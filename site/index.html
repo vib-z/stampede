@@ -28,27 +28,43 @@
 <link rel="stylesheet" href="assets/hero-mark/hero-mark.css">
 <link rel="stylesheet" href="assets/cta/star.css">
 <link rel="stylesheet" href="assets/motion.css">
+<link rel="stylesheet" href="assets/cta/page.css">
 <script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('motion-enabled');</script>
 <script src="assets/motion.js" defer></script>
 <script src="assets/cta/star.js" defer></script>
-<script src="assets/cta/ticket.js" defer></script>
+<script src="assets/cta/start.js" defer></script>
 </head>
 <body>
-<div class="theme-switch" role="group" aria-label="Colour theme" hidden>
+<a class="page-skip" href="#main">Skip to content</a>
+<header class="site-header"><div class="header-inner">
+  <a class="site-home" href="#" aria-label="stampede home"><svg class="header-wordmark" viewBox="355 0 720 140" role="img" aria-label="stampede"><path fill="currentColor" d="M396.2 115Q386.3 115 378.9 111.8Q371.5 108.7 367.4 103.2Q363.2 97.7 363.2 90.3H384.6Q384.6 94.4 387.6 96.4Q390.7 98.4 396.2 98.4H402.5Q408.5 98.4 411.8 96.4Q415 94.4 415 90.6Q415 87 412.4 85.3Q409.8 83.6 404.4 83L386.2 80.9Q375.6 79.6 369.9 73Q364.3 66.4 364.3 56.5Q364.3 32.3 395.3 32.3H402.1Q416.8 32.3 425.5 38.7Q434.2 45.1 434.2 55.8H412.8Q412.8 52.3 410 50.4Q407.2 48.5 402.1 48.5H395.3Q390.2 48.5 387.6 50.4Q385 52.3 385 55.6Q385 59 387.5 60.1Q390.1 61.3 394.7 61.9L412.1 64.1Q423.9 65.5 429.8 72.3Q435.8 79.1 435.8 90.3Q435.8 102 427.3 108.5Q418.9 115 402.5 115ZM492.2 113.5Q480 113.5 473.1 106.5Q466.1 99.6 466.1 87.4V53.3H444.7V33.8H466.1V11.3H487.9V33.8H519V53.3H487.9V86.7Q487.9 89.9 489.5 91.9Q491.2 93.9 494.4 93.9H518.3V113.5ZM558.7 115Q546.8 115 539.9 108.1Q532.9 101.2 532.9 90Q532.9 78 541.5 71Q550 64.1 565.5 64.1H581.2V59Q581.2 54.5 578.1 51.9Q574.9 49.4 569.1 49.4Q563.6 49.4 560.4 51.6Q557.1 53.8 556.8 58H536.2Q536.7 46.2 545.5 39.3Q554.4 32.3 569.4 32.3Q585.2 32.3 594.1 39.6Q602.9 46.8 602.9 59.9V113.5H581.9V99.7Q580.5 106.8 574.3 110.9Q568.1 115 558.7 115ZM566.4 97.5Q573.2 97.5 577.2 94.1Q581.2 90.7 581.2 85.2V77.1H566Q560.2 77.1 557 79.9Q553.9 82.8 553.9 87.3Q553.9 91.8 557.2 94.7Q560.4 97.5 566.4 97.5ZM615.8 113.5V33.8H633.6V46.1H633.9Q634.3 40 637.9 36.1Q641.6 32.3 647.2 32.3Q652.4 32.3 656.3 36Q660.1 39.7 661.3 45.6Q661.7 39.6 665.5 35.9Q669.3 32.3 674.9 32.3Q682 32.3 686.9 38Q691.7 43.6 691.7 52.6V113.5H673V55.1Q673 48.1 667.5 48.1Q662.3 48.1 662.3 55.1V113.5H645.2V55.1Q645.2 48.1 640 48.1Q634.5 48.1 634.5 55.1V113.5ZM704.6 139.6V33.8H725.6V48.2Q728.2 40.7 733.9 36.5Q739.5 32.3 747.5 32.3Q755.2 32.3 761 36.3Q766.8 40.3 770 47.2Q773.3 54.2 773.3 63.5V83.8Q773.3 92.9 770 99.9Q766.8 107 761 111Q755.2 115 747.5 115Q739.7 115 734 110.8Q728.4 106.7 725.7 99.3L726.3 117.8V139.6ZM739.1 96.1Q745 96.1 748.3 92.7Q751.5 89.3 751.5 83V64.2Q751.5 57.8 748.3 54.5Q745 51.2 739.1 51.2Q732.8 51.2 729.6 54.7Q726.3 58.3 726.3 64.9V82.3Q726.3 89 729.6 92.5Q732.8 96.1 739.1 96.1ZM823.4 115Q812.8 115 804.9 111Q797 107 792.7 99.8Q788.5 92.6 788.5 83V64.2Q788.5 54.6 792.7 47.5Q797 40.3 804.9 36.3Q812.8 32.3 823.4 32.3Q834 32.3 841.7 36.3Q849.5 40.3 853.8 47.5Q858 54.6 858 64.2V79H809.2V83Q809.2 90.6 812.7 94.1Q816.3 97.5 823.4 97.5Q828 97.5 831.5 96.1Q835 94.7 835.6 91.8H856.9Q854.6 102.2 845.4 108.6Q836.3 115 823.4 115ZM809.2 64.2V66.1L837.3 65.8V63.9Q837.3 56.5 833.9 52.5Q830.5 48.4 823.4 48.4Q816.3 48.4 812.7 52.6Q809.2 56.8 809.2 64.2ZM899 115Q887.6 115 880.4 106.5Q873.2 98 873.2 83.8V63.5Q873.2 49.3 880.4 40.8Q887.6 32.3 899 32.3Q907 32.3 912.6 36.3Q918.1 40.3 920.8 47.7L920.2 29.4V7.7H941.9V113.5H920.9V99.1Q918.3 106.7 912.6 110.8Q907 115 899 115ZM907.4 96.1Q913.7 96.1 916.9 92.5Q920.2 89 920.2 82.3V64.9Q920.2 58.3 916.9 54.7Q913.7 51.2 907.4 51.2Q901.5 51.2 898.2 54.5Q895 57.8 895 64.2V83Q895 89.3 898.2 92.7Q901.5 96.1 907.4 96.1ZM992.9 115Q982.3 115 974.4 111Q966.5 107 962.2 99.8Q958 92.6 958 83V64.2Q958 54.6 962.2 47.5Q966.5 40.3 974.4 36.3Q982.3 32.3 992.9 32.3Q1003.5 32.3 1011.2 36.3Q1019 40.3 1023.3 47.5Q1027.5 54.6 1027.5 64.2V79H978.7V83Q978.7 90.6 982.2 94.1Q985.8 97.5 992.9 97.5Q997.5 97.5 1001 96.1Q1004.5 94.7 1005.1 91.8H1026.4Q1024.1 102.2 1014.9 108.6Q1005.8 115 992.9 115ZM978.7 64.2V66.1L1006.8 65.8V63.9Q1006.8 56.5 1003.4 52.5Q1000 48.4 992.9 48.4Q985.8 48.4 982.2 52.6Q978.7 56.8 978.7 64.2Z"/><path class="dot" fill="currentColor" d="M1052.2 115Q1045.7 115 1041.7 110.9Q1037.6 106.8 1037.6 100.3Q1037.6 93.8 1041.7 89.7Q1045.7 85.7 1052.2 85.7Q1058.8 85.7 1062.8 89.7Q1066.9 93.8 1066.9 100.3Q1066.9 106.8 1062.8 110.9Q1058.8 115 1052.2 115Z"/></svg></a>
+  <nav class="header-nav" aria-label="Main navigation">
+    <a class="desktop-link" href="#how-it-works">How it works</a>
+    <a class="desktop-link" href="https://github.com/vib-z/stampede#readme">Docs</a>
+    <a class="nav-github" href="https://github.com/vib-z/stampede" aria-label="GitHub"><span>GitHub</span><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2.23c-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.16 1.18a11 11 0 0 1 5.75 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.58.23 2.75.11 3.04.73.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.15v3.19c0 .31.21.68.79.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg></a>
+    <div class="theme-switch" role="group" aria-label="Colour theme" hidden>
   <button type="button" data-theme-choice="light" aria-label="Light theme" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></button>
   <button type="button" data-theme-choice="dark" aria-label="Dark theme" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A9 9 0 0 1 10 3.5 9 9 0 1 0 20.5 14Z"/></svg></button>
   <button type="button" data-theme-choice="system" aria-label="System theme" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></button>
 </div>
-<main>
-<section class="film-section" aria-labelledby="name">
-  <div class="film-stage">
-    <header class="intro"><div class="brand-lockup"><div class="stp-hero-mark"><svg class="stp-logo is-running" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 310 137" aria-hidden="true"><g class="ink"><path class="cell c1" d="M56 47Q56 43 60 43L102 43Q106 43 106 47L106 90Q106 94 102 94L60 94Q56 94 56 90Z"/><path class="cell c2" d="M130 47Q130 43 134 43L176 43Q180 43 180 47L180 90Q180 94 176 94L134 94Q130 94 130 90Z"/><path class="cell c3" d="M204 47Q204 43 208 43L250 43Q254 43 254 47L254 90Q254 94 250 94L208 94Q204 94 204 90Z"/><path d="M0 4Q0 0 4 0L67 0Q71 0 71 4L71 20Q71 24 67 24L31 24L31 113L67 113Q71 113 71 117L71 133Q71 137 67 137L4 137Q0 137 0 133Z"/><path d="M310 4Q310 0 306 0L243 0Q239 0 239 4L239 20Q239 24 243 24L279 24L279 113L243 113Q239 113 239 117L239 133Q239 137 243 137L306 137Q310 137 310 133Z"/></g></svg></div><h1 id="name">stampede</h1></div><p>One ask. A team that reports back.</p><div class="stp-actions">
+  </nav>
+</div></header>
+<main id="main">
+<section class="home-hero" aria-labelledby="name">
+  <div class="stp-hero-mark"><svg class="stp-logo is-running" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 310 137" aria-hidden="true"><g class="ink"><path class="cell c1" d="M56 47Q56 43 60 43L102 43Q106 43 106 47L106 90Q106 94 102 94L60 94Q56 94 56 90Z"/><path class="cell c2" d="M130 47Q130 43 134 43L176 43Q180 43 180 47L180 90Q180 94 176 94L134 94Q130 94 130 90Z"/><path class="cell c3" d="M204 47Q204 43 208 43L250 43Q254 43 254 47L254 90Q254 94 250 94L208 94Q204 94 204 90Z"/><path d="M0 4Q0 0 4 0L67 0Q71 0 71 4L71 20Q71 24 67 24L31 24L31 113L67 113Q71 113 71 117L71 133Q71 137 67 137L4 137Q0 137 0 133Z"/><path d="M310 4Q310 0 306 0L243 0Q239 0 239 4L239 20Q239 24 243 24L279 24L279 113L243 113Q239 113 239 117L239 133Q239 137 243 137L306 137Q310 137 310 133Z"/></g></svg></div>
+  <h1 id="name"><span>One ask.</span> <span>A team that reports back.</span></h1>
+  <p class="hero-subhead">One lead. Your agents. You make the call.</p>
+  <div class="stp-actions">
+  <a class="stp-start" href="https://github.com/vib-z/stampede#install"><span class="start-shine" aria-hidden="true"></span><span class="start-label"><span class="start-default">Get started<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></span><span class="start-success" aria-hidden="true">Copied<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></span></span></a>
   <a class="stp-star" href="https://github.com/vib-z/stampede">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.5 4.4 1.1 6.2-5.7-3-5.7 3 1.1-6.2-4.5-4.4 6.3-.9Z"/></svg>
     <span>Star on GitHub</span><span class="stp-count" hidden></span>
   </a>
-  <a class="stp-ticket" href="https://github.com/vib-z/stampede#install"><span class="ticket-shine" aria-hidden="true"></span><span class="ticket-label">Get started</span><span class="ticket-stub" aria-hidden="true"><span class="ticket-stamp">COPY</span></span></a>
-</div></header>
+  <div class="start-help" hidden><span class="start-status" role="status" aria-live="polite"></span><button class="see-prompt" type="button" aria-controls="install-prompt" aria-expanded="false">See prompt</button></div>
+</div>
+</section>
+<section id="how-it-works" class="film-section" aria-label="How stampede works">
+  <div class="film-stage">
     <figure class="film" role="img" aria-label="A Grok Bot ask is typed and sent on a generic phone, bringing a local lead and workers. Builders cross Tailscale and their badges turn to cloud. Research, design, testing and two reviews produce a pricing page. The reply returns to the same phone, the agents close, and the finished page stays.">
       <img class="poster opening" alt="" width="1920" height="1080">
       <noscript><style>.intro p,.readme{opacity:1}
@@ -66,14 +82,23 @@
     <a class="skip" href="#after-film">Skip to details</a>
   </div>
 </section>
-<section id="after-film" class="handoff" aria-label="How stampede works"><p>You make the call.<br>The team brings you the result.</p><div class="stp-actions">
+<section id="after-film" class="handoff" aria-labelledby="handoff-title">
+  <h2 id="handoff-title">You make the call.<br><span>The team brings you the result.</span></h2>
+  <div class="stp-actions">
+  <a class="stp-start" href="https://github.com/vib-z/stampede#install"><span class="start-shine" aria-hidden="true"></span><span class="start-label"><span class="start-default">Get started<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></span><span class="start-success" aria-hidden="true">Copied<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></span></span></a>
   <a class="stp-star" href="https://github.com/vib-z/stampede">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.5 4.4 1.1 6.2-5.7-3-5.7 3 1.1-6.2-4.5-4.4 6.3-.9Z"/></svg>
     <span>Star on GitHub</span><span class="stp-count" hidden></span>
   </a>
-  <a class="stp-ticket" href="https://github.com/vib-z/stampede#install"><span class="ticket-shine" aria-hidden="true"></span><span class="ticket-label">Get started</span><span class="ticket-stub" aria-hidden="true"><span class="ticket-stamp">COPY</span></span></a>
-</div><a class="readme-doc" href="https://github.com/vib-z/stampede#readme">Read the README <span aria-hidden="true">↗</span></a></section>
+  <div class="start-help" hidden><span class="start-status" role="status" aria-live="polite"></span><button class="see-prompt" type="button" aria-controls="install-prompt" aria-expanded="false">See prompt</button></div>
+</div>
+</section>
 </main>
+<footer class="site-footer"><div class="footer-inner">
+  <div class="footer-brand"><a href="#" aria-label="stampede home"><span class="brand-image brand-light"><img src="brand/lockup-light.svg" alt="stampede" width="168" height="22" loading="lazy"></span><span class="brand-image brand-dark"><img src="brand/lockup-dark.svg" alt="stampede" width="168" height="22" loading="lazy"></span></a><p>One ask. A team that reports back.</p></div>
+  <nav aria-label="Footer navigation"><a href="https://github.com/vib-z/stampede">GitHub</a><a href="https://github.com/vib-z/stampede#readme">Docs</a><a href="brand/guide.html">Brand</a><a href="https://github.com/vib-z/stampede/blob/main/LICENSE">MIT licence</a></nav>
+  <span class="site-version">v0.1.0</span>
+</div></footer>
 <section class="install-popover" id="install-prompt" popover aria-labelledby="prompt-title">
   <div class="prompt-heading"><h2 id="prompt-title">Your agent takes it from here.</h2><button class="prompt-close" type="button" aria-label="Close install prompt">×</button></div>
   <p class="copy-status" role="status" aria-live="polite"></p>
