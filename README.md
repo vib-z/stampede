@@ -20,6 +20,7 @@
 
 <p align="center">
   <a href="#install">Install</a> ·
+  <a href="#updating">Updating</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#use-one-job-start-to-finish">Walkthrough</a> ·
   <a href="#front-doors">Front doors</a> ·
@@ -29,7 +30,7 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-<p align="center">★ <a href="https://github.com/vib-z/stampede">Star stampede on GitHub</a> to follow new releases.<br>
+<p align="center">New releases: on <a href="https://github.com/vib-z/stampede">GitHub</a>, <b>Watch</b>, then <b>Custom</b>, then <b>Releases</b>.<br>
   The site: <a href="https://vib-z.github.io/stampede/">vib-z.github.io/stampede</a></p>
 
 ---
@@ -197,6 +198,25 @@ Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: 
 
 **Linux:** the lead, `stampede` and `herdr-trust` use only Python and git, but the event relay scripts use macOS tools (`launchd`, BSD `stat`, `md5`), and no Linux run has been tried.
 
+## Updating
+
+| installed with | update with |
+|---|---|
+| a clone and `./install.sh` | `stampede update`, or by hand in the checkout: `git pull --ff-only && ./install.sh` |
+| `herdr plugin install vib-z/stampede` | `herdr plugin update` |
+
+`stampede update` updates only a clean checkout on `main`: it runs `git pull --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. With local changes or another branch it refuses with the reason (`refused: <checkout> has local changes: commit or stash them, then rerun`) and changes nothing. Outside a git checkout, as in a plugin install, it prints `herdr plugin update` to run instead.
+
+**The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release: one request without a token, a 2 s timeout, the answer cached for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out they print one line:
+
+```text
+$ stampede --version
+0.1.0
+stampede 0.2.0 is out, this is 0.1.0: run stampede update
+```
+
+`stampede --version` puts that line on stderr, after the version, and still exits 0; `herdr-doctor` prints it as a `warn` line, never a `PROBLEM`. Offline, rate-limited, a malformed reply or any other failure prints nothing and is cached too, so the next try is a day later. Turn the check off with `export STAMPEDE_NO_UPDATE_CHECK=1` in your shell profile or `~/.config/stampede/config` ([Configure](#configure)). To hear of a release on GitHub instead: on the repo page, **Watch**, then **Custom**, then **Releases**. How a release is cut: [RELEASING.md](RELEASING.md).
+
 ## Use: one job, start to finish
 
 In a Herdr pane in your repo, ask your Claude chat: *"With stampede: make hello.txt with hi, then have a reviewer on another model confirm it."* The chat (a front door) writes the ask and starts the lead:
@@ -295,6 +315,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
 | `HERDR_EVENTS_ROUTES_DIR` | `~/.config/herdr-events/routes` | one file per route, `URL=` and `KEY=` |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
+| `STAMPEDE_NO_UPDATE_CHECK` | `0` | `1` turns off the daily check for a newer release ([Updating](#updating)) |
+| `STAMPEDE_UPDATE_URL` | `https://api.github.com/repos/vib-z/stampede/releases/latest` | where the check reads the latest release; the tests point it at a local file |
 </details>
 
 ## Troubleshoot
@@ -309,6 +331,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `FileExistsError` from `stampede new` | a job of that name exists; pass `--name <new slug>` |
 | `fleet-job new: new needs --workspace or --pane, or run it inside Herdr` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([SKILL.md](SKILL.md#front-door)) |
 | a bot gets no events | `herdr-doctor` names the broken part; see [remote/events.md](remote/events.md) |
+| `refused: ... has local changes` or `... is on <branch>, not main` from `stampede update` | commit or stash your changes, or `git switch main`, then rerun; it never discards local work |
+| no update line, though a release is out | the check runs at most once a day and is silent offline: delete `~/.cache/stampede/latest-release` to check now, and see that `STAMPEDE_NO_UPDATE_CHECK` is not `1` |
 
 Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/references/failure-modes.md). Startup dialogs: [unattended-setup.md](skills/herdr-fleet/references/unattended-setup.md). Setup problems: [docs/SETUP.md](docs/SETUP.md#setup-problems).
 
@@ -323,7 +347,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 <details>
 <summary><b><code>stampede</code> commands and exit codes</b></summary>
 
-`stampede` is the same command as `fleet-job` ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py)). `stampede --version` (or `-V`) prints the version from [VERSION](VERSION).
+`stampede` is the same command as `fleet-job` ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py)). `stampede --version` (or `-V`) prints the version from [VERSION](VERSION), then, on stderr, the update line when a newer release is out ([Updating](#updating)). `update` is in [stampede_update.py](scripts/stampede_update.py).
 
 | command | flags | does |
 |---|---|---|
@@ -333,9 +357,11 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background; prints `ASKED <id>` |
 | `cancel <job> <id>` | | stops an asked question and its phone card |
 | `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead |
+| `update` | | in a clean git checkout on `main`: `git pull --ff-only`, then `./install.sh`; refuses local changes or another branch; outside a git checkout prints `herdr plugin update` |
+| `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 
-**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor, a start before approval, yolo outside a worktree), with the reason on stderr; 1 Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude.
+**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor, a start before approval, yolo outside a worktree), with the reason on stderr; 1 Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
 </details>
 
 <details>
@@ -349,7 +375,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 | `herdr-send <agent> <text>` | prompts an agent and confirms it started: `SUBMITTED` or `FAILED`; refuses a pane you have focused before any key | 0, 1 failed, 2 usage |
 | `herdr-reopen-snapshot <ws> <job dir>` | reads the live workspace (read only) and writes `REOPEN.md` and `reopen.sh` in the job folder: the tabs holding the job's agents (from `agents.tsv`), never another's agent | 0, or 1 with the reason |
 | `<job>/reopen.sh` | recreates the workspace and resumes each agent's session; `--fresh` new sessions, `--prompt` re-sends the briefs, `--into <ws>` adds to an open workspace | 0, 2 a workspace with that label is open, 3 a pane's folder is gone, 4 a tab did not open, 64 usage |
-| `herdr-doctor` | read-only health check: `ok`, `warn`, `PROBLEM` lines | 0, or 1 on a PROBLEM |
+| `herdr-doctor` | read-only health check: `ok`, `warn`, `PROBLEM` lines; a newer stampede release is a `warn` | 0, or 1 on a PROBLEM |
 | `herdr-events-owner <ws> [<bot>\|--clear]` | tags a workspace with the bot its events go to | 0, or 2 refused |
 | `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md) | 0 |
 </details>
@@ -364,7 +390,8 @@ AGENTS.md  CLAUDE.md  SKILL.md  config.example  install.sh  herdr-plugin.toml
 skills/herdr-fleet/     the job: SKILL.md, references/, scripts/fleet-job, fleet_job.py, fleet-watch.sh
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor, the relay)
 skills/share-plan/      the plan review, on request
-scripts/stampede        the command (also linked as fleet-job); answers --version
+scripts/stampede        the command (also linked as fleet-job); answers --version and update
+scripts/stampede_update.py   the daily release check and stampede update
 scripts/herdr-plugin-event   the Herdr plugin's event hook
 remote/                 front-door guides
 docs/                   SETUP.md, RUNS.md, superpowers/specs/ (the design), images/ (screenshots, logos/)
@@ -402,6 +429,8 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 ## Status and roadmap
 
 **0.1.0, 22 Oct 2026. Works and tested:** the job folder, the lead's start with its hooks, starting workers on Claude, Codex or Cursor, the review lock and approval, background questions and cancel, the wake on every rewritten report, the yolo guard, the install, `--version` and the plugin event, all with fakes. Every command in this README was run against a scratch job.
+
+**Unreleased, 22 Oct 2026. Updating:** `stampede update` and `stampede update --check`, the daily release check in `--version` and `herdr-doctor`, and a test that keeps `herdr-plugin.toml` at VERSION. Tested with a local reply file, a fake rate-limited server and scratch git repos, and run once against the live GitHub API.
 
 **Site and brand, 22 Oct 2026:** the hero (PR #16), the brand kit (PR #20) and the landing page around the film (PR #3) are done. The site is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 

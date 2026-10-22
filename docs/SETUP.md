@@ -1,11 +1,12 @@
 # Set up stampede
 
-The short version is in the [README](../README.md#install). This page adds the details: what the installer does, the one-time settings, the event relay for a remote bot, uninstalling, and setup problems.
+The short version is in the [README](../README.md#install). This page adds the details: what the installer does, updating, the one-time settings, the event relay for a remote bot, uninstalling, and setup problems.
 
 ## Contents
 - [What you need](#what-you-need)
 - [Install](#install)
 - [Unattended agents](#unattended-agents)
+- [Update](#update)
 - [Configure](#configure)
 - [The event relay, for a remote bot](#the-event-relay-for-a-remote-bot)
 - [Uninstall](#uninstall)
@@ -33,6 +34,10 @@ cd ~/stampede
 - **Never** installs Herdr or an agent CLI. Start each CLI once by hand to sign in.
 
 **The Herdr plugin** is needed only for the event relay to a remote bot. From the checkout: `herdr plugin link .`. Herdr then runs `scripts/herdr-plugin-event` on every agent status change. Check it with `herdr plugin list`.
+
+## Update
+
+From a clone on `main`: `stampede update` (`git pull --ff-only`, then `./install.sh`; it refuses local changes or another branch and changes nothing). By hand, the same: `git pull --ff-only && ./install.sh`. A GitHub plugin install: `herdr plugin update`. The daily check that says when a release is out, and how to turn it off: [README, Updating](../README.md#updating).
 
 ## Unattended agents
 
