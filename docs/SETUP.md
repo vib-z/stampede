@@ -37,7 +37,7 @@ cd ~/stampede
 
 ## Update
 
-From a clone on `main`: `stampede update` (`git pull --ff-only`, then `./install.sh`; it refuses local changes or another branch and changes nothing). By hand, the same: `git pull --ff-only && ./install.sh`. A GitHub plugin install: `herdr plugin update`. The daily check that says when a release is out, and how to turn it off: [README, Updating](../README.md#updating).
+From a clone on `main`: `stampede update` (`git fetch`, `git merge --ff-only`, then `./install.sh`; it refuses local changes, untracked files, another branch, or an ignored file the update would overwrite, and then changes nothing). By hand, without those checks: `git pull --ff-only && ./install.sh`. A GitHub plugin install: `herdr plugin update`. The daily check that says when a release is out, and how to turn it off: [README, Updating](../README.md#updating).
 
 ## Unattended agents
 

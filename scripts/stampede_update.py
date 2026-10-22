@@ -1,6 +1,6 @@
 """stampede update: the daily check for a newer release, and the update of a git checkout. Python 3 stdlib only.
   stampede update --check   one line: a newer release (exit 1), or this is the latest (exit 0); nothing when unknown or off
-  stampede update           fast-forward a clean checkout on main, then rerun install.sh; never discards local changes"""
+  stampede update           fast-forward a clean checkout on main, then rerun install.sh; never overwrites a local file"""
 import json, os, re, subprocess, sys, threading, time, urllib.request
 from pathlib import Path
 
@@ -67,6 +67,14 @@ def git(*args):
     return subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True).stdout.strip()
 
 
+def in_the_way(path):
+    """Something already on disk where an incoming file goes, or a file where it needs a folder. After a clean
+    git status that can only be an ignored file, and a fast-forward would overwrite it."""
+    rel = Path(path)
+    return os.path.lexists(ROOT / rel) or any(
+        os.path.lexists(ROOT / d) and not (ROOT / d).is_dir() for d in list(rel.parents)[:-1])
+
+
 def update():
     if not (ROOT / '.git').exists():
         print(f'{ROOT} is not a git checkout (a Herdr plugin install): run herdr plugin update')
@@ -75,12 +83,21 @@ def update():
     if branch != 'main':
         print(f'refused: {ROOT} is on {branch or "a detached HEAD"}, not main: git switch main, then rerun', file=sys.stderr)
         return 1
-    if git('status', '--porcelain', '--untracked-files=no'):
-        print(f'refused: {ROOT} has local changes: commit or stash them, then rerun', file=sys.stderr)
+    if git('status', '--porcelain'):
+        print(f'refused: {ROOT} has local changes or untracked files: commit, stash or move them, then rerun', file=sys.stderr)
+        return 1
+    if subprocess.run(['git', '-C', str(ROOT), 'fetch']).returncode:
+        print('refused: git fetch failed (above); your files are as they were', file=sys.stderr)
+        return 1
+    added = git('diff', '-z', '--name-only', '--no-renames', '--diff-filter=A', 'HEAD', '@{u}').split('\0')
+    clash = [p for p in added if p and in_the_way(p)]
+    if clash:
+        print(f'refused: the update adds {", ".join(clash)}, already in {ROOT} (ignored by git, so it would be '
+              'overwritten): move it away, then rerun', file=sys.stderr)
         return 1
     before = (ROOT / 'VERSION').read_text().strip()
-    if subprocess.run(['git', '-C', str(ROOT), 'pull', '--ff-only']).returncode:
-        print('refused: git pull --ff-only failed (above); your files are as they were', file=sys.stderr)
+    if subprocess.run(['git', '-C', str(ROOT), 'merge', '--ff-only', '@{u}']).returncode:
+        print('refused: git merge --ff-only failed (above); your files are as they were', file=sys.stderr)
         return 1
     if subprocess.run(['bash', str(ROOT / 'install.sh')]).returncode:
         return 1

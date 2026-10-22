@@ -202,10 +202,10 @@ Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: 
 
 | installed with | update with |
 |---|---|
-| a clone and `./install.sh` | `stampede update`, or by hand in the checkout: `git pull --ff-only && ./install.sh` |
+| a clone and `./install.sh` | `stampede update`, or by hand in the checkout, without its checks: `git pull --ff-only && ./install.sh` |
 | `herdr plugin install vib-z/stampede` | `herdr plugin update` |
 
-`stampede update` updates only a clean checkout on `main`: it runs `git pull --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. With local changes or another branch it refuses with the reason (`refused: <checkout> has local changes: commit or stash them, then rerun`) and changes nothing. Outside a git checkout, as in a plugin install, it prints `herdr plugin update` to run instead.
+`stampede update` updates only a clean checkout on `main`, and never overwrites a file of yours. It runs `git fetch`, fast-forwards with `git merge --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. It refuses with the reason, and changes no file, when the checkout has local changes or untracked files, is on another branch, or holds an ignored file at a path the update adds, which git would overwrite (`refused: the update adds local-settings.txt, already in <checkout> (ignored by git, so it would be overwritten): move it away, then rerun`). Outside a git checkout, as in a plugin install, it prints `herdr plugin update` to run instead.
 
 **The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release: one request without a token, given 3 s in all (DNS, connect and the reply), the answer cached for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out they print one line:
 
@@ -331,7 +331,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `FileExistsError` from `stampede new` | a job of that name exists; pass `--name <new slug>` |
 | `fleet-job new: new needs --workspace or --pane, or run it inside Herdr` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([SKILL.md](SKILL.md#front-door)) |
 | a bot gets no events | `herdr-doctor` names the broken part; see [remote/events.md](remote/events.md) |
-| `refused: ... has local changes` or `... is on <branch>, not main` from `stampede update` | commit or stash your changes, or `git switch main`, then rerun; it never discards local work |
+| `refused: ... has local changes or untracked files`, `... is on <branch>, not main` or `... the update adds <path>, already in ...` from `stampede update` | commit, stash or move the files it names, or `git switch main`, then rerun; it never overwrites a file of yours |
 | no update line, though a release is out | the check runs at most once a day and is silent offline: delete `~/.cache/stampede/latest-release` to check now, and see that `STAMPEDE_NO_UPDATE_CHECK` is not `1` |
 
 Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/references/failure-modes.md). Startup dialogs: [unattended-setup.md](skills/herdr-fleet/references/unattended-setup.md). Setup problems: [docs/SETUP.md](docs/SETUP.md#setup-problems).
@@ -357,7 +357,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background; prints `ASKED <id>` |
 | `cancel <job> <id>` | | stops an asked question and its phone card |
 | `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead |
-| `update` | | in a clean git checkout on `main`: `git pull --ff-only`, then `./install.sh`; refuses local changes or another branch; outside a git checkout prints `herdr plugin update` |
+| `update` | | in a clean git checkout on `main`: `git fetch`, `git merge --ff-only`, then `./install.sh`; refuses local changes, untracked files, another branch, or an ignored file at a path the update adds; outside a git checkout prints `herdr plugin update` |
 | `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 

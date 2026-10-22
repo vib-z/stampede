@@ -150,7 +150,7 @@ class Update(unittest.TestCase):
         shutil.copy(ROOT / 'scripts/stampede_update.py', origin / 'scripts')
         (origin / 'VERSION').write_text('0.1.0\n')
         (origin / 'install.sh').write_text('touch "$(dirname "$0")/installed"\n')
-        (origin / '.gitignore').write_text('installed\n__pycache__/\n')
+        (origin / '.gitignore').write_text('installed\n__pycache__/\nlocal-settings.txt\nlocal\n')
         self.git(origin, 'init', '-q', '-b', 'main')
         self.git(origin, 'add', '.')
         self.git(origin, 'commit', '-qm', 'one')
@@ -185,6 +185,30 @@ class Update(unittest.TestCase):
         out = self.update(self.clone)
         self.assertEqual(out.returncode, 1)
         self.assertIn('is on mine, not main', out.stderr)
+
+    def test_an_untracked_file_is_refused_and_kept(self):
+        (self.clone / 'untracked.txt').write_text('my notes\n')
+        out = self.update(self.clone)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn('has local changes or untracked files', out.stderr)
+        self.assertEqual((self.clone / 'untracked.txt').read_text(), 'my notes\n')
+        self.assertEqual((self.clone / 'VERSION').read_text(), '0.1.0\n')
+
+    def test_an_ignored_file_the_update_would_overwrite_is_refused_and_kept(self):
+        for path in ('local-settings.txt', 'local'):  # the same path, and a file where the update needs a folder
+            (self.clone / path).write_text('LOCAL WORK TO KEEP\n')
+        (self.origin / 'local-settings.txt').write_text('RELEASE DEFAULTS\n')
+        (self.origin / 'local').mkdir()
+        (self.origin / 'local/defaults.txt').write_text('RELEASE DEFAULTS\n')
+        self.git(self.origin, 'add', '-f', 'local-settings.txt', 'local/defaults.txt')
+        self.git(self.origin, 'commit', '-qm', 'three')
+        out = self.update(self.clone)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn('the update adds local-settings.txt, local/defaults.txt', out.stderr)
+        for path in ('local-settings.txt', 'local'):
+            self.assertEqual((self.clone / path).read_text(), 'LOCAL WORK TO KEEP\n')
+        self.assertEqual((self.clone / 'VERSION').read_text(), '0.1.0\n')
+        self.assertFalse((self.clone / 'installed').exists())
 
     def test_a_plugin_install_names_herdr_plugin_update(self):
         plain = self.dir / 'plain'
