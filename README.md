@@ -207,7 +207,7 @@ Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: 
 
 `stampede update` updates only a clean checkout on `main`: it runs `git pull --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. With local changes or another branch it refuses with the reason (`refused: <checkout> has local changes: commit or stash them, then rerun`) and changes nothing. Outside a git checkout, as in a plugin install, it prints `herdr plugin update` to run instead.
 
-**The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release: one request without a token, a 2 s timeout, the answer cached for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out they print one line:
+**The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release: one request without a token, given 3 s in all (DNS, connect and the reply), the answer cached for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out they print one line:
 
 ```text
 $ stampede --version

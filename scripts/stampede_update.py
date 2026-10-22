@@ -1,11 +1,12 @@
 """stampede update: the daily check for a newer release, and the update of a git checkout. Python 3 stdlib only.
   stampede update --check   one line: a newer release (exit 1), or this is the latest (exit 0); nothing when unknown or off
   stampede update           fast-forward a clean checkout on main, then rerun install.sh; never discards local changes"""
-import json, os, re, subprocess, sys, time, urllib.request
+import json, os, re, subprocess, sys, threading, time, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DAY = 24 * 3600
+DEADLINE = 3  # seconds for the whole fetch: DNS, connect and the reply
 X_Y_Z = re.compile(r'v?(\d+)\.(\d+)\.(\d+)')
 
 
@@ -13,6 +14,15 @@ def parse(version):
     """'v0.10.0' -> (0, 10, 0), so versions compare as numbers; None when it is not X.Y.Z."""
     m = X_Y_Z.fullmatch(str(version).strip())
     return tuple(map(int, m.groups())) if m else None
+
+
+def fetch(url, got):
+    """Append the reply's tag_name to got. Runs in a thread, so a slow server cannot outlast DEADLINE."""
+    try:
+        with urllib.request.urlopen(url, timeout=2) as reply:
+            got.append(str(json.loads(reply.read(65536))['tag_name']))  # a release reply is a few KB
+    except Exception:
+        pass
 
 
 def latest():
@@ -23,14 +33,13 @@ def latest():
             return cache.read_text().strip()
     except OSError:
         pass
-    tag = ''
-    try:
-        url = os.environ.get('STAMPEDE_UPDATE_URL') or 'https://api.github.com/repos/vib-z/stampede/releases/latest'
-        with urllib.request.urlopen(url, timeout=2) as reply:
-            tag = str(json.load(reply)['tag_name'])
-    except Exception:
-        pass
-    try:  # a failure is cached too, so an offline machine waits a day, not 2 s on every command
+    got = []
+    url = os.environ.get('STAMPEDE_UPDATE_URL') or 'https://api.github.com/repos/vib-z/stampede/releases/latest'
+    worker = threading.Thread(target=fetch, args=(url, got), daemon=True)
+    worker.start()
+    worker.join(DEADLINE)  # past it the daemon thread is abandoned and the check counts as failed
+    tag = got[0] if got else ''
+    try:  # a failure is cached too, so an offline machine waits a day, not 3 s on every command
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(tag + '\n')
     except OSError:

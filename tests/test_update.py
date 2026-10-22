@@ -21,6 +21,21 @@ class RateLimited(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class Trickle(RateLimited):
+    """A 200 reply that never ends: one byte every 0.4 s, so no single socket wait times out."""
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        try:
+            for _ in range(100):
+                self.wfile.write(b' ')
+                self.wfile.flush()
+                time.sleep(0.4)
+        except OSError:
+            pass  # the check gave up and closed the socket
+
+
 class Check(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
@@ -32,6 +47,14 @@ class Check(unittest.TestCase):
 
     def release(self, tag):
         self.reply.write_text('{"tag_name": "%s", "name": "stampede"}' % tag)
+
+    def serve(self, handler):
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f'http://127.0.0.1:{server.server_port}/'
 
     def run_stampede(self, *args, **env):
         return subprocess.run([str(ROOT / 'scripts/stampede'), *args], env={**self.env, **env},
@@ -62,10 +85,7 @@ class Check(unittest.TestCase):
             self.assertIn('the latest release is ' + tag.lstrip('v'), out.stdout)
 
     def test_offline_rate_limited_or_malformed_is_silent(self):
-        server = http.server.HTTPServer(('127.0.0.1', 0), RateLimited)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.shutdown)
-        cases = {'offline': (self.dir / 'missing.json').as_uri(), 'rate limited': f'http://127.0.0.1:{server.server_port}/'}
+        cases = {'offline': (self.dir / 'missing.json').as_uri(), 'rate limited': self.serve(RateLimited)}
         for name, body in (('not json', 'Bad gateway'), ('no tag', '{"message": "Not Found"}'), ('a list', '[]'),
                            ('not X.Y.Z', '{"tag_name": "nightly"}')):
             (self.dir / name).write_text(body)
@@ -77,6 +97,16 @@ class Check(unittest.TestCase):
                 self.assertEqual((out.returncode, out.stderr), (code, ''), (name, args))
                 self.assertEqual(out.stdout, VERSION + '\n' if args == ['--version'] else '', (name, args))
             self.assertTrue(self.cache.exists(), name)  # the failure is cached too: no retry for a day
+
+    def test_a_server_that_trickles_bytes_cannot_block(self):
+        url = self.serve(Trickle)
+        for args, stdout in ((['update', '--check'], ''), (['--version'], VERSION + '\n')):
+            self.cache.unlink(missing_ok=True)
+            start = time.monotonic()
+            out = self.run_stampede(*args, STAMPEDE_UPDATE_URL=url)
+            self.assertLess(time.monotonic() - start, 5, args)
+            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, stdout, ''), args)
+            self.assertTrue(self.cache.exists(), args)  # a miss is cached like any failure
 
     def test_the_cache_answers_for_24_hours(self):
         self.release('v99.0.0')
