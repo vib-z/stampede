@@ -2,6 +2,10 @@
 
 [The landing page](index.html) follows one ask through a team of coding agents to a finished pricing page and a reply. The silent, scroll-driven film has separate desktop and portrait compositions, light and dark themes, and a still poster for reduced motion or disabled JavaScript.
 
+The top-right switch selects light, dark or system appearance. System is the default; an explicit choice is remembered when browser storage is available. A theme change keeps the displayed canvas until the matching pack can draw the current scroll frame. The mark, colours and posters follow the same choice. With JavaScript disabled, the page follows the system theme.
+
+The gold **Get started** ticket appears in the intro and hand-off. It copies an install prompt for Claude Code or Codex and opens a selectable copy with confirmation. If clipboard access is refused, the prompt is selected for manual copying and the popover offers a retry. Escape or the close button dismisses it. Without JavaScript the ticket links to the README's Install section. The shine stops under reduced motion; **Star on GitHub** is a quiet outline link.
+
 ## Run locally
 
 From the repository root:
