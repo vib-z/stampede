@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Site:** the landing page is rebuilt around the film: a frosted header with a theme toggle, the Open gate mark's full run with a red beat and no outlines, one gold Get started that copies the install prompt, and a short footer. Live at https://vib-z.github.io/stampede/ and https://stampede-xi.vercel.app/.
+- **Site:** the landing page is rebuilt around the film: a frosted header with a theme toggle, the Open gate mark's full run with a red beat and no outlines, one gold Get started that copies the install prompt and says to paste it into your agent, and a short footer. Live at https://vib-z.github.io/stampede/ and https://stampede-xi.vercel.app/.
 
 ## 0.1.0 (22 Oct 2026)
 
