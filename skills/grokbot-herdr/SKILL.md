@@ -29,6 +29,9 @@ You are a Grok Bot on the box, OUTSIDE Herdr. Before any Herdr work:
 - Never poll a running job. After the first prompt and one screen check, end your turn and wait for the webhook event (source herdr, claude, codex or herdr-watchdog; state done, blocked, Stop, StopFailure, agent-turn-complete, stale or dead). Only then read the pane, once.
 - Always prompt agents with `herdr-send <name-or-pane> "<text>"` (grokbot-herdr/scripts/herdr-send, installed at `~/.local/bin/herdr-send`) or `herdr agent prompt`, never `pane send-text` plus Enter (Codex leaves it unsubmitted). Never send `ctrl+c` to an idle Codex yourself: on an empty prompt it quits Codex (herdr-send clears only typed leftovers). Continue only on `SUBMITTED`; on `FAILED` read the screen before any resend. If Claude kept the text but dropped the Enter (it can while still drawing its screen), herdr-send presses Enter once and says so; it never does that for a slash command.
 
+## Size the job first
+Before creating any workspace, size the job (herdr-fleet, "Size the job first: small or big"). A small job needs no stampede: do it in one session with built-in subagents. Only a big job goes through `fleet-job new`.
+
 ## Setup note
 Every tagged event goes to the route named after the tag (`~/.config/herdr-events/routes/<bot-slug>`, holding `URL=` and `KEY=`), or to the `default` route when the bot has none; the webhook behind it passes the event to the owning bot as a message. When that message arrives, read the pane once and finish your job.
 

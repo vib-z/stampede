@@ -24,6 +24,17 @@ herdr tab list --workspace <ws>
 herdr agent list | jq -r '.result.agents[] | "\(.pane_id) \(.name // "-") \(.agent) \(.agent_status)"'
 ```
 
+## Size the job first: small or big
+
+Before opening any Herdr workspace, size the job on four questions: **length** (one sitting of under about an hour, or hours or overnight), **agents** (one agent family, or a mix such as Claude plus Codex, Cursor or another model), **risk** (does anything leave the machine: merge, push, send, spend, publish, deploy) and **durability** (must it survive a restart, or would the owner want to look in halfway).
+
+- **Small** (all four small): no stampede at all. Run it in one plain Claude session with its built-in subagents: no workspace, no panes, no reopen record. This is the answer to "why not subagents": for a small job, use them. Examples: find where a feature lives and explain it; review one PR from a few angles; fix one bug with its test; compare three pricing pages; a rename or docs tidy.
+- **Big** (any one big): run it as a stampede job under the rules below, with gates and a reopen record (and an owner tag when a bot starts it). Examples: a research, writing and review run for a long document; a feature to PR with a cross-model review and a merge gate; a batch of images or videos with review; an overnight or multi-repo job; anything that sends, spends, publishes or deploys.
+- **Unsure:** start small, and promote to big the moment a big signal appears (a merge or send is needed, it runs long, a second agent family is needed).
+- Write the decision and the reason as one line at the top of `plan.md` (or in the reply when small), e.g. `Size: big (merge gate, Codex review)`.
+
+Inside a big job, "Panes, not built-in subagents" still applies: subagents there are only for quick lookups the lead reads itself.
+
 ## The shape
 
 - **Workspace = project or initiative**, one label per repo or initiative. Reuse the project's workspace if it exists. Otherwise: `herdr workspace create --cwd <repo> --label <project> --no-focus`.
