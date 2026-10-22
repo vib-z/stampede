@@ -59,9 +59,9 @@
     const copied = () => {
       go.classList.add('is-copied');
       replay(heroMark);
-      status.textContent = 'Copied. Paste it into Claude Code or Codex.';
+      status.textContent = 'Copied. Paste it into Claude Code, Codex or Cursor.';
       clearTimeout(timer);
-      timer = setTimeout(() => { go.classList.remove('is-copied'); status.textContent = ''; }, 2200);
+      timer = setTimeout(() => { go.classList.remove('is-copied'); status.textContent = ''; }, 5000);
     };
     const open = () => {
       if (panel.showPopover) { if (!panel.matches(':popover-open')) panel.showPopover(); }

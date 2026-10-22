@@ -8,7 +8,7 @@ Two states, light and dark. The page follows the system by default. The header t
 
 ## Get started
 
-Clicking copies the install prompt to the clipboard and the button reads Copied for two seconds. If the clipboard is refused, a panel opens with the prompt selected as text, with a Copy retry and a Close button; Escape closes it. Without JavaScript the button links to the README's Install section.
+Clicking copies the install prompt to the clipboard; the button reads Copied and a line under it says to paste the prompt into Claude Code, Codex or Cursor, for five seconds. If the clipboard is refused, a panel opens with the prompt selected as text, with a Copy retry and a Close button; Escape closes it. Without JavaScript the button links to the README's Install section.
 
 ## Motion
 
