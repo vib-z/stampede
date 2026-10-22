@@ -16,7 +16,7 @@ for(const base of bases)for(const width of [390,1440])for(const theme of ['light
  await page.waitForFunction(v=>window.__filmStats?.variant===v&&window.__filmStats.quality==='full',variant);
  const observed=[];
  for(const frame of [0,48,104,141,170,259,300,357,419,260,20,419]){
-  await page.evaluate(f=>scrollTo(0,(document.querySelector('.film-section').offsetHeight-innerHeight)*f/419),frame);
+  await page.evaluate(f=>{const r=document.querySelector('.film-section');scrollTo(0,r.offsetTop+(r.offsetHeight-innerHeight)*f/419);},frame);
   await page.waitForFunction(f=>window.__filmStats.frame===f&&window.__filmStats.quality==='full',frame);
   observed.push(await page.evaluate(()=>({frame:window.__filmStats.frame,beat:document.querySelector('.beat-title')?.textContent??null})));
  }

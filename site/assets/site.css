@@ -1,0 +1,132 @@
+/* stampede landing page. Loads after hero-mark.css and motion.css; the film player keeps its own rules. */
+@property --go-angle{syntax:"<angle>";inherits:false;initial-value:0deg}
+:root{--paper:#fff;--ink:#0a0a0a;--text-2:#333;--muted:#666;--quiet:#757575;--line:#e5e5e5;--border:#ccc;--surface:#fafafa;--frost:rgba(255,255,255,.76);--hero-light:radial-gradient(ellipse 62% 58% at 50% 40%,transparent 42%,rgba(10,10,10,.035) 100%);color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0a0a0a;--ink:#f5f5f5;--text-2:#d4d4d4;--muted:#a3a3a3;--quiet:#8a8a8a;--line:#262626;--border:#383838;--surface:#111;--frost:rgba(10,10,10,.7);--hero-light:radial-gradient(ellipse 30% 40% at 50% 4%,rgba(255,255,255,.13),transparent 70%),radial-gradient(ellipse 62% 58% at 50% 6%,rgba(255,255,255,.1),transparent 72%);color-scheme:dark}}
+:root[data-theme="dark"]{--paper:#0a0a0a;--ink:#f5f5f5;--text-2:#d4d4d4;--muted:#a3a3a3;--quiet:#8a8a8a;--line:#262626;--border:#383838;--surface:#111;--frost:rgba(10,10,10,.7);--hero-light:radial-gradient(ellipse 30% 40% at 50% 4%,rgba(255,255,255,.13),transparent 70%),radial-gradient(ellipse 62% 58% at 50% 6%,rgba(255,255,255,.1),transparent 72%);color-scheme:dark}
+:root[data-theme="light"]{--paper:#fff;--ink:#0a0a0a;--text-2:#333;--muted:#666;--quiet:#757575;--line:#e5e5e5;--border:#ccc;--surface:#fafafa;--frost:rgba(255,255,255,.76);--hero-light:radial-gradient(ellipse 62% 58% at 50% 40%,transparent 42%,rgba(10,10,10,.035) 100%);color-scheme:light}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:64px}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 Geist,Arial,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+::selection{background:var(--ink);color:var(--paper)}
+a{color:inherit}
+button{font:inherit;color:inherit;cursor:pointer}
+:where(a,button,textarea):focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* Header: frosted, hairline once scrolled, hides on scroll down and returns on scroll up. */
+.site-header{position:sticky;top:0;z-index:20;height:64px;background:var(--frost);-webkit-backdrop-filter:blur(14px) saturate(1.4);backdrop-filter:blur(14px) saturate(1.4);box-shadow:inset 0 -1px 0 transparent;transition:transform .36s cubic-bezier(.2,.8,.2,1),box-shadow .3s,visibility 0s}
+.site-header[data-scrolled]{box-shadow:inset 0 -1px 0 var(--line)}
+.site-header[data-hidden]{transform:translateY(-100%);visibility:hidden;transition:transform .36s cubic-bezier(.2,.8,.2,1),box-shadow .3s,visibility 0s .36s}
+.site-header .wrap{display:flex;align-items:center;justify-content:space-between;height:100%}
+.lockup{display:inline-flex;align-items:center;height:44px;color:var(--ink);text-decoration:none;border-radius:4px}
+.lockup svg{display:block;height:22px;width:auto;overflow:visible}
+.header-actions{display:flex;align-items:center;gap:2px;margin-right:-8px}
+.icon-btn{display:inline-grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);transition:color .15s,background .15s}
+.icon-btn:hover{color:var(--ink);background:color-mix(in srgb,var(--ink) 7%,transparent)}
+.icon-btn:active{background:color-mix(in srgb,var(--ink) 12%,transparent)}
+.icon-btn svg{display:block;width:20px;height:20px;overflow:visible}
+.theme-toggle[hidden]{display:none}
+.theme-toggle .sun,.theme-toggle .moon{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transform-box:fill-box;transform-origin:center;transition:opacity .2s,transform .35s cubic-bezier(.2,.8,.2,1)}
+:root[data-theme="dark"] .theme-toggle .moon,:root:not([data-theme="dark"]) .theme-toggle .sun{opacity:0;transform:rotate(-50deg) scale(.5)}
+
+/* Hero: one light from above, the mark, the promise, one gold button. */
+.hero{position:relative;isolation:isolate;overflow:hidden;min-height:calc(100svh - 64px);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 24px 11svh}
+.hero::before{content:"";position:absolute;z-index:-1;inset:0;pointer-events:none;background:var(--hero-light)}
+.hero .stp-hero-mark{width:124px;margin:0 auto 32px}
+.hero .stp-logo{width:100%;overflow:visible;cursor:pointer}
+/* The run's cells: no outline in either theme, and a red beat for a blocked cell beside amber (waiting) and green (done). */
+.stp-logo{--logo-cell-border:transparent;--logo-alert:#e5484d}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .stp-logo{--logo-cell-border:transparent;--logo-alert:#ff6369}}
+:root[data-theme="dark"] .stp-logo{--logo-cell-border:transparent;--logo-alert:#ff6369}
+.hero h1{margin:0;font-size:clamp(42px,1.5rem + 3.6vw,72px);font-weight:500;line-height:1.04;letter-spacing:-.025em;text-wrap:balance}
+.hero h1 .line{display:block}
+.hero p{margin:20px auto 0;max-width:40ch;font-size:18px;line-height:1.5;letter-spacing:-.005em;color:var(--muted);text-wrap:pretty}
+.hero-cta{margin-top:36px}
+
+/* Get started: the page's one colour. Gold, lit from above, a slow shine, a light that runs the rim on hover. */
+.go{--go-ink:#3a2806;position:relative;isolation:isolate;display:inline-grid;align-items:center;justify-items:center;min-height:48px;padding:0 26px;border-radius:999px;overflow:hidden;color:var(--go-ink);background:linear-gradient(180deg,#fff6dc 0%,#f8db94 34%,#eab34a 100%);box-shadow:0 10px 22px -12px rgba(176,118,18,.75),0 0 0 1px rgba(181,139,54,.4),inset 0 1px 0 rgba(255,255,255,.8),inset 0 -1px 0 rgba(140,90,10,.22);font-size:15px;font-weight:600;line-height:1;letter-spacing:-.005em;text-decoration:none;white-space:nowrap;transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .25s}
+.go>*{grid-area:1/1}
+.go-shine{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.62) 50%,transparent 60%);transform:translateX(-140%)}
+.go-ring{position:absolute;inset:0;z-index:2;pointer-events:none;border-radius:inherit;padding:1.5px;background:conic-gradient(from var(--go-angle),transparent 0deg,transparent 230deg,rgba(255,255,255,.95) 300deg,transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transition:opacity .25s}
+.go-label{position:relative;z-index:3;display:grid;place-items:center}
+.go-label>span{grid-area:1/1;display:inline-flex;align-items:center;gap:8px;transition:opacity .22s,transform .22s cubic-bezier(.2,.8,.2,1)}
+.go-done{opacity:0;transform:translateY(8px)}
+.go.is-copied .go-text{opacity:0;transform:translateY(-8px)}
+.go.is-copied .go-done{opacity:1;transform:none}
+.go svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.go:hover{transform:translateY(-1px);box-shadow:0 14px 28px -12px rgba(176,118,18,.85),0 0 0 1px rgba(181,139,54,.45),inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(140,90,10,.22)}
+.go:hover .go-ring,.go:focus-visible .go-ring{opacity:1}
+.go:active{transform:translateY(1px) scale(.985);box-shadow:0 4px 10px -6px rgba(176,118,18,.7),0 0 0 1px rgba(181,139,54,.45),inset 0 2px 4px rgba(120,80,10,.22);transition-duration:.1s}
+.go:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+
+/* Film: the player's rules stay in motion.css; the skip link sits below the header. */
+.film-section .skip{border-radius:999px;padding:10px 14px;box-shadow:0 0 0 1px var(--line)}
+.film-section .skip:focus{top:76px}
+
+/* Footer */
+.site-footer{border-top:1px solid var(--line);padding:36px 0 44px;font-size:13px;color:var(--quiet)}
+.site-footer .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 24px}
+.footer-brand{display:inline-flex;align-items:center;gap:14px;min-height:44px;color:var(--ink);text-decoration:none;border-radius:4px}
+.footer-brand svg{display:block;height:18px;width:auto}
+.footer-brand span{color:var(--quiet)}
+.site-footer nav{display:flex;flex-wrap:wrap;gap:0 22px}
+.site-footer nav a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);text-decoration:none;transition:color .15s}
+.site-footer nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:4px}
+
+/* The prompt, when the clipboard is refused: selectable text in a quiet panel. */
+.prompt{width:min(540px,calc(100vw - 32px));max-height:calc(100svh - 32px);overflow:auto;padding:24px;border:1px solid var(--line);border-radius:16px;background:var(--paper);color:var(--ink);box-shadow:0 24px 80px -24px rgba(0,0,0,.45)}
+.prompt:not(:popover-open):not(.is-open){display:none}
+.prompt.is-open{display:block;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:30}
+.prompt::backdrop{background:rgba(0,0,0,.4)}
+.prompt h2{margin:0 0 6px;font-size:18px;font-weight:600;letter-spacing:-.02em;line-height:1.3}
+.prompt p{margin:0 0 14px;font-size:14px;line-height:1.5;color:var(--muted)}
+.prompt textarea{display:block;width:100%;height:200px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font:13px/1.6 Geist,Arial,sans-serif;resize:none}
+.prompt-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.btn{display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border:1px solid var(--border);border-radius:999px;background:transparent;font-size:14px;font-weight:500;transition:background .15s,color .15s}
+.btn:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.btn-primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn-primary:hover{background:color-mix(in srgb,var(--ink) 86%,var(--paper))}
+
+@media(max-width:700px){
+.site-header{height:56px}
+.lockup svg{height:20px}
+.wrap{padding:0 20px}
+.hero{min-height:calc(100svh - 56px);padding:28px 20px 9svh}
+.hero .stp-hero-mark{width:96px;margin-bottom:24px}
+.hero p{margin-top:16px;font-size:17px}
+.hero-cta{margin-top:28px}
+.site-footer{padding:28px 0 36px}
+.site-footer .wrap{flex-direction:column;align-items:flex-start;gap:4px}
+.site-footer nav{gap:0 18px}
+.prompt{padding:18px}
+}
+
+/* Motion, on the mark's own grammar: the run (hero-mark.css) and its 100 ms beats, the stomp easing, the words rising after the cells land, an idle wink, the light settling, the shine and the rim light. */
+@media(prefers-reduced-motion:no-preference){
+.hero::before{animation:light-in 2.2s cubic-bezier(.16,1,.3,1) both}
+@keyframes light-in{from{opacity:0}to{opacity:1}}
+.hero h1,.hero p,.hero-cta{animation:rise .9s cubic-bezier(.16,1,.3,1) both}
+.hero h1{animation-delay:.32s}.hero p{animation-delay:.42s}.hero-cta{animation-delay:.52s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.go-shine{animation:go-shine 4.4s cubic-bezier(.45,0,.2,1) infinite}
+@keyframes go-shine{0%,58%{transform:translateX(-140%)}100%{transform:translateX(140%)}}
+.go:hover .go-ring,.go:focus-visible .go-ring{animation:go-spin 2.2s linear infinite}
+@keyframes go-spin{to{--go-angle:360deg}}
+:root:not([data-motion="off"]) .hero .stp-logo.is-running .c2{animation:stp-move-2 2400ms both,stp-tone-2 2400ms both,hero-wink 8s 3.4s infinite}
+:root:not([data-motion="off"]) .stp-logo.is-running .c3{animation:stp-move-3 2400ms both,site-tone-3 2400ms both}
+@keyframes site-tone-3{0%{fill:var(--logo-ink);fill-opacity:1;stroke:none;animation-timing-function:step-end}26.667%{fill:var(--logo-working);fill-opacity:.45;stroke:none;animation-timing-function:step-end}30.139%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}33.611%{fill:var(--logo-working);fill-opacity:1;animation-timing-function:step-end}37.083%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}40.556%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}44.028%{fill:var(--logo-working);fill-opacity:1;animation-timing-function:step-end}47.5%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}50.972%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}54.444%{fill:var(--logo-working);fill-opacity:1;animation-timing-function:step-end}57.917%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}61.389%{fill:var(--logo-working);fill-opacity:.45;animation-timing-function:step-end}64.861%{fill:var(--logo-working);fill-opacity:1;animation-timing-function:step-end}68.333%{fill:var(--logo-alert);fill-opacity:1;animation-timing-function:step-end}78.75%{fill:var(--logo-alert);fill-opacity:1;animation-timing-function:cubic-bezier(.16,1,.3,1)}93.333%{fill:var(--logo-ink);fill-opacity:1;animation-timing-function:step-end}100%{fill:var(--logo-ink);fill-opacity:1}}
+@keyframes hero-wink{0%,96.5%,100%{fill-opacity:1}97.5%,99%{fill-opacity:.3}}
+.go.is-copied .go-label{animation:stomp .36s cubic-bezier(.16,1,.3,1)}
+@keyframes stomp{0%{transform:scale(1)}35%{transform:scale(1.08,.9)}65%{transform:scale(.985,1.02)}100%{transform:none}}
+}
+@media(prefers-reduced-motion:reduce){
+.site-header,.icon-btn,.theme-toggle .sun,.theme-toggle .moon,.go,.go-label>span,.go-ring,.btn,.site-footer nav a{transition:none}
+.go:hover,.go:active{transform:none}
+}
+@media(forced-colors:active){
+.go,.btn{border:1px solid ButtonText;color:ButtonText;background:Canvas;box-shadow:none}
+.go-shine,.go-ring,.hero::before{display:none}
+.site-header{box-shadow:none;border-bottom:1px solid CanvasText}
+}

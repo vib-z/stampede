@@ -5,8 +5,8 @@ const root=path.resolve(import.meta.dirname,'../..'),out=process.env.FILM_PREVIE
 if(!out)throw new Error('Set FILM_PREVIEW');
 await fs.mkdir(path.join(out,'assets'),{recursive:true});
 for(const cut of ['desktop','phone'])for(const theme of ['light','dark'])await fs.rm(path.join(out,`assets/motion/${cut}-${theme}-instant.webp`),{force:true});
-for(const file of ['motion.js','motion.css','favicon.svg'])await fs.copyFile(path.join(root,'site/assets',file),path.join(out,'assets',file));
-for(const dir of ['motion','fonts','hero-mark','cta'])await fs.cp(path.join(root,'site/assets',dir),path.join(out,'assets',dir),{recursive:true});
+for(const file of ['motion.js','motion.css','site.js','site.css','favicon.svg'])await fs.copyFile(path.join(root,'site/assets',file),path.join(out,'assets',file));
+for(const dir of ['motion','fonts','hero-mark'])await fs.cp(path.join(root,'site/assets',dir),path.join(out,'assets',dir),{recursive:true});
 await fs.rm(path.join(out,'assets/fonts/Geist-OFL.txt'),{force:true});
 let html=await fs.readFile(path.join(root,'site/index.html'),'utf8');
 html=html.replace(/<!doctype html>|<html[^>]*>|<\/html>|<head>|<\/head>|<body>|<\/body>/gi,'');
