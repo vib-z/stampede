@@ -30,7 +30,7 @@
 </p>
 
 <p align="center">★ <a href="https://github.com/vib-z/stampede">Star stampede on GitHub</a> to follow new releases.<br>
-  The site, planned to go live with 0.1.0: <a href="https://vib-z.github.io/stampede/">vib-z.github.io/stampede</a></p>
+  The site: <a href="https://vib-z.github.io/stampede/">vib-z.github.io/stampede</a></p>
 
 ---
 
@@ -401,7 +401,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **0.1.0, 22 Oct 2026. Works and tested:** the job folder, the lead's start with its hooks, starting workers on Claude, Codex or Cursor, the review lock and approval, background questions and cancel, the wake on every rewritten report, the yolo guard, the install, `--version` and the plugin event, all with fakes. Every command in this README was run against a scratch job.
 
-**Site and brand, 22 Oct 2026:** the hero (PR #16) and the brand kit (PR #20) are done. The site goes live with 0.1.0.
+**Site and brand, 22 Oct 2026:** the hero (PR #16), the brand kit (PR #20) and the landing page around the film (PR #3) are done. The site is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 
 **Live, 21 Oct 2026:** the engine started a hooked Claude lead, which was woken by its inbox file; a Codex reviewer's turn reached it through Codex's notify hook; a Cursor worker committed under auto-review and its stop hook reached the lead; a question went to the owner's phone without blocking the lead and was cancelled cleanly. Real jobs, with timelines: [docs/RUNS.md](docs/RUNS.md).
 
@@ -412,7 +412,6 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 - Codex or Cursor as the lead.
 - ChatGPT Dots as a front door, once it can be woken by a webhook.
 - Report to Herdr that Codex's "Implement this plan?" and Cursor's "Ready to build?" dialogs read as `idle` and `done`, not `blocked` (needs the owner's yes).
-- The site at https://vib-z.github.io/stampede/, live once GitHub Pages is turned on for 0.1.0.
 - A Linux run.
 
 ## Credits and license
