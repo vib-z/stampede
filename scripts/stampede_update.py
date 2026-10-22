@@ -89,8 +89,9 @@ def update():
     if subprocess.run(['git', '-C', str(ROOT), 'fetch']).returncode:
         print('refused: git fetch failed (above); your files are as they were', file=sys.stderr)
         return 1
-    added = git('diff', '-z', '--name-only', '--no-renames', '--diff-filter=A', 'HEAD', '@{u}').split('\0')
-    clash = [p for p in added if p and in_the_way(p)]
+    added = subprocess.run(['git', '-C', str(ROOT), 'diff', '-z', '--name-only', '--no-renames', '--diff-filter=A',
+                            'HEAD', '@{u}'], capture_output=True).stdout  # raw bytes: a path may start or end with a space
+    clash = [p for p in map(os.fsdecode, added.split(b'\0')) if p and in_the_way(p)]
     if clash:
         print(f'refused: the update adds {", ".join(clash)}, already in {ROOT} (ignored by git, so it would be '
               'overwritten): move it away, then rerun', file=sys.stderr)

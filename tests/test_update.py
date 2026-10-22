@@ -150,7 +150,7 @@ class Update(unittest.TestCase):
         shutil.copy(ROOT / 'scripts/stampede_update.py', origin / 'scripts')
         (origin / 'VERSION').write_text('0.1.0\n')
         (origin / 'install.sh').write_text('touch "$(dirname "$0")/installed"\n')
-        (origin / '.gitignore').write_text('installed\n__pycache__/\nlocal-settings.txt\nlocal\n')
+        (origin / '.gitignore').write_text('installed\n__pycache__/\nlocal-settings.txt\nlocal\n local-settings.txt\n')
         self.git(origin, 'init', '-q', '-b', 'main')
         self.git(origin, 'add', '.')
         self.git(origin, 'commit', '-qm', 'one')
@@ -209,6 +209,17 @@ class Update(unittest.TestCase):
             self.assertEqual((self.clone / path).read_text(), 'LOCAL WORK TO KEEP\n')
         self.assertEqual((self.clone / 'VERSION').read_text(), '0.1.0\n')
         self.assertFalse((self.clone / 'installed').exists())
+
+    def test_an_ignored_file_whose_name_starts_with_a_space_is_kept(self):
+        name = ' local-settings.txt'
+        (self.clone / name).write_text('LOCAL WORK TO KEEP\n')
+        (self.origin / name).write_text('RELEASE DEFAULTS\n')
+        self.git(self.origin, 'add', '-f', name)
+        self.git(self.origin, 'commit', '-qm', 'three')
+        out = self.update(self.clone)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn(f'the update adds {name}, already in', out.stderr)
+        self.assertEqual((self.clone / name).read_text(), 'LOCAL WORK TO KEEP\n')
 
     def test_a_plugin_install_names_herdr_plugin_update(self):
         plain = self.dir / 'plain'
