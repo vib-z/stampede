@@ -358,7 +358,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 <summary><b>Repo layout</b></summary>
 
 ```text
-README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  LICENSE  VERSION
+README.md  CHANGELOG.md  CONTRIBUTING.md  RELEASING.md  SECURITY.md  LICENSE  VERSION
 AGENTS.md  CLAUDE.md  SKILL.md  config.example  install.sh  herdr-plugin.toml
 .github/                issue and pull request templates
 skills/herdr-fleet/     the job: SKILL.md, references/, scripts/fleet-job, fleet_job.py, fleet-watch.sh
@@ -387,6 +387,7 @@ tests/                  python3 -m unittest discover tests
 | [the lean design](docs/superpowers/specs/2026-10-21-stampede-lean-design.md) | why stampede is shaped this way |
 | [site/](site/README.md) | the hero site, and its [brand kit](site/brand/README.md) |
 | [CHANGELOG.md](CHANGELOG.md) | what each version shipped |
+| [RELEASING.md](RELEASING.md) | how a maintainer cuts a release: VERSION, the changelog, the tag, the GitHub Release |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) | how to help, and how to report a security problem privately |
 
 ## Contribute
