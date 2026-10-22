@@ -1,0 +1,36 @@
+# Job folders, briefs and local agent settings
+.stampede/
+.herdr-*/
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Node, in case the app ever vendors a build
+node_modules/
+film/.venv/
+film/.npm-cache/
+film/renders/
+film/look*/
+
+# OS and editors
+.DS_Store
+*.swp
+
+# Secrets never belong here
+.env
+.env.*
+*.pem
+*.key
+
+# Media over 10 MB goes in a release, never in git
+*.mp4
+*.mov
+
+# A browser tool's local state
+.gstack/
+
+# Generated film diagnostics
+film/*-metrics.json
+film/pace-control.json

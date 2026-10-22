@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="render-height" content="1380">
+<title>The build tab of the fleet that built stampede v0</title>
+<link rel="stylesheet" href="system.css">
+<style>
+.grid { grid-template-columns: 1fr 1fr; grid-template-rows: 704px 252px; }
+body { padding: 48px 40px; } .body { grid-template-columns: 210px 1fr; } .pane pre { font-size: 12.3px; }
+</style></head>
+<body>
+<!-- Real: pane text captured with `herdr agent read <agent> --source visible|recent-unwrapped` at 18:41 to 18:42 on 18 Oct 2026.
+     Excerpts only; home paths replaced with ~, model names with <model> <effort>, the project folder with <project dir>. Regenerate the text by hand if you re-shoot. -->
+<div class="head">
+  <div>
+    <div class="kicker">Real run · 18 Oct 2026 · 18:42</div>
+    <div class="title">The build tab of the fleet that built stampede v0</div>
+    <div class="sub">Two Claude Code agents above, two Codex agents below, each in its own Herdr pane. The text is each pane's own screen, read with herdr agent read; excerpts, with home paths shown as ~ and model names as &lt;model&gt;.</div>
+  </div>
+</div>
+<div class="win">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>herdr: stampede</div>
+  <div class="body">
+    <div class="side">
+      <h4>spaces</h4>
+      <div class="on">● stampede</div>
+      <h4>agents · build</h4>
+      <div><span class="ok">✓</span> build-steps-plan</div>
+      <div><span class="warn">●</span> build-steps-run</div>
+      <div><span class="warn">●</span> build-scripts</div>
+      <div><span class="warn">●</span> build-app</div>
+      <h4>tabs</h4>
+      <div class="dim">lead · 3 agents</div>
+      <div class="dim">research · 4 agents</div>
+      <div class="on">build · 4 agents</div>
+      <div class="dim">docs · 1 agent</div>
+    </div>
+    <div class="main">
+      <div class="tabs"><span>lead</span><span>research</span><span class="on">build</span><span>docs</span><span>delivery-test</span></div>
+      <div class="grid">
+        <div class="pane "><span class="name">build-steps-plan</span><pre class="term"><span class="ok">⏺ Steps 0 to 5 are written, the report is in, and the lead has been pinged. They follow</span>
+  contract v2.3: just-do-it is the default mode, gated is for big or risky jobs, and one-agent
+  jobs take the solo path in either mode. Step 3 also has the section 10 update: it checks
+  whether a role&#x27;s tool is installed and takes the row&#x27;s fallback role when it isn&#x27;t.
+
+  What each step does:
+  - 0 triage: picks the mode, size, kind, steps, gates and remote. It asks at most one question
+    up front, and only when the job can&#x27;t go ahead without the answer. For every other open
+    question it writes down the choice it will make, so the owner can correct it later.
+  - 1 collect: gathers the owner&#x27;s dump, in one message or many, and offers a brainstorming
+    skill (credited to its open-source source). It agrees the goal with the owner.
+  - 2 plan: writes the plain plan.md in the agent&#x27;s own plan mode: the goal, tasks marked clear
+    or unclear, and questions.
+  - 3 roles: fills the roles.md table from the roles list and one domain index. It picks each
+    role&#x27;s agent from the optional priority list, else what is installed.
+  - 4 orchestrate: reads one pattern as a seed and writes fleet-plan.md with one plain card per
+    pane. The lead is named lead-&lt;slug&gt; in tab lead, to match how stampede launch starts it.
+  - 5 review-app: uses only the review app&#x27;s commands, handles each line it prints, never
+    writes the approval itself, and hands over to stampede launch &lt;job dir&gt;.
+
+  ⋮
+<span class="warn">✻ Churned for 7m 33s · done 6:38 PM</span>
+
+<span class="dim">──────────────────────────────────────────────────────────────────────────── build-steps-plan ─</span>
+❯
+<span class="dim">───────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span class="dim">  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                        /rc</span></pre></div>
+        <div class="pane focus"><span class="name">build-steps-run</span><pre class="term"><span class="dim">  ⎿  Updated steps/9-review/review.md (+5 -2)</span>
+       9  |---|---|---|---|---|
+      10  | R1 | &lt;file:line&gt; | &lt;critical, major, minor or trivial&gt; | &lt;the command and it
+          s output, a failing test, or the exact lines&gt; | &lt;yes or no&gt; |
+      11
+<span class="bad">      12 -- A critical with no proof counts as major.</span>
+<span class="bad">      13 -- Pass: no new finding is major or worse. Pre-existing findings never fail a l</span>
+         -ane; they go to the lead as suggestions.
+<span class="ok">      12 +## Rules (fixed: the reviewer describes, these decide)</span>
+<span class="ok">      13 +- Every finding has a severity and a proof. A critical with no proof counts as</span>
+         + major.
+<span class="ok">      14 +- Pass when no new finding is major or worse; otherwise fail and send it back.</span>
+<span class="ok">      15 +- Pre-existing findings never fail a lane; they go to the lead as suggestions.</span>
+<span class="ok">      16 +- At most two fix rounds; after that the lead decides.</span>
+      17
+      18  ## QA
+      19  - &lt;what you ran and used, the way the work&#x27;s user would, and what happened&gt;
+<span class="dim">  ⎿  Allowed by auto mode classifier</span>
+
+<span class="ok">⏺ Bash(gh api repos/eliasstravik/herdr-projects/contents/docs/gate.md?ref=7d8bba7eea413b1f7fba8</span>
+      c0ba3e31e29a9ad1471 --jq &#x27;.path + &quot; &quot; + .sha&#x27; 2&gt;&amp;1; gh api repos/eliasst…)
+<span class="dim">  ⎿  (eval):1: no matches found: repos/eliasstravik/herdr-projects/contents/docs/gate.md?r</span>
+     ef=7d8bba7eea413b1f7fba8c0ba3e31e29a9ad1471
+     MIT
+<span class="dim">  ⎿  Allowed by auto mode classifier</span>
+
+<span class="ok">⏺ Bash(gh api &#x27;repos/eliasstravik/herdr-projects/contents/docs/gate.md?ref=7d8bba7eea413b1f7fba</span>
+      8c0ba3e31e29a9ad1471&#x27; --jq &#x27;.path + &quot; &quot; + .sha&#x27;)
+<span class="dim">  ⎿  docs/gate.md 99c6b3eb3f3bec6d14843e2da66b0eefeb16ef52</span>
+<span class="dim">  ⎿  Allowed by auto mode classifier</span>
+
+<span class="warn">✽ Mulling… (34s · ↓ 2.9k tokens)</span>
+
+<span class="dim">───────────────────────────────────────────────────────────────────────────── build-steps-run ─</span>
+❯
+<span class="dim">───────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span class="dim">  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← 1 agent                     /rc</span></pre></div>
+        <div class="pane "><span class="name">build-scripts</span><pre class="term"><span class="warn">• Working (10m 49s • esc to interrupt)</span>
+<span class="dim">  └ Tip: Use the desktop app. Run codex app to open it. It installs automatically if needed.</span>
+
+
+› Ask Codex to do anything
+
+  &lt;model&gt; &lt;effort&gt; · &lt;project dir&gt; · Read build-scripts instructions
+<span class="dim">  ? for shortcuts                                                     ⚠ 5 warnings · f2 to view</span></pre></div>
+        <div class="pane "><span class="name">build-app</span><pre class="term"><span class="warn">• Working (10m 50s • esc to interrupt)</span>
+<span class="dim">  └ Tip: Use /status to see the current model, approvals, and token usage.</span>
+
+
+› Ask Codex to do anything
+
+  &lt;model&gt; &lt;effort&gt; · &lt;project dir&gt; · Implement build-app contract
+<span class="dim">  ? for shortcuts                                                    ⚠ 4 warnings · f2 to view</span></pre></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>stampede │ build │ 4 panes</span><span>✓ done  ● working</span></div>
+</div>
+</body></html>

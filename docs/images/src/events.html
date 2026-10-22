@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="render-height" content="1060">
+<title>Events arriving</title>
+<link rel="stylesheet" href="system.css">
+<style>
+.cols { display: grid; grid-template-columns: 1.35fr 1fr; gap: 28px; }
+.log { padding: 16px 22px 20px; font: 19px/1.62 var(--mono); }
+.ev { display: grid; grid-template-columns: 90px 110px 1fr; gap: 14px; }
+.t { color: var(--muted); } .k { font-weight: 700; }
+.legend .card { margin-bottom: 16px; }
+.legend p { font: 18px/1.45 var(--sans); color: var(--text); }
+.legend b { font-family: var(--mono); }
+</style></head>
+<body>
+<!-- Real: the lines of the lead's watch.log (fleet-watch.sh) from the fleet that built stampede v0, 18 Oct 2026.
+     Generated from that file; report paths shortened to reports/<lane>.md. -->
+<div class="head"><div>
+  <div class="kicker">Real run · 18 Oct 2026 · 18:10 to 18:42</div>
+  <div class="title">Events arrive; nobody polls</div>
+  <div class="sub">The lead's watch log from the fleet that built stampede v0. Each line came to the lead as an event the moment it happened.</div>
+</div></div>
+<div class="cols">
+  <div class="win">
+    <div class="bar"><div class="dots"><i></i><i></i><i></i></div>watch.log</div>
+    <div class="log"><div class="ev"><span class="t">18:10</span><span class="k dim">GONE</span><span class="r">delivery-codex</span></div><div class="ev"><span class="t">18:11</span><span class="k dim">GONE</span><span class="r">delivery-claude</span></div><div class="ev"><span class="t">18:12</span><span class="k dim">GONE</span><span class="r">delivery-cursor</span></div><div class="ev"><span class="t">18:13</span><span class="k dim">GONE</span><span class="r">delivery-hermes</span></div><div class="ev"><span class="t">18:13</span><span class="k dim">GONE</span><span class="r">delivery-cursor</span></div><div class="ev"><span class="t">18:14</span><span class="k ok">REPORT</span><span class="r">reports/patterns-research.md</span></div><div class="ev"><span class="t">18:14</span><span class="k dim">GONE</span><span class="r">delivery-hermes</span></div><div class="ev"><span class="t">18:16</span><span class="k dim">GONE</span><span class="r">delivery-kimi</span></div><div class="ev"><span class="t">18:16</span><span class="k dim">GONE</span><span class="r">delivery-gemini</span></div><div class="ev"><span class="t">18:17</span><span class="k ok">REPORT</span><span class="r">reports/contract.md</span></div><div class="ev"><span class="t">18:17</span><span class="k ok">REPORT</span><span class="r">reports/delivery.md</span></div><div class="ev"><span class="t">18:19</span><span class="k ok">REPORT</span><span class="r">reports/roles-gtm-research.md</span></div><div class="ev"><span class="t">18:22</span><span class="k ok">REPORT</span><span class="r">reports/roles-biz-research.md</span></div><div class="ev"><span class="t">18:24</span><span class="k ok">REPORT</span><span class="r">reports/roles-build-research.md</span></div><div class="ev"><span class="t">18:29</span><span class="k ok">REPORT</span><span class="r">reports/harden.md</span></div><div class="ev"><span class="t">18:37</span><span class="k ok">REPORT</span><span class="r">reports/roles-build-write.md</span></div><div class="ev"><span class="t">18:38</span><span class="k ok">REPORT</span><span class="r">reports/steps-plan.md</span></div><div class="ev"><span class="t">18:38</span><span class="k bad">BLOCKED</span><span class="r">research-roles-biz</span></div><div class="ev"><span class="t">18:38</span><span class="k ok">REPORT</span><span class="r">reports/agents-remote.md</span></div><div class="ev"><span class="t">18:39</span><span class="k ok">REPORT</span><span class="r">reports/steps-run.md</span></div><div class="ev"><span class="t">18:40</span><span class="k ok">REPORT</span><span class="r">reports/prior-art.md</span></div><div class="ev"><span class="t">18:42</span><span class="k ok">REPORT</span><span class="r">reports/patterns-write.md</span></div><div class="ev"><span class="t">18:42</span><span class="k ok">REPORT</span><span class="r">reports/setup-write.md</span></div></div>
+  </div>
+  <div class="legend">
+    <div class="card"><p><b class="ok">REPORT</b> a lane wrote its report file. The lead reads it, then routes it to review.</p></div>
+    <div class="card"><p><b class="bad">BLOCKED</b> an agent is waiting at a prompt. Here a permission check stopped a risky command; the lead read the screen and denied it.</p></div>
+    <div class="card"><p><b class="dim">GONE</b> an agent left its pane. These were short live checks of how each CLI takes a message while busy, each closed when done.</p></div>
+    <div class="card"><p><b class="warn">STALL?</b> working, but its screen stopped changing. None in this run.</p></div>
+    <p class="note">The same events go to your remote, if you have one: a webhook message per turn end, never a poll.</p>
+  </div>
+</div>
+</body></html>

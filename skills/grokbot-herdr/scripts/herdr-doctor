@@ -1,0 +1,96 @@
+#!/bin/bash
+# herdr-doctor: read-only health check of Herdr and the event relay on this Mac. One line per check:
+#   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
+# Exit 1 on any PROBLEM. Fixes nothing, never prints route files (URL, KEY) or settings values.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+bad=0
+ok(){ echo "ok $*"; }
+warn(){ echo "warn $*"; }
+problem(){ echo "PROBLEM $*"; bad=1; }
+
+for t in herdr jq curl git; do command -v "$t" >/dev/null || problem "$t not on PATH: install it"; done
+
+# herdr client and server
+st=$(herdr status 2>&1)
+cv=$(awk '/^client:/{c=1} c && /version:/{print $2; exit}' <<<"$st")
+sv=$(awk '/^server:/{s=1} s && /version:/{print $2; exit}' <<<"$st")
+if ! grep -q 'status: running' <<<"$st"; then problem "herdr server not running: the owner starts it (bots never do)"
+elif [ "$cv" != "$sv" ]; then problem "herdr client $cv, server $sv: the owner restarts the server after an upgrade"
+elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart needed: the owner restarts the server when idle"
+else ok "herdr client and server $cv"; fi
+
+# relay sources
+herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled' && ok "event plugin enabled" \
+  || problem "event plugin not enabled: herdr plugin link <stampede checkout>, or herdr plugin install vib-z/stampede"
+hooks=$(jq -r '[.hooks // {} | to_entries[] | select([.value[]?.hooks[]?.command] | any(test("herdr-event-claude-hook"))) | .key] | join(" ")' ~/.claude/settings.json 2>/dev/null)
+for h in Stop StopFailure Notification; do
+  grep -qw "$h" <<<"$hooks" || problem "Claude hook $h missing herdr-event-claude-hook: the owner adds it to ~/.claude/settings.json"
+done
+grep -qw "Stop" <<<"$hooks" && grep -qw StopFailure <<<"$hooks" && grep -qw Notification <<<"$hooks" && ok "Claude hooks Stop, StopFailure, Notification"
+grep -q '^notify *=.*herdr-event-codex-notify' ~/.codex/config.toml 2>/dev/null && ok "Codex notify chains herdr-event-codex-notify" \
+  || problem "Codex notify line missing herdr-event-codex-notify: the owner fixes ~/.codex/config.toml"
+for s in herdr-event-post herdr-event-flush herdr-event-watchdog herdr-event-claude-hook herdr-event-codex-notify herdr-events-owner herdr-send; do
+  [ -x "$HOME/.local/bin/$s" ] || problem "$s not installed in ~/.local/bin: copy it from grokbot-herdr/scripts"
+done
+
+# launchd jobs (PID, last exit, label)
+lj=$(launchctl list 2>/dev/null)
+for j in local.herdr-event-watchdog local.herdr-events-flush; do
+  line=$(awk -v j="$j" '$3==j' <<<"$lj")
+  if [ -z "$line" ]; then problem "launchd $j not loaded: launchctl load ~/Library/LaunchAgents/$j.plist"
+  elif [ "$(awk '{print $2}' <<<"$line")" != 0 ]; then warn "launchd $j last exit $(awk '{print $2}' <<<"$line"): see ~/Library/Logs/herdr-events*.log"
+  else ok "launchd $j loaded"; fi
+done
+
+# routes: one file per bot (or default), present and private, contents never read
+R="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"; n=0
+for f in "$R"/*; do
+  [ -f "$f" ] || continue; n=$((n+1))
+  [ "$(stat -f %Lp "$f")" = 600 ] || warn "route $(basename "$f") is mode $(stat -f %Lp "$f"): chmod 600 $f"
+done
+if [ "$n" = 0 ]; then problem "no route file in $R: add one per bot (remote/events.md)"; else ok "$n route files in $R"; fi
+
+# queue and dead letters
+QH="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"
+q=$(find "$QH/queue" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+qold=$(find "$QH/queue" -name '*.json' -mmin +10 2>/dev/null | wc -l | tr -d ' ')
+d=$(find "$QH/dead" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+sup=$(find "$QH/dead" -name '*.superseded' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$qold" -gt 0 ]; then problem "queue holds $q events, $qold older than 10 min: the network or the route's webhook is down, see $QH/flush.log"
+else ok "queue $q, dead letters $d, superseded $sup"; fi
+[ "$d" -gt 0 ] && warn "$d dead letters (undelivered for 24h) in $QH/dead: read flush.log, then delete them"
+
+# owner tags
+O="$HOME/.config/herdr-events/owners"
+live=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null)
+n=0
+for f in "$O"/*; do
+  [ -f "$f" ] || continue; ws=$(basename "$f"); n=$((n+1))
+  if ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then warn "malformed owner tag file in $O (not a workspace id): delete it"
+  elif [ -n "$live" ] && ! grep -qx "$ws" <<<"$live"; then warn "owner tag $ws ($(sed -n 's/^owner=//p' "$f")) for a closed workspace: herdr-events-owner $ws --clear"; fi
+done
+ok "$n owner tags checked"
+
+# worktrees under $FLEET_TRUST_ROOT (default ~/code): folder gone, or branch already merged into the default branch
+while IFS= read -r g; do
+  repo=$(dirname "$g")
+  def=$(git -C "$repo" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); def=${def#origin/}
+  [ -n "$def" ] || def=$(git -C "$repo" rev-parse -q --verify main >/dev/null && echo main || echo master)
+  # porcelain: one record per worktree, the main checkout first; a detached one has no branch line
+  git -C "$repo" worktree list --porcelain 2>/dev/null |
+    awk '/^worktree /{n++; w=substr($0,10); b=""} /^branch /{b=substr($0,19)} /^$/{if (n>1) print w"\t"b; w=""} END{if (w!="" && n>1) print w"\t"b}' |
+  while IFS=$'\t' read -r wt br; do
+    if [ ! -d "$wt" ]; then warn "worktree $wt: folder gone, run git -C $repo worktree prune"
+    elif [ -n "$br" ] && [ "$br" != "$def" ] && git -C "$repo" merge-base --is-ancestor "$br" "$def" 2>/dev/null; then
+      warn "worktree $wt: branch $br is merged into $def; remove it once no agent uses it"
+    fi
+  done
+done < <(find "${FLEET_TRUST_ROOT:-$HOME/code}" -maxdepth 3 -name .git -type d 2>/dev/null)
+ok "worktrees under ${FLEET_TRUST_ROOT:-~/code} checked"
+
+# disk
+free=$(df -k "$HOME" | awk 'NR==2{print int($4/1048576)}')
+if [ "$free" -lt 10 ]; then problem "${free} GB free on the home disk: clear space before starting agents"
+else ok "${free} GB free"; fi
+
+exit $bad

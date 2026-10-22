@@ -1,0 +1,5 @@
+#!/bin/bash
+# stampede: the public name of fleet-job (skills/herdr-fleet/scripts/fleet-job). Its version is the repo's VERSION file.
+here=$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")")
+case "${1:-}" in --version|-V) cat "$here/../VERSION"; exit 0;; esac
+exec "$here/../skills/herdr-fleet/scripts/fleet-job" "$@"

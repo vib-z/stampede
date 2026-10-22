@@ -1,0 +1,31 @@
+#!/bin/bash
+# herdr-trust <dir>: pre-trust the git repo holding <dir> for Claude Code (~/.claude.json) and Codex
+# (~/.codex/config.toml), so agents started there skip the folder-trust dialog. Owner-approved 2026-10-16 for
+# fleet setup. Only repos under $FLEET_TRUST_ROOT (default ~/code). Trusts the main checkout's root, which covers its worktrees. Idempotent.
+set -euo pipefail
+dir="${1:?usage: herdr-trust <dir>}"
+common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || { echo "not a git repo: $dir" >&2; exit 2; }
+root=$(cd "$(dirname "$common")" && pwd -P)
+top=$(cd "${FLEET_TRUST_ROOT:-$HOME/code}" 2>/dev/null && pwd -P) || { echo "refused: there is no ${FLEET_TRUST_ROOT:-~/code} folder to trust repos under" >&2; exit 2; }
+case "$root/" in "$top/"*) ;; *) echo "refused: $root is outside ${FLEET_TRUST_ROOT:-~/code}" >&2; exit 2;; esac
+python3 -I - "$root" <<'EOF'
+import json, os, sys
+root, p = sys.argv[1], os.path.expanduser('~/.claude.json')
+s = json.load(open(p)) if os.path.exists(p) else {}
+proj = s.setdefault('projects', {}).setdefault(root, {})
+if proj.get('hasTrustDialogAccepted') is True:
+    print('claude: already trusted', root)
+else:
+    proj['hasTrustDialogAccepted'] = True
+    tmp = f'{p}.{os.getpid()}.tmp'
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
+        json.dump(s, f, indent=2)
+    os.replace(tmp, p)
+    print('claude: trusted', root)
+EOF
+c="$HOME/.codex/config.toml"; head="[projects.\"$root\"]"
+if [ -f "$c" ] && grep -qF "$head" "$c"; then echo "codex: already listed $root (left as is)"
+else
+  mkdir -p "$(dirname "$c")"; [ -s "$c" ] && [ -n "$(tail -c1 "$c")" ] && echo >> "$c"
+  printf '\n%s\ntrust_level = "trusted"\n' "$head" >> "$c"; echo "codex: trusted $root"
+fi

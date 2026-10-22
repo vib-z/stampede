@@ -1,0 +1,23 @@
+# stampede settings. Every key is optional: the value shown is the default.
+# They are environment variables. Copy this file to ~/.config/stampede/config and source it from your shell
+# profile (add the line: . ~/.config/stampede/config). The Herdr plugin event reads the same file.
+
+# The lead and its questions (fleet-job, also called stampede)
+export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's Claude model
+export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort
+export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this; the question and options are appended
+
+# Trust (herdr-trust, herdr-doctor)
+export FLEET_TRUST_ROOT=~/code                      # herdr-trust trusts repos only under this folder; herdr-doctor checks worktrees here
+
+# The watch, for a bot outside Herdr (fleet-watch.sh)
+export FLEET_WATCH_INTERVAL=30                      # seconds between passes
+export FLEET_WATCH_PASSES=0                         # stop after this many passes; 0 runs until stopped
+export FLEET_WATCH_NOTIFY=1                         # 0 turns off the phone push for stalls and vanished agents
+
+# The event relay to a remote bot (herdr-event-post, herdr-event-flush)
+export HERDR_EVENTS_MACHINE=$(hostname -s)          # label sent with every event
+export HERDR_EVENTS_HOME=~/.herdr-events            # the queue and dead letters
+export HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes   # one file per route, holding URL= and KEY=
+export HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log        # the flusher's log
+# HERDR_EVENTS_OWNER=<bot-slug> is set per command, for a one-off command in a pane; never here.

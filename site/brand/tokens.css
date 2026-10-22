@@ -1,0 +1,13 @@
+@font-face{font-family:Geist;src:url('fonts/geist-latin.woff2') format('woff2');font-weight:100 900;font-display:swap}
+:root{--bg:#fff;--ink:#0a0a0a;--muted:#666;--line:#e5e5e5;--soft:#fafafa;--stp-focus:#000;color-scheme:light;--space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:24px;--space-6:32px;--space-7:48px;--space-8:64px;--space-9:96px;--radius:8px;--accent:#FFB547;--status-waiting:#ffb547;--status-done:#147d50;--status-done-dark:#3ccf8e;--eo:cubic-bezier(.215,.61,.355,1);--eio:cubic-bezier(.645,.045,.355,1)}
+@media(prefers-color-scheme:dark){:root{--bg:#0a0a0a;--ink:#f5f5f5;--muted:#a3a3a3;--line:#262626;--soft:#111111;--stp-focus:#fff;color-scheme:dark}}
+:root[data-theme="light"],[data-surface="light"]{--bg:#fff;--ink:#0a0a0a;--muted:#666;--line:#e5e5e5;--soft:#fafafa;--stp-focus:#000;color-scheme:light}
+:root[data-theme="dark"],[data-surface="dark"]{--bg:#0a0a0a;--ink:#f5f5f5;--muted:#a3a3a3;--line:#262626;--soft:#111111;--stp-focus:#fff;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 Geist,Arial,sans-serif}a{color:inherit}button{font:inherit}button:focus-visible,a:focus-visible{outline:2px solid var(--ink);outline-offset:4px}img,svg{max-width:100%}button{cursor:pointer}::selection{background:var(--ink);color:var(--bg)}
+
+:root{--surface-1:#fafafa;--surface-2:#f5f5f5;--surface-3:#eeeeee;--text-2:#333;--text-3:#666;--text-4:#757575;--border-2:#ccc;--border-3:#767676;--radius-sm:4px;--radius-md:8px;--radius-lg:16px;--motion-fast:100ms;--motion-press:150ms;--motion-ui:250ms;--prose:624px;--content:1200px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){--surface-1:#111;--surface-2:#171717;--surface-3:#1f1f1f;--text-2:#d4d4d4;--text-3:#a3a3a3;--text-4:#8a8a8a;--border-2:#383838;--border-3:#767676}}
+:root[data-theme="dark"],[data-surface="dark"]{--surface-1:#111;--surface-2:#171717;--surface-3:#1f1f1f;--text-2:#d4d4d4;--text-3:#a3a3a3;--text-4:#8a8a8a;--border-2:#383838;--border-3:#767676}
+:root[data-theme="light"],[data-surface="light"]{--surface-1:#fafafa;--surface-2:#f5f5f5;--surface-3:#eee;--text-2:#333;--text-3:#666;--text-4:#757575;--border-2:#ccc;--border-3:#767676}
+@font-face{font-family:"Geist Mono";src:url("fonts/geist-mono-latin.woff2") format("woff2");font-weight:100 900;font-display:swap}
+code,pre,kbd{font-family:"Geist Mono",monospace}

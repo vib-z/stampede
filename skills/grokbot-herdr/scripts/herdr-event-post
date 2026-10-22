@@ -1,0 +1,71 @@
+#!/bin/bash
+# herdr-event-post: relay a JSON event to the Grok Bot webhook routine.
+# Usage: echo '{"source":"x","pane":"w1:p1","state":"done"}' | herdr-event-post
+#    or: herdr-event-post '{"...json..."}'   or: herdr-event-post key=value ...
+# Routes: $HERDR_EVENTS_ROUTES_DIR (default ~/.config/herdr-events/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+LOG="$HOME/Library/Logs/herdr-events.log"
+STATE_DIR="$HOME/.local/state/herdr-events"
+DEDUPE_SECS=120
+mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
+log(){ printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG"; }
+
+if [ "$#" -eq 0 ]; then payload=$(cat)
+elif [ "$#" -eq 1 ] && printf '%s' "$1" | jq -e . >/dev/null 2>&1; then payload=$1
+else
+  payload='{}'
+  for kv in "$@"; do payload=$(jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" '.[$k]=$v' <<<"$payload"); done
+fi
+if ! payload=$(jq -c . <<<"$payload" 2>/dev/null) || [ -z "$payload" ]; then log "skip: invalid json"; exit 0; fi
+payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENTS_MACHINE:-$(hostname -s)}" '. + {machine:$m, timestamp:$ts}' <<<"$payload")
+summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state//"-")"' <<<"$payload")
+
+# de-dupe identical pane+state within DEDUPE_SECS
+key=$(jq -r '"\(.source//"")|\(.pane//.session_id//"")|\(.state//"")"' <<<"$payload")
+DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
+exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
+touch "$DB"
+seen(){ awk -F'\t' -v k="$1" -v n="$now" -v w="$2" '$1==k && n-$2<w {f=1} END{exit !f}' "$DB"; }
+if seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summary"; exit 0; fi
+# One event per turn: herdr done/idle, claude Stop and codex agent-turn-complete report the same turn end within
+# a second or two. Keep the first per pane for TURN_SECS. Claude's idle_prompt Notification comes 60 s after a turn
+# end and only repeats it, so drop it when that pane's turn end went out in the last IDLE_SECS.
+TURN_SECS=15; IDLE_SECS=300
+read -r pane state ntype < <(jq -r '[.pane//.session_id//"-", .state//"-", .notification_type//"-"] | @tsv' <<<"$payload")
+tkey=""; [ "$pane" != "-" ] && tkey="turn-end|$pane"
+if [ -n "$tkey" ]; then
+  case "$state" in
+    done|idle|Stop|agent-turn-complete) if seen "$tkey" "$TURN_SECS"; then log "dedupe-skip (turn end sent): $summary"; exit 0; fi;;
+    Notification) if [ "$ntype" = idle_prompt ] && seen "$tkey" "$IDLE_SECS"; then log "dedupe-skip (idle after turn end): $summary"; exit 0; fi; tkey="";;
+    *) tkey="";;
+  esac
+fi
+awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" '$1!=k && $1!=t && n-$2<600' "$DB" >"$DB.tmp"
+printf '%s\t%s\n' "$key" "$now" >>"$DB.tmp"; [ -n "$tkey" ] && printf '%s\t%s\n' "$tkey" "$now" >>"$DB.tmp"
+mv "$DB.tmp" "$DB"
+
+# --- owner routing ---
+D="$HOME/.config/herdr-events"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
+owner=$(jq -r '.owner // empty' <<<"$payload")
+ws=$(jq -r '.workspace // empty' <<<"$payload")
+[ -z "$ws" ] && ws=$(jq -r '.pane // empty | split(":")[0]' <<<"$payload")
+if [ -z "$ws" ]; then  # cwd match against herdr agents
+  cwd=$(jq -r '.cwd // empty' <<<"$payload")
+  [ -n "$cwd" ] && ws=$(herdr agent list 2>/dev/null | jq -r --arg c "$cwd" '[.result.agents[]|select(.cwd==$c or .foreground_cwd==$c).workspace_id]|first // empty')
+fi
+if [ -z "$owner" ] && [ -n "$ws" ] && [ -r "$D/owners/$ws" ]; then owner=$(sed -n 's/^owner=//p' "$D/owners/$ws" | head -1); fi
+route="default"; if [ -n "$owner" ] && [ -r "$RD/$owner" ]; then route="$owner"; fi
+payload=$(jq -c --arg o "${owner:-}" --arg w "$ws" --arg r "$route" '. + {owner:(if $o=="" then null else $o end), route:$r} + (if (.workspace//"")=="" and $w!="" then {workspace:$w} else {} end)' <<<"$payload")
+summary="$summary owner=${owner:--} route=$route"
+URL=""; KEY=""
+[ -r "$RD/$route" ] && . "$RD/$route"
+if [ -z "$URL" ]; then echo "$(date +%Y-%m-%dT%H:%M:%S%z) logged-only (no route URL):$summary" >> "$LOG"; exit 0; fi
+unset URL KEY
+# durable queue: write atomically, then flush (fast path). Queue holds route name only, never URL/KEY.
+QH="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"; mkdir -p "$QH/queue"
+qname="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.json"
+if jq -c --arg r "$route" '{route:$r, payload:.}' <<<"$payload" >"$QH/queue/.tmp-$qname" && mv "$QH/queue/.tmp-$qname" "$QH/queue/$qname"; then
+  log "queued $qname: $summary"
+else rm -f "$QH/queue/.tmp-$qname"; log "queue-write-failed: $summary"; exit 0; fi
+"$HOME/.local/bin/herdr-event-flush" </dev/null >/dev/null 2>&1
+exit 0

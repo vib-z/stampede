@@ -1,0 +1,3 @@
+#!/bin/bash
+# fleet-job: start, message and wake a Herdr job's agents. See fleet_job.py.
+exec python3 -I "$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")")/fleet_job.py" "$@"

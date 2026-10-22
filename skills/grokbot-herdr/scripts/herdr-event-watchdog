@@ -1,0 +1,53 @@
+#!/bin/bash
+# Run by launchd every 5 min. Flags agents stuck in working with no output change
+# for 30+ min (stale) and agent panes that vanished without a done/idle state (dead).
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+S="$HOME/.local/state/herdr-events/watchdog"; mkdir -p "$S"
+LOG="$HOME/Library/Logs/herdr-events.log"
+STALE=$((30*60)); now=$(date +%s)
+list=$(herdr agent list 2>/dev/null) || { echo "$(date '+%FT%T%z') watchdog: herdr agent list failed" >>"$LOG"; exit 0; }
+jq -c '.result.agents[]' <<<"$list" > "$S/cur.jsonl"
+: > "$S/seen.new"
+while read -r a; do
+  pane=$(jq -r .pane_id <<<"$a"); st=$(jq -r .agent_status <<<"$a"); kind=$(jq -r .agent <<<"$a")
+  ws=$(jq -r .workspace_id <<<"$a"); tab=$(jq -r .tab_id <<<"$a"); f="$S/$(tr ':' '_' <<<"$pane")"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$pane" "$st" "$kind" "$ws" "$tab" >>"$S/seen.new"
+  if [ "$st" = working ]; then
+    h=$(herdr pane read "$pane" --source recent --lines 40 2>/dev/null | md5 -q)
+    read -r oh since flagged < "$f" 2>/dev/null || true
+    if [ "$h" != "$oh" ]; then echo "$h $now 0" > "$f"
+    elif [ $((now-since)) -ge $STALE ] && [ "$flagged" != 1 ]; then
+      tail=$(herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null)
+      jq -nc --arg p "$pane" --arg k "$kind" --arg w "$ws" --arg t "$tab" --arg o "$tail" --argjson m $(((now-since)/60)) \
+        '{source:"herdr-watchdog",state:"stale",pane:$p,agent:$k,workspace:$w,tab:$t,minutes_unchanged:$m,output_tail:$o}' | herdr-event-post
+      echo "$h $since 1" > "$f"
+    fi
+  else rm -f "$f"; fi
+done < "$S/cur.jsonl"
+# vanished panes: previously seen, now absent, last state was working/blocked (no done)
+if [ -f "$S/seen" ]; then
+  while IFS=$'\t' read -r pane st kind ws tab; do
+    grep -q "^$pane	" "$S/seen.new" && continue
+    case "$st" in working|blocked)
+      jq -nc --arg p "$pane" --arg k "$kind" --arg w "$ws" --arg t "$tab" --arg s "$st" \
+        '{source:"herdr-watchdog",state:"dead",pane:$p,agent:$k,workspace:$w,tab:$t,last_state:$s}' | herdr-event-post;;
+    esac
+    rm -f "$S/$(tr ':' '_' <<<"$pane")"
+  done < "$S/seen"
+fi
+mv "$S/seen.new" "$S/seen"
+# owner tags: delete a malformed one at once, and one whose workspace has been gone a day. Skipped if herdr fails.
+O="$HOME/.config/herdr-events/owners"; G="$S/gone"; mkdir -p "$G"
+if wsl=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null) && [ -n "$wsl" ]; then
+  for f in "$O"/*; do
+    [ -f "$f" ] || continue; ws=$(basename "$f"); ow=$(sed -n 's/^owner=//p' "$f" | head -1)
+    if ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then rm -f "$f"; echo "$(date '+%FT%T%z') watchdog: removed malformed owner tag (owner=$ow)" >>"$LOG"
+    elif grep -qx "$ws" <<<"$wsl"; then rm -f "$G/$ws"
+    elif [ ! -f "$G/$ws" ]; then echo "$now" > "$G/$ws"
+    elif [ $((now-$(cat "$G/$ws"))) -ge 86400 ]; then
+      rm -f "$f" "$G/$ws"; echo "$(date '+%FT%T%z') watchdog: removed stale owner tag $ws (owner=$ow, workspace gone 24h)" >>"$LOG"
+    fi
+  done
+  for g in "$G"/*; do [ -f "$g" ] && [ ! -f "$O/$(basename "$g")" ] && rm -f "$g"; done
+fi
+exit 0

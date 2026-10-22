@@ -1,0 +1,6 @@
+{
+  "name": "stampede-film-motion",
+  "private": true,
+  "scripts": {"pack": "node tools/pack.mjs", "qa": "node tools/qa.mjs"},
+  "devDependencies": {"playwright-core": "1.64.0"}
+}

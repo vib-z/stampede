@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""herdr-reopen-snapshot: save how to reopen a Herdr job after its workspace is closed (owner's rule, 17 Oct 2026).
+
+  herdr-reopen-snapshot <ws> <job dir>
+      Read the live workspace (read-only herdr calls) and write <job dir>/REOPEN.md and an executable
+      <job dir>/reopen.sh that recreates the job's tabs (those holding its agents in agents.tsv): panes, labels, cwds, agents.
+  herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> -- <agent args...>
+      Note how an agent was started (the flags after `herdr agent start ... --`, and its brief) in
+      <job dir>/agents.tsv. Herdr knows layout, kinds and session ids, not flags or briefs: record them at every start.
+
+Write the snapshot at launch, after every start or restart, and again before any close. Agents that already exited
+keep their kind and session id from an earlier snapshot (agents.tsv), so exiting before the last refresh is fine.
+Panes are matched to agents by name (the fleet convention: a pane is labelled with its agent's name).
+HERDR overrides the herdr binary (tests). This script never changes Herdr.
+"""
+import json
+import os
+import shlex
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+HERDR = os.environ.get('HERDR', 'herdr')
+COLS = ('name', 'kind', 'session', 'brief', 'args')   # agents.tsv, tab separated; args is shell-quoted
+RESUME = {'claude': '--resume', 'hermes': '--resume', 'codex': 'resume', 'kimi': '-r'}   # agents-and-models.md
+TOL = 2   # cells of slack between neighbouring pane rects (borders)
+
+
+def herdr(*args):
+    r = subprocess.run([HERDR, *args], capture_output=True, text=True)
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        sys.exit(f'HERDR_ERROR herdr {" ".join(args)}: {(r.stderr or r.stdout).strip()[:200]}')
+    if 'error' in d:
+        sys.exit(f'HERDR_ERROR herdr {" ".join(args)}: {d["error"].get("code")}')
+    return d['result']
+
+
+def load_agents(job):
+    p = job / 'agents.tsv'
+    rows = {}
+    if p.exists():
+        for line in p.read_text().splitlines():
+            f = line.split('\t')
+            if f and f[0] and not f[0].startswith('#'):
+                rows[f[0]] = dict(zip(COLS, f + [''] * (len(COLS) - len(f))))
+    return rows
+
+
+def save_agents(job, rows):
+    lines = ['# herdr-reopen-snapshot: ' + '\t'.join(COLS)]
+    lines += ['\t'.join(r.get(c, '') for c in COLS) for r in rows.values()]
+    (job / 'agents.tsv').write_text('\n'.join(lines) + '\n')
+
+
+def record(argv):
+    if len(argv) < 5 or argv[4] != '--':
+        sys.exit('usage: herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> -- <agent args...>')
+    job, name, kind, brief = Path(argv[0]).expanduser(), argv[1], argv[2], argv[3]
+    job.mkdir(parents=True, exist_ok=True)
+    rows = load_agents(job)
+    old = rows.get(name, {})
+    rows[name] = {'name': name, 'kind': kind, 'session': old.get('session', '') if old.get('kind') == kind else '',
+                  'brief': '' if brief == '-' else str(Path(brief).expanduser()), 'args': shlex.join(argv[5:])}
+    save_agents(job, rows)
+    print(f'recorded {name} ({kind}) in {job}/agents.tsv')
+
+
+def model_effort(kind, args):
+    a = shlex.split(args)
+    model = effort = ''
+    for i, x in enumerate(a):
+        nxt = a[i + 1] if i + 1 < len(a) else ''
+        if x in ('--model', '-m'):
+            model = nxt
+        elif x == '--effort':
+            effort = nxt
+        elif x in ('-c', '--config') and nxt.startswith('model_reasoning_effort='):
+            effort = nxt.split('=', 1)[1].strip('"\'')
+    return model or '(CLI default)', effort or '(CLI default)'
+
+
+def split_from(pane, made):
+    """Which already-made pane to split, and which way, so the new pane lands where `pane` was."""
+    r = pane['rect']
+    best = None
+    for m in made:
+        q = m['rect']
+        if abs(q['x'] - r['x']) <= TOL and q['y'] < r['y']:        # above, same column: split it down
+            cand = (r['y'] - q['y'], m, 'down')
+        elif abs(q['y'] - r['y']) <= TOL and q['x'] < r['x']:      # left, same row: split it right
+            cand = (r['x'] - q['x'], m, 'right')
+        else:
+            continue
+        if best is None or cand[0] < best[0]:
+            best = cand
+    return (best[1], best[2]) if best else (made[-1], 'right')
+
+
+def snapshot(ws_id, job):
+    ws = next((w for w in herdr('workspace', 'list')['workspaces'] if w['workspace_id'] == ws_id), None)
+    if not ws:
+        sys.exit(f'no live workspace {ws_id} (herdr workspace list)')
+    owner = (ws.get('tokens') or {}).get('owner', '')
+    tag = Path.home() / '.config/herdr-events/owners' / ws_id
+    if not owner and tag.exists():
+        owner = next((l[6:] for l in tag.read_text().splitlines() if l.startswith('owner=')), '')
+    tabs = herdr('tab', 'list', '--workspace', ws_id)['tabs']
+    panes = [p for p in herdr('pane', 'list')['panes'] if p['workspace_id'] == ws_id]
+    names = {a['pane_id']: a.get('name') for a in herdr('agent', 'list')['agents']}
+    rows = load_agents(job)
+    for t in tabs:
+        t['panes'] = [p for p in panes if p['tab_id'] == t['tab_id']]
+        if t['panes']:
+            rects = {q['pane_id']: q['rect'] for q in herdr('pane', 'layout', '--pane', t['panes'][0]['pane_id'])['layout']['panes']}
+        for p in t['panes']:
+            p['rect'] = rects.get(p['pane_id'], {'x': 0, 'y': 0, 'width': 0, 'height': 0})
+            p['name'] = names.get(p['pane_id']) or p.get('label') or ''
+            sess = (p.get('agent_session') or {}).get('value', '') if (p.get('agent_session') or {}).get('kind') == 'id' else ''
+            if p.get('agent') and p['name'] in rows:                  # this job's live agent: keep its kind and session
+                r = rows[p['name']]
+                if r['kind'] != p['agent']:
+                    r.update(kind=p['agent'], session='', args='')
+                r['session'] = sess or r['session']
+            p['agent_row'] = rows.get(p['name'])                      # exited agents come back from agents.tsv; any other pane is a shell
+    tabs = [t for t in tabs if any(p['agent_row'] for p in t['panes'])]   # only tabs holding the job's own agents (agents.tsv)
+    save_agents(job, rows)
+    when = datetime.now().strftime('%Y-%m-%d %H:%M')
+    sh = job / 'reopen.sh'
+    sh.write_text(reopen_sh(ws, owner, tabs, when))
+    sh.chmod(0o755)
+    (job / 'REOPEN.md').write_text(reopen_md(ws, owner, tabs, when, job))
+    n = sum(1 for t in tabs for p in t['panes'] if p['agent_row'])
+    print(f'wrote {job}/REOPEN.md and {sh}: {len(tabs)} tabs, {sum(len(t["panes"]) for t in tabs)} panes, {n} agents')
+
+
+def q(s):
+    return shlex.quote(str(s))
+
+
+def reopen_sh(ws, owner, tabs, when):
+    cwds = ' '.join(q(d) for d in dict.fromkeys(p['cwd'] for t in tabs for p in t['panes']))
+    out = [
+        '#!/bin/bash',
+        f'# reopen.sh: recreate Herdr workspace {ws["label"]} as it was at {when} (herdr-reopen-snapshot {ws["workspace_id"]}).',
+        '# Usage: reopen.sh [--fresh] [--prompt] [--into <workspace id>]',
+        '#   default: a new workspace, every agent resumes its saved session; --fresh: new sessions, same flags;',
+        '#   --prompt: also send each agent its brief pointer with herdr-send;',
+        '#   --into: add the tabs to that open workspace (a fleet in the owner\'s project workspace), skipping tabs open there.',
+        '# Refuses while a workspace with this label is open (without --into), or when a cwd is gone.',
+        '# Opening needs no ask; closing does (herdr-fleet, Wrap up).',
+        'set -euo pipefail',
+        'export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"',
+        'H=${HERDR:-herdr}; FRESH=0; PROMPT=0; WS=""',
+        'while [ $# -gt 0 ]; do',
+        '  case "$1" in --fresh) FRESH=1;; --prompt) PROMPT=1;; --into) WS=${2:?--into needs a workspace id}; shift;;',
+        '    *) sed -n "3,7p" "$0" >&2; exit 64;; esac; shift',
+        'done',
+        f'LABEL={q(ws["label"])}; OWNER={q(owner)}; INTO=$WS',
+        'if [ -z "$INTO" ] && "$H" workspace list | jq -e --arg l "$LABEL" \'.result.workspaces[] | select(.label == $l)\' >/dev/null; then',
+        '  echo "refused: a workspace labelled $LABEL is already open (herdr workspace list); use --into <id> or close it first" >&2; exit 2',
+        'fi',
+        'gone=0',
+        f'for d in {cwds}; do',
+        '  [ -d "$d" ] || { echo "refused: cwd $d is gone (a removed worktree? git worktree add it back first)" >&2; gone=1; }',
+        'done',
+        '[ "$gone" = 0 ] || exit 3',
+        'tab() {   # tab <label> <cwd>: R = the new tab; returns 1 when --into already has a tab with that label',
+        '  if [ -n "$INTO" ] && "$H" tab list --workspace "$WS" | jq -e --arg l "$1" \'.result.tabs[] | select(.label == $l)\' >/dev/null; then',
+        '    echo "kept tab $1: already open in $WS"; return 1',
+        '  fi',
+        '  if [ -z "$WS" ]; then',
+        '    R=$("$H" workspace create --cwd "$2" --label "$LABEL" --no-focus)',
+        '    WS=$(jq -r .result.workspace.workspace_id <<<"$R")',
+        '    "$H" tab rename "$(jq -r .result.tab.tab_id <<<"$R")" "$1" >/dev/null',
+        '    if [ -n "$OWNER" ]; then herdr-events-owner "$WS" "$OWNER"; fi',
+        '  else',
+        '    R=$("$H" tab create --workspace "$WS" --cwd "$2" --label "$1" --no-focus)',
+        '  fi',
+        '  jq -e \'.result.root_pane.pane_id\' <<<"$R" >/dev/null || { echo "HERDR_ERROR opening tab $1: $R" >&2; exit 4; }',
+        '}',
+        'start() {   # start <name> <kind> <pane> <session id> <brief> [agent args...]',
+        '  local n=$1 k=$2 p=$3 s=$4 b=$5 r=(); shift 5',
+        '  if [ "$FRESH" = 0 ] && [ -n "$s" ]; then',
+        '    case "$k" in claude|hermes) r=(--resume "$s");; codex) r=(resume "$s");; kimi) r=(-r "$s");; esac',
+        '  fi',
+        '  "$H" agent start "$n" --kind "$k" --pane "$p" --timeout 90000 -- ${r[@]+"${r[@]}"} "$@" >/dev/null \\',
+        '    || echo "WARN $n: agent start did not confirm; read its pane" >&2',
+        '  "$H" agent read "$n" --source visible --lines 30 || true   # clear any startup dialog first (herdr-fleet failure-modes)',
+        '  if [ "$PROMPT" = 1 ] && [ -n "$b" ]; then herdr-send "$n" "You are $n in a herdr fleet. Read $b and do everything it says."; fi',
+        '}',
+    ]
+    k = 0
+    for t in tabs:
+        first = t['panes'][0]
+        k += 1
+        first['var'], made = f'P{k}', [first]
+        out.append(f'if tab {q(t.get("label") or "main")} {q(first["cwd"])}; then')
+        out.append(f'  P{k}=$(jq -r .result.root_pane.pane_id <<<"$R")')
+        for p in t['panes'][1:]:
+            src, way = split_from(p, made)
+            k += 1
+            p['var'] = f'P{k}'
+            out.append(f'  {p["var"]}=$("$H" pane split --pane "${src["var"]}" --direction {way} --cwd {q(p["cwd"])} --no-focus | jq -r .result.pane.pane_id)')
+            made.append(p)
+        starts = []
+        for p in t['panes']:
+            if p.get('label'):
+                out.append(f'  "$H" pane rename "${p["var"]}" {q(p["label"])} >/dev/null')
+            a = p['agent_row']
+            if a:
+                args = (' ' + a['args']) if a['args'] else ''
+                starts.append(f'  start {q(a["name"])} {q(a["kind"])} "${p["var"]}" {q(a["session"])} {q(a["brief"])}{args}')
+        out += starts + ['fi']
+    out += ['echo "REOPENED $LABEL in $WS"', '']
+    return '\n'.join(out)
+
+
+def reopen_md(ws, owner, tabs, when, job):
+    out = [f'# Reopen record: {ws["label"]}', '',
+           f'Snapshot {when} of workspace {ws["workspace_id"]} (label `{ws["label"]}`, owner tag `{owner or "none"}`) by '
+           f'`herdr-reopen-snapshot {ws["workspace_id"]} {job}`. Refresh it after every start or restart and before any close.', '',
+           f'Reopen after a close: `bash {job}/reopen.sh` (agents resume their sessions), `--fresh` (new sessions, same flags), '
+           '`--prompt` (also re-send each brief pointer), `--into <ws>` (add the missing tabs to an open workspace, such as the '
+           "owner's project workspace a fleet ran in). It refuses while a workspace with this label is open, or when a cwd is gone.", '',
+           '| tab | pane | label | cwd | agent CLI | model | effort | session | brief |', '|---|---|---|---|---|---|---|---|---|']
+    cmds, warns = [], []
+    for t in tabs:
+        for p in t['panes']:
+            a = p['agent_row'] or {}
+            model, effort = model_effort(a['kind'], a['args']) if a else ('', '')
+            out.append(f'| {t.get("label") or t["tab_id"]} | {p["pane_id"]} | {p.get("label") or "-"} | `{p["cwd"]}` | '
+                       f'{a.get("kind") or "shell"} | {model} | {effort} | {a.get("session") or "-"} | {a.get("brief") or "-"} |')
+            if a:
+                res = f'{RESUME[a["kind"]]} {a["session"]} ' if a['session'] and a['kind'] in RESUME else ''
+                cmds.append(f'herdr agent start {a["name"]} --kind {a["kind"]} --pane <{p.get("label") or p["pane_id"]}> '
+                            f'--timeout 90000 -- {res}{a["args"]}'.rstrip())
+                if not a['args']:
+                    warns.append(f'- {a["name"]}: no start flags recorded, so it reopens on the CLI defaults. Record them: '
+                                 f'`herdr-reopen-snapshot record {job} {a["name"]} {a["kind"]} <brief> -- <flags>`.')
+                if not a['session']:
+                    warns.append(f'- {a["name"]}: no session id yet (Codex, Hermes and Kimi report one after the first turn); it reopens fresh.')
+    out += ['', '## Start commands (resume form)', '', '```bash', *cmds, '```']
+    if warns:
+        out += ['', '## Gaps', '', *warns]
+    return '\n'.join(out) + '\n'
+
+
+def main(argv):
+    if argv[:1] == ['record']:
+        return record(argv[1:])
+    if len(argv) != 2 or argv[0].startswith('-'):
+        sys.exit(__doc__.strip())
+    job = Path(argv[1]).expanduser().resolve()
+    job.mkdir(parents=True, exist_ok=True)
+    snapshot(argv[0], job)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

@@ -1,0 +1,25 @@
+#!/bin/bash
+# herdr-plugin-event: the Herdr plugin hook (herdr-plugin.toml). Herdr passes pane.agent_status_changed in
+# HERDR_PLUGIN_EVENT_JSON; this sends done, blocked, and idle right after working, to herdr-event-post.
+[ -r "$HOME/.config/stampede/config" ] && . "$HOME/.config/stampede/config"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+H="${HERDR_BIN_PATH:-herdr}"
+SD="${HERDR_PLUGIN_STATE_DIR:-$HOME/.local/state/herdr-events}/panes"; mkdir -p "$SD"
+ev="${HERDR_PLUGIN_EVENT_JSON:-{\}}"
+st=$(jq -r '.data.agent_status // empty | ascii_downcase' <<<"$ev")
+pane=$(jq -r '.data.pane_id // empty' <<<"$ev"); [ -z "$pane" ] && pane="$HERDR_PANE_ID"
+[ -z "$st" ] || [ -z "$pane" ] && exit 0
+f="$SD/$(tr ':' '_' <<<"$pane")"; prev=$(cat "$f" 2>/dev/null); echo "$st" > "$f"
+case "$st" in
+  done|blocked) ;;
+  idle) [ "$prev" = working ] || exit 0 ;;
+  *) exit 0 ;;
+esac
+info=$("$H" pane get "$pane" 2>/dev/null)
+ws=$(jq -r '.data.workspace_id // empty' <<<"$ev"); [ -z "$ws" ] && ws=$(jq -r '.result.pane.workspace_id // empty' <<<"$info")
+tab=$(jq -r '.data.tab_id // empty' <<<"$ev"); [ -z "$tab" ] && tab=$(jq -r '.result.pane.tab_id // empty' <<<"$info")
+wsl=$("$H" workspace list 2>/dev/null | jq -r --arg w "$ws" '.result.workspaces[]|select(.workspace_id==$w).label')
+kind=$(jq -r '.data.agent // .data.display_agent // empty' <<<"$ev")
+out=$("$H" pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null)
+jq -nc --arg w "$ws" --arg wl "$wsl" --arg t "$tab" --arg p "$pane" --arg k "$kind" --arg s "$st" --arg pv "$prev" --arg o "$out" \
+  '{source:"herdr",workspace:$w,workspace_label:$wl,tab:$t,pane:$p,agent:$k,state:$s,previous_state:$pv,output_tail:$o}' | herdr-event-post

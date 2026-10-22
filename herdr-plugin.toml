@@ -1,0 +1,13 @@
+id = "stampede"
+name = "stampede"
+version = "0.2.0"
+min_herdr_version = "0.9.4"
+description = "One ask, a lead agent, and only the panes that pay: Herdr skills that plan and run a job."
+platforms = ["macos"]
+
+[[build]]
+command = ["bash", "install.sh", "--from-plugin"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bash", "scripts/herdr-plugin-event"]

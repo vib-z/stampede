@@ -1,0 +1,19 @@
+{
+  "source": "Owner-supplied Open gate kit, 22 October 2026",
+  "changes": {
+    "#211b13": "#000000",
+    "#f3ede2": "#ffffff"
+  },
+  "geometry_and_animation_preserved": [
+    "lockup.inline.svg",
+    "lockup-animated.svg",
+    "mark-light.svg",
+    "lockup.svg",
+    "lockup-light.svg",
+    "lockup-dark.svg",
+    "mark.svg",
+    "logo.css",
+    "mark-dark.svg",
+    "favicon.svg"
+  ]
+}

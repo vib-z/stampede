@@ -1,0 +1,123 @@
+[
+  {
+    "scene": "valley",
+    "file": "imagery/valley.webp",
+    "master": "result-valley-gpt-v1.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 94926,
+    "sha256": "b4034927b31a6cd90476f336e3e82fae5a41f5f83a2aec5516100e90dd2144e5",
+    "master_sha256": "494e26ef35387890da03facaa9c20f658a23cee8b1cc4d50b56301e98897c13d",
+    "provider": "Codex built-in GPT Image",
+    "date": "2026-10-22",
+    "model": "Not exposed",
+    "seed": "Not exposed",
+    "references": [
+      "genre-luminist-valley.jpg",
+      "genre-luminist-marsh.jpg",
+      "genre-luminist-mesa.jpg"
+    ],
+    "prompt": "Use case: stylized-concept. Create ONE new painterly atmosphere layer for stampede's brand guide. The three input images are the owner's preferred STYLE REFERENCES, not edit targets: valley for colour and painterly depth, marsh for huge quiet sky, mesa for understated terrain. Match their exact understated, hand-painted, luminous antique atmosphere.\n\nBegin from this reference's recipe: a nineteenth century American Luminist oil sketch on board, a wide valley at golden hour, low rolling hills in warm ochre and sage receding into haze, a thread of river catching the light, the upper half a wide empty luminous pale gold sky with no cloud detail, extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still.\n\nCompose a new WIDE 16:9 valley painting. Terrain and river belong entirely in the BOTTOM 35 PERCENT, lower than reference 1. Two low hills enter from the lower corners and open toward a distant luminous valley; a narrow pale river curves through that low valley. The UPPER 60 PERCENT is a broad unbroken pale cream-gold atmospheric wash, like reference 2, reserved for sharp UI that will be composited later. Fine matte oil-and-gouache-like brushwork, feathered edges, subtle board grain. Luminous, not muddy or brown. Very restrained warm straw, grey sage and pale mineral tones. Soft painted distances with finely resolved brush texture. Entirely uninhabited landscape. Full bleed painting continuing beyond all four edges.\n\nDo not paint any text, signature, seal, people, faces, buildings, logos, UI, panels, border, mount, frame or visible paper edges. No visible sun disc or theatrical sunbeams. No photographic look, glossy CGI, vector shapes, dramatic foreground objects or detailed clouds. One image only, not a sheet or collage. Output landscape 16:9, ideally 3840x2160 if supported.",
+    "processing": "WebP quality 90, native dimensions; no crop, upscale or colour adjustment"
+  },
+  {
+    "scene": "mountains",
+    "file": "imagery/mountains.webp",
+    "master": "result-mountains-gpt-v1.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 119796,
+    "sha256": "92036b861f8b80101af462d71368c5e8cecf35b34505ddfc4710e73a2fc2db41",
+    "master_sha256": "6a0d9c577575d2eb539c2ebf8aa8ebe93b82d136a59b31bd97f17af650f026c9",
+    "provider": "Codex built-in GPT Image",
+    "date": "2026-10-22",
+    "model": "Not exposed",
+    "seed": "Not exposed",
+    "references": [
+      "valley-gpt-v1.png",
+      "genre-luminist-lake.jpg"
+    ],
+    "prompt": "Use case: stylized-concept. Asset type: painterly atmosphere layer for stampede's brand guide, behind crisp separately composited UI. Input 1 is the owner-approved valley: match its luminous matte paint, delicate board grain, feathered edges, restrained contrast and enormous quiet sky, as a sibling in the same six-image series. Input 2 is the owner's subject and colour reference, not an edit target. Generate a new original scene. A nineteenth century American Luminist oil sketch on board with soft oil-and-gouache-like matte brushwork, an extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Terrain stays in a low band at the bottom, with upper 60 percent genuinely quiet atmospheric wash for separately composed UI. Preserve natural brush texture while the scene itself is soft. Landscape only, uninhabited. No people, faces, creatures, buildings, lettering, captions, signature, seal, logo, interface, panel, border, mount, sheet edge or frame. Paint continues through all four edges. No theatrical sunbeams or glossy photoreal/3D finish. Primary request: a nineteenth century American Luminist oil sketch on board, a quiet mountain range at early morning, low overlapping ridges in muted lilac, slate and warm grey receding into haze, a pale stony foreground with tiny subdued sage scrub, the upper half a wide empty luminous cream-grey sky with no cloud detail, extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Mountains occupy only the bottom 35 percent, their peaks low and distant. Use a gentle cream-grey sky rather than golden sunset; keep the same natural handling as the approved valley. Output: one landscape image, 16:9, native resolution.",
+    "processing": "WebP quality 90, native dimensions; no crop, upscale or colour adjustment"
+  },
+  {
+    "scene": "lake",
+    "file": "imagery/lake.webp",
+    "master": "result-lake-gpt-v1.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 106258,
+    "sha256": "66e24840cbc0b03fe99d3301aee417576e6ea3c339b41949465c835a0c704b35",
+    "master_sha256": "6b7f5c2798cfda4e09f81e7cda9759b0d34cb7373e193560c672a356af7d0e62",
+    "provider": "Codex built-in GPT Image",
+    "date": "2026-10-22",
+    "model": "Not exposed",
+    "seed": "Not exposed",
+    "references": [
+      "valley-gpt-v1.png",
+      "genre-luminist-lake.jpg"
+    ],
+    "prompt": "Use case: stylized-concept. Asset type: painterly atmosphere layer for stampede's brand guide, behind crisp separately composited UI. Input 1 is the owner-approved valley: match its luminous matte paint, delicate board grain, feathered edges, restrained contrast and enormous quiet sky, as a sibling in the same six-image series. Input 2 is the owner's subject and colour reference, not an edit target. Generate a new original scene. A nineteenth century American Luminist oil sketch on board with soft oil-and-gouache-like matte brushwork, an extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Terrain stays in a low band at the bottom, with upper 60 percent genuinely quiet atmospheric wash for separately composed UI. Preserve natural brush texture while the scene itself is soft. Landscape only, uninhabited. No people, faces, creatures, buildings, lettering, captions, signature, seal, logo, interface, panel, border, mount, sheet edge or frame. Paint continues through all four edges. No theatrical sunbeams or glossy photoreal/3D finish. Primary request: a nineteenth century American Luminist oil sketch on board, a still alpine lake with a low green wooded headland and distant hazy mountains in muted lilac and mauve, pale lavender water, the upper half a wide empty luminous cream-grey sky with no cloud detail, extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Keep the shoreline and pale mirror water within the lower 40 percent, low mountain silhouettes; one wooded headland enters from a lower corner. The sky occupies at least 60 percent with broad quiet cream-lavender values. Output: one landscape image, 16:9, native resolution.",
+    "processing": "WebP quality 90, native dimensions; no crop, upscale or colour adjustment"
+  },
+  {
+    "scene": "planet-surface",
+    "file": "imagery/planet-surface.webp",
+    "master": "result-planet-surface-gpt-v1.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 112272,
+    "sha256": "3d0cb24f9213c029529ebcc782511177c2210e2399ddcec95fd3580e8844713a",
+    "master_sha256": "a4ed9171ce7e88454c02dcda47dacbea6ef636dbf8bc1acbd5a12282007f6f5a",
+    "provider": "Codex built-in GPT Image",
+    "date": "2026-10-22",
+    "model": "Not exposed",
+    "seed": "Not exposed",
+    "references": [
+      "valley-gpt-v1.png",
+      "genre-luminist-mesa.jpg"
+    ],
+    "prompt": "Use case: stylized-concept. Asset type: painterly atmosphere layer for stampede's brand guide, behind crisp separately composited UI. Input 1 is the owner-approved valley: match its luminous matte paint, delicate board grain, feathered edges, restrained contrast and enormous quiet sky, as a sibling in the same six-image series. Input 2 is the owner's subject and colour reference, not an edit target. Generate a new original scene. A nineteenth century American Luminist oil sketch on board with soft oil-and-gouache-like matte brushwork, an extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Terrain stays in a low band at the bottom, with upper 60 percent genuinely quiet atmospheric wash for separately composed UI. Preserve natural brush texture while the scene itself is soft. Landscape only, uninhabited. No people, faces, creatures, buildings, lettering, captions, signature, seal, logo, interface, panel, border, mount, sheet edge or frame. Paint continues through all four edges. No theatrical sunbeams or glossy photoreal/3D finish. Primary request: a nineteenth century American Luminist oil sketch on board, a quiet uninhabited red planet surface, one low flat-topped eroded mesa on a broad dry plain in dusty rose, muted terracotta and bone, distant shallow craters and rounded mineral ridges receding into soft haze, the land in the lower third, the upper two-thirds a wide empty luminous pale apricot-grey sky with no cloud detail, extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. A gently strange mineral world with no vegetation or Earthlike rivers, but the exact same delicate paint and quiet proportions as the approved valley. Output: one landscape image, 16:9, native resolution.",
+    "processing": "WebP quality 90, native dimensions; no crop, upscale or colour adjustment"
+  },
+  {
+    "scene": "outer-world",
+    "file": "imagery/outer-world.webp",
+    "master": "result-outer-world-gpt-v1.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 128324,
+    "sha256": "03264eba929b4a208f7df8e17b1bad10e82bf74d7c960f95fd741328c99b0797",
+    "master_sha256": "d030a1ed61bc94152f75a62100c544a25eecb71f77324df2be0b86a04e65bf2d",
+    "provider": "Codex built-in GPT Image",
+    "date": "2026-10-22",
+    "model": "Not exposed",
+    "seed": "Not exposed",
+    "references": [
+      "valley-gpt-v1.png",
+      "genre-aurora.jpg"
+    ],
+    "prompt": "Use case: stylized-concept. Asset type: painterly atmosphere layer for stampede's brand guide, behind crisp separately composited UI. Input 1 is the owner-approved valley: match its luminous matte paint, delicate board grain, feathered edges, restrained contrast and enormous quiet sky, as a sibling in the same six-image series. Input 2 is the owner's subject and colour reference, not an edit target. Generate a new original scene. A nineteenth century American Luminist oil sketch on board with soft oil-and-gouache-like matte brushwork, an extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Terrain stays in a low band at the bottom, with upper 60 percent genuinely quiet atmospheric wash for separately composed UI. Preserve natural brush texture while the scene itself is soft. Landscape only, uninhabited. No people, faces, creatures, buildings, lettering, captions, signature, seal, logo, interface, panel, border, mount, sheet edge or frame. Paint continues through all four edges. No theatrical sunbeams or glossy photoreal/3D finish. Primary request: a quiet outer world painted with the same luminous Luminist matte oil-and-gouache handling as the approved valley, low distant alien mountain ridges and a still mineral plain in muted slate-violet along the bottom quarter, above them a vast deep smoky indigo sky, one extremely faint broad veil of pale sage auroral light near the low horizon, extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Dark-theme sibling: the upper 65 percent is a very quiet near-black indigo wash, subtle paint variations only; the subtle auroral glow remains just above the low terrain, well below UI space. No decorative star field, spacecraft, birds, bright celestial discs, high-contrast lights or neon. Render the same handmade atmosphere, not a science-fiction render or a photograph. Output: one landscape image, 16:9, native resolution.",
+    "processing": "WebP quality 90, native dimensions; no crop, upscale or colour adjustment"
+  },
+  {
+    "scene": "grassland",
+    "file": "imagery/grassland.webp",
+    "master": "result-grassland-gpt-v1.png",
+    "width": 1254,
+    "height": 1254,
+    "bytes": 156736,
+    "sha256": "5136c79557b96d9b6b564d808f7d0b0b05b8a7867d0864b6dee5b70a450d8372",
+    "master_sha256": "9070235cd66a2243284b8ec316f2ff4fb7b83fe2336bf869eefe62b9c762ff92",
+    "provider": "Codex built-in GPT Image",
+    "date": "2026-10-22",
+    "model": "Not exposed",
+    "seed": "Not exposed",
+    "references": [
+      "valley-gpt-v1.png",
+      "genre-luminist-marsh.jpg"
+    ],
+    "prompt": "Use case: stylized-concept. Asset type: painterly atmosphere layer for stampede's brand guide, behind crisp separately composited UI. Input 1 is the owner-approved valley: match its luminous matte paint, delicate board grain, feathered edges, restrained contrast and enormous quiet sky, as a sibling in the same six-image series. Input 2 is the owner's subject and colour reference, not an edit target. Generate a new original scene. A nineteenth century American Luminist oil sketch on board with soft oil-and-gouache-like matte brushwork, an extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. Terrain stays in a low band at the bottom, with upper 60 percent genuinely quiet atmospheric wash for separately composed UI. Preserve natural brush texture while the scene itself is soft. Landscape only, uninhabited. No people, faces, creatures, buildings, lettering, captions, signature, seal, logo, interface, panel, border, mount, sheet edge or frame. Paint continues through all four edges. No theatrical sunbeams or glossy photoreal/3D finish. Primary request: a nineteenth century American Luminist oil sketch on board, a low flat grassy landscape with soft reeds and rolling meadow in straw, muted olive and grey sage, distant shallow hills and a narrow pale footpath receding into haze, the upper two-thirds a wide empty luminous silver-grey cream sky with no cloud detail, extremely muted desaturated palette, soft atmospheric perspective, visible board texture, calm and still. A quiet grassland without people, the grasses occupy only the bottom third and never rise into the clear sky. Match the approved valley's delicate soft paint and visible texture, but cooler silvery natural light. Output: one SQUARE 1:1 social image at native resolution, with the upper two-thirds quiet.",
+    "processing": "WebP quality 90, native dimensions; no crop, upscale or colour adjustment"
+  }
+]

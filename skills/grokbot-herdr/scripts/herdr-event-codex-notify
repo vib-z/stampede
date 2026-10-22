@@ -1,0 +1,26 @@
+#!/bin/bash
+# Codex notify: forwards agent-turn-complete JSON (last arg) to herdr-event-post, then chains to the previous notify.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+json="${@: -1}"
+PREV="$HOME/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+[ -x "$PREV" ] && "$PREV" turn-ended "$json" >/dev/null 2>&1 &
+# Codex also notifies for turns that are not the agent's own (checked live on 0.162.1, 2026-10-16):
+# a sub-agent or the --approve-for-me guardian, whose rollout's first line names a parent_thread_id,
+# and the chat-title side conversation, which has no rollout file at all. Skip both; inside Herdr the
+# plugin still reports the pane's real turn end.
+tid=$(jq -r '.["thread-id"] // empty' <<<"$json" 2>/dev/null)
+if [ -n "$tid" ]; then
+  f=$(ls "${CODEX_HOME:-$HOME/.codex}"/sessions/*/*/*/rollout-*"$tid".jsonl 2>/dev/null | head -1)
+  why=""
+  if [ -z "$f" ]; then why="side conversation (no rollout)"
+  elif head -1 "$f" | jq -e '.payload.parent_thread_id // .payload.source.subagent' >/dev/null 2>&1; then why="sub-agent"; fi
+  if [ -n "$why" ]; then
+    printf '%s skip: codex %s thread=%s pane=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$why" "$tid" "${HERDR_PANE_ID:--}" >>"$HOME/Library/Logs/herdr-events.log"
+    wait; exit 0
+  fi
+fi
+jq -c --arg pane "${HERDR_PANE_ID:-}" --arg ws "${HERDR_WORKSPACE_ID:-}" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:"codex", state:(.type//"unknown"),
+  thread_id:(.["thread-id"]//null), turn_id:(.["turn-id"]//null), cwd:(.cwd//null),
+  pane:(if $pane=="" then null else $pane end), workspace:(if $ws=="" then null else $ws end), owner:(if $ow=="" then null else $ow end),
+  last_assistant_message:((.["last-assistant-message"]//"")|.[0:2000])} | with_entries(select(.value!=null))' <<<"$json" | herdr-event-post
+wait; exit 0
