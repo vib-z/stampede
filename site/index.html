@@ -24,14 +24,21 @@
 <link rel="icon" href="brand/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
 <link rel="preload" href="assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+<script src="assets/cta/theme.js"></script>
 <link rel="stylesheet" href="assets/hero-mark/hero-mark.css">
 <link rel="stylesheet" href="assets/cta/star.css">
 <link rel="stylesheet" href="assets/motion.css">
 <script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('motion-enabled');</script>
 <script src="assets/motion.js" defer></script>
 <script src="assets/cta/star.js" defer></script>
+<script src="assets/cta/ticket.js" defer></script>
 </head>
 <body>
+<div class="theme-switch" role="group" aria-label="Colour theme" hidden>
+  <button type="button" data-theme-choice="light" aria-label="Light theme" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></button>
+  <button type="button" data-theme-choice="dark" aria-label="Dark theme" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A9 9 0 0 1 10 3.5 9 9 0 1 0 20.5 14Z"/></svg></button>
+  <button type="button" data-theme-choice="system" aria-label="System theme" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></button>
+</div>
 <main>
 <section class="film-section" aria-labelledby="name">
   <div class="film-stage">
@@ -40,7 +47,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.5 4.4 1.1 6.2-5.7-3-5.7 3 1.1-6.2-4.5-4.4 6.3-.9Z"/></svg>
     <span>Star on GitHub</span><span class="stp-count" hidden></span>
   </a>
-  <a class="stp-docs" href="https://github.com/vib-z/stampede#install">Get started<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13m-5-5 5 5-5 5"/></svg></a>
+  <a class="stp-ticket" href="https://github.com/vib-z/stampede#install"><span class="ticket-shine" aria-hidden="true"></span><span class="ticket-label">Get started</span><span class="ticket-stub" aria-hidden="true"><span class="ticket-stamp">COPY</span></span></a>
 </div></header>
     <figure class="film" role="img" aria-label="A Grok Bot ask is typed and sent on a generic phone, bringing a local lead and workers. Builders cross Tailscale and their badges turn to cloud. Research, design, testing and two reviews produce a pricing page. The reply returns to the same phone, the agents close, and the finished page stays.">
       <img class="poster opening" alt="" width="1920" height="1080">
@@ -64,8 +71,15 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.5 4.4 1.1 6.2-5.7-3-5.7 3 1.1-6.2-4.5-4.4 6.3-.9Z"/></svg>
     <span>Star on GitHub</span><span class="stp-count" hidden></span>
   </a>
-  <a class="stp-docs" href="https://github.com/vib-z/stampede#install">Get started<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13m-5-5 5 5-5 5"/></svg></a>
+  <a class="stp-ticket" href="https://github.com/vib-z/stampede#install"><span class="ticket-shine" aria-hidden="true"></span><span class="ticket-label">Get started</span><span class="ticket-stub" aria-hidden="true"><span class="ticket-stamp">COPY</span></span></a>
 </div><a class="readme-doc" href="https://github.com/vib-z/stampede#readme">Read the README <span aria-hidden="true">↗</span></a></section>
 </main>
+<section class="install-popover" id="install-prompt" popover aria-labelledby="prompt-title">
+  <div class="prompt-heading"><h2 id="prompt-title">Your agent takes it from here.</h2><button class="prompt-close" type="button" aria-label="Close install prompt">×</button></div>
+  <p class="copy-status" role="status" aria-live="polite"></p>
+  <label for="prompt-text">Paste this into Claude Code or Codex.</label>
+  <textarea id="prompt-text" readonly spellcheck="false"></textarea>
+  <div class="prompt-footer"><a href="https://github.com/vib-z/stampede#install">Read the install steps <span aria-hidden="true">↗</span></a><button class="prompt-copy" type="button">Copy prompt</button></div>
+</section>
 </body>
 </html>
