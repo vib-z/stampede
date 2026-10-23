@@ -45,7 +45,7 @@ The relay scripts live in `scripts/` here and are copied to `~/.local/bin` on th
 Every call: `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '<herdr command>'`. If herdr isn't found, prefix `export PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH;`.
 
 ## Step 2. Health check
-`ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '~/.local/bin/herdr-doctor'` (read only; checks the herdr server and client, the relay plugin, hooks and launchd jobs, the event queue, owner tags, leftover worktrees and disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM).
+`ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '~/.local/bin/herdr-doctor --relay'` (read only; checks the herdr server and client, the relay plugin, hooks and launchd jobs, the event queue, owner tags, leftover worktrees and disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM).
 - Exit 0: go on. Mention any `warn` line in your report; never fix it yourself unless it is yours (your own stale tag or worktree).
 - Exit 1: stop and tell the owner the PROBLEM lines (a broken relay means your job's events would never reach you).
 - ssh fails -> bring Tailscale back up on the box, then retry once. Still failing -> stop and tell the owner (usually the Mac is asleep/offline).

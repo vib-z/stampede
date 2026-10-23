@@ -358,6 +358,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `fleet-job new: new needs --workspace or --pane, or run it inside Herdr` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([SKILL.md](SKILL.md#front-door)) |
 | `PROBLEM` from `herdr-doctor` | the line names the broken part and its fix. Plain `herdr-doctor` checks the core install only; the event relay's checks run when the relay is installed, or with `--relay` |
 | a bot gets no events | `herdr-doctor --relay` names the broken part; see [remote/events.md](remote/events.md) |
+| relay `PROBLEM` lines on a Mac without a bot | a routes folder, a relay launch agent or a relay hook is left over, so the relay counts as installed: finish its setup ([remote/events.md](remote/events.md)) or remove what you no longer use |
+| skill or command links still point at an old plugin checkout | a new `herdr plugin install` does not move links that already exist; see [docs/SETUP.md](docs/SETUP.md#update) |
 | `refused: ... has local changes or untracked files`, `... is on <branch>, not main` or `... the update adds <path>, already in ...` from `stampede update` | commit, stash or move the files it names, or `git switch main`, then rerun; it never overwrites a file of yours |
 | no update line, though a release is out | the check runs at most once a day and is silent offline: delete `~/.cache/stampede/latest-release` to check now, and see that `STAMPEDE_NO_UPDATE_CHECK` is not `1` |
 
@@ -402,7 +404,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 | `herdr-send <agent> <text>` | prompts an agent and confirms it started: `SUBMITTED` or `FAILED`; refuses a pane you have focused before any key | 0, 1 failed, 2 usage |
 | `herdr-reopen-snapshot <ws> <job dir>` | reads the live workspace (read only) and writes `REOPEN.md` and `reopen.sh` in the job folder: the tabs holding the job's agents (from `agents.tsv`), never another's agent | 0, or 1 with the reason |
 | `<job>/reopen.sh` | recreates the workspace and resumes each agent's session; `--fresh` new sessions, `--prompt` re-sends the briefs, `--into <ws>` adds to an open workspace | 0, 2 a workspace with that label is open, 3 a pane's folder is gone, 4 a tab did not open, 64 usage |
-| `herdr-doctor [--relay]` | read-only health check: `ok`, `warn`, `PROBLEM` lines. The core install by default; the event relay too when it is installed, or with `--relay`. A newer stampede release is a `warn` | 0 ok, 1 a PROBLEM, 2 usage |
+| `herdr-doctor [--relay]` | read-only health check: `ok`, `warn`, `PROBLEM` lines; `-h` prints usage. The core install by default; the event relay too when it is installed, or with `--relay`. A newer stampede release is a `warn` | 0 ok, 1 a PROBLEM, 2 usage |
 | `herdr-events-owner <ws> [<bot>\|--clear]` | tags a workspace with the bot its events go to | 0, or 2 refused |
 | `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md) | 0 |
 </details>

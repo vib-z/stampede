@@ -13,7 +13,7 @@ Any bot that has a computer of its own can drive stampede the way Grok Bot does:
 
 ## Run
 ```bash
-ssh -o BatchMode=yes -o ConnectTimeout=10 <host> 'herdr-doctor'   # the bot reaches the machine
+ssh -o BatchMode=yes -o ConnectTimeout=10 <host> 'herdr-doctor --relay'   # the bot reaches the machine
 herdr-event-post source=test state=done pane=<pane id>    # on the machine: the bot gets a message
 ```
 

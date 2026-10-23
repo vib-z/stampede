@@ -1,27 +1,70 @@
 #!/bin/bash
-# herdr-doctor: read-only health check of Herdr and the event relay on this Mac. One line per check:
+# herdr-doctor: read-only core health check, plus the optional event relay when installed or --relay.
+# One line per check:
 #   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
-# Exit 1 on any PROBLEM. Fixes nothing, never prints route files (URL, KEY) or settings values.
+# Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing; never prints route files or settings values.
+usage(){ echo 'usage: herdr-doctor [--relay] [-h|--help]'; }
+relay=0
+for option in "$@"; do
+  case "$option" in
+    --relay) relay=1;;
+    -h|--help) usage; exit 0;;
+    *) usage >&2; exit 2;;
+  esac
+done
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 bad=0
 ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }
 problem(){ echo "PROBLEM $*"; bad=1; }
 
-for t in herdr jq curl git; do command -v "$t" >/dev/null || problem "$t not on PATH: install it"; done
+for t in herdr jq git python3; do
+  if command -v "$t" >/dev/null; then ok "$t on PATH"; else problem "$t not on PATH: install it"; fi
+done
+
+# stampede must report this checkout's VERSION, including when this helper is a symlink
+if ! command -v stampede >/dev/null; then problem "stampede not on PATH: run install.sh and add ~/.local/bin to PATH"
+elif command -v python3 >/dev/null; then
+  version_file=$(python3 -c 'import os,sys; print(os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "../../../VERSION"))' "${BASH_SOURCE[0]}")
+  expected=$(cat "$version_file" 2>/dev/null)
+  version=$(stampede --version 2>/dev/null); version_status=$?
+  # a copy of this helper outside a stampede checkout has no VERSION beside it: then only --version must work
+  if [ "$version_status" = 0 ] && [ -n "$version" ] && { [ -z "$expected" ] || [ "$version" = "$expected" ]; }; then ok "stampede $version"
+  else problem "stampede --version does not match VERSION: re-run install.sh from the intended checkout and check PATH"; fi
+fi
+
+# the installer links skills only for agent homes that exist
+for app in .claude .codex; do
+  [ -d "$HOME/$app" ] || continue
+  for skill in herdr-fleet grokbot-herdr share-plan; do
+    if [ -L "$HOME/$app/skills/$skill" ] && [ -f "$HOME/$app/skills/$skill/SKILL.md" ]; then ok "~/$app/skills/$skill linked"
+    else problem "~/$app/skills/$skill not linked: run install.sh; it leaves existing files alone"; fi
+  done
+done
 
 # herdr client and server
-st=$(herdr status 2>&1)
+st=$(herdr status 2>&1); status_result=$?
 cv=$(awk '/^client:/{c=1} c && /version:/{print $2; exit}' <<<"$st")
 sv=$(awk '/^server:/{s=1} s && /version:/{print $2; exit}' <<<"$st")
-if ! grep -q 'status: running' <<<"$st"; then problem "herdr server not running: the owner starts it (bots never do)"
-elif [ "$cv" != "$sv" ]; then problem "herdr client $cv, server $sv: the owner restarts the server after an upgrade"
+if [ "$status_result" != 0 ] || ! grep -q 'status: running' <<<"$st"; then problem "herdr server not running: the owner starts it (bots never do)"
+elif [ -z "$cv" ] || [ -z "$sv" ] || [ "$cv" != "$sv" ]; then problem "herdr client $cv, server $sv: the owner restarts the server after an upgrade"
 elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart needed: the owner restarts the server when idle"
 else ok "herdr client and server $cv"; fi
 
-# relay sources
-herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled' && ok "event plugin enabled" \
-  || problem "event plugin not enabled: herdr plugin link <stampede checkout>, or herdr plugin install vib-z/stampede"
+# relay configuration is the signal, not the helper scripts installed for every user
+R="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"
+if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.plist" ] \
+  || [ -e "$HOME/Library/LaunchAgents/local.herdr-events-flush.plist" ] \
+  || grep -q 'herdr-event-claude-hook' "$HOME/.claude/settings.json" 2>/dev/null \
+  || grep -q '^notify *=.*herdr-event-codex-notify' "$HOME/.codex/config.toml" 2>/dev/null; then relay=1; fi
+
+# a clone plus install.sh does not enable the event plugin
+if herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled'; then ok "event plugin enabled"
+elif [ "$relay" = 1 ]; then problem "event plugin not enabled: herdr plugin link <stampede checkout>, or herdr plugin install vib-z/stampede"
+else warn "event plugin not enabled (optional): needed only for a remote bot's event relay"; fi
+
+if [ "$relay" = 1 ]; then
+command -v curl >/dev/null || problem "curl not on PATH: install it for the event relay"
 hooks=$(jq -r '[.hooks // {} | to_entries[] | select([.value[]?.hooks[]?.command] | any(test("herdr-event-claude-hook"))) | .key] | join(" ")' ~/.claude/settings.json 2>/dev/null)
 for h in Stop StopFailure Notification; do
   grep -qw "$h" <<<"$hooks" || problem "Claude hook $h missing herdr-event-claude-hook: the owner adds it to ~/.claude/settings.json"
@@ -43,7 +86,7 @@ for j in local.herdr-event-watchdog local.herdr-events-flush; do
 done
 
 # routes: one file per bot (or default), present and private, contents never read
-R="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"; n=0
+n=0
 for f in "$R"/*; do
   [ -f "$f" ] || continue; n=$((n+1))
   [ "$(stat -f %Lp "$f")" = 600 ] || warn "route $(basename "$f") is mode $(stat -f %Lp "$f"): chmod 600 $f"
@@ -59,6 +102,10 @@ sup=$(find "$QH/dead" -name '*.superseded' 2>/dev/null | wc -l | tr -d ' ')
 if [ "$qold" -gt 0 ]; then problem "queue holds $q events, $qold older than 10 min: the network or the route's webhook is down, see $QH/flush.log"
 else ok "queue $q, dead letters $d, superseded $sup"; fi
 [ "$d" -gt 0 ] && warn "$d dead letters (undelivered for 24h) in $QH/dead: read flush.log, then delete them"
+
+else
+  ok "event relay not installed (optional): herdr-doctor --relay checks it"
+fi
 
 # owner tags
 O="$HOME/.config/herdr-events/owners"

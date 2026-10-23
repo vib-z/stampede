@@ -12,7 +12,7 @@ Prove the machine is ready before the first real job, and tell the person in pla
 ## Run
 ```bash
 herdr --version && herdr status
-herdr-doctor                                        # exit 0: go on; exit 1: report the PROBLEM lines
+herdr-doctor --relay                                        # exit 0: go on; exit 1: report the PROBLEM lines
 claude --version                                    # the lead's CLI
 stampede --help                                     # usage: fleet-job ... {new,start,tell,ask,cancel,approve,hook,_ask}
 herdr-event-post source=test state=done pane=<pane id>                                    # only when a remote listens

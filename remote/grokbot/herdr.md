@@ -13,7 +13,7 @@ Herdr runs on your machine and holds the agents in panes. stampede is a Herdr pl
 ## Run
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede && ~/stampede/install.sh   # on the machine, once
-herdr-doctor                                    # exit 0 go on, exit 1 stop and report the PROBLEM lines
+herdr-doctor --relay                                    # exit 0 go on, exit 1 stop and report the PROBLEM lines
 herdr workspace list                            # never bare herdr over SSH: it opens the screen and hangs
 herdr workspace create --cwd <project dir> --label bot-<task> --no-focus
 herdr-trust <project dir>                       # before agents start in a repo under FLEET_TRUST_ROOT; it writes the agents' own trust settings
