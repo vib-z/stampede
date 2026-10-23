@@ -53,7 +53,13 @@ def tell(job, name, text):
 
 def ask_now(job, question, options, command=None, gate=None):
     """Ask the owner and wait; the answer, or why it failed, goes to the lead's inbox.
-    A gate always asks FLEET_ASK_CMD itself, and its yes (exit 0, a yes or nothing on stdout) is recorded for gate-ok."""
+    A gate always asks FLEET_ASK_CMD itself, with the question made from its own record, and its yes (exit 0, a yes or
+    nothing on stdout) is recorded for gate-ok, only while the record is still the one asked about."""
+    asked = load_gate(job, gate) if gate else None
+    if asked:
+        if asked['route'] != 'local':
+            raise PermissionError(f'gate {gate} goes to {asked["route"]}, not to the phone')
+        question, options = gate_question(asked), []
     argv = shlex.split(ASK_CMD if gate else command or ASK_CMD)
     for option in options:
         argv += ['--option', option]
@@ -70,8 +76,11 @@ def ask_now(job, question, options, command=None, gate=None):
     except OSError as error:
         status, answer = 'ASK FAILED', 'exit 127: ' + line(error)
     if gate and yes:
-        record_yes(job, gate, load_gate(job, gate)['sha'], 'owner, through ' + Path(argv[0]).name)
-        return 0
+        try:
+            record_yes(job, gate, asked['sha'], 'owner, through ' + Path(argv[0]).name, asked)
+            return 0
+        except PermissionError as error:
+            status, answer = 'GATE NOT RECORDED', line(error)
     tell(job, 'lead', status + ' ' + line(question) + ': ' + answer)
     return 0 if status == 'ANSWER' else 1
 
@@ -94,6 +103,8 @@ def ask_background(job, question, options, command=None, gate=None):
 
 def cancel(job, ident):
     """Stop an answered or unwanted question: its waiter and its card, as one process group."""
+    if not GATE.fullmatch(ident) or not (Path(job) / 'asks' / (ident + '.pid')).is_file():
+        raise ValueError('no phone card ' + line(ident) + ' waiting in this job (a question sent to a bot is answered in its chat)')
     pid = int((Path(job) / 'asks' / (ident + '.pid')).read_text())
     try:
         os.killpg(pid, signal.SIGTERM)
@@ -113,12 +124,50 @@ def job_owner(job):
 
 
 def starter(workspace):
-    """At fleet-job new: HERDR_EVENTS_OWNER, else the workspace's owner tag (herdr-events-owner); '' when local."""
-    owner = os.environ.get('HERDR_EVENTS_OWNER', '').strip()
+    """At fleet-job new: HERDR_EVENTS_OWNER, else the workspace's owner tag (herdr-events-owner); '' when local.
+    A slug that is set but malformed is refused: it must never turn a bot's job into a local one."""
+    owner, source = os.environ.get('HERDR_EVENTS_OWNER', '').strip(), 'HERDR_EVENTS_OWNER'
     tag = Path.home() / '.config/herdr-events/owners' / str(workspace)
     if not owner and workspace and tag.is_file():
         owner = next((row[len('owner='):].strip() for row in tag.read_text().splitlines() if row.startswith('owner=')), '')
-    return owner if OWNER.fullmatch(owner) else ''
+        source = 'the owner tag of ' + str(workspace)
+    if owner and not OWNER.fullmatch(owner):
+        raise ValueError(f'{source} holds no bot slug ({line(owner)}): fix it with herdr-events-owner, then start again')
+    return owner
+
+
+def bot_route(owner):
+    """The bot's own route, with a URL. Without it the relay falls back to the default route (another bot's, perhaps)
+    or only logs the event, and the bot never hears the question or the gate."""
+    route = Path(os.environ.get('HERDR_EVENTS_ROUTES_DIR') or Path.home() / '.config/herdr-events/routes') / owner
+    rows = route.read_text().splitlines() if route.is_file() else []
+    if not any(row.startswith('URL=') and row[4:].strip(' \'"') for row in rows):
+        raise ValueError(f'no route with a URL for {owner} ({route}), so the bot would never hear this: '
+                         'fix the route (herdr-doctor --relay), or ask the owner in your own pane')
+
+
+def post_event(job, owner, fields):
+    """One event to the bot that started the job, through the relay. No `pane`: the flusher keeps only a pane's newest
+    event after an outage, and a question or a gate must never be dropped for a later turn end."""
+    bot_route(owner)
+    event = {'source': 'stampede', 'owner': owner, 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields}
+    for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID')):
+        if os.environ.get(name):
+            event[key] = os.environ[name]
+    subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), json.dumps(event)], check=True)
+
+
+def ask(job, question, options):
+    """A question for the owner: to the bot that started the job, as a question event it answers with tell;
+    else FLEET_ASK_CMD in the background."""
+    owner = job_owner(job)
+    if not owner:
+        return ask_background(job, question, options)
+    ident = uuid.uuid4().hex[:12]
+    post_event(job, owner, {'state': 'question', 'ask': ident, 'question': line(question), 'options': options,
+                            'answer': shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead', "<the owner's words>"])})
+    print(f'ASKED {ident} sent to {owner}, which asks the owner in chat; the answer comes to your inbox')
+    return ident
 
 
 def ask_gate(job, action, sha, pr=None):
@@ -128,6 +177,8 @@ def ask_gate(job, action, sha, pr=None):
     if not SHA.fullmatch(sha):
         raise ValueError('--sha takes the full commit id the gate is about (git rev-parse HEAD)')
     owner = job_owner(job)
+    if owner:
+        bot_route(owner)  # before the gate exists: no gate is recorded that cannot reach its bot
     ident = uuid.uuid4().hex[:12]
     gate = {'gate': ident, 'action': line(action), 'pr': pr, 'sha': sha, 'route': owner or 'local',
             'asked': datetime.now().strftime('%Y-%m-%d %H:%M')}
@@ -135,18 +186,17 @@ def ask_gate(job, action, sha, pr=None):
     (job / 'gates' / (ident + '.json')).write_text(json.dumps(gate) + '\n')
     check = f'fleet-job gate-ok {job} {ident} --sha <the commit you act on>'
     if not owner:
-        ask_background(job, f'Gate {ident}: {gate["action"]}' + (f' (PR #{pr})' if pr else '') + f' at {sha[:12]}?', [], gate=ident)
+        ask_background(job, gate_question(gate), [], gate=ident)
         return print(f'GATE {ident} on the phone; act after {check} prints APPROVED, or on the owner\'s yes typed in your pane')
-    event = {'source': 'stampede', 'state': 'gate', 'owner': owner, 'job': str(job), 'agent': roster(job)[1], **gate,
-             'options': ['yes', 'no'],
-             'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--by', 'owner in ' + owner + ' chat']),
-             'deny': shlex.join(['fleet-job', 'tell', str(job), 'lead', "<the owner's words>"])}
-    for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('pane', 'HERDR_PANE_ID')):
-        if os.environ.get(name):
-            event[key] = os.environ[name]
-    subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), json.dumps(event)], check=True)
-    print(f'GATE {ident} sent to {owner}, which asks the owner in chat; act after {check} prints APPROVED, '
+    post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
+                            'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--by', 'owner in ' + owner + ' chat']),
+                            'deny': shlex.join(['fleet-job', 'tell', str(job), 'lead', "<the owner's words>"])})
+    print(f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED, '
           'or on the owner\'s yes typed in your pane')
+
+
+def gate_question(gate):
+    return f'Gate {gate["gate"]}: {gate["action"]}' + (f' (PR #{gate["pr"]})' if gate['pr'] else '') + f' at {gate["sha"][:12]}?'
 
 
 def load_gate(job, ident):
@@ -156,9 +206,11 @@ def load_gate(job, ident):
     return json.loads(path.read_text())
 
 
-def record_yes(job, ident, sha, by):
-    """The owner's yes for one gate at one commit, then wake the lead."""
+def record_yes(job, ident, sha, by, asked=None):
+    """The owner's yes for one gate at one commit, then wake the lead. asked: the gate as it was when asked."""
     gate = load_gate(job, ident)
+    if asked is not None and gate != asked:
+        raise PermissionError(f'gate {ident} changed while the owner was asked: ask again')
     if sha != gate['sha']:
         raise PermissionError(f'gate {ident} asked about {gate["sha"]}, not {sha}: a stale yes; ask again')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -211,6 +263,8 @@ def gate_ok(job, ident, sha):
     if not path.is_file():
         raise PermissionError(f'gate {ident} has no recorded yes: wait for it, or the owner\'s yes typed in your pane')
     record = json.loads(path.read_text())
+    if record.get('gate') != ident:
+        raise PermissionError(f'the yes recorded under gate {ident} is for gate {record.get("gate")}: ask again')
     if not record.get('sha') == gate['sha'] == sha:
         raise PermissionError(f'gate {ident} was approved for {record.get("sha")}, not {sha}: a push after the yes '
                               'withdraws it; ask again')
@@ -499,6 +553,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None):
     info = herdr('pane', 'get', pane)['pane'] if pane else None
     # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
     repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
+    owner = starter(info.get('workspace_id', pane.split(':')[0]) if info else workspace)
     job = repo / ('.herdr-' + (name or slug(ask)))
     job.mkdir(parents=True, exist_ok=False)
     probe = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)
@@ -507,7 +562,6 @@ def new(ask_file, workspace, name=None, review=False, pane=None):
         if not exclude.exists() or '/.herdr-*/' not in exclude.read_text().splitlines():
             append(exclude, '/.herdr-*/')
     (job / 'ask.md').write_text(ask)
-    owner = starter(info.get('workspace_id', pane.split(':')[0]) if info else workspace)
     if owner:
         (job / 'owner').write_text(owner + '\n')
     if review:
@@ -593,7 +647,7 @@ def run(a):
             raise ValueError('a gate takes --sha and no --option: one exact action, yes or no; ask each choice as its own gate')
         return ask_gate(a.job, ' '.join(a.question), a.sha, a.pr)
     if a.cmd == 'ask':
-        return ask_background(a.job, ' '.join(a.question), a.option) and 0
+        return ask(a.job, ' '.join(a.question), a.option) and 0
     if a.cmd == 'approve-gate':
         return approve_gate(a.job, a.gate, a.sha, a.by)
     if a.cmd == 'gate-ok':
