@@ -1,5 +1,10 @@
 #!/bin/bash
-# stampede: the public name of fleet-job (skills/herdr-fleet/scripts/fleet-job). Its version is the repo's VERSION file.
+# stampede: the public name of fleet-job (skills/herdr-fleet/scripts/fleet-job). Its version is the repo's VERSION file;
+# `stampede update` is its own (stampede_update.py).
 here=$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")")
-case "${1:-}" in --version|-V) cat "$here/../VERSION"; exit 0;; esac
+case "${1:-}" in
+  --version|-V) cat "$here/../VERSION"  # then a newer release, at most once a day, on stderr; never changes the exit code
+    note=$(python3 -I "$here/stampede_update.py" --check 2>/dev/null); [ $? = 1 ] && echo "$note" >&2; exit 0;;
+  update) shift; exec python3 -I "$here/stampede_update.py" "$@";;
+esac
 exec "$here/../skills/herdr-fleet/scripts/fleet-job" "$@"

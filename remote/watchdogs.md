@@ -12,7 +12,7 @@ Events cover a turn that ends. Watchdogs cover the rest: an agent that hangs, a 
 ## Run
 | helper | what it does | how it runs |
 |---|---|---|
-| `herdr-doctor` | read only: tools on PATH, the Herdr server and client, the event plugin, the Claude and Codex hooks, the helpers, the two timers below, the route files, the queue, owner tags, leftover worktrees under `FLEET_TRUST_ROOT`, free disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM | by hand or by the bot, before a job |
+| `herdr-doctor` | read only: tools on PATH, the Herdr server and client, the event plugin, the Claude and Codex hooks, the helpers, the two timers below, the route files, the queue, owner tags, leftover worktrees under `FLEET_TRUST_ROOT`, a newer stampede release (a `warn`, once a day), free disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM | by hand or by the bot, before a job |
 | `herdr-event-watchdog` | sends `stale` (working, no output change for 30 minutes) and `dead` (pane gone without a done); removes malformed tags and tags of workspaces gone a day | launchd, every 5 minutes |
 | `herdr-event-flush` | sends the queued events, oldest first; after 24 hours undelivered, an event moves to `dead/` | launchd, every 2 minutes |
 | `fleet-watch.sh` | for a bot outside Herdr: `REPORT`, `BLOCKED`, `GONE` and `STALL?` lines for one job, with a phone push (`FLEET_WATCH_*`) | by the bot, as a background command |

@@ -21,3 +21,7 @@ export HERDR_EVENTS_HOME=~/.herdr-events            # the queue and dead letters
 export HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes   # one file per route, holding URL= and KEY=
 export HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log        # the flusher's log
 # HERDR_EVENTS_OWNER=<bot-slug> is set per command, for a one-off command in a pane; never here.
+
+# The daily check for a newer release (stampede --version, stampede update --check, herdr-doctor)
+export STAMPEDE_NO_UPDATE_CHECK=0                   # 1 turns the check off
+export STAMPEDE_UPDATE_URL=https://api.github.com/repos/vib-z/stampede/releases/latest  # where it reads the latest release

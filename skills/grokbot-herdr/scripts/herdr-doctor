@@ -88,6 +88,12 @@ while IFS= read -r g; do
 done < <(find "${FLEET_TRUST_ROOT:-$HOME/code}" -maxdepth 3 -name .git -type d 2>/dev/null)
 ok "worktrees under ${FLEET_TRUST_ROOT:-~/code} checked"
 
+# stampede: a newer release is a warn, never a PROBLEM (checked once a day; silent offline or with STAMPEDE_NO_UPDATE_CHECK=1)
+if command -v stampede >/dev/null; then
+  u=$(stampede update --check 2>/dev/null)
+  if [ $? = 1 ]; then warn "$u"; elif [ -n "$u" ]; then ok "$u"; fi
+fi
+
 # disk
 free=$(df -k "$HOME" | awk 'NR==2{print int($4/1048576)}')
 if [ "$free" -lt 10 ]; then problem "${free} GB free on the home disk: clear space before starting agents"
