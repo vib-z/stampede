@@ -202,12 +202,12 @@ Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: 
 
 | installed with | update with |
 |---|---|
-| a clone and `./install.sh` | `stampede update`, or by hand in the checkout, without its checks: `git pull --ff-only && ./install.sh` |
+| a clone and `./install.sh` | `stampede update` |
 | `herdr plugin install vib-z/stampede` | `herdr plugin update` |
 
-`stampede update` updates only a clean checkout on `main`, and never overwrites a file of yours. It runs `git fetch`, fast-forwards with `git merge --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. It refuses with the reason, and changes no file, when the checkout has local changes or untracked files, is on another branch, or holds an ignored file at a path the update adds, which git would overwrite (`refused: the update adds local-settings.txt, already in <checkout> (ignored by git, so it would be overwritten): move it away, then rerun`). Outside a git checkout, as in a plugin install, it prints `herdr plugin update` to run instead.
+`stampede update` is the guided updater: it updates only a clean checkout on `main`, and never overwrites a file of yours. It runs `git fetch`, fast-forwards with `git merge --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. It refuses with the reason, and changes no file, when the checkout has local changes or untracked files, is on another branch, or holds an ignored file at a path the update adds, which git would overwrite (`refused: the update adds local-settings.txt, already in <checkout> (ignored by git, so it would be overwritten): move it away, then rerun`). Outside a git checkout, as in a plugin install, it prints `herdr plugin update` to run instead.
 
-**The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release: one request without a token, given 3 s in all (DNS, connect and the reply), the answer cached for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out they print one line:
+**The daily check.** It only tells you a release is out; it never updates anything. At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release: one request without a token, given 3 s in all (DNS, connect and the reply), the answer cached for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out they print one line:
 
 ```text
 $ stampede --version
