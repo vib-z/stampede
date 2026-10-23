@@ -14,7 +14,10 @@ jobs:
       - name: install
         run: mkdir -p ~/.claude && ./install.sh
       - name: Herdr and jq
-        run: brew install herdr jq
+        run: |
+          brew update --quiet   # the runner's cached formulae can be older than the Herdr 0.9.4 the plugin needs
+          brew install herdr jq
+          herdr --version
       - name: start the Herdr server
         run: |
           nohup herdr server > "$RUNNER_TEMP/herdr.log" 2>&1 &
