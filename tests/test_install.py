@@ -1,6 +1,7 @@
 """install.sh and the Herdr plugin, only in temporary HOME directories with fakes (stdlib)."""
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -19,9 +20,18 @@ class Install(unittest.TestCase):
         (self.home / '.claude').mkdir()
         self.env = {**os.environ, 'HOME': str(self.home)}
 
-    def run_install(self, *flags):
-        return subprocess.run(['bash', str(ROOT / 'install.sh'), *flags], env=self.env,
+    def run_install(self, *flags, root=ROOT):
+        return subprocess.run(['bash', str(root / 'install.sh'), *flags], env=self.env,
                               capture_output=True, text=True, timeout=30)
+
+    def managed_checkout(self, n):
+        """A fake Herdr-managed checkout: Herdr gives each plugin install or update a new N-0 folder."""
+        root = self.home / f'.config/herdr/plugins/github-installations/stampede-x/{n}-0/checkout'
+        root.mkdir(parents=True)
+        shutil.copy(ROOT / 'install.sh', root)
+        for part in ('scripts', 'skills'):
+            shutil.copytree(ROOT / part, root / part, ignore=shutil.ignore_patterns('__pycache__'))
+        return root
 
     def test_links_skills_and_commands_and_is_idempotent(self):
         kept = self.home / '.local/bin/herdr-send'
@@ -46,6 +56,26 @@ class Install(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn('linked', again.stdout)
         self.assertIn(f'ok {bin_dir / "stampede"}', again.stdout)
+
+    def test_links_follow_a_new_managed_checkout_and_no_other(self):
+        own = self.home / '.local/bin/herdr-send'
+        own.parent.mkdir(parents=True)
+        own.symlink_to(self.home / 'my-clone/herdr-send')  # a link of the owner's, never moved
+        first, second = self.managed_checkout(1), self.managed_checkout(2)
+        self.assertEqual(self.run_install(root=first).returncode, 0)
+        shutil.rmtree(first)  # Herdr deletes the old checkout at its next start, so every link dangles
+        stampede = self.home / '.local/bin/stampede'
+        self.assertIn('would relink', self.run_install('--dry-run', root=second).stdout)
+        self.assertEqual(os.readlink(stampede), str(first / 'scripts/stampede'))
+        result = self.run_install(root=second)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'relinked {stampede}', result.stdout)
+        for path, target in [(stampede, 'scripts/stampede'), (self.home / '.local/bin/fleet-job', 'scripts/stampede'),
+                             (self.home / '.local/bin/herdr-doctor', 'skills/grokbot-herdr/scripts/herdr-doctor'),
+                             *((self.home / '.claude/skills' / s, f'skills/{s}') for s in SKILLS)]:
+            self.assertEqual(path.resolve(strict=True), second / target)
+        self.assertEqual(os.readlink(own), str(self.home / 'my-clone/herdr-send'))
+        self.assertIn(f'skip {own}', result.stdout)
 
     def test_a_real_skill_folder_is_left_alone(self):
         own = self.home / '.claude/skills/herdr-fleet'

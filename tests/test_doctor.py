@@ -27,7 +27,9 @@ class Doctor(unittest.TestCase):
                        capture_output=True, timeout=15)
         self.fake('herdr', '''case "$1 $2" in
   "status ") printf 'client:\n  version: 0.9.5\nserver:\n  status: %s\n  version: %s\n' "${TEST_SERVER_STATE:-running}" "${TEST_SERVER_VERSION:-0.9.5}";;
-  "plugin list") [ "${TEST_PLUGIN:-0}" = 1 ] && echo '- stampede (stampede) enabled [local:test]';;
+  "plugin list") if [ "${3:-}" = --json ]; then
+      [ -n "${TEST_MANAGED:-}" ] && printf '{"result":{"plugins":[{"plugin_id":"stampede","source":{"managed_path":"%s"}}]}}' "$TEST_MANAGED"
+    elif [ "${TEST_PLUGIN:-0}" = 1 ]; then echo '- stampede (stampede) enabled [local:test]'; fi;;
   "workspace list") echo '{"result":{"workspaces":[]}}';;
   *) exit 99;;
 esac
@@ -163,6 +165,25 @@ exit 0
         path.mkdir()
         (path / 'SKILL.md').write_text('a local copy')
         self.assert_problem(self.doctor(), '~/.codex/skills/herdr-fleet not linked')
+
+    def test_links_outside_the_managed_plugin_checkout_are_a_problem(self):
+        result = self.doctor(TEST_MANAGED=str(ROOT))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('ok stampede and the skills resolve into the plugin checkout', result.stdout)
+        new = self.home / '.config/herdr/plugins/github-installations/stampede-x/2-0/checkout'
+        new.mkdir(parents=True)  # Herdr updated the plugin; the links still point at the old checkout
+        self.assert_problem(self.doctor(TEST_MANAGED=str(new)),
+                            f'~/.local/bin/stampede ~/.claude/skills/herdr-fleet ~/.claude/skills/grokbot-herdr '
+                            f'~/.claude/skills/share-plan ~/.codex/skills/herdr-fleet ~/.codex/skills/grokbot-herdr '
+                            f'~/.codex/skills/share-plan not in the plugin checkout {new}: bash {new}/install.sh relinks')
+        self.assertNotIn('plugin checkout', self.doctor().stdout)  # a clone, no managed plugin: no check
+
+    def test_a_missing_trust_root_is_a_warning(self):
+        result = self.doctor()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('warn no ~/code (FLEET_TRUST_ROOT): create it or set the key before herdr-trust\n', result.stdout)
+        (self.home / 'code').mkdir()
+        self.assertIn('ok worktrees under ~/code checked', self.doctor().stdout)
 
     def test_agent_home_not_installed_is_not_required(self):
         shutil.rmtree(self.home / '.codex')

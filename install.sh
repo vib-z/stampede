@@ -1,6 +1,7 @@
 #!/bin/bash
 # Install stampede from this checkout: link its three skills into Claude Code and Codex, and its commands into
-# ~/.local/bin. Safe to re-run. Never replaces what is already there; never installs Herdr or an agent CLI.
+# ~/.local/bin. Safe to re-run. Never replaces what is already there, except its own links into an older Herdr-managed
+# checkout (Herdr deletes that one at its next start); never installs Herdr or an agent CLI.
 set -euo pipefail
 usage() { echo 'usage: install.sh [--dry-run] [--from-plugin]'; }
 DRY=0
@@ -13,6 +14,8 @@ done
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 link() {  # link <target> <path>
   if [ -L "$2" ] && [ "$(readlink "$2")" = "$1" ]; then echo "ok $2"
+  elif [ -L "$2" ] && [[ "$(readlink "$2")" == */herdr/plugins/github-installations/stampede-*/checkout/* ]]; then
+    if [ "$DRY" = 1 ]; then echo "would relink $2 -> $1"; else ln -sfn "$1" "$2" && echo "relinked $2 -> $1"; fi
   elif [ -e "$2" ] || [ -L "$2" ]; then echo "skip $2: something else is there; left as is"
   elif [ "$DRY" = 1 ]; then echo "would link $2 -> $1"
   else mkdir -p "$(dirname "$2")" && ln -s "$1" "$2" && echo "linked $2 -> $1"; fi

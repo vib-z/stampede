@@ -1,6 +1,7 @@
 """stampede update: the daily check for a newer release, and the update of a git checkout. Python 3 stdlib only.
   stampede update --check   one line: a newer release (exit 1), or this is the latest (exit 0); nothing when unknown or off
-  stampede update           fast-forward a clean checkout on main, then rerun install.sh; never overwrites a local file"""
+  stampede update           fast-forward a clean checkout on main, then rerun install.sh; never overwrites a local file.
+                            A Herdr plugin install names herdr plugin update instead"""
 import json, os, re, subprocess, sys, threading, time, urllib.request
 from pathlib import Path
 
@@ -56,11 +57,16 @@ def check():
         if not (parse(mine) and parse(tag)):
             return 0, ''
         if parse(tag) > parse(mine):
-            how = 'stampede update' if (ROOT / '.git').exists() else 'herdr plugin update'
+            how = 'herdr plugin update stampede --yes' if plugin_install() else 'stampede update'
             return 1, f'stampede {tag.lstrip("v")} is out, this is {mine}: run {how}'
         return 0, f'stampede {mine}, the latest release is {tag.lstrip("v")}'
     except Exception:
         return 0, ''
+
+
+def plugin_install():
+    """Herdr's managed checkout keeps .git on a detached HEAD, so its folder says it, not .git; a copy without .git too."""
+    return 'github-installations' in ROOT.parts or not (ROOT / '.git').exists()
 
 
 def git(*args):
@@ -76,8 +82,8 @@ def in_the_way(path):
 
 
 def update():
-    if not (ROOT / '.git').exists():
-        print(f'{ROOT} is not a git checkout (a Herdr plugin install): run herdr plugin update')
+    if plugin_install():
+        print(f'{ROOT} is a Herdr plugin install: run herdr plugin update stampede --yes')
         return 1
     branch = git('symbolic-ref', '-q', '--short', 'HEAD')
     if branch != 'main':
