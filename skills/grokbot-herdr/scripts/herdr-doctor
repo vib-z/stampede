@@ -53,10 +53,12 @@ else ok "herdr client and server $cv"; fi
 
 # relay configuration is the signal, not the helper scripts installed for every user
 R="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"
+# Codex's notify array, from its line to the closing bracket (it may span lines)
+codex_notify=$(awk '/^notify *=/{f=1} f{print} f && /]/{exit}' "$HOME/.codex/config.toml" 2>/dev/null)
 if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.plist" ] \
   || [ -e "$HOME/Library/LaunchAgents/local.herdr-events-flush.plist" ] \
   || grep -q 'herdr-event-claude-hook' "$HOME/.claude/settings.json" 2>/dev/null \
-  || grep -q '^notify *=.*herdr-event-codex-notify' "$HOME/.codex/config.toml" 2>/dev/null; then relay=1; fi
+  || grep -q 'herdr-event-codex-notify' <<<"$codex_notify"; then relay=1; fi
 
 # a clone plus install.sh does not enable the event plugin
 if herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled'; then ok "event plugin enabled"
@@ -70,7 +72,7 @@ for h in Stop StopFailure Notification; do
   grep -qw "$h" <<<"$hooks" || problem "Claude hook $h missing herdr-event-claude-hook: the owner adds it to ~/.claude/settings.json"
 done
 grep -qw "Stop" <<<"$hooks" && grep -qw StopFailure <<<"$hooks" && grep -qw Notification <<<"$hooks" && ok "Claude hooks Stop, StopFailure, Notification"
-grep -q '^notify *=.*herdr-event-codex-notify' ~/.codex/config.toml 2>/dev/null && ok "Codex notify chains herdr-event-codex-notify" \
+grep -q 'herdr-event-codex-notify' <<<"$codex_notify" && ok "Codex notify chains herdr-event-codex-notify" \
   || problem "Codex notify line missing herdr-event-codex-notify: the owner fixes ~/.codex/config.toml"
 for s in herdr-event-post herdr-event-flush herdr-event-watchdog herdr-event-claude-hook herdr-event-codex-notify herdr-events-owner herdr-send; do
   [ -x "$HOME/.local/bin/$s" ] || problem "$s not installed in ~/.local/bin: copy it from grokbot-herdr/scripts"

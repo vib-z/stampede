@@ -79,16 +79,17 @@ exit 0
         self.assertNotIn('event relay not installed', result.stdout)
 
     def test_each_relay_configuration_signal_enables_full_checks(self):
-        signals = {
-            '.config/herdr-events/routes': None,
-            'Library/LaunchAgents/local.herdr-event-watchdog.plist': '',
-            'Library/LaunchAgents/local.herdr-events-flush.plist': '',
-            '.claude/settings.json': json.dumps({'hooks': {'Stop': [{'hooks': [
-                {'command': 'herdr-event-claude-hook'}]}]}}),
-            '.codex/config.toml': 'notify = ["herdr-event-codex-notify"]\n',
-        }
-        for name, content in signals.items():
-            with self.subTest(signal=name):
+        signals = [
+            ('.config/herdr-events/routes', None),
+            ('Library/LaunchAgents/local.herdr-event-watchdog.plist', ''),
+            ('Library/LaunchAgents/local.herdr-events-flush.plist', ''),
+            ('.claude/settings.json', json.dumps({'hooks': {'Stop': [{'hooks': [
+                {'command': 'herdr-event-claude-hook'}]}]}})),
+            ('.codex/config.toml', 'notify = ["herdr-event-codex-notify"]\n'),
+            ('.codex/config.toml', 'model = "x"\nnotify = [\n  "herdr-event-codex-notify",\n]\n'),  # over several lines
+        ]
+        for name, content in signals:
+            with self.subTest(signal=name, content=content):
                 path = self.home / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if content is None:
@@ -97,6 +98,8 @@ exit 0
                     path.write_text(content)
                 result = self.doctor()
                 self.assert_problem(result, 'launchd local.herdr-events-flush not loaded')
+                if name == '.codex/config.toml':
+                    self.assertIn('ok Codex notify chains herdr-event-codex-notify', result.stdout)
                 if content is None:
                     path.rmdir()
                 else:
