@@ -33,7 +33,7 @@
 
 ## Grok Bot to Claude Code and Codex
 
-![Grok Bot to Claude Code and Codex: you chat, the bot reaches your Mac over SSH on Tailscale, starts a Claude Code lead, which opens workers only when they pay](docs/diagrams/grokbot-flow.png)
+<img src="docs/diagrams/grokbot-flow.png" width="520" alt="Grok Bot to Claude Code and Codex: you chat, the bot reaches your Mac over SSH on Tailscale, starts a Claude Code lead, which opens workers only when they pay">
 
 <sub>Rendered with mermaid-cli from [its mermaid source](docs/diagrams/grokbot-flow.mmd).</sub>
 
