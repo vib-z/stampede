@@ -33,17 +33,9 @@
 
 ## Grok Bot to Claude Code and Codex
 
-```mermaid
-flowchart LR
-    you(["You, in chat"]) --> bot["Grok Bot"]
-    bot -- "SSH over Tailscale" --> mac["Your Mac, always on,<br/>running Herdr"]
-    mac --> lead["Claude Code lead"]
-    lead -- "only when they pay" --> workers["Codex and Claude Code<br/>workers, in Herdr panes"]
-    workers -- "reports, by hooks" --> lead
-    lead -- "gate question" --> phone(["Your phone, Moshi"])
-    phone -- "your tap" --> merge(["Draft PR merged"])
-    lead -. "result, by webhook" .-> bot
-```
+![Grok Bot to Claude Code and Codex: you chat, the bot reaches your Mac over SSH on Tailscale, starts a Claude Code lead, which opens workers only when they pay](docs/diagrams/grokbot-flow.png)
+
+<sub>Rendered with mermaid-cli from [its mermaid source](docs/diagrams/grokbot-flow.mmd).</sub>
 
 - **A whole job from one chat message.** Grok Bot starts a Claude Code lead on your Mac; the lead plans the job and does it.
 - **Codex only when it pays.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.

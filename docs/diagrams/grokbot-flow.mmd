@@ -1,0 +1,9 @@
+flowchart LR
+    you(["You, in chat"]) --> bot["Grok Bot"]
+    bot -- "SSH over Tailscale" --> mac["Your Mac, always on,<br/>running Herdr"]
+    mac --> lead["Claude Code lead"]
+    lead -- "only when they pay" --> workers["Codex and Claude Code<br/>workers, in Herdr panes"]
+    workers -- "reports, by hooks" --> lead
+    lead -- "gate question" --> phone(["Your phone, Moshi"])
+    phone -- "your tap" --> merge(["Draft PR merged"])
+    lead -. "result, by webhook" .-> bot
