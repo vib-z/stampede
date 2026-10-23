@@ -1,9 +1,8 @@
 <h1 align="center">stampede</h1>
 
 <p align="center">
-  <b>One ask. One lead. Only the agents that pay.</b><br>
-  stampede is three skills and one command for Claude Code. A lead agent plans your job, does the work, and opens a <a href="https://herdr.dev">Herdr</a> pane for another agent only when that pane pays for itself.<br>
-  Every merge, push, send, spend and close waits for your own tap.
+  <b>Run Claude Code and Codex on your Mac from Grok Bot.</b><br>
+  One ask starts a Claude Code lead in <a href="https://herdr.dev">Herdr</a>. It adds Codex workers only when they pay, and nothing merges, pushes or sends without your tap on your phone.
 </p>
 
 <p align="center">
@@ -32,6 +31,27 @@
 
 ---
 
+## Grok Bot to Claude Code and Codex
+
+```mermaid
+flowchart LR
+    you(["You, in chat"]) --> bot["Grok Bot"]
+    bot -- "SSH over Tailscale" --> mac["Your Mac, always on,<br/>running Herdr"]
+    mac --> lead["Claude Code lead"]
+    lead -- "only when they pay" --> workers["Codex and Claude Code<br/>workers, in Herdr panes"]
+    workers -- "reports, by hooks" --> lead
+    lead -- "gate question" --> phone(["Your phone, Moshi"])
+    phone -- "your tap" --> merge(["Draft PR merged"])
+    lead -. "result, by webhook" .-> bot
+```
+
+- **A whole job from one chat message.** Grok Bot starts a Claude Code lead on your Mac; the lead plans the job and does it.
+- **Codex only when it pays.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
+- **Hooks, not polling.** Workers report to the lead through hooks, and the result reaches Grok Bot by webhook.
+- **Your tap on every merge, push, send, spend or close.** The question reaches your phone through Moshi, and the lead keeps working while it waits.
+
+Cursor workers, other bots and a chat directly in Herdr also work: see [Front doors](#front-doors). The bot is optional; the core runs locally on your Mac.
+
 ## Quick start
 
 On a Mac with [Herdr](https://herdr.dev/docs/install/) 0.9.4 or later, Claude Code signed in, Python 3.9 or later, git, jq and curl:
@@ -46,16 +66,6 @@ export PATH="$HOME/.local/bin:$PATH"   # add this line to your shell profile too
 
 > With stampede: add a /health endpoint with a test, have a reviewer on another model check it, then open a draft PR.
 
-```mermaid
-flowchart LR
-    ask(["Your ask"]) --> lead["Lead (Claude)<br/>writes plan.md"]
-    lead -- "only when they pay" --> panes["Panes<br/>Claude, Codex or Cursor"]
-    panes -- "reports, by hooks" --> lead
-    lead -- "your gates" --> phone(["Your phone<br/>your own tap"])
-    phone --> lead
-    lead --> pr(["Draft PR"])
-```
-
 **Limits.**
 - macOS only. No Linux run has been tried.
 - The lead is Claude. Workers can be Claude, Codex or Cursor.
@@ -66,7 +76,7 @@ The full install, with every prerequisite: [Install](#install). A whole job, com
 
 ## What is stampede?
 
-You ask once, in plain words: in a Herdr chat, Claude or Codex desktop, Cursor, or a bot such as Grok Bot. stampede starts **one lead agent** for the job. The lead writes a short plan and starts working at once. It brings in another agent, in its own Herdr pane, only when that agent earns its place: work that runs in parallel, a different model, one reviewer, or the same task many times over. Workers report through hooks, so nobody polls. Your questions and gates reach your phone, and nothing that matters happens without your own tap.
+stampede lets you run Claude Code remotely: you ask once, in plain words, in Grok Bot or another bot, a Herdr chat, Claude or Codex desktop, or Cursor. It is multi-agent orchestration for Claude Code and Codex, three skills and one command, installed by script or as a Herdr plugin. stampede starts **one lead agent** for the job. The lead writes a short plan and starts working at once. It brings in Codex workers, or Claude Code or Cursor ones, each in its own Herdr pane, only when that agent earns its place: work that runs in parallel, a different model, one reviewer, or the same task many times over. Workers report through hooks, so nobody polls. Your questions and gates reach your phone, so you steer Claude Code from your phone, and nothing that matters happens without your own tap.
 
 **Why.** Running many agents by hand means stops between steps, too many small agents, rounds that wait on each other, and a lead that spends its day writing briefs. Real jobs showed all four ([docs/RUNS.md](docs/RUNS.md)). stampede is the lean answer: plan and go, work alone by default, wake on hooks, and ask you only what is yours to decide.
 
@@ -156,7 +166,7 @@ Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 
 
 ## How it works
 
-The flow is the diagram in [Quick start](#quick-start), step by step:
+The flow is the [diagram at the top](#grok-bot-to-claude-code-and-codex), step by step, for any front door:
 
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes the ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name, and steps back.
 2. **One lead plans and goes.** `lead-<slug>` starts on Claude (Opus 5.5 at `xhigh` effort by default) in auto mode, in a `lead` tab. It writes `plan.md` (the tasks, who does each, questions with a safe default, and the gates) and starts work.
