@@ -70,7 +70,7 @@ export PATH="$HOME/.local/bin:$PATH"   # add this line to your shell profile too
 - macOS only. No Linux run has been tried.
 - The lead is Claude. Workers can be Claude, Codex or Cursor.
 - Version 0.1.x, and early: commands and files may still change.
-- For big jobs. A small job needs one plain Claude session ([FAQ](#troubleshoot)).
+- For big jobs. A small job runs as one agent session in a single tagged Herdr pane ([FAQ](#troubleshoot)).
 
 The full install, with every prerequisite: [Install](#install). A whole job, command by command: [the walkthrough](#use-one-job-start-to-finish).
 
@@ -376,7 +376,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/references/failure-modes.md). Startup dialogs: [unattended-setup.md](skills/herdr-fleet/references/unattended-setup.md). Setup problems: [docs/SETUP.md](docs/SETUP.md#setup-problems).
 
 **FAQ**
-- *Do I need stampede for this?* Only for a big job: hours long, more than one agent family, anything that leaves the machine (merge, push, send, spend, publish, deploy), or work that must survive a restart. A small job needs no stampede: run it in one plain Claude session with its built-in subagents. That is also the answer to "why not subagents": for small jobs, use them. The rule: [Size the job first](skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
+- *Do I need stampede for this?* Only for a big job: hours long, more than one agent family, anything that leaves the machine (merge, push, send, spend, publish, deploy), or work that must survive a restart. A small job needs no stampede job: run it as one agent session with its built-in subagents, still inside Herdr in a single tagged pane of its own, so its finish arrives as an event. That is also the answer to "why not subagents": for small jobs, use them. The rule: [Size the job first](skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
 - *Why two names?* `stampede` is the public name of `fleet-job`, its first name; both run the same command.
 - *Can Codex or Cursor lead?* Not yet; the lead is Claude ([roadmap](#status-and-roadmap)).
 - *Can workers run on Gemini, Kimi or the other agents Herdr knows?* Not through `stampede start` yet ([roadmap](#status-and-roadmap)).

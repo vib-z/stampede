@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Small jobs stay in Herdr:** a small job still needs no stampede job, but it runs as one agent session in a single Herdr pane of its own, tagged with `herdr-events-owner` and prompted with `herdr-send`, never as a bare agent CLI call over SSH or nohup outside Herdr. Updated in herdr-fleet, grokbot-herdr, SKILL.md and the README.
+
 ## 0.1.1 (23 Oct 2026)
 
 - **Updating:** `stampede update` fast-forwards a clean checkout on `main` and reruns `install.sh`; it refuses local changes, untracked files, another branch, or an ignored file the update would overwrite, and outside a git checkout names `herdr plugin update`. Once a day, `stampede --version` (on stderr), `stampede update --check` and `herdr-doctor` (a `warn`) say when a newer GitHub release is out; silent offline or on any failure, off with `STAMPEDE_NO_UPDATE_CHECK=1`. The README has an [Updating](README.md#updating) section.
