@@ -64,9 +64,12 @@ def check():
         return 0, ''
 
 
+MANAGED = re.compile(r'/plugins/github-installations/stampede-[^/]+/\d+-\d+/checkout\Z')  # one Herdr plugin checkout
+
+
 def plugin_install():
-    """Herdr's managed checkout keeps .git on a detached HEAD, so its folder says it, not .git; a copy without .git too."""
-    return 'github-installations' in ROOT.parts or not (ROOT / '.git').exists()
+    """Herdr's managed checkout keeps .git on a detached HEAD, so its path says it, not .git; a copy without .git too."""
+    return bool(MANAGED.search(ROOT.as_posix())) or not (ROOT / '.git').exists()
 
 
 def git(*args):

@@ -228,6 +228,14 @@ class Update(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn('run herdr plugin update stampede --yes', out.stdout)
 
+    def test_an_ordinary_clone_under_a_folder_named_github_installations_updates(self):
+        clone = self.dir / 'my-projects/github-installations/ordinary-clone'
+        self.git(self.dir, 'clone', '-q', str(self.origin), str(clone))
+        self.git(clone, 'reset', '-q', '--hard', 'HEAD~1')
+        out = self.update(clone)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn('stampede 0.1.0 -> 0.2.0', out.stdout)
+
     def test_a_herdr_managed_checkout_holding_git_names_herdr_plugin_update(self):
         managed = self.dir / 'plugins/github-installations/stampede-x/1-0/checkout'
         self.git(self.dir, 'clone', '-q', str(self.origin), str(managed))  # Herdr's checkout keeps .git

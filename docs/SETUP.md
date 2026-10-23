@@ -30,7 +30,7 @@ cd ~/stampede
 
 - **Skills:** `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` are linked into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists.
 - **Commands:** `scripts/stampede` (also as `fleet-job`, its first name) and every `skills/grokbot-herdr/scripts/herdr-*` helper are linked into `~/.local/bin`. `stampede --version` prints the version. Put it on your PATH, also for non-interactive SSH shells if a bot will call it.
-- **Safe to re-run:** a link already in place prints `ok`; a link into an older Herdr-managed stampede checkout (`*/herdr/plugins/github-installations/stampede-*/checkout/*`) is moved to this checkout and prints `relinked`; anything else already at that path prints `skip ... left as is` and is never replaced. That keeps your own copy of a skill or helper.
+- **Safe to re-run:** a link already in place prints `ok`. Run from a Herdr-managed checkout (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install is moved to this checkout and prints `relinked`; a clone relinks nothing. Anything else already at that path prints `skip ... left as is` and is never replaced. That keeps your own copy of a skill or helper.
 - **Flags:** `--dry-run` prints `would link` lines and changes nothing; `--from-plugin` is what Herdr's plugin build passes (the same links); `--help`. Exit 0 done, 2 usage.
 - **Never** installs Herdr or an agent CLI. Start each CLI once by hand to sign in.
 
@@ -98,10 +98,13 @@ This is optional for local use and required for a bot that receives job events. 
 
 ## Uninstall
 
-From a stable checkout, remove only the links that point into it, then unlink the plugin if you linked it:
+From a stable checkout, remove only the links that point into it, then unlink the plugin if you linked it. Each link's target is compared with the checkout's path as plain text (`"$M"` is quoted), so no character in a path acts as a pattern:
 
 ```bash
-for d in ~/.local/bin ~/.claude/skills ~/.codex/skills; do [ -d "$d" ] && find "$d" -maxdepth 1 -type l -lname "$(pwd -P)/*" -print -delete; done
+M=$(pwd -P)
+find ~/.local/bin ~/.claude/skills ~/.codex/skills -maxdepth 1 -type l 2>/dev/null | while IFS= read -r l; do
+  t=$(readlink "$l"); [[ "$t" == "$M"/* ]] && rm -v "$l"
+done
 herdr plugin unlink stampede
 ```
 
@@ -109,11 +112,13 @@ For a GitHub-managed install, remove the links that point into Herdr's checkout 
 
 ```bash
 M=$(herdr plugin list --json | jq -r '.result.plugins[]|select(.plugin_id=="stampede").source.managed_path // empty')
-[ -n "$M" ] && for d in ~/.local/bin ~/.claude/skills ~/.codex/skills; do [ -d "$d" ] && find "$d" -maxdepth 1 -type l -lname "$M/*" -print -delete; done
+[ -n "$M" ] && find ~/.local/bin ~/.claude/skills ~/.codex/skills -maxdepth 1 -type l 2>/dev/null | while IFS= read -r l; do
+  t=$(readlink "$l"); [[ "$t" == "$M"/* ]] && rm -v "$l"
+done
 herdr plugin uninstall stampede
 ```
 
-Already uninstalled? Then `herdr plugin list` no longer names the checkout: use `-lname '*/herdr/plugins/github-installations/stampede-*'` in place of `-lname "$M/*"`. Herdr deletes the old checkout (about 31 MB) the next time its server starts. Never remove a real folder or another checkout's links.
+Already uninstalled? Then `herdr plugin list` no longer names the checkout. Find the exact one first with `ls -d ~/.config/herdr/plugins/github-installations/stampede-*/*/checkout`, set `M` to that path (`M=<the path>`), and run the same `find` loop. Never match links by a pattern such as `stampede-*`: another plugin or a backup can share it. Herdr deletes the old checkout (about 31 MB) the next time its server starts. Never remove a real folder or another checkout's links.
 
 If you set up the relay, unload its two launchd jobs and remove only its hook/notify entries before removing its helper links. See [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks) for their labels and commands. Uninstalling the plugin alone does not remove timers, hooks or route files.
 
