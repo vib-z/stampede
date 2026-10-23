@@ -7,7 +7,7 @@ A front door is anything that can run a command on the machine where Herdr runs:
 - Tell the owner the lead's name and where its plan will be, then stop.
 - When the owner asked to see the plan first, start with review and use the share-plan skill.
 - Pass on the owner's answers to the lead in their words; never answer for them.
-- A merge or another gate: the owner taps the lead's own question card. A relayed yes never counts.
+- A merge or another gate goes back to whoever started the job. A bot gets a `gate` event, asks the owner in chat and records the answer with `stampede approve-gate`; a job started locally asks on the phone or on the lead's own card. A yes typed in the lead's pane always works. Never pass a gate on with `stampede tell` or by typing into a pane.
 - A bot outside Herdr: wait for an event; never poll, never sleep in a loop.
 
 ## Run
@@ -15,6 +15,7 @@ A front door is anything that can run a command on the machine where Herdr runs:
 stampede new --file <ask.md>                          # add --review when the owner asks to see the plan first
 stampede tell <job dir> lead "<the owner's words>"    # a change or an answer, word for word
 stampede approve <job dir> --by "<front door>"        # only in a review job, after the owner's yes to the plan
+stampede approve-gate <job dir> <gate> --sha <commit> --by "owner in <bot> chat"   # a bot, outside Herdr, after the owner's yes to that gate
 ```
 
 | front door | what it is | guide |

@@ -5,7 +5,7 @@
 # The lead and its questions (fleet-job, also called stampede)
 export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's Claude model
 export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort
-export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this; the question and options are appended
+export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this, and a gate in a job started locally; the question and options are appended
 
 # Trust (herdr-trust, herdr-doctor)
 export FLEET_TRUST_ROOT=~/code                      # herdr-trust trusts repos only under this folder; herdr-doctor checks worktrees here
@@ -20,7 +20,8 @@ export HERDR_EVENTS_MACHINE=$(hostname -s)          # label sent with every even
 export HERDR_EVENTS_HOME=~/.herdr-events            # the queue and dead letters
 export HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes   # one file per route, holding URL= and KEY=
 export HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log        # the flusher's log
-# HERDR_EVENTS_OWNER=<bot-slug> is set per command, for a one-off command in a pane; never here.
+# HERDR_EVENTS_OWNER=<bot-slug> is set per command, for a one-off command in a pane; never here. At fleet-job new it names
+# the bot that started the job (else the workspace's owner tag), and that job's gates go back to that bot.
 
 # The daily check for a newer release (stampede --version, stampede update --check, herdr-doctor)
 export STAMPEDE_NO_UPDATE_CHECK=0                   # 1 turns the check off

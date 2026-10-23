@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Run Claude Code and Codex on your Mac from Grok Bot.</b><br>
-  One ask starts a Claude Code lead in <a href="https://herdr.dev">Herdr</a>. It adds Codex workers only when they pay, and nothing merges, pushes or sends without your tap on your phone.
+  One ask starts a Claude Code lead in <a href="https://herdr.dev">Herdr</a>. It adds Codex workers only when it's worth it, and nothing merges, pushes or sends without your yes, asked where you started the job.
 </p>
 
 <p align="center">
@@ -38,17 +38,20 @@ flowchart LR
     you(["You, in chat"]) --> bot["Grok Bot"]
     bot -- "SSH over Tailscale" --> mac["Your Mac, always on,<br/>running Herdr"]
     mac --> lead["Claude Code lead"]
-    lead -- "only when they pay" --> workers["Codex and Claude Code<br/>workers, in Herdr panes"]
+    lead -- "only when it's worth it" --> workers["Codex and Claude Code<br/>workers, in Herdr panes"]
     workers -- "reports, by hooks" --> lead
-    lead -- "gate question" --> phone(["Your phone, Moshi"])
-    phone -- "your tap" --> merge(["Draft PR merged"])
+    lead -- "gate question" --> bot
+    bot -- "asks you in chat,<br/>records your yes" --> merge(["Draft PR merged"])
+    lead -. "or Moshi, if you<br/>started it locally" .-> phone(["Your phone"])
+    phone -. "your tap" .-> merge
+    mac -. "or answer in Herdr" .-> merge
     lead -. "result, by webhook" .-> bot
 ```
 
 - **A whole job from one chat message.** Grok Bot starts a Claude Code lead on your Mac; the lead plans the job and does it.
-- **Codex only when it pays.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
+- **Codex only when it's worth it.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
 - **Hooks, not polling.** Workers report to the lead through hooks, and the result reaches Grok Bot by webhook.
-- **Your tap on every merge, push, send, spend or close.** The question reaches your phone through Moshi, and the lead keeps working while it waits.
+- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job: Grok Bot asks you in chat, a job you started on the Mac asks on your phone through Moshi, and a yes typed in Herdr always works. The lead keeps working while it waits.
 
 Cursor workers, other bots and a chat directly in Herdr also work: see [Front doors](#front-doors). The bot is optional; the core runs locally on your Mac.
 
@@ -170,10 +173,10 @@ The flow is the [diagram at the top](#grok-bot-to-claude-code-and-codex), step b
 
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes the ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name, and steps back.
 2. **One lead plans and goes.** `lead-<slug>` starts on Claude (Opus 5.5 at `xhigh` effort by default) in auto mode, in a `lead` tab. It writes `plan.md` (the tasks, who does each, questions with a safe default, and the gates) and starts work.
-3. **A pane only when it pays:** parallel pieces of about 30 minutes or more (at most 4), another model or tool, one reviewer on another model, or the same task many times (6 at once). Each worker gets its own Herdr pane.
+3. **A pane only when it's worth it:** parallel pieces of about 30 minutes or more (at most 4), another model or tool, one reviewer on another model, or the same task many times (6 at once). Each worker gets its own Herdr pane.
 4. **Hooks, not polling.** A worker's report, turn end, question or exit lands as a line in `<job>/inbox.log` (`REPORT`, `TURN`, `QUESTION`, `GONE`), and Claude's file hook wakes the lead.
 5. **Review only what ships**, on another model, at most two rounds.
-6. **Questions and gates reach your phone** through Moshi, and the lead keeps working while it waits. Every gate is your own tap; a yes relayed by another agent never counts.
+6. **Questions reach your phone** through Moshi, and **gates go back to whoever started the job**: a bot gets a `gate` event, asks you in chat and records your answer; a job you started locally asks on your phone. A yes typed in the lead's pane always works. The lead keeps working while it waits, and an agent's own say-so never counts.
 7. **The lead reports back once**, then asks whether to close.
 8. **Workers exit when their work is merged** or accepted. Nothing closes without your yes, and `reopen.sh` brings a closed job back.
 
@@ -194,6 +197,8 @@ inbox.log     REPORT, TURN, QUESTION and GONE lines that wake the lead
 inbox/        messages to each agent, one file per agent
 questions/    a worker's questions, as files for the lead
 asks/         questions out to your phone, while they wait
+owner         the bot that started the job, when one did: its gates go back to it
+gates/        each gate asked (action, PR, commit) and your recorded yes
 agents.tsv    who was started, and how: the reopen record
 approved      the plan's fingerprint, for a --review job
 REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close
@@ -285,7 +290,7 @@ $ stampede ask .herdr-make-hello-txt-with-hi "Keep the file in the repo root?" \
 ASKED 1fecfa0be4dc (the answer goes to the lead inbox; cancel with: fleet-job cancel <job> 1fecfa0be4dc)
 ```
 
-Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging the draft PR) is the lead's own question card, which Moshi puts on your phone. Then the lead writes a short report and asks whether to close the workspace; `<job>/reopen.sh` brings it back later.
+Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging the draft PR) goes back to whoever started the job ([Safety](#safety)); you started this one in Herdr, so it is the lead's own question card or `stampede ask --gate`, on your phone. Then the lead writes a short report and asks whether to close the workspace; `<job>/reopen.sh` brings it back later.
 
 ### Share the plan first
 
@@ -325,7 +330,12 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 
 ## Safety
 
-- **Your own tap, every time:** a merge to main, a push to main or another shared branch, a deploy, publishing, sending email or messages, any spend, and closing panes, tabs or a workspace. A plan, a brief or a relayed yes is never approval. Pushing the job's own work branch and opening a draft PR need no ask.
+- **Your own yes, every time:** a merge to main, a push to main or another shared branch, a deploy, publishing, sending email or messages, any spend, and closing panes, tabs or a workspace. Pushing the job's own work branch and opening a draft PR need no ask.
+- **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`:
+  - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.
+  - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
+  - **either way,** a yes typed in the lead's Herdr pane works.
+- **The recorded yes is for one gate at one commit.** The lead acts only after `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED`, and merges with `--match-head-commit` on that commit; a push after your yes withdraws it, so the gate is asked again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
 - **Auto mode, never no-checks mode, by default:** Claude `--permission-mode auto`, Codex `--approve-for-me`, Cursor `--auto-review`. `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode only when its pane's shell sits in its own linked git worktree, and never the lead.
 - **Plan approval** (only when you asked to see the plan) lets the lead work inside the job's own folder and branch; it is not a gate and covers no merge or spend.
 - **Nothing closes by itself.** The last step is always the question whether to close; no answer is a no.
@@ -342,7 +352,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 |---|---|---|
 | `FLEET_LEAD_MODEL` | Claude Opus 5.5 (its id is in config.example) | the lead's Claude model |
 | `FLEET_LEAD_EFFORT` | `xhigh` | the lead's effort |
-| `FLEET_ASK_CMD` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | what `stampede ask` runs; the options and question are appended |
+| `FLEET_ASK_CMD` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | what `stampede ask` runs, and a gate's question in a job started locally; the options and question are appended |
 | `FLEET_TRUST_ROOT` | `~/code` | `herdr-trust` trusts repos only under it; `herdr-doctor` checks worktrees there |
 | `FLEET_WATCH_INTERVAL` | `30` | seconds between `fleet-watch.sh` passes (a bot outside Herdr) |
 | `FLEET_WATCH_PASSES` | `0` | stop the watch after this many passes; 0 runs until stopped |
@@ -351,6 +361,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
 | `HERDR_EVENTS_ROUTES_DIR` | `~/.config/herdr-events/routes` | one file per route, `URL=` and `KEY=` |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
+| `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
 | `STAMPEDE_NO_UPDATE_CHECK` | `0` | `1` turns off the daily check for a newer release ([Updating](#updating)) |
 | `STAMPEDE_UPDATE_URL` | `https://api.github.com/repos/vib-z/stampede/releases/latest` | where the check reads the latest release; the tests point it at a local file |
 </details>
@@ -394,13 +405,16 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `start <job> <agent> --kind claude\|codex\|cursor --pane <id> --brief <file>` | `--model`, `--effort`, `--report <path>` (repeatable), `--yolo-in <worktree>` | starts a worker in a pane with hooks and auto mode, records it, sends its brief pointer |
 | `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file; another CLI through `herdr-send` |
 | `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background; prints `ASKED <id>` |
+| `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option`: a gate is yes or no | a gate: a `gate` event to the bot that started the job, else your phone; prints `GATE <id>` |
+| `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot records your yes in chat, run outside Herdr; refuses inside Herdr, a local job's gate or another commit |
+| `gate-ok <job> <gate> --sha <commit>` | | the lead's check before it acts: prints `APPROVED ...` only for your recorded yes at that commit |
 | `cancel <job> <id>` | | stops an asked question and its phone card |
 | `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead |
 | `update` | | in a clean git checkout on `main`: `git fetch`, `git merge --ff-only`, then `./install.sh`; refuses local changes, untracked files, another branch, or an ignored file at a path the update adds; outside a git checkout prints `herdr plugin update` |
 | `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 
-**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor, a start before approval, yolo outside a worktree), with the reason on stderr; 1 Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
+**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit), with the reason on stderr; 1 Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
 </details>
 
 <details>

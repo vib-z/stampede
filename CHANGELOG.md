@@ -3,6 +3,8 @@
 ## Unreleased
 
 - **Small jobs stay in Herdr:** a small job still needs no stampede job, but it runs as one agent session in a single Herdr pane of its own, tagged with `herdr-events-owner` and prompted with `herdr-send`, never as a bare agent CLI call over SSH or nohup outside Herdr. Updated in herdr-fleet, grokbot-herdr, SKILL.md and the README.
+- **Gate questions go back to whoever started the job.** `stampede new` records the starting bot (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. `stampede ask --gate --sha <commit> [--pr <n>] "<action>"` sends a `gate` event to that bot, which asks you in chat and records your yes with `stampede approve-gate`; a job started locally asks on your phone through `FLEET_ASK_CMD`, as before. A yes typed in the lead's pane always works. The lead acts on a recorded yes only after `stampede gate-ok` matches it to the gate and the commit; a push after it withdraws it, and `approve-gate` refuses inside Herdr, for a local job and for another commit. The relay sends every gate as its own event.
+- **The README flowchart is a live mermaid block again**, left to right, showing the gate question going back to Grok Bot, Moshi only for a job you started locally, and a yes typed in Herdr. "Only when they pay" is now "only when it's worth it".
 
 ## 0.1.1 (23 Oct 2026)
 

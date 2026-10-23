@@ -8,6 +8,7 @@ The machine tells the bot when an agent is done, stuck or waiting. A webhook tur
 - On the machine, save them as a route file only the owner can read.
 - Send one test event; check the bot got it.
 - Tag every workspace the bot makes, before its agents start.
+- On a `gate` event, ask the owner in chat with its action, PR and commit; run its `approve` command only on their yes to that gate ([events.md](../events.md)).
 
 ## Run
 ```bash

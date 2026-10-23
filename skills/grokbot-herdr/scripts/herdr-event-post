@@ -20,8 +20,8 @@ if ! payload=$(jq -c . <<<"$payload" 2>/dev/null) || [ -z "$payload" ]; then log
 payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENTS_MACHINE:-$(hostname -s)}" '. + {machine:$m, timestamp:$ts}' <<<"$payload")
 summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state//"-")"' <<<"$payload")
 
-# de-dupe identical pane+state within DEDUPE_SECS
-key=$(jq -r '"\(.source//"")|\(.pane//.session_id//"")|\(.state//"")"' <<<"$payload")
+# de-dupe identical pane+state within DEDUPE_SECS; every gate is its own event
+key=$(jq -r '"\(.source//"")|\(.pane//.session_id//"")|\(.state//"")\(if .gate then "|"+.gate else "" end)"' <<<"$payload")
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
 exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
 touch "$DB"
