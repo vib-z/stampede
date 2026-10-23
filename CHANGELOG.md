@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.1 (23 Oct 2026)
+
 - **Updating:** `stampede update` fast-forwards a clean checkout on `main` and reruns `install.sh`; it refuses local changes, untracked files, another branch, or an ignored file the update would overwrite, and outside a git checkout names `herdr plugin update`. Once a day, `stampede --version` (on stderr), `stampede update --check` and `herdr-doctor` (a `warn`) say when a newer GitHub release is out; silent offline or on any failure, off with `STAMPEDE_NO_UPDATE_CHECK=1`. The README has an [Updating](README.md#updating) section.
 - **One version:** `herdr-plugin.toml` now says 0.1.0, like VERSION, and a test keeps them equal. [RELEASING.md](RELEASING.md) says how to cut a release.
 - **One version, wider:** the version test also checks the README badge, the README's `stampede --version` line and the site's install prompt against VERSION.
