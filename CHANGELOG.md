@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+## 0.1.1 (23 Oct 2026)
+
 - **Updating:** `stampede update` fast-forwards a clean checkout on `main` and reruns `install.sh`; it refuses local changes, untracked files, another branch, or an ignored file the update would overwrite, and outside a git checkout names `herdr plugin update`. Once a day, `stampede --version` (on stderr), `stampede update --check` and `herdr-doctor` (a `warn`) say when a newer GitHub release is out; silent offline or on any failure, off with `STAMPEDE_NO_UPDATE_CHECK=1`. The README has an [Updating](README.md#updating) section.
 - **One version:** `herdr-plugin.toml` now says 0.1.0, like VERSION, and a test keeps them equal. [RELEASING.md](RELEASING.md) says how to cut a release.
+- **One version, wider:** the version test also checks the README badge, the README's `stampede --version` line and the site's install prompt against VERSION.
+- **A clean core install:** `herdr-doctor` runs the core checks only and exits 0 on a clean install with Herdr running. The event relay checks run when the relay is installed, or with `herdr-doctor --relay`. Exit 0 ok, 1 a `PROBLEM`, 2 usage.
+- **A short README top and macOS CI:** the README opens with what stampede is, a 3-command install, a first ask, a flow diagram and its limits. CI (`.github/workflows/ci.yml`) runs the tests, the install and `herdr-doctor` against a real Herdr on macOS, on every push and pull request.
 - **Size the job first:** before any workspace, the lead or front door sizes the job on length, agents, risk and durability. A small job needs no stampede (one Claude session with built-in subagents); a big one runs as a stampede job. The rule is in [herdr-fleet](skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big), linked from SKILL.md, grokbot-herdr and the README FAQ.
 - **Site:** the landing page is rebuilt around the film: a frosted header with a theme toggle, the Open gate mark's full run with a red beat and no outlines, one gold Get started that copies the install prompt and says to paste it into your agent, and a short footer. Live at https://vib-z.github.io/stampede/ and https://stampede-xi.vercel.app/.
 

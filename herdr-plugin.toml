@@ -1,6 +1,6 @@
 id = "stampede"
 name = "stampede"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.9.4"
 description = "One ask, a lead agent, and only the panes that pay: Herdr skills that plan and run a job."
 platforms = ["macos"]

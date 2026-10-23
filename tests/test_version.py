@@ -1,5 +1,6 @@
 """The version: one VERSION file, printed by stampede and by fleet-job as install.sh links it, and named by the plugin."""
 import os
+import re
 import subprocess
 import tempfile
 import tomllib
@@ -31,6 +32,18 @@ class Version(unittest.TestCase):
         version = (ROOT / 'VERSION').read_text().strip()
         toml = tomllib.loads((ROOT / 'herdr-plugin.toml').read_text())['version']
         self.assertEqual(toml, version, 'herdr-plugin.toml version differs from VERSION')
+
+    def test_the_readme_and_the_site_name_the_version_file(self):
+        """The README badge, the README's stampede --version line and the site's install prompt (RELEASING.md)."""
+        version = (ROOT / 'VERSION').read_text().strip()
+        readme = (ROOT / 'README.md').read_text()
+        site = (ROOT / 'site/assets/site.js').read_text()
+        for name, text, pattern in (('README badge', readme, r'alt="Version ([^"]+)" src="https://img\.shields\.io/badge/version-\1-'),
+                                    ('README --version line', readme, r'(?m)^stampede --version +# (\S+)$'),
+                                    ('site install prompt', site, r'stampede --version prints (\d+\.\d+\.\d+)')):
+            found = re.search(pattern, text)
+            self.assertIsNotNone(found, name + ' not found (or its alt text and URL differ)')
+            self.assertEqual(found.group(1), version, name + ' differs from VERSION')
 
 
 if __name__ == '__main__':

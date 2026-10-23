@@ -2,7 +2,7 @@
 
 [VERSION](VERSION) is the one source of truth. `stampede --version` prints it, and the daily update check compares it with the latest GitHub release.
 
-1. **Bump the version:** set `VERSION` to the new `X.Y.Z`, and the `version` line in [herdr-plugin.toml](herdr-plugin.toml) to the same (TOML cannot read another file; `tests/test_version.py` fails when the two differ).
+1. **Bump the version:** set `VERSION` to the new `X.Y.Z`, and the same version in the `version` line of [herdr-plugin.toml](herdr-plugin.toml), the README's version badge and `stampede --version` line, and the install prompt in `site/assets/site.js` (none of them can read VERSION; `tests/test_version.py` fails when any differs).
 2. **Move the changelog:** in [CHANGELOG.md](CHANGELOG.md), move the entries under `## Unreleased` to a new `## X.Y.Z (D Mon YYYY)` heading below it, and leave `## Unreleased` empty above. `tests/test_version.py` checks that the heading exists.
 3. **Test:** `python3 -m unittest discover tests` passes.
 4. **Merge to main**, then tag that commit: `git tag vX.Y.Z && git push origin vX.Y.Z`.

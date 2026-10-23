@@ -32,7 +32,7 @@ herdr-event-flush                                    # send what is queued, olde
 
 ## Hooks
 
-These change the agents' own settings, so you add them yourself. `herdr-doctor` checks both.
+These change the agents' own settings, so you add them yourself. `herdr-doctor --relay` checks both.
 
 - **Claude Code,** in `~/.claude/settings.json`, the same command on `Stop`, `StopFailure` and `Notification`:
 

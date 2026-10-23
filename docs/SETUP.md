@@ -1,12 +1,13 @@
 # Set up stampede
 
-The short version is in the [README](../README.md#install). This page adds the details: what the installer does, updating, the one-time settings, the event relay for a remote bot, uninstalling, and setup problems.
+The short version is in the [README](../README.md#install). This page adds the details: what the installer does, updating, the one-time settings, the optional event relay for a remote bot, uninstalling, and setup problems.
 
 ## Contents
 - [What you need](#what-you-need)
 - [Install](#install)
-- [Unattended agents](#unattended-agents)
 - [Update](#update)
+- [Health check](#health-check)
+- [Unattended agents](#unattended-agents)
 - [Configure](#configure)
 - [The event relay, for a remote bot](#the-event-relay-for-a-remote-bot)
 - [Uninstall](#uninstall)
@@ -33,11 +34,25 @@ cd ~/stampede
 - **Flags:** `--dry-run` prints `would link` lines and changes nothing; `--from-plugin` is what Herdr's plugin build passes (the same links); `--help`. Exit 0 done, 2 usage.
 - **Never** installs Herdr or an agent CLI. Start each CLI once by hand to sign in.
 
-**The Herdr plugin** is needed only for the event relay to a remote bot. From the checkout: `herdr plugin link .`. Herdr then runs `scripts/herdr-plugin-event` on every agent status change. Check it with `herdr plugin list`.
+**The Herdr plugin** is needed only for the event relay to a remote bot. From the checkout: `herdr plugin link .`. Herdr then runs `scripts/herdr-plugin-event` on every agent status change. Check it with `herdr plugin list`. With no route configured, events are logged locally without sending.
+
+To let Herdr manage the checkout instead, use `herdr plugin install vib-z/stampede` (`--ref <tag>` pins a release; `--yes` accepts the build non-interactively). It runs the same installer. Skills are linked only for agent home folders that already exist. Do not install over a locally linked plugin; unlink it first.
 
 ## Update
 
-From a clone on `main`: `stampede update` (`git fetch`, `git merge --ff-only`, then `./install.sh`; it refuses local changes, untracked files, another branch, or an ignored file the update would overwrite, and then changes nothing). A GitHub plugin install: `herdr plugin update`. The daily check that says when a release is out, and how to turn it off: [README, Updating](../README.md#updating).
+From a clone on `main`: `stampede update` (`git fetch`, `git merge --ff-only`, then `./install.sh`; it refuses local changes, untracked files, another branch, or an ignored file the update would overwrite, and then changes nothing). Existing skill and command links keep pointing at the same checkout. A locally linked plugin updates the same way, with `stampede update` in its checkout; `herdr plugin update` cannot update it. The daily check that says when a release is out, and how to turn it off: [README, Updating](../README.md#updating).
+
+For a GitHub-managed install: `herdr plugin update stampede` (`--yes` for non-interactive use). Herdr keeps the requested ref, so a pinned tag stays pinned. See the [Herdr CLI reference](https://herdr.dev/docs/cli-reference/#plugins) for managed checkout retention. A new installation directory does not replace existing skill or command links: the installer leaves conflicting links alone. Keep a stable checkout when you need links that survive replacement; inspect `herdr plugin list` and the links before deleting an old checkout.
+
+## Health check
+
+Run `herdr-doctor` after installation with the Herdr server already running. It checks `herdr`, `jq`, `git` and `python3`, client/server versions, `stampede --version` against the checkout's `VERSION`, all three skill links for each agent home that exists, owner tags, worktrees and disk. A missing event plugin is a warning for a core install.
+
+The relay is optional for a lead inside Herdr. Its checks run when a routes directory, either relay launchd plist, a Claude relay hook or a Codex relay notify line exists, or whenever you pass `--relay`. The routes key `HERDR_EVENTS_ROUTES_DIR` is respected. Helper scripts or an enabled plugin alone do not mark the relay installed.
+
+With no relay configuration, one line says `ok event relay not installed (optional): herdr-doctor --relay checks it`. Remote bots always run `herdr-doctor --relay`, even before relay setup, so missing hooks, helpers, timers, plugin or routes remain a `PROBLEM`.
+
+Flags: `--relay` forces relay checks; `-h` / `--help` prints usage. Exit 0 means no `PROBLEM`, 1 means at least one `PROBLEM`, 2 means a usage error. Warnings do not change the exit code. The doctor reads state only and never fixes settings or prints route contents.
 
 ## Unattended agents
 
@@ -58,21 +73,25 @@ The full table: [README, Configure](../README.md#configure). `stampede`, the hoo
 
 ## The event relay, for a remote bot
 
-A bot outside Herdr (Grok Bot, or any bot with a webhook) hears when an agent is done or stuck through the relay, so it never polls. Set it up in this order:
+This is optional for local use and required for a bot that receives job events. A bot outside Herdr (Grok Bot, or any bot with a webhook) hears when an agent is done or stuck through the relay, so it never polls. Set it up in this order:
 1. The Herdr plugin (above).
 2. A route file per bot, and the tag on each workspace: [remote/events.md](../remote/events.md).
 3. The Claude Code and Codex hooks that send turn ends: [remote/events.md, Hooks](../remote/events.md#hooks).
 4. The watchdog and the queue flusher, every few minutes: [remote/watchdogs.md](../remote/watchdogs.md).
-5. `herdr-doctor`: every line `ok`.
+5. `herdr-doctor --relay`: no `PROBLEM` lines; read and report warnings.
 
 ## Uninstall
 
-From the checkout, remove only the links that point into it, then the plugin if you linked it:
+From a stable checkout, remove only the links that point into it, then unlink the plugin if you linked it:
 
 ```bash
 for d in ~/.local/bin ~/.claude/skills ~/.codex/skills; do [ -d "$d" ] && find "$d" -maxdepth 1 -type l -lname "$(pwd -P)/*" -print -delete; done
 herdr plugin unlink stampede
 ```
+
+For a GitHub-managed install, inspect `herdr plugin list` and remove only the skill and command symlinks that point into that managed checkout before `herdr plugin uninstall stampede`. Herdr unregisters the plugin; it does not remove those symlinks. Never remove a real folder or another checkout's links. Old managed checkout files may remain until Herdr can safely clean them up.
+
+If you set up the relay, unload its two launchd jobs and remove only its hook/notify entries before removing its helper links. See [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks) for their labels and commands. Uninstalling the plugin alone does not remove timers, hooks or route files.
 
 Job folders (`<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herdr-events/` stay until you remove them yourself.
 
@@ -80,6 +99,9 @@ Job folders (`<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herd
 
 | what you see | fix |
 |---|---|
+| relay `PROBLEM` lines on a local install | a relay signal remains; finish relay setup, or remove only the unused relay configuration you own |
+| `stampede --version does not match VERSION` | inspect PATH and existing links; the installer skips links to another checkout, so remove only stale links you own and re-run it |
+| `~/.claude/skills/... not linked` or `~/.codex/skills/... not linked` | run the installer after the agent home exists; inspect any skipped path before replacing it |
 | `stampede: command not found` | `~/.local/bin` is not on PATH; add it to your shell profile |
 | `skip ... left as is` | something of yours is at that path; remove it if you want stampede's link there, then re-run |
 | `refused: there is no ~/code folder to trust repos under` | the trust root (`FLEET_TRUST_ROOT`, default `~/code`) does not exist; create it or change the key |

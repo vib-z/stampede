@@ -55,6 +55,22 @@ class Install(unittest.TestCase):
         self.assertFalse(own.is_symlink())
         self.assertIn(f'skip {own}', result.stdout)
 
+    def test_codex_and_claude_links_survive_reinstall(self):
+        (self.home / '.codex').mkdir()
+        self.assertEqual(self.run_install('--from-plugin').returncode, 0)
+        links = {self.home / app / 'skills' / skill: ROOT / 'skills' / skill
+                 for app in ('.claude', '.codex') for skill in SKILLS}
+        self.assertEqual(self.run_install('--from-plugin').returncode, 0)
+        for path, target in links.items():
+            self.assertTrue(path.is_symlink())
+            self.assertEqual(path.resolve(), target)
+        before = {str(p.relative_to(self.home)): os.readlink(p) if p.is_symlink() else None
+                  for p in self.home.rglob('*')}
+        self.assertEqual(self.run_install('--dry-run').returncode, 0)
+        after = {str(p.relative_to(self.home)): os.readlink(p) if p.is_symlink() else None
+                 for p in self.home.rglob('*')}
+        self.assertEqual(before, after)
+
     def test_dry_run_changes_nothing_and_bad_flags_are_usage_errors(self):
         result = self.run_install('--dry-run')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -91,6 +107,24 @@ class Install(unittest.TestCase):
         sent = [json.loads(line) for line in posted.read_text().splitlines()]
         self.assertEqual([(e['state'], e['previous_state']) for e in sent], [('idle', 'working'), ('done', 'idle')])
         self.assertEqual((sent[0]['pane'], sent[0]['workspace_label'], sent[0]['source']), ('w1:p1', 'demo', 'herdr'))
+
+    def test_plugin_event_without_relay_logs_only_and_never_sends(self):
+        self.assertEqual(self.run_install().returncode, 0)
+        bin_dir = self.home / '.local/bin'
+        (bin_dir / 'herdr').write_text('#!/bin/bash\necho \'{"result":{"workspaces":[]}}\'\n')
+        (bin_dir / 'curl').write_text('#!/bin/bash\ntouch "$HOME/network-called"\nexit 1\n')
+        for name in ('herdr', 'curl'):
+            (bin_dir / name).chmod(0o755)
+        env = {k: v for k, v in self.env.items() if not k.startswith('HERDR_')}
+        event = {'data': {'pane_id': 'w1:p1', 'workspace_id': 'w1', 'agent_status': 'done'}}
+        env.update(PATH=f'{bin_dir}:/opt/homebrew/bin:/usr/bin:/bin',
+                   HERDR_PLUGIN_EVENT_JSON=json.dumps(event), HERDR_EVENTS_MACHINE='fixture')
+        result = subprocess.run(['bash', str(ROOT / 'scripts/herdr-plugin-event')],
+                                env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('logged-only (no route URL)', (self.home / 'Library/Logs/herdr-events.log').read_text())
+        self.assertFalse((self.home / 'network-called').exists())
+        self.assertFalse((self.home / '.herdr-events/queue').exists())
 
 
 if __name__ == '__main__':
