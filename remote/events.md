@@ -5,8 +5,8 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 ## Do
 - Give each bot a route: a webhook URL and secret, in a file only you can read.
 - Tag each workspace with its bot before its agents start.
-- An untagged workspace, or a bot with no route file, uses the default route; no route file at all means logged only.
-- One message per turn end: the same pane and state inside 120 seconds is sent once.
+- An untagged workspace, or a bot with no route file, uses the default route for its turn events; no route file at all means logged only. A question or a gate (below) goes only through its bot's own route, with `herdr-event-post --strict`: no route of its own (exit 3) or no queue (exit 4) is a refusal the lead sees, and a queued one waits out a route with no URL instead of being dropped. Its lead hears it as one `UNDELIVERED` line in `inbox.log` when it is held, and another if it is still undelivered after 24 h.
+- One message per turn end: the same pane and state inside 120 seconds is sent once. Every gate is its own message.
 - A send that fails waits in a queue; after an outage only each pane's newest event goes.
 - On an event, read that pane once. Never poll.
 
@@ -17,6 +17,7 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 | claude | Stop, StopFailure, Notification | `herdr-event-claude-hook`, a Claude Code hook |
 | codex | agent-turn-complete | `herdr-event-codex-notify`, the Codex `notify` command |
 | herdr-watchdog | stale, dead | `herdr-event-watchdog` ([watchdogs.md](watchdogs.md)) |
+| stampede | question, gate | `stampede ask` and `stampede ask --gate` in a job a bot started: below |
 
 ```bash
 mkdir -p ~/.config/herdr-events/routes
@@ -28,6 +29,8 @@ herdr-event-flush                                    # send what is queued, olde
 ```
 
 - **Payload:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`; from Herdr also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines); from Claude and Codex `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (first 2000 characters).
+- **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`): ask the owner in chat, then run it with their words.
+- **A gate:** `job`, `agent` (the lead), `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and the two answers as commands: `approve` (`stampede approve-gate <job> <gate> --sha <sha> --by "owner in <bot> chat"`) and `deny` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat with the action, PR and commit; run `approve` over SSH only on their yes to that gate, else `deny` with their words. Never type a yes into a pane.
 - **Delivery:** an HTTP POST of the JSON to `URL`, with `Authorization: Bearer <KEY>` when `KEY` is set. URL and KEY are never logged. Queue and dead letters: `HERDR_EVENTS_HOME` (default `~/.herdr-events`). Log: `~/Library/Logs/herdr-events.log`.
 
 ## Hooks

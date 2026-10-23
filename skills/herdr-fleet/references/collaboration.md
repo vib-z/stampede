@@ -95,7 +95,7 @@ Variations that have worked:
   - `GONE <name>` when an agent left its pane. Check whether it finished, crashed or self-updated.
   - `STALL? <name> log idle <N>m` when the status says working but the session log stopped moving.
   - `HERDR_ERROR <msg>` when a herdr call failed (server down, socket gone, PATH). Run `herdr status`; do not trust silence until it is clean.
-- **A per-agent wake-up** is the hooks' job: a `TURN`, `REPORT`, `QUESTION` or `GONE` line in `inbox.log` wakes the lead. Confirm a `TURN` with the report. For Codex rely on the report; it can sit in `unknown` after answering.
+- **A per-agent wake-up** is the hooks' job: a `TURN`, `REPORT`, `QUESTION`, `GONE` or `UNDELIVERED` line in `inbox.log` wakes the lead. Confirm a `TURN` with the report. For Codex rely on the report; it can sit in `unknown` after answering.
 - **A quick look without dumping:** `herdr agent read <name> --source recent-unwrapped --lines 40 | tail -15`.
 - **Never wait for agents** with `sleep N; check`, Monitor or a background `until` loop: end the turn and let the hooks wake you.
 - **A stall** means status `working` with an unchanged session log for 15 minutes or more. Long xhigh or max thinking can go quiet for up to about 15 minutes, so look at the screen before killing anything. The fix is in [failure-modes.md](failure-modes.md).

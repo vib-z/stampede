@@ -1,6 +1,8 @@
 """install.sh and the Herdr plugin, only in temporary HOME directories with fakes (stdlib)."""
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -19,9 +21,18 @@ class Install(unittest.TestCase):
         (self.home / '.claude').mkdir()
         self.env = {**os.environ, 'HOME': str(self.home)}
 
-    def run_install(self, *flags):
-        return subprocess.run(['bash', str(ROOT / 'install.sh'), *flags], env=self.env,
+    def run_install(self, *flags, root=ROOT):
+        return subprocess.run(['bash', str(root / 'install.sh'), *flags], env=self.env,
                               capture_output=True, text=True, timeout=30)
+
+    def managed_checkout(self, n):
+        """A fake Herdr-managed checkout: Herdr gives each plugin install or update a new N-0 folder."""
+        root = self.home / f'.config/herdr/plugins/github-installations/stampede-x/{n}-0/checkout'
+        root.mkdir(parents=True)
+        shutil.copy(ROOT / 'install.sh', root)
+        for part in ('scripts', 'skills'):
+            shutil.copytree(ROOT / part, root / part, ignore=shutil.ignore_patterns('__pycache__'))
+        return root
 
     def test_links_skills_and_commands_and_is_idempotent(self):
         kept = self.home / '.local/bin/herdr-send'
@@ -46,6 +57,87 @@ class Install(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn('linked', again.stdout)
         self.assertIn(f'ok {bin_dir / "stampede"}', again.stdout)
+
+    def test_links_follow_a_new_managed_checkout_and_no_other(self):
+        plugins = self.home / '.config/herdr/plugins/github-installations'
+        bin_dir = self.home / '.local/bin'
+        bin_dir.mkdir(parents=True)
+        own = {  # links of the owner's that only look like stampede's: never moved
+            bin_dir / 'herdr-send': plugins / 'stampede-helper-abc/1-0/checkout/skills/grokbot-herdr/scripts/herdr-send',
+            bin_dir / 'herdr-trust': self.home / 'backup' / plugins.relative_to(self.home) /
+            'stampede-x/1-0/checkout/skills/grokbot-herdr/scripts/herdr-trust',
+            bin_dir / 'herdr-events-owner': plugins / 'stampede-x/1-0/checkout/scripts/owner-tool',
+            bin_dir / 'herdr-reopen-snapshot': self.home / 'my-clone/skills/grokbot-herdr/scripts/herdr-reopen-snapshot',
+        }
+        for link, target in own.items():
+            link.symlink_to(target)
+        first, second = self.managed_checkout(1), self.managed_checkout(2)
+        self.assertEqual(self.run_install(root=first).returncode, 0)
+        shutil.rmtree(first)  # Herdr deletes the old checkout at its next start, so every link dangles
+        stampede = self.home / '.local/bin/stampede'
+        self.assertIn('would relink', self.run_install('--dry-run', root=second).stdout)
+        self.assertEqual(os.readlink(stampede), str(first / 'scripts/stampede'))
+        result = self.run_install(root=second)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'relinked {stampede}', result.stdout)
+        for path, target in [(stampede, 'scripts/stampede'), (self.home / '.local/bin/fleet-job', 'scripts/stampede'),
+                             (self.home / '.local/bin/herdr-doctor', 'skills/grokbot-herdr/scripts/herdr-doctor'),
+                             *((self.home / '.claude/skills' / s, f'skills/{s}') for s in SKILLS)]:
+            self.assertEqual(path.resolve(strict=True), second / target)
+        for link, target in own.items():
+            self.assertEqual(os.readlink(link), str(target))
+            self.assertIn(f'skip {link}: something else is there; left as is', result.stdout)
+
+    def test_a_clone_install_relinks_nothing(self):
+        stampede = self.home / '.local/bin/stampede'
+        stampede.parent.mkdir(parents=True)
+        plugin = self.managed_checkout(1) / 'scripts/stampede'
+        stampede.symlink_to(plugin)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.readlink(stampede), str(plugin))
+        self.assertIn(f'skip {stampede}', result.stdout)
+
+    def uninstall_recipe(self, intro):
+        """The bash block after the paragraph that starts with intro, in docs/SETUP.md's Uninstall section."""
+        text = (ROOT / 'docs/SETUP.md').read_text()
+        rest = text[text.index('## Uninstall'):]
+        return re.search(r'```bash\n(.*?)```', rest[rest.index(intro):], re.S).group(1)
+
+    def test_the_uninstall_recipes_remove_only_links_into_that_checkout(self):
+        shells = [s for s in ('/bin/bash', '/bin/zsh') if os.path.exists(s)]  # zsh: the macOS login shell
+        for intro, kind in (('From a stable checkout', 'unlink'), ('For a GitHub-managed install', 'uninstall')):
+            for shell in shells:
+                with self.subTest(recipe=kind, shell=shell):
+                    home = Path(tempfile.mkdtemp(dir=self.home))
+                    checkout = home / 'plugin[12]/checkout'  # glob characters in the path must stay literal
+                    checkout.mkdir(parents=True)
+                    plugins = home / '.config/herdr/plugins/github-installations'
+                    gone = {home / '.local/bin/stampede': checkout / 'scripts/stampede',
+                            home / '.claude/skills/herdr-fleet': checkout / 'skills/herdr-fleet'}
+                    kept = {home / '.local/bin/my-helper': plugins / 'stampede-helper-abc/1-0/checkout/scripts/tool',
+                            home / '.local/bin/other': home / 'plugin1/checkout/scripts/tool',
+                            home / '.codex/skills/share-plan': home / 'plugin[12]/checkout-old/skills/share-plan'}
+                    for link, target in {**gone, **kept}.items():
+                        link.parent.mkdir(parents=True, exist_ok=True)
+                        link.symlink_to(target)
+                    fake = home / 'fakebin/herdr'
+                    fake.parent.mkdir()
+                    fake.write_text('#!/bin/bash\ncase "$1 $2" in\n'
+                                    '  "plugin list") printf \'{"result":{"plugins":[{"plugin_id":"stampede",'
+                                    '"source":{"managed_path":"%s"}}]}}\' "$TEST_MANAGED";;\n'
+                                    '  *) echo "$*" >> "$HOME/herdr-calls";;\nesac\n')
+                    fake.chmod(0o755)
+                    env = {'HOME': str(home), 'PATH': f'{fake.parent}:/usr/bin:/bin:/opt/homebrew/bin',
+                           'TEST_MANAGED': str(checkout)}
+                    result = subprocess.run([shell, '-c', self.uninstall_recipe(intro)], cwd=checkout, env=env,
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.stderr, '')
+                    for link in gone:
+                        self.assertFalse(os.path.lexists(link), link)
+                    for link, target in kept.items():
+                        self.assertEqual(os.readlink(link), str(target))
+                    self.assertEqual((home / 'herdr-calls').read_text(), f'plugin {kind} stampede\n')
 
     def test_a_real_skill_folder_is_left_alone(self):
         own = self.home / '.claude/skills/herdr-fleet'

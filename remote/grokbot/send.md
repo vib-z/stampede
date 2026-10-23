@@ -8,6 +8,7 @@ Every message to an agent goes through one helper that makes sure it landed.
 - On a failure, read the screen once before any resend.
 - Never send an interrupt to an idle Codex: on an empty prompt it quits.
 - Prompt only agents in the bot's own workspace, never the focused pane.
+- Never type a gate's yes into a pane; the owner's answer to a gate goes only through `stampede approve-gate` ([events.md](../events.md)).
 
 ## Run
 ```bash

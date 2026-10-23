@@ -21,8 +21,9 @@ The owner watches and steers fleets from an iPhone with Moshi (Pro), paired to t
 
 ## What the lead adds
 
-- **Questions for the owner:** use AskUserQuestion. It already reaches the phone; the owner answers there.
-  From a script, a watch loop or a Codex agent, gate on the phone directly:
+- **Questions for the owner, in a job started locally:** use AskUserQuestion. It already reaches the phone; the owner
+  answers there. In a job a bot started (`<job>/owner`), questions and gates go to that bot instead: `fleet-job ask`,
+  with `--gate` for a gate (SKILL.md, The lead, item 6). From a script, a watch loop or a Codex agent in a local job:
 
   ```bash
   moshi-hook ask --require-remote --source herdr-fleet --label "<project> lead" --timeout 2h "Merge build-api into main?"

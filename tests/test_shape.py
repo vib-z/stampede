@@ -204,13 +204,17 @@ class Shape(unittest.TestCase):
         self.assertEqual(bad, [], "\n".join(bad))
 
     def test_front_doors_relay_no_gate(self):
-        """A front door relays plan approval and ordinary answers only; every gate is the owner's own tap on the lead's card."""
+        """A front door relays plan approval and ordinary answers only. A gate is the owner's own tap on the lead's card or phone,
+        or, in a job a bot started, the owner's yes that the bot records with approve-gate (owner, 23 Oct 2026)."""
         relay = re.compile(r"yes (at|to) (a|the) gate|says yes to|pass(es)? (on )?(your|their) yes", re.I)
         bad = [f"{rel(p)}:{i}: relays a gate yes" for p in sorted((ROOT / "remote").rglob("*.md"))
                for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if relay.search(line)]
         for name in ("claude-code.md", "codex.md"):
             if "own tap on the lead's card" not in (ROOT / "remote" / name).read_text(encoding="utf-8"):
                 bad.append(f"remote/{name}: says nothing of the owner's own tap on the lead's card")
+        for name in ("README.md", "events.md", "grokbot/send.md"):
+            if "approve-gate" not in (ROOT / "remote" / name).read_text(encoding="utf-8"):
+                bad.append(f"remote/{name}: says nothing of approve-gate, the only way a bot passes a gate yes")
         self.assertEqual(bad, [], "\n".join(bad))
 
     def test_front_doors_outside_herdr_name_a_target(self):

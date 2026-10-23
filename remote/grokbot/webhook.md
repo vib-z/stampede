@@ -8,6 +8,7 @@ The machine tells the bot when an agent is done, stuck or waiting. A webhook tur
 - On the machine, save them as a route file only the owner can read.
 - Send one test event; check the bot got it.
 - Tag every workspace the bot makes, before its agents start.
+- On a `gate` event, ask the owner in chat with its action, PR and commit; run its `approve` command only on their yes to that gate ([events.md](../events.md)).
 
 ## Run
 ```bash
@@ -18,7 +19,7 @@ herdr-events-owner <workspace id> <route>
 herdr-event-post source=test state=done pane=<pane id>
 ```
 
-- **One routine for many bots:** save it as the route named `default` and have the routine pass each message to the bot named in its `owner` field. A tagged workspace whose bot has no route file of its own uses `default`.
+- **One routine for many bots:** have the routine pass each message to the bot named in its `owner` field, and give every bot a route file of its own with that same URL and secret. A bot with no route file of its own gets its turn events through `default`, but its questions and gates are refused: they never fall back to another bot's route.
 - **What the bot does with a message:** read that pane once, report to the owner in plain words, then wait again. `state` is done, blocked, Stop, StopFailure, agent-turn-complete, stale or dead.
 - **Nothing arrives:** `herdr-doctor` names the broken part. With no route file for the tag and none named `default`, an event is logged only.
 - **The full event model:** [events.md](../events.md). **Never** paste the URL or secret into a chat, a brief or the repo.

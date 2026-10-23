@@ -42,6 +42,19 @@ for app in .claude .codex; do
   done
 done
 
+# a GitHub-managed plugin: Herdr moves each update to a new checkout and deletes the old one at its next start
+managed=$(herdr plugin list --json 2>/dev/null | jq -r '.result.plugins[]? | select(.plugin_id == "stampede") | .source.managed_path // empty' 2>/dev/null)
+if [ -n "$managed" ] && command -v python3 >/dev/null; then
+  top=$(cd "$managed" 2>/dev/null && pwd -P); top=${top:-$managed}
+  outside=""
+  for l in "$(command -v stampede)" "$HOME"/.claude/skills/{herdr-fleet,grokbot-herdr,share-plan} "$HOME"/.codex/skills/{herdr-fleet,grokbot-herdr,share-plan}; do
+    { [ -e "$l" ] || [ -L "$l" ]; } || continue
+    case "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$l")" in "$top"/*) ;; *) outside="$outside ${l/#$HOME/~}";; esac
+  done
+  if [ -n "$outside" ]; then problem "${outside# } not in the plugin checkout $managed: bash $managed/install.sh relinks; it skips a link of your own, so remove that first"
+  else ok "stampede and the skills resolve into the plugin checkout"; fi
+fi
+
 # herdr client and server
 st=$(herdr status 2>&1); status_result=$?
 cv=$(awk '/^client:/{c=1} c && /version:/{print $2; exit}' <<<"$st")
@@ -135,7 +148,8 @@ while IFS= read -r g; do
     fi
   done
 done < <(find "${FLEET_TRUST_ROOT:-$HOME/code}" -maxdepth 3 -name .git -type d 2>/dev/null)
-ok "worktrees under ${FLEET_TRUST_ROOT:-~/code} checked"
+if [ -d "${FLEET_TRUST_ROOT:-$HOME/code}" ]; then ok "worktrees under ${FLEET_TRUST_ROOT:-~/code} checked"
+else warn "no ${FLEET_TRUST_ROOT:-~/code} (FLEET_TRUST_ROOT): create it or set the key before herdr-trust"; fi
 
 # stampede: a newer release is a warn, never a PROBLEM (checked once a day; silent offline or with STAMPEDE_NO_UPDATE_CHECK=1)
 if command -v stampede >/dev/null; then

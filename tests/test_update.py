@@ -162,9 +162,9 @@ class Update(unittest.TestCase):
     def git(self, where, *args):
         subprocess.run(['git', '-C', str(where), *args], env={**os.environ, **GIT_ENV}, check=True, capture_output=True)
 
-    def update(self, where):
-        return subprocess.run([sys.executable, '-I', str(where / 'scripts/stampede_update.py')],
-                              env={**os.environ, **GIT_ENV}, capture_output=True, text=True, timeout=60)
+    def update(self, where, *args, **env):
+        return subprocess.run([sys.executable, '-I', str(where / 'scripts/stampede_update.py'), *args],
+                              env={**os.environ, **GIT_ENV, **env}, capture_output=True, text=True, timeout=60)
 
     def test_a_clean_main_fast_forwards_and_reinstalls(self):
         out = self.update(self.clone)
@@ -226,7 +226,30 @@ class Update(unittest.TestCase):
         shutil.copytree(self.origin, plain, ignore=shutil.ignore_patterns('.git'))
         out = self.update(plain)
         self.assertEqual(out.returncode, 1)
-        self.assertIn('run herdr plugin update', out.stdout)
+        self.assertIn('run herdr plugin update stampede --yes', out.stdout)
+
+    def test_an_ordinary_clone_under_a_folder_named_github_installations_updates(self):
+        clone = self.dir / 'my-projects/github-installations/ordinary-clone'
+        self.git(self.dir, 'clone', '-q', str(self.origin), str(clone))
+        self.git(clone, 'reset', '-q', '--hard', 'HEAD~1')
+        out = self.update(clone)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn('stampede 0.1.0 -> 0.2.0', out.stdout)
+
+    def test_a_herdr_managed_checkout_holding_git_names_herdr_plugin_update(self):
+        managed = self.dir / 'plugins/github-installations/stampede-x/1-0/checkout'
+        self.git(self.dir, 'clone', '-q', str(self.origin), str(managed))  # Herdr's checkout keeps .git
+        self.git(managed, 'reset', '-q', '--hard', 'HEAD~1')  # behind, so a git update would move it
+        out = self.update(managed)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn('is a Herdr plugin install: run herdr plugin update stampede --yes', out.stdout)
+        self.assertEqual((managed / 'VERSION').read_text(), '0.1.0\n')
+        reply = self.dir / 'reply.json'
+        reply.write_text('{"tag_name": "v99.0.0"}')
+        env = {'XDG_CACHE_HOME': str(self.dir / 'cache'), 'STAMPEDE_UPDATE_URL': reply.as_uri(), 'STAMPEDE_NO_UPDATE_CHECK': '0'}
+        out = self.update(managed, '--check', **env)
+        self.assertEqual((out.returncode, out.stdout),
+                         (1, 'stampede 99.0.0 is out, this is 0.1.0: run herdr plugin update stampede --yes\n'))
 
 
 if __name__ == '__main__':

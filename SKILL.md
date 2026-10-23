@@ -1,11 +1,11 @@
 ---
 name: stampede
-description: One ask starts a Herdr job run by a lead agent that opens panes only when they pay. Use when asked to use stampede, run a job with agents in Herdr, start a lead for an ask, or show the plan before a job starts.
+description: One ask starts a Herdr job run by a lead agent that opens panes only when it's worth it. Use when asked to use stampede, run a job with agents in Herdr, start a lead for an ask, or show the plan before a job starts.
 ---
 
 # stampede
 
-One ask, one lead, and only the panes that pay. The lead plans in `plan.md`, works, and brings the owner only the questions and gates that are theirs.
+The Grok Bot is the inlet on top: it spins up a team of local agents on the owner's Mac over Tailscale, and every update and question goes back through it (it works without a bot too). One ask, one lead, and a pane only when it's worth it. The lead plans in `plan.md`, works, and brings the owner only the questions and gates that are theirs.
 
 - **Running the job** (the lead, or a chat that will open panes): read [skills/herdr-fleet/SKILL.md](skills/herdr-fleet/SKILL.md).
 - **A bot front door** (outside Herdr, over SSH): read [skills/grokbot-herdr/SKILL.md](skills/grokbot-herdr/SKILL.md).

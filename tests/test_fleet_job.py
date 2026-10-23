@@ -1,5 +1,5 @@
 """fleet-job: messages, background questions, approval and hooks, all with fakes."""
-import json, os, stat, subprocess, sys, tempfile, time, unittest
+import json, os, shlex, stat, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -496,3 +496,302 @@ class StampedeReview1(unittest.TestCase):
             self.assertNotRegex(text, r'herdr agent prompt \S+ "You are', name)   # an unhooked start, then the brief by hand
         self.assertNotIn('Monitor tool', (refs / 'worked-example.md').read_text())
         self.assertNotIn('herdr agent start review-', (refs / 'agents-and-models.md').read_text())   # the takeover starts hooked too
+
+
+class Gates(unittest.TestCase):
+    """Gate questions go back to whoever started the job; only the owner's recorded yes, at that commit, opens one."""
+    SHA = 'a' * 40
+
+    def setUp(self):
+        from unittest import mock
+        self.home = Path(tempfile.mkdtemp())
+        routes = self.home / 'routes'
+        routes.mkdir()
+        (routes / 'alpha').write_text('URL=http://127.0.0.1:9/never\n')  # queued only: no flusher in this HOME
+        env = {'HOME': str(self.home), 'HERDR_EVENTS_ROUTES_DIR': str(routes), 'HERDR_EVENTS_HOME': str(self.home / 'events'),
+               'HERDR_EVENTS_OWNER': '', 'HERDR_WORKSPACE_ID': 'w9', 'HERDR_PANE_ID': 'w9:p1'}
+        patch = mock.patch.dict(os.environ, env)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.job = job_with([('lead-demo', 'claude')])
+
+    def bot_job(self):
+        (self.job / 'owner').write_text('alpha\n')
+        return self.job
+
+    def quiet(self, call, *args):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            call(*args)
+        return out.getvalue()
+
+    def gate_ids(self):
+        return sorted(p.stem for p in (self.job / 'gates').glob('*.json'))
+
+    def approve(self, ident, sha):
+        from unittest import mock
+        with mock.patch.object(fj, 'inside_herdr', return_value=False):
+            return self.quiet(fj.approve_gate, self.job, ident, sha, 'owner in Grok Bot chat')
+
+    def test_new_records_the_bot_that_started_the_job(self):
+        tag = self.home / '.config/herdr-events/owners/w9'
+        tag.parent.mkdir(parents=True)
+        cases = [({'HERDR_EVENTS_OWNER': 'alpha'}, 'alpha'), ({}, ''), ({'TAG': 'owner=alpha\n'}, 'alpha')]
+        for env, owner in cases:
+            if 'TAG' in env:
+                tag.write_text(env.pop('TAG'))
+            _, job, _ = Fixes.run_new(self, 'idle', env)
+            brief = (job / 'briefs/lead-fix-login-bug.md').read_text()
+            self.assertEqual((job / 'owner').read_text().strip() if (job / 'owner').exists() else '', owner)
+            self.assertIn('gate-ok', brief)
+            self.assertIn('goes back to alpha' if owner else 'your own question card', brief)
+
+    def test_a_bot_started_gate_posts_a_gate_event(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)  # a second gate at once is its own event
+        queued = [json.loads(p.read_text()) for p in sorted((self.home / 'events/queue').glob('*.json'))]
+        self.assertEqual(len(queued), 2)
+        event = next(q['payload'] for q in queued if q['payload']['pr'] == 12)
+        self.assertEqual(queued[0]['route'], 'alpha')
+        self.assertEqual((event['source'], event['state'], event['owner']), ('stampede', 'gate', 'alpha'))
+        self.assertEqual((event['action'], event['sha'], event['options']), ('Merge PR #12 into main', self.SHA, ['yes', 'no']))
+        self.assertIn(event['gate'], self.gate_ids())
+        self.assertIn('approve-gate ' + str(self.job.absolute()) + ' ' + event['gate'] + ' --sha ' + self.SHA, event['approve'])
+        self.assertFalse((self.job / 'asks').exists(), 'a bot-started gate never puts a card on the phone')
+        self.assertNotIn('pane', event)  # the flusher keeps only a pane's newest event; a gate must never be dropped
+        self.assertEqual(event['lead_pane'], 'w9:p1')
+
+    def test_a_queued_gate_survives_a_later_turn_end_from_the_lead_pane(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)
+        tag = self.home / '.config/herdr-events/owners/w9'  # the bot tagged the workspace, so the lead's turn ends go to it too
+        tag.parent.mkdir(parents=True)
+        tag.write_text('owner=alpha\n')
+        post = ROOT / 'skills/grokbot-herdr/scripts/herdr-event-post'
+        subprocess.run([str(post), 'source=claude', 'state=Stop', 'pane=w9:p1'], check=True)
+        queue = self.home / 'events/queue'
+        self.assertEqual(len(list(queue.glob('*.json'))), 3)
+        subprocess.run([str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], check=True, timeout=30)  # the route is down
+        states = sorted(json.loads(p.read_text())['payload']['state'] for p in queue.glob('*.json'))
+        self.assertEqual(states, ['Stop', 'gate', 'gate'])
+
+    def test_a_question_in_a_bot_started_job_goes_to_the_bot(self):
+        self.bot_job()
+        self.quiet(fj.ask, self.job, 'Keep the file in the repo root?', ['Yes', 'No'])
+        self.quiet(fj.ask, self.job, 'And the second one?', [])  # a second question at once is its own event
+        events = [json.loads(p.read_text())['payload'] for p in sorted((self.home / 'events/queue').glob('*.json'))]
+        self.assertEqual([e['state'] for e in events], ['question', 'question'])
+        first = next(e for e in events if e['options'])
+        self.assertEqual((first['owner'], first['question'], first['options']), ('alpha', 'Keep the file in the repo root?', ['Yes', 'No']))
+        self.assertIn('tell ' + str(self.job.absolute()) + ' lead', first['answer'])
+        self.assertFalse((self.job / 'asks').exists(), 'no phone card in a bot-started job')
+        with self.assertRaises(ValueError):
+            fj.cancel(self.job, first['ask'])  # nothing to cancel on the phone: one plain refusal
+
+    def test_the_owners_yes_is_recorded_and_matched_to_the_commit(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        ident = self.gate_ids()[0]
+        with self.assertRaises(PermissionError):
+            fj.gate_ok(self.job, ident, self.SHA)  # nothing recorded yet
+        self.approve(ident, self.SHA)
+        self.assertIn('APPROVED ' + ident + ' by owner in Grok Bot chat', self.quiet(fj.gate_ok, self.job, ident, self.SHA))
+        self.assertIn('GATE ' + ident + ' APPROVED by owner in Grok Bot chat', (self.job / 'inbox/lead-demo.md').read_text())
+
+    def test_a_stale_commit_is_refused(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        ident = self.gate_ids()[0]
+        with self.assertRaises(PermissionError):
+            self.approve(ident, 'b' * 40)  # the bot's yes was for another commit
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+        self.approve(ident, self.SHA)
+        with self.assertRaises(PermissionError):
+            fj.gate_ok(self.job, ident, 'c' * 40)  # a push after the yes withdraws it
+        with self.assertRaises(ValueError):
+            fj.ask_gate(self.job, 'Merge', 'abc123')  # a short sha could match more than one commit
+
+    def test_an_agents_own_yes_is_refused(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        ident = self.gate_ids()[0]
+        with self.assertRaises(PermissionError):  # HERDR_PANE_ID is set: a command from a Herdr pane
+            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('HERDR_')}
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'approve-gate', str(self.job), ident, '--sha', self.SHA, '--by', 'me'],
+                                env={**env, 'HERDR_ENV': '1'}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("an agent's own say-so never counts", result.stderr)
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+        fake = Path(tempfile.mkdtemp()) / 'herdr'  # a process named herdr and its child: a pane's tree, HERDR_* stripped
+        fake.symlink_to('/bin/bash')
+        server = subprocess.Popen([str(fake), '-c', 'sleep 30; true'], stderr=subprocess.DEVNULL)
+        self.addCleanup(server.wait)
+        self.addCleanup(server.kill)
+        deadline = time.time() + 10
+        while not subprocess.run(['pgrep', '-P', str(server.pid)], capture_output=True, text=True).stdout.strip():
+            self.assertLess(time.time(), deadline, 'the fake server never started its child')
+            time.sleep(0.05)
+        child = int(subprocess.run(['pgrep', '-P', str(server.pid)], capture_output=True, text=True).stdout.split()[0])
+        self.addCleanup(lambda: subprocess.run(['kill', str(child)], capture_output=True))
+        self.assertTrue(fj.inside_herdr({}, child))
+        self.assertFalse(fj.inside_herdr({}, 1))
+
+    def test_a_local_gate_refuses_approve_gate_and_ignores_a_swapped_command(self):
+        from unittest import mock
+        with mock.patch.object(fj, 'ask_background'):
+            self.quiet(fj.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
+        ident = self.gate_ids()[0]
+        with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
+            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
+        no = Asks.fake_ask(self, 'exit 1')
+        yes = Asks.fake_ask(self, 'echo yes')
+        with mock.patch.object(fj, 'ASK_CMD', no):
+            fj.ask_now(self.job, 'Gate?', [], yes, ident)  # a hidden _ask with its own --command never opens a gate
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+
+    def test_a_local_job_asks_fleet_ask_cmd(self):
+        args = Path(tempfile.mkdtemp()) / 'args'
+        fake = Asks.fake_ask(self, 'printf "%s\\n" "$@" > ' + str(args) + '; echo yes')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('HERDR_')}
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'ask', str(self.job), '--gate', '--sha', self.SHA, '--pr', '3',
+                                 'Merge PR #3 into main'], env={**env, 'FLEET_ASK_CMD': fake}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        ident = self.gate_ids()[0]
+        deadline = time.time() + 10
+        while not (self.job / 'gates' / (ident + '.approved')).exists():
+            self.assertLess(time.time(), deadline, 'the local gate never recorded the yes')
+            time.sleep(0.05)
+        self.assertIn('Gate ' + ident + ': Merge PR #3 into main (PR #3) at ' + self.SHA[:12] + '?', args.read_text())
+        self.assertIn('by owner, through fake-ask', self.quiet(fj.gate_ok, self.job, ident, self.SHA))
+        refused = subprocess.run([str(SCRIPTS / 'fleet-job'), 'ask', str(self.job), '--gate', '--sha', self.SHA, '--option', 'a',
+                                  '--option', 'b', 'Merge'], env=env, capture_output=True, text=True)
+        self.assertEqual(refused.returncode, 2)
+
+    # review-codex, round 1
+
+    def test_p1_a_hidden_ask_asks_the_gates_own_question_and_never_a_bot_gate(self):
+        from unittest import mock
+        with mock.patch.object(fj, 'ask_background'):
+            self.quiet(fj.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
+        ident = self.gate_ids()[0]
+        args = Path(tempfile.mkdtemp()) / 'args'
+        fake = Asks.fake_ask(self, 'printf "%s\\n" "$@" > ' + str(args) + '; echo yes')
+        with mock.patch.object(fj, 'ASK_CMD', fake):
+            fj.ask_now(self.job, 'Continue the read-only review?', ['Sure'], None, ident)
+        self.assertIn('Gate ' + ident + ': Merge PR #3 into main (PR #3) at', args.read_text())
+        self.assertNotIn('read-only review', args.read_text())
+        self.assertNotIn('Sure', args.read_text())
+        (self.job / 'gates' / (ident + '.json')).write_text(json.dumps({**fj.load_gate(self.job, ident), 'route': 'alpha'}))
+        args.unlink()
+        with mock.patch.object(fj, 'ASK_CMD', fake), self.assertRaises(PermissionError):
+            fj.ask_now(self.job, 'Merge?', [], None, ident)  # a bot's gate never goes to the phone
+        self.assertFalse(args.exists())
+
+    def test_p1_a_gate_changed_while_asked_is_not_recorded(self):
+        from unittest import mock
+        with mock.patch.object(fj, 'ask_background'):
+            self.quiet(fj.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
+        ident = self.gate_ids()[0]
+        record = self.job / 'gates' / (ident + '.json')
+        swap = json.dumps({**fj.load_gate(self.job, ident), 'action': 'Deploy to production'})
+        fake = Asks.fake_ask(self, "printf '%s' " + shlex.quote(swap) + ' > ' + str(record) + '; echo yes')
+        with mock.patch.object(fj, 'ASK_CMD', fake):
+            fj.ask_now(self.job, '', [], None, ident)
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+        self.assertIn('GATE NOT RECORDED', (self.job / 'inbox/lead-demo.md').read_text())
+
+    def test_p1_no_route_for_the_bot_is_a_refusal_not_a_lost_gate(self):
+        self.bot_job()
+        (self.home / 'routes/alpha').unlink()
+        (self.home / 'routes/default').write_text('URL=http://127.0.0.1:9/another-bot\n')  # never a fallback
+        with self.assertRaises(ValueError):
+            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+        with self.assertRaises(ValueError):
+            fj.ask(self.job, 'Keep it?', [])
+        self.assertFalse((self.job / 'gates').exists() and any((self.job / 'gates').iterdir()))
+        self.assertFalse((self.home / 'events/queue').exists() and any((self.home / 'events/queue').iterdir()))
+
+    def test_p2_gate_ok_needs_the_record_of_that_very_gate(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(fj.ask_gate, self.job, 'Send a draft to the owner', self.SHA)
+        first, second = self.gate_ids()
+        self.approve(first, self.SHA)
+        (self.job / 'gates' / (second + '.approved')).write_text((self.job / 'gates' / (first + '.approved')).read_text())
+        with self.assertRaises(PermissionError):
+            fj.gate_ok(self.job, second, self.SHA)
+
+    def test_p2_a_malformed_starter_is_refused_before_any_job_exists(self):
+        tag = self.home / '.config/herdr-events/owners/w9'
+        tag.parent.mkdir(parents=True)
+        tag.write_text('owner=alpha\n')
+        for env, bad_tag in (({'HERDR_EVENTS_OWNER': 'Alpha'}, None), ({}, 'owner=../escape\n')):
+            if bad_tag:
+                tag.write_text(bad_tag)
+            with self.assertRaises(ValueError):
+                Fixes.run_new(self, 'idle', env)
+
+    # review-codex, round 2
+    def test_r2_a_queued_gate_waits_out_a_route_that_loses_its_url(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (self.home / 'routes/alpha').unlink()  # the owner rotates the route while the gate waits
+        subprocess.run([str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], check=True, timeout=30)
+        self.assertEqual([json.loads(p.read_text())['payload']['state'] for p in (self.home / 'events/queue').glob('*.json')], ['gate'])
+
+    # review-codex, round 3
+    def test_r3_a_held_or_expired_question_or_gate_tells_its_lead_once(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(fj.ask, self.job, 'Keep it?', [])
+        (self.home / 'routes/alpha').unlink()
+        flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
+        for _ in range(2):  # every flush holds them; the lead hears it once
+            subprocess.run(flush, check=True, timeout=30)
+        told = (self.job / 'inbox.log').read_text().splitlines()
+        self.assertEqual(sorted(line.split()[1] for line in told), ['gate', 'question'])
+        self.assertTrue(all(line.startswith('UNDELIVERED ') and 'held' in line and 'for alpha' in line for line in told))
+        curl = self.home / '.local/bin/curl'  # the route comes back: both go out, the lead hears nothing more
+        curl.parent.mkdir(parents=True)
+        curl.write_text('#!/bin/sh\ncat >/dev/null; printf 200\n')
+        curl.chmod(0o755)
+        (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        subprocess.run(flush, check=True, timeout=30)
+        self.assertEqual((list(queue.glob('*.json')), list((self.home / 'events/held').iterdir())), ([], []))
+        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)
+        (self.home / 'routes/alpha').unlink()
+        subprocess.run(flush, check=True, timeout=30)
+        for path in queue.glob('*.json'):
+            os.utime(path, (time.time() - 86460,) * 2)
+        subprocess.run(flush, check=True, timeout=30)
+        last = (self.job / 'inbox.log').read_text().splitlines()[-1]
+        self.assertTrue(last.startswith('UNDELIVERED gate ') and 'after 24 h' in last, last)
+        self.assertEqual(len(list((self.home / 'events/dead').glob('*.json'))), 1)
+
+    def test_r2_a_route_with_no_effective_url_or_no_queue_is_a_refusal(self):
+        self.bot_job()
+        (self.home / 'routes/alpha').write_text('URL="" # disabled during route rotation\n')
+        with self.assertRaises(ValueError):
+            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        blocked = self.home / 'not-a-folder'
+        blocked.write_text('a file where the queue should be')
+        from unittest import mock
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_HOME': str(blocked)}), self.assertRaises(ValueError):
+            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_HOME': str(blocked)}), self.assertRaises(ValueError):
+            fj.ask(self.job, 'Keep it?', [])
+        self.assertEqual(self.gate_ids(), [], 'a gate its bot never hears is taken back')
+
+    def test_r2_each_answer_names_its_question(self):
+        self.bot_job()
+        self.quiet(fj.ask, self.job, 'Keep the first file?', ['Yes', 'No'])
+        self.quiet(fj.ask, self.job, 'Keep the second file?', ['Yes', 'No'])
+        events = [json.loads(p.read_text())['payload'] for p in (self.home / 'events/queue').glob('*.json')]
+        for event in events:
+            self.assertIn('ANSWER ' + event['ask'] + ' ' + event['question'] + ': ', event['answer'])
+        self.assertEqual(len({event['answer'] for event in events}), 2)
