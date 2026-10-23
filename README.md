@@ -1,9 +1,17 @@
 <h1 align="center">stampede</h1>
 
-<p align="center">
-  <b>One ask to Grok Bot, and stampede runs the whole job with Claude Code and Codex on your Mac.</b><br>
-  It starts and ends with the bot: a Claude Code lead in <a href="https://herdr.dev">Herdr</a> does the work, and every update and gate question comes back through the bot. Recommended for everyone, not required: stampede also runs straight from Claude, Codex or any agent.
-</p>
+**The Grok Bot is the inlet on top.** You get a Grok Bot, and it spins up a team of local agents on your own laptop or Mac, over Tailscale on a private network, using the agent connectors you already have on that machine (Claude Code, Codex, Cursor):
+
+1. You talk to Grok, in your Tesla or anywhere else.
+2. Grok talks to your stampede Grok Bot.
+3. The bot hands the job to the Claude Code lead on your laptop, in [Herdr](https://herdr.dev).
+4. The lead orchestrates the other agents to do the job.
+5. The lead reports back to the bot, and the bot reports back to you.
+
+- **The lead is the valve below the bot.** It directs all the work as it sees fit and passes each agent only the context it needs. Splitting the job across more agents is optional and depends on how big the job is.
+- **Each bot owns its own Herdr workspace** for what it is working on, with its own tabs and panes, so you can watch every agent.
+- **All the communication goes through the bot,** to your local Mac and your local agents: updates come back by webhook, and the bot asks you in chat when a question or a gate needs your yes.
+- **Recommended for everyone, not required.** stampede is designed and tested with Grok Bot, and that is the best setup. It also runs straight from Claude, Codex or whatever agent you use ([Without a bot](#without-a-bot)).
 
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
@@ -31,14 +39,9 @@
 
 ---
 
-## With Grok Bot (recommended)
+## How it flows
 
-stampede starts with Grok Bot and ends with Grok Bot. You send one ask from your phone, and all the communication goes through the bot to your local Mac and your local agents:
-- **Grok Bot is the inlet, on top.** It reaches your Mac, always on, over SSH on Tailscale, starts the job in Herdr, hears back by webhook instead of polling, and asks you in chat when a question or a gate needs you.
-- **Each bot owns its own Herdr workspace** for what it is working on, with its own tabs and panes, so you can watch every agent.
-- **The lead is the valve below it.** It directs all the work as it sees fit and passes each worker only the context it needs. Splitting the job into workers is optional and depends on how big the job is.
-
-This is the setup we recommend for everyone: stampede is designed and tested this way.
+Started from Grok Bot, the setup we recommend:
 
 ```mermaid
 flowchart LR
@@ -57,7 +60,7 @@ flowchart LR
 
 ## Without a bot
 
-It is not required. stampede works fully on its own with Herdr, Claude Code and this repo: start a job straight from Claude, Codex, Cursor or any agent, or from a Claude pane in Herdr ([Front doors](#front-doors)). Gate questions then reach your phone through Moshi, if you use it, or you answer in Herdr.
+stampede works fully on its own with Herdr, Claude Code and this repo: start a job straight from Claude, Codex, Cursor or any agent, or from a Claude pane in Herdr ([Front doors](#front-doors)). Gate questions then reach your phone through Moshi, if you use it, or you answer in Herdr.
 
 Either way:
 - **One ask, one lead.** A Claude Code lead plans the job and does it.
@@ -181,7 +184,7 @@ Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 
 
 ## How it works
 
-The flow is the [diagram at the top](#with-grok-bot-recommended), step by step, for any front door:
+The flow is the [diagram at the top](#how-it-flows), step by step, for any front door:
 
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes the ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name, and steps back.
 2. **One lead plans and goes.** `lead-<slug>` starts on Claude (Opus 5.5 at `xhigh` effort by default) in auto mode, in a `lead` tab. It writes `plan.md` (the tasks, who does each, questions with a safe default, and the gates) and starts work.
