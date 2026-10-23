@@ -1,0 +1,31 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: tests
+        run: python3 -m unittest discover tests
+      - name: install, dry run
+        run: ./install.sh --dry-run
+      - name: install
+        run: mkdir -p ~/.claude && ./install.sh
+      - name: Herdr and jq
+        run: brew install herdr jq
+      - name: start the Herdr server
+        run: |
+          nohup herdr server > "$RUNNER_TEMP/herdr.log" 2>&1 &
+          for _ in $(seq 30); do
+            herdr status 2>/dev/null | grep -q 'status: running' && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/herdr.log"
+          exit 1
+      - name: herdr-doctor, core checks
+        run: PATH="$HOME/.local/bin:$PATH" herdr-doctor
+      - name: stop the Herdr server
+        if: always()
+        run: herdr server stop || true

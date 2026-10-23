@@ -2,20 +2,17 @@
 
 <p align="center">
   <b>One ask. One lead. Only the agents that pay.</b><br>
-  A lead agent plans your job, does the work, and opens a <a href="https://herdr.dev">Herdr</a> pane for another agent only when that pane pays for itself.<br>
+  stampede is three skills and one command for Claude Code. A lead agent plans your job, does the work, and opens a <a href="https://herdr.dev">Herdr</a> pane for another agent only when that pane pays for itself.<br>
   Every merge, push, send, spend and close waits for your own tap.
 </p>
 
 <p align="center">
+  <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
   <a href="CHANGELOG.md"><img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-black"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black"></a>
   <a href="https://github.com/vib-z/stampede/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/vib-z/stampede?style=flat&color=black&label=stars"></a>
   <a href="https://herdr.dev"><img alt="Herdr 0.9.4 or later" src="https://img.shields.io/badge/Herdr-0.9.4%2B-black"></a>
   <img alt="Python 3.9 or later" src="https://img.shields.io/badge/python-3.9%2B-black">
-</p>
-
-<p align="center">
-  <img src="assets/teaser.gif" alt="The stampede teaser: horses charge at the camera, turn into terminal glyphs, then into a pile of agent windows, with the lines One AI agent at a time is slow, and A dozen at once is chaos." width="480">
 </p>
 
 <p align="center">
@@ -34,6 +31,38 @@
   The site: <a href="https://vib-z.github.io/stampede/">vib-z.github.io/stampede</a></p>
 
 ---
+
+## Quick start
+
+On a Mac with [Herdr](https://herdr.dev/docs/install/) 0.9.4 or later, Claude Code signed in, Python 3.9 or later, git, jq and curl:
+
+```bash
+git clone https://github.com/vib-z/stampede.git ~/stampede
+~/stampede/install.sh
+export PATH="$HOME/.local/bin:$PATH"   # add this line to your shell profile too
+```
+
+**Your first ask.** Run `herdr-trust ~/code/my-app` once for your repo, open it in Herdr, start Claude in a pane, and type:
+
+> With stampede: add a /health endpoint with a test, have a reviewer on another model check it, then open a draft PR.
+
+```mermaid
+flowchart LR
+    ask(["Your ask"]) --> lead["Lead (Claude)<br/>writes plan.md"]
+    lead -- "only when they pay" --> panes["Panes<br/>Claude, Codex or Cursor"]
+    panes -- "reports, by hooks" --> lead
+    lead -- "your gates" --> phone(["Your phone<br/>your own tap"])
+    phone --> lead
+    lead --> pr(["Draft PR"])
+```
+
+**Limits.**
+- macOS only. No Linux run has been tried.
+- The lead is Claude. Workers can be Claude, Codex or Cursor.
+- Version 0.1.x, and early: commands and files may still change.
+- For big jobs. A small job needs one plain Claude session ([FAQ](#troubleshoot)).
+
+The full install, with every prerequisite: [Install](#install). A whole job, command by command: [the walkthrough](#use-one-job-start-to-finish).
 
 ## What is stampede?
 
@@ -117,20 +146,17 @@ Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 
 
 ![The build tab of a fleet in Herdr: four panes side by side. build-steps-plan and build-steps-run are Claude Code agents that have just finished; build-scripts and build-app are Codex agents still working.](docs/images/fleet-build-tab.png)
 
-<sub>Real, drawn: the <code>build</code> tab of the fleet that built stampede's first version, drawn from each pane's own screen text (<code>herdr agent read</code>), personal paths replaced with <code>~</code>, 18 Oct 2026. A lean job opens fewer panes; each looks the same. The teaser at the top is from the launch film, 17 Oct 2026.</sub>
+<sub>Real, drawn: the <code>build</code> tab of the fleet that built stampede's first version, drawn from each pane's own screen text (<code>herdr agent read</code>), personal paths replaced with <code>~</code>, 18 Oct 2026. A lean job opens fewer panes; each looks the same.</sub>
+
+<p align="center">
+  <img src="assets/teaser.gif" alt="The stampede teaser: horses charge at the camera, turn into terminal glyphs, then into a pile of agent windows, with the lines One AI agent at a time is slow, and A dozen at once is chaos." width="480">
+</p>
+
+<sub>The teaser, from the launch film, 17 Oct 2026.</sub>
 
 ## How it works
 
-```mermaid
-flowchart LR
-    you(["You"]) -- "one ask" --> door["Front door<br/>Herdr chat, Claude, Codex,<br/>Cursor or Grok Bot"]
-    door -- "stampede new" --> lead["Lead (Claude)<br/>plans and goes"]
-    lead -- "stampede start,<br/>only when it pays" --> workers["Workers<br/>Claude, Codex or Cursor"]
-    workers -- "reports, via hooks" --> lead
-    lead -- "stampede ask" --> phone(["Your phone<br/>Moshi"])
-    phone -- "your tap" --> lead
-    lead -- "one report" --> you
-```
+The flow is the diagram in [Quick start](#quick-start), step by step:
 
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes the ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name, and steps back.
 2. **One lead plans and goes.** `lead-<slug>` starts on Claude (Opus 5.5 at `xhigh` effort by default) in auto mode, in a `lead` tab. It writes `plan.md` (the tasks, who does each, questions with a safe default, and the gates) and starts work.
@@ -178,7 +204,7 @@ REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close
 | [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.33 | questions on your phone, optional |
 | [Tailscale](https://tailscale.com/kb/1017/install) | 1.104.1 | a bot on another computer, optional |
 
-**Quick start**, on a Mac with Herdr, Claude Code (signed in), Python 3 and git:
+**Step by step**, on a Mac with Herdr, Claude Code (signed in), Python 3 and git:
 
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede
@@ -330,7 +356,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `fleet-job start: pane ...'s shell is in ..., not ...` | `--yolo-in` needs the pane's shell in that worktree; use auto mode or `cd` the pane first |
 | `FileExistsError` from `stampede new` | a job of that name exists; pass `--name <new slug>` |
 | `fleet-job new: new needs --workspace or --pane, or run it inside Herdr` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([SKILL.md](SKILL.md#front-door)) |
-| a bot gets no events | `herdr-doctor` names the broken part; see [remote/events.md](remote/events.md) |
+| `PROBLEM` from `herdr-doctor` | the line names the broken part and its fix. Plain `herdr-doctor` checks the core install only; the event relay's checks run when the relay is installed, or with `--relay` |
+| a bot gets no events | `herdr-doctor --relay` names the broken part; see [remote/events.md](remote/events.md) |
 | `refused: ... has local changes or untracked files`, `... is on <branch>, not main` or `... the update adds <path>, already in ...` from `stampede update` | commit, stash or move the files it names, or `git switch main`, then rerun; it never overwrites a file of yours |
 | no update line, though a release is out | the check runs at most once a day and is silent offline: delete `~/.cache/stampede/latest-release` to check now, and see that `STAMPEDE_NO_UPDATE_CHECK` is not `1` |
 
@@ -375,7 +402,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 | `herdr-send <agent> <text>` | prompts an agent and confirms it started: `SUBMITTED` or `FAILED`; refuses a pane you have focused before any key | 0, 1 failed, 2 usage |
 | `herdr-reopen-snapshot <ws> <job dir>` | reads the live workspace (read only) and writes `REOPEN.md` and `reopen.sh` in the job folder: the tabs holding the job's agents (from `agents.tsv`), never another's agent | 0, or 1 with the reason |
 | `<job>/reopen.sh` | recreates the workspace and resumes each agent's session; `--fresh` new sessions, `--prompt` re-sends the briefs, `--into <ws>` adds to an open workspace | 0, 2 a workspace with that label is open, 3 a pane's folder is gone, 4 a tab did not open, 64 usage |
-| `herdr-doctor` | read-only health check: `ok`, `warn`, `PROBLEM` lines; a newer stampede release is a `warn` | 0, or 1 on a PROBLEM |
+| `herdr-doctor [--relay]` | read-only health check: `ok`, `warn`, `PROBLEM` lines. The core install by default; the event relay too when it is installed, or with `--relay`. A newer stampede release is a `warn` | 0 ok, 1 a PROBLEM, 2 usage |
 | `herdr-events-owner <ws> [<bot>\|--clear]` | tags a workspace with the bot its events go to | 0, or 2 refused |
 | `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md) | 0 |
 </details>
@@ -386,7 +413,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 ```text
 README.md  CHANGELOG.md  CONTRIBUTING.md  RELEASING.md  SECURITY.md  LICENSE  VERSION
 AGENTS.md  CLAUDE.md  SKILL.md  config.example  install.sh  herdr-plugin.toml
-.github/                issue and pull request templates
+.github/                issue and pull request templates, workflows/ci.yml (macOS CI)
 skills/herdr-fleet/     the job: SKILL.md, references/, scripts/fleet-job, fleet_job.py, fleet-watch.sh
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor, the relay)
 skills/share-plan/      the plan review, on request
@@ -421,7 +448,7 @@ tests/                  python3 -m unittest discover tests
 
 How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The rules every change follows: [AGENTS.md](AGENTS.md).
 
-- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr).
+- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr). [CI](.github/workflows/ci.yml) runs them on macOS on every push and pull request, then a real install and `herdr-doctor` against Homebrew Herdr.
 - **The three skills are copies** of the maintainer's own skills, scrubbed of anything personal. A pull request that changes `skills/` is welcome; the maintainer carries it to the source first, then copies it back here.
 - **A front door:** a guide in `remote/` that writes the ask and runs `stampede new`, linked from [Front doors](#front-doors).
 - **An agent CLI:** its auto and no-checks flags in `AUTO` and `YOLO`, and its hooks in `cli_args`, in [fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), with a test in `tests/test_fleet_job.py`.
@@ -431,6 +458,8 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 **0.1.0, 22 Oct 2026. Works and tested:** the job folder, the lead's start with its hooks, starting workers on Claude, Codex or Cursor, the review lock and approval, background questions and cancel, the wake on every rewritten report, the yolo guard, the install, `--version` and the plugin event, all with fakes. Every command in this README was run against a scratch job.
 
 **Unreleased, 22 Oct 2026. Updating:** `stampede update` and `stampede update --check`, the daily release check in `--version` and `herdr-doctor`, and a test that keeps `herdr-plugin.toml` at VERSION. Tested with a local reply file, a fake rate-limited server and scratch git repos, and run once against the live GitHub API.
+
+**Unreleased, 23 Oct 2026. A clean first install:** plain `herdr-doctor` checks the core install, and the event relay only when it is installed or with `--relay`; the README opens with a short path; CI on macOS runs the tests, a real install and `herdr-doctor` against Homebrew Herdr on every push and pull request.
 
 **Site and brand, 22 Oct 2026:** the hero (PR #16), the brand kit (PR #20) and the landing page around the film (PR #3) are done. The site is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 
