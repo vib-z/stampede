@@ -13,7 +13,7 @@ One ask, one lead, and only the panes that pay. The lead plans in `plan.md`, wor
 
 ## Front door
 
-First size the job ([herdr-fleet, "Size the job first"](skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big)). A small job needs no stampede: run it in one plain Claude session with built-in subagents. Only a big job goes on:
+First size the job ([herdr-fleet, "Size the job first"](skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big)). A small job needs no stampede job: run it as one agent session with built-in subagents in a single tagged Herdr pane, never as a bare agent CLI call outside Herdr. Only a big job goes on:
 
 Write the owner's ask, word for word, to a file, then start the lead and step back:
 
