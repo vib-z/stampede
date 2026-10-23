@@ -189,7 +189,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes the ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name, and steps back.
 2. **One lead plans and goes.** `lead-<slug>` starts on Claude (Opus 5.5 at `xhigh` effort by default) in auto mode, in a `lead` tab. It writes `plan.md` (the tasks, who does each, questions with a safe default, and the gates) and starts work.
 3. **A pane only when it's worth it:** parallel pieces of about 30 minutes or more (at most 4), another model or tool, one reviewer on another model, or the same task many times (6 at once). Each worker gets its own Herdr pane.
-4. **Hooks, not polling.** A worker's report, turn end, question or exit lands as a line in `<job>/inbox.log` (`REPORT`, `TURN`, `QUESTION`, `GONE`), and Claude's file hook wakes the lead.
+4. **Hooks, not polling.** A worker's report, turn end, question or exit lands as a line in `<job>/inbox.log` (`REPORT`, `TURN`, `QUESTION`, `GONE`, and `UNDELIVERED` for a question or gate its bot has not heard), and Claude's file hook wakes the lead.
 5. **Review only what ships**, on another model, at most two rounds.
 6. **Questions and gates go back to whoever started the job**: a bot gets a `question` or `gate` event, asks you in chat and passes your answer back (a gate's yes recorded with `approve-gate`); a job you started locally asks on your phone through Moshi. A yes typed in the lead's pane always works. The lead keeps working while it waits, and an agent's own say-so never counts.
 7. **The lead reports back once**, then asks whether to close.
@@ -208,7 +208,7 @@ lead          the lead's name
 plan.md       the lead's plan
 briefs/       one brief per agent, the lead's first
 hooks/        each agent's hook settings and wake state
-inbox.log     REPORT, TURN, QUESTION and GONE lines that wake the lead
+inbox.log     REPORT, TURN, QUESTION, GONE and UNDELIVERED lines that wake the lead
 inbox/        messages to each agent, one file per agent
 questions/    a worker's questions, as files for the lead
 asks/         questions out to your phone, while they wait
@@ -418,6 +418,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `PROBLEM` from `herdr-doctor` | the line names the broken part and its fix. Plain `herdr-doctor` checks the core install only; the event relay's checks run when the relay is installed, or with `--relay` |
 | a bot gets no events | `herdr-doctor --relay` names the broken part; see [remote/events.md](remote/events.md) |
 | `fleet-job ask: the relay did not queue this for <bot>` | a job that bot started asks it by its own route only, never the default route: add `~/.config/herdr-events/routes/<bot>` with a `URL=` (the same webhook as `default` is fine) and check the queue folder with `herdr-doctor --relay` ([remote/events.md](remote/events.md)); meanwhile answer in the lead's pane |
+| `UNDELIVERED gate <id> for <bot> held: route <bot> has no URL` in `inbox.log` | the gate or question is queued, but its bot's route lost its URL: put the `URL=` back in `~/.config/herdr-events/routes/<bot>` and the flusher sends it within 2 minutes. After 24 h it moves to `dead/` (a second `UNDELIVERED` line says so): ask again, or ask the owner in the lead's pane |
 | `fleet-job gate-ok: gate ... was approved for <sha>, not <sha>` | a push came after the yes: ask the gate again at the new commit |
 | `fleet-job approve-gate: approve-gate runs only outside Herdr` | it is the starting bot's command, over SSH; inside Herdr, type yes in the lead's pane instead |
 | relay `PROBLEM` lines on a Mac without a bot | a routes folder, a relay launch agent or a relay hook is left over, so the relay counts as installed: finish its setup ([remote/events.md](remote/events.md)) or remove what you no longer use |

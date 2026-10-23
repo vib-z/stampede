@@ -743,6 +743,35 @@ class Gates(unittest.TestCase):
         subprocess.run([str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], check=True, timeout=30)
         self.assertEqual([json.loads(p.read_text())['payload']['state'] for p in (self.home / 'events/queue').glob('*.json')], ['gate'])
 
+    # review-codex, round 3
+    def test_r3_a_held_or_expired_question_or_gate_tells_its_lead_once(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(fj.ask, self.job, 'Keep it?', [])
+        (self.home / 'routes/alpha').unlink()
+        flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
+        for _ in range(2):  # every flush holds them; the lead hears it once
+            subprocess.run(flush, check=True, timeout=30)
+        told = (self.job / 'inbox.log').read_text().splitlines()
+        self.assertEqual(sorted(line.split()[1] for line in told), ['gate', 'question'])
+        self.assertTrue(all(line.startswith('UNDELIVERED ') and 'held' in line and 'for alpha' in line for line in told))
+        curl = self.home / '.local/bin/curl'  # the route comes back: both go out, the lead hears nothing more
+        curl.parent.mkdir(parents=True)
+        curl.write_text('#!/bin/sh\ncat >/dev/null; printf 200\n')
+        curl.chmod(0o755)
+        (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        subprocess.run(flush, check=True, timeout=30)
+        self.assertEqual((list(queue.glob('*.json')), list((self.home / 'events/held').iterdir())), ([], []))
+        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)
+        (self.home / 'routes/alpha').unlink()
+        subprocess.run(flush, check=True, timeout=30)
+        for path in queue.glob('*.json'):
+            os.utime(path, (time.time() - 86460,) * 2)
+        subprocess.run(flush, check=True, timeout=30)
+        last = (self.job / 'inbox.log').read_text().splitlines()[-1]
+        self.assertTrue(last.startswith('UNDELIVERED gate ') and 'after 24 h' in last, last)
+        self.assertEqual(len(list((self.home / 'events/dead').glob('*.json'))), 1)
+
     def test_r2_a_route_with_no_effective_url_or_no_queue_is_a_refusal(self):
         self.bot_job()
         (self.home / 'routes/alpha').write_text('URL="" # disabled during route rotation\n')
