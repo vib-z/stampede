@@ -2,6 +2,8 @@
 # herdr-event-post: relay a JSON event to the Grok Bot webhook routine.
 # Usage: echo '{"source":"x","pane":"w1:p1","state":"done"}' | herdr-event-post
 #    or: herdr-event-post '{"...json..."}'   or: herdr-event-post key=value ...
+#    --strict first (stampede's questions and gates): only the owner's own route, never default; no de-dupe;
+#    exit 3 when that route has no URL, 4 when the queue write fails, 0 only once the event is queued.
 # Routes: $HERDR_EVENTS_ROUTES_DIR (default ~/.config/herdr-events/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 LOG="$HOME/Library/Logs/herdr-events.log"
@@ -10,13 +12,15 @@ DEDUPE_SECS=120
 mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 log(){ printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG"; }
 
+STRICT=0; [ "${1:-}" = --strict ] && { STRICT=1; shift; }
+refuse(){ log "refused (strict): $2"; echo "herdr-event-post: $2" >&2; exit "$1"; }
 if [ "$#" -eq 0 ]; then payload=$(cat)
 elif [ "$#" -eq 1 ] && printf '%s' "$1" | jq -e . >/dev/null 2>&1; then payload=$1
 else
   payload='{}'
   for kv in "$@"; do payload=$(jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" '.[$k]=$v' <<<"$payload"); done
 fi
-if ! payload=$(jq -c . <<<"$payload" 2>/dev/null) || [ -z "$payload" ]; then log "skip: invalid json"; exit 0; fi
+if ! payload=$(jq -c . <<<"$payload" 2>/dev/null) || [ -z "$payload" ]; then [ "$STRICT" = 1 ] && refuse 2 "invalid json"; log "skip: invalid json"; exit 0; fi
 payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENTS_MACHINE:-$(hostname -s)}" '. + {machine:$m, timestamp:$ts}' <<<"$payload")
 summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state//"-")"' <<<"$payload")
 
@@ -26,7 +30,7 @@ DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
 exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
 touch "$DB"
 seen(){ awk -F'\t' -v k="$1" -v n="$now" -v w="$2" '$1==k && n-$2<w {f=1} END{exit !f}' "$DB"; }
-if seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summary"; exit 0; fi
+if [ "$STRICT" = 0 ] && seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summary"; exit 0; fi
 # One event per turn: herdr done/idle, claude Stop and codex agent-turn-complete report the same turn end within
 # a second or two. Keep the first per pane for TURN_SECS. Claude's idle_prompt Notification comes 60 s after a turn
 # end and only repeats it, so drop it when that pane's turn end went out in the last IDLE_SECS.
@@ -55,17 +59,18 @@ if [ -z "$ws" ]; then  # cwd match against herdr agents
 fi
 if [ -z "$owner" ] && [ -n "$ws" ] && [ -r "$D/owners/$ws" ]; then owner=$(sed -n 's/^owner=//p' "$D/owners/$ws" | head -1); fi
 route="default"; if [ -n "$owner" ] && [ -r "$RD/$owner" ]; then route="$owner"; fi
+if [ "$STRICT" = 1 ] && { [ -z "$owner" ] || [ "$route" != "$owner" ]; }; then refuse 3 "no route of its own for owner ${owner:-(none)} in $RD"; fi
 payload=$(jq -c --arg o "${owner:-}" --arg w "$ws" --arg r "$route" '. + {owner:(if $o=="" then null else $o end), route:$r} + (if (.workspace//"")=="" and $w!="" then {workspace:$w} else {} end)' <<<"$payload")
 summary="$summary owner=${owner:--} route=$route"
 URL=""; KEY=""
 [ -r "$RD/$route" ] && . "$RD/$route"
-if [ -z "$URL" ]; then echo "$(date +%Y-%m-%dT%H:%M:%S%z) logged-only (no route URL):$summary" >> "$LOG"; exit 0; fi
+if [ -z "$URL" ]; then [ "$STRICT" = 1 ] && refuse 3 "route $route has no URL"; echo "$(date +%Y-%m-%dT%H:%M:%S%z) logged-only (no route URL):$summary" >> "$LOG"; exit 0; fi
 unset URL KEY
 # durable queue: write atomically, then flush (fast path). Queue holds route name only, never URL/KEY.
-QH="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"; mkdir -p "$QH/queue"
+QH="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"; mkdir -p "$QH/queue" 2>/dev/null || { [ "$STRICT" = 1 ] && refuse 4 "cannot make $QH/queue"; }
 qname="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.json"
 if jq -c --arg r "$route" '{route:$r, payload:.}' <<<"$payload" >"$QH/queue/.tmp-$qname" && mv "$QH/queue/.tmp-$qname" "$QH/queue/$qname"; then
   log "queued $qname: $summary"
-else rm -f "$QH/queue/.tmp-$qname"; log "queue-write-failed: $summary"; exit 0; fi
+else rm -f "$QH/queue/.tmp-$qname"; [ "$STRICT" = 1 ] && refuse 4 "queue write failed"; log "queue-write-failed: $summary"; exit 0; fi
 "$HOME/.local/bin/herdr-event-flush" </dev/null >/dev/null 2>&1
 exit 0

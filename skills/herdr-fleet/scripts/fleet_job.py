@@ -136,25 +136,19 @@ def starter(workspace):
     return owner
 
 
-def bot_route(owner):
-    """The bot's own route, with a URL. Without it the relay falls back to the default route (another bot's, perhaps)
-    or only logs the event, and the bot never hears the question or the gate."""
-    route = Path(os.environ.get('HERDR_EVENTS_ROUTES_DIR') or Path.home() / '.config/herdr-events/routes') / owner
-    rows = route.read_text().splitlines() if route.is_file() else []
-    if not any(row.startswith('URL=') and row[4:].strip(' \'"') for row in rows):
-        raise ValueError(f'no route with a URL for {owner} ({route}), so the bot would never hear this: '
-                         'fix the route (herdr-doctor --relay), or ask the owner in your own pane')
-
-
 def post_event(job, owner, fields):
-    """One event to the bot that started the job, through the relay. No `pane`: the flusher keeps only a pane's newest
-    event after an outage, and a question or a gate must never be dropped for a later turn end."""
-    bot_route(owner)
+    """One event to the bot that started the job, queued by the relay in strict mode: only the bot's own route with a
+    URL (never the default route, perhaps another bot's), or a refusal. No `pane`: the flusher keeps only a pane's
+    newest event after an outage, and a question or a gate must never be dropped for a later turn end."""
     event = {'source': 'stampede', 'owner': owner, 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields}
     for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID')):
         if os.environ.get(name):
             event[key] = os.environ[name]
-    subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), json.dumps(event)], check=True)
+    result = subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), '--strict', json.dumps(event)],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(f'the relay did not queue this for {owner} ({line(result.stderr) or "exit " + str(result.returncode)}), '
+                         'so the bot would never hear it: fix its route (herdr-doctor --relay), or ask the owner in your own pane')
 
 
 def ask(job, question, options):
@@ -165,7 +159,8 @@ def ask(job, question, options):
         return ask_background(job, question, options)
     ident = uuid.uuid4().hex[:12]
     post_event(job, owner, {'state': 'question', 'ask': ident, 'question': line(question), 'options': options,
-                            'answer': shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead', "<the owner's words>"])})
+                            'answer': shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead',
+                                                  f"ANSWER {ident} {line(question)}: <the owner's words>"])})
     print(f'ASKED {ident} sent to {owner}, which asks the owner in chat; the answer comes to your inbox')
     return ident
 
@@ -177,8 +172,6 @@ def ask_gate(job, action, sha, pr=None):
     if not SHA.fullmatch(sha):
         raise ValueError('--sha takes the full commit id the gate is about (git rev-parse HEAD)')
     owner = job_owner(job)
-    if owner:
-        bot_route(owner)  # before the gate exists: no gate is recorded that cannot reach its bot
     ident = uuid.uuid4().hex[:12]
     gate = {'gate': ident, 'action': line(action), 'pr': pr, 'sha': sha, 'route': owner or 'local',
             'asked': datetime.now().strftime('%Y-%m-%d %H:%M')}
@@ -188,9 +181,13 @@ def ask_gate(job, action, sha, pr=None):
     if not owner:
         ask_background(job, gate_question(gate), [], gate=ident)
         return print(f'GATE {ident} on the phone; act after {check} prints APPROVED, or on the owner\'s yes typed in your pane')
-    post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
-                            'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--by', 'owner in ' + owner + ' chat']),
-                            'deny': shlex.join(['fleet-job', 'tell', str(job), 'lead', "<the owner's words>"])})
+    try:
+        post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
+                                'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--by', 'owner in ' + owner + ' chat']),
+                                'deny': shlex.join(['fleet-job', 'tell', str(job), 'lead', f"GATE {ident} NO: <the owner's words>"])})
+    except ValueError:
+        (job / 'gates' / (ident + '.json')).unlink()  # a gate its bot never hears is no gate
+        raise
     print(f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED, '
           'or on the owner\'s yes typed in your pane')
 

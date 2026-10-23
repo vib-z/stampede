@@ -39,7 +39,10 @@ while :; do
     if [ -z "$route" ] || ! jq -e .payload "$f" >/dev/null 2>&1; then mv "$f" "$DEAD/"; log "dead (bad file): $name"; continue; fi
     URL=""; KEY=""
     [ -r "$ROUTES/$route" ] && . "$ROUTES/$route"
-    if [ -z "$URL" ]; then rm -f "$f"; log "dropped (route $route has no URL): $name"; continue; fi
+    if [ -z "$URL" ]; then  # a stampede question or gate waits for its route to come back (24 h, then dead/)
+      if jq -e '.payload.source == "stampede" and (.payload.state == "gate" or .payload.state == "question")' "$f" >/dev/null 2>&1; then
+        log "held (route $route has no URL): $name"; continue; fi
+      rm -f "$f"; log "dropped (route $route has no URL): $name"; continue; fi
     hdr=(); [ -n "$KEY" ] && hdr=(-H "Authorization: Bearer $KEY")
     code=$(jq -c .payload "$f" | curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 \
       -X POST "$URL" -H 'Content-Type: application/json' "${hdr[@]}" --data-binary @- 2>/dev/null)

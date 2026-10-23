@@ -5,7 +5,7 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 ## Do
 - Give each bot a route: a webhook URL and secret, in a file only you can read.
 - Tag each workspace with its bot before its agents start.
-- An untagged workspace, or a bot with no route file, uses the default route; no route file at all means logged only.
+- An untagged workspace, or a bot with no route file, uses the default route for its turn events; no route file at all means logged only. A question or a gate (below) goes only through its bot's own route, with `herdr-event-post --strict`: no route of its own (exit 3) or no queue (exit 4) is a refusal the lead sees, and a queued one waits out a route with no URL instead of being dropped.
 - One message per turn end: the same pane and state inside 120 seconds is sent once. Every gate is its own message.
 - A send that fails waits in a queue; after an outage only each pane's newest event goes.
 - On an event, read that pane once. Never poll.

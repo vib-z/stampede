@@ -734,3 +734,35 @@ class Gates(unittest.TestCase):
                 tag.write_text(bad_tag)
             with self.assertRaises(ValueError):
                 Fixes.run_new(self, 'idle', env)
+
+    # review-codex, round 2
+    def test_r2_a_queued_gate_waits_out_a_route_that_loses_its_url(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (self.home / 'routes/alpha').unlink()  # the owner rotates the route while the gate waits
+        subprocess.run([str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], check=True, timeout=30)
+        self.assertEqual([json.loads(p.read_text())['payload']['state'] for p in (self.home / 'events/queue').glob('*.json')], ['gate'])
+
+    def test_r2_a_route_with_no_effective_url_or_no_queue_is_a_refusal(self):
+        self.bot_job()
+        (self.home / 'routes/alpha').write_text('URL="" # disabled during route rotation\n')
+        with self.assertRaises(ValueError):
+            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        blocked = self.home / 'not-a-folder'
+        blocked.write_text('a file where the queue should be')
+        from unittest import mock
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_HOME': str(blocked)}), self.assertRaises(ValueError):
+            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_HOME': str(blocked)}), self.assertRaises(ValueError):
+            fj.ask(self.job, 'Keep it?', [])
+        self.assertEqual(self.gate_ids(), [], 'a gate its bot never hears is taken back')
+
+    def test_r2_each_answer_names_its_question(self):
+        self.bot_job()
+        self.quiet(fj.ask, self.job, 'Keep the first file?', ['Yes', 'No'])
+        self.quiet(fj.ask, self.job, 'Keep the second file?', ['Yes', 'No'])
+        events = [json.loads(p.read_text())['payload'] for p in (self.home / 'events/queue').glob('*.json')]
+        for event in events:
+            self.assertIn('ANSWER ' + event['ask'] + ' ' + event['question'] + ': ', event['answer'])
+        self.assertEqual(len({event['answer'] for event in events}), 2)
