@@ -17,17 +17,27 @@ echo ".herdr-alerts/" >> "$(git -C "$REPO" rev-parse --git-common-dir)/info/excl
 
 In `$WT/alerts`, the lead writes the contract (`src/lib/alerts/types.ts`, stub files, one validation test) and commits it. Then it writes:
 - `$B/_common.md`: the ownership rules from [collaboration.md](collaboration.md), the dev-server ports (api 3151, ui 3152) and project facts.
-- `$B/build-api.md` and `$B/build-ui.md`, shaped like this:
+- `$B/build-api.md` and `$B/build-ui.md`, on the [hand-off template](brief.md), shaped like this:
 
 ```markdown
 # Brief: build-api
+## Goal
+Build the alert rules API and hourly evaluator, as specified in the contract.
+## Why
+You build the server half of the alerts feature; a separate worker builds the UI. Your lead committed the shared contract so both halves agree.
+## Inputs
 Read /abs/path/.herdr-alerts/_common.md first.
-Worktree: /abs/path/.claude/worktrees/alerts-api, branch alerts/api. Commit only to this branch.
-Goal: the alert rules API and the hourly evaluator, as specified in the contract.
-You own: src/app/api/alerts/**, src/lib/alerts/server.ts, tests/alerts-api.test.ts
-Contract: src/lib/alerts/types.ts. Do not change it; propose changes in your report.
-Checks: npx vitest run tests/alerts-api.test.ts
-Report: /abs/path/.herdr-alerts/reports/build-api.md
+Worktree: /abs/path/.claude/worktrees/alerts-api, branch alerts/api, starting commit <contract commit>.
+You own, under that worktree: src/app/api/alerts/**, src/lib/alerts/server.ts, tests/alerts-api.test.ts.
+Read its src/lib/alerts/types.ts contract.
+## Constraints
+Follow _common.md. Commit only to alerts/api. Do not change the contract; propose changes in your report.
+## Done when
+- `npx vitest run tests/alerts-api.test.ts` passes and the API and hourly evaluator match the contract.
+## Report back
+Write /abs/path/.herdr-alerts/reports/build-api.md last, under 60 lines: Status: DONE in the first 10 lines, what changed, files touched, unverified and decisions.
+## If blocked
+Your lead decides: write /abs/path/.herdr-alerts/questions/build-api.md, say so in your last message and end your turn. Make the reasonable call where you can and record it.
 ```
 
 - `$B/register.md`: a roster table (agent, kind, model and effort, pane, worktree, port, status) and a "next step" line.
@@ -86,18 +96,19 @@ fleet-job start "$B" review-alerts --kind claude --pane "$PR" --brief "$B/_revie
 herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
 ```
 
-`_review.md` says the reviewer did not build this, and names:
-- the diff (`git diff origin/main...HEAD`);
-- the briefs to check against;
-- the order of checks: correctness, security, data loss, then style;
-- what it may fix (small fixes outside the builders' files) and what it must only report;
-- the report path and its verdict format, with numbered findings `R1..Rn`.
+`_review.md` uses the [hand-off template](brief.md):
+- Goal: independently review the alerts feature; Why: you did not build it and it will ship.
+- Inputs: read `_common.md` first, then the absolute worktree path, branch, starting commit, diff (`git diff origin/main...HEAD`) and builder briefs.
+- Constraints: small fixes outside the builders' files only; report everything else, under the ownership rules.
+- Done when: check correctness, security, data loss, then style, with proof for numbered findings `R1..Rn`.
+- Report back: the absolute report path, under 60 lines, `Status: PASS` or `Status: FINDINGS` in the first 10 lines, files touched, unverified and decisions.
+- If blocked: write the lead's question file, say so and end your turn; make and record reasonable calls.
 
 For a cross-vendor second pass in a plain pane, add `herdr pane run <pane> "codex review --base origin/main"`.
 
 ## 7. Fix round
 
-The lead triages the review into `$B/fixes-api.md` and `$B/fixes-ui.md`. It fast-forwards each builder to the integration branch and prompts them:
+The lead triages the review into `$B/fixes-api.md` and `$B/fixes-ui.md` on the [hand-off template](brief.md), referencing unchanged sections from the original briefs. It fast-forwards each builder to the integration branch and prompts them:
 
 ```bash
 git -C "$WT/alerts-api" merge --ff-only claude/alerts
@@ -109,7 +120,7 @@ herdr agent prompt build-ui "Review round 1: read $B/fixes-ui.md and fix each fi
 When both reports update, the lead:
 1. merges the fixes;
 2. moves the review worktree with `git -C "$WT/alerts-review" checkout --detach claude/alerts`;
-3. sends `herdr agent prompt review-alerts "Round 2: recheck only R1-R5 at $(git -C "$WT/alerts" rev-parse --short HEAD); append to your report."`
+3. updates `_review.md` on the same template to recheck only R1-R5 at the integration commit, then sends `herdr agent prompt review-alerts "Round 2: read $B/_review.md; append to your report."`
 
 Stop at "ship". After two rounds the lead decides.
 

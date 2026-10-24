@@ -18,6 +18,14 @@ def job_with(agents):
     return job
 
 
+def valid_brief(job, agent='build-x', omit=()):
+    brief = job / 'briefs' / (agent + '.md')
+    brief.parent.mkdir(exist_ok=True)
+    brief.write_text('\n'.join('## ' + name + '\nDo the assigned work.\n'
+                              for name in fj.BRIEF_SECTIONS if name not in omit))
+    return brief
+
+
 def fake_herdr(cwd, status='idle', foreground='', start_error=None):
     """foreground: the pane's live shell folder; '' means the same as cwd, None leaves it out.
     start_error: an error code `agent start` answers with (exit 1), as Herdr does."""
@@ -231,6 +239,96 @@ class Start(unittest.TestCase):
         self.assertIn('cursor-stop', (plugin / 'hooks/hooks.json').read_text())
 
 
+class Briefs(unittest.TestCase):
+    def test_missing_sections_refuse_before_hooks_herdr_or_roster_writes(self):
+        import contextlib, io
+        from unittest import mock
+        for kind in ('claude', 'codex', 'cursor'):
+            with self.subTest(kind=kind):
+                job = job_with([('lead-demo', 'claude')])
+                brief = valid_brief(job, omit=('Goal', 'Done when'))
+                before = (job / 'agents.tsv').read_bytes()
+                herdr, log = fake_herdr(job.parent)
+                message = (f'brief {brief} is missing: Goal, Done when; '
+                           'fill them in on skills/herdr-fleet/references/brief.md and start again')
+                argv = ['start', str(job), 'build-x', '--kind', kind, '--pane', 'w9:p3', '--brief', str(brief)]
+                with mock.patch.dict(os.environ, {'HERDR': herdr}):
+                    with self.assertRaises(ValueError) as refused:
+                        fj.start(job, 'build-x', kind, 'w9:p3', brief, yolo_in=job.parent)
+                    self.assertEqual(str(refused.exception), message)
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        self.assertEqual(fj.main(argv), 2)
+                self.assertEqual(stderr.getvalue(), 'fleet-job start: ' + message + '\n')
+                self.assertFalse(log.exists(), 'not even a Herdr read should run')
+                self.assertFalse((job / 'hooks').exists())
+                self.assertEqual((job / 'agents.tsv').read_bytes(), before)
+                self.assertNotIn('build-x', fj.roster(job)[0])
+
+    def test_stampede_start_missing_done_when_exits_2_and_starts_nothing(self):
+        job = job_with([('lead-demo', 'claude')])
+        brief = valid_brief(job, omit=('Done when',))
+        herdr, log = fake_herdr(job.parent)
+        result = subprocess.run([str(ROOT / 'scripts/stampede'), 'start', str(job), 'build-x', '--kind', 'claude',
+                                 '--pane', 'w9:p3', '--brief', str(brief)], capture_output=True, text=True,
+                                env={**os.environ, 'HERDR': herdr})
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, f'fleet-job start: brief {brief} is missing: Done when; '
+                         'fill them in on skills/herdr-fleet/references/brief.md and start again\n')
+        self.assertFalse(log.exists())
+        self.assertFalse((job / 'hooks/build-x.json').exists())
+        self.assertNotIn('build-x', fj.roster(job)[0])
+
+    def test_an_empty_section_is_missing_before_any_level_heading(self):
+        job = job_with([('lead-demo', 'claude')])
+        text = valid_brief(job).read_text()
+        for next_heading in ('# Notes', '###### Notes'):
+            with self.subTest(next_heading=next_heading):
+                empty = text.replace('## Goal\nDo the assigned work.\n', '## Goal\n \t\n' + next_heading + '\nOther context.\n')
+                self.assertEqual(fj.missing_sections(empty), ['Goal'])
+        self.assertEqual(fj.missing_sections(text.replace('## If blocked\nDo the assigned work.\n', '## If blocked\n \t\n')),
+                         ['If blocked'])
+
+    def test_heading_levels_case_and_title_suffixes_are_accepted(self):
+        job = job_with([('lead-demo', 'claude')])
+        text = valid_brief(job).read_text().replace('## Constraints', '## Constraints and anti-goals')
+        for level in range(1, 7):
+            with self.subTest(level=level):
+                self.assertEqual(fj.missing_sections(text.replace('## ', '#' * level + ' ').upper()), [])
+        self.assertEqual(fj.missing_sections(text.replace('## Goal', '####### Goal')), ['Goal'])
+        self.assertEqual(fj.missing_sections(text.replace('## Goal', 'Goal:')), ['Goal'])
+
+    def test_a_missing_brief_file_is_refused_without_side_effects(self):
+        from unittest import mock
+        job = job_with([('lead-demo', 'claude')])
+        brief = job / 'briefs/missing.md'
+        before = (job / 'agents.tsv').read_bytes()
+        herdr, log = fake_herdr(job.parent)
+        with mock.patch.dict(os.environ, {'HERDR': herdr}), self.assertRaises(ValueError) as refused:
+            fj.start(job, 'build-x', 'claude', 'w9:p3', brief)
+        self.assertEqual(str(refused.exception), f'brief {brief} does not exist')
+        self.assertFalse(log.exists())
+        self.assertFalse((job / 'hooks').exists())
+        self.assertEqual((job / 'agents.tsv').read_bytes(), before)
+
+    def test_a_restarted_lead_accepts_its_generated_one_paragraph_brief(self):
+        out, job, _ = Fixes.run_new(self, 'idle')
+        lead = fj.roster(job)[1]
+        brief = job / 'briefs' / (lead + '.md')
+        self.assertEqual(fj.missing_sections(brief.read_text()), list(fj.BRIEF_SECTIONS))
+        error, log = ReviewRound1.start(self, job, lead, job.parent)
+        self.assertIsNone(error)
+        self.assertIn('agent start ' + lead, log)
+        self.assertIn('Read ' + str(brief), (job / 'inbox' / (lead + '.md')).read_text())
+
+    def test_the_template_matches_the_required_sections_and_is_complete(self):
+        import re
+        template = (SCRIPTS.parent / 'references/brief.md').read_text()
+        self.assertEqual(tuple(re.findall(r'^## (.+)$', template, re.M)), fj.BRIEF_SECTIONS)
+        self.assertEqual(fj.missing_sections(template), [])
+
+
 class Command(unittest.TestCase):
     def test_hook_wake_exits_2_with_the_new_lines(self):
         job = job_with([('lead-demo', 'claude')])
@@ -306,10 +404,13 @@ class ReviewRound1(unittest.TestCase):
         import contextlib, io
         from unittest import mock
         herdr, log = fake_herdr(pane_cwd, foreground=foreground)
+        brief = job / 'briefs' / (agent + '.md')
+        if agent != fj.roster(job)[1]:
+            brief = valid_brief(job, agent)
         error = None
         with mock.patch.dict(os.environ, {'HERDR': herdr}), contextlib.redirect_stdout(io.StringIO()):
             try:
-                fj.start(job, agent, 'claude', 'w9:p3', str(job / 'briefs' / (agent + '.md')), **kw)
+                fj.start(job, agent, 'claude', 'w9:p3', str(brief), **kw)
             except PermissionError as refused:
                 error = refused
         return error, log.read_text() if log.exists() else ''
@@ -417,9 +518,10 @@ class LiveFixes(unittest.TestCase):
         import contextlib, io
         from unittest import mock
         herdr, log = fake_herdr(job.parent, start_error=start_error)
+        brief = valid_brief(job, agent)
         out = io.StringIO()
         with mock.patch.dict(os.environ, {'HERDR': herdr}), contextlib.redirect_stdout(out):
-            fj.start(job, agent, 'claude', 'w9:p3', str(job / 'briefs' / (agent + '.md')))
+            fj.start(job, agent, 'claude', 'w9:p3', str(brief))
         return out.getvalue()
 
     def test_a_startup_dialog_at_start_is_blocked_not_a_crash(self):
