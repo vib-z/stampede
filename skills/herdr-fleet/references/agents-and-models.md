@@ -1,6 +1,8 @@
 # Agents and models
 
-## Why the routing table looks like that
+## Pick models per role
+
+The [routing table](../SKILL.md#pick-the-agent-and-model) gives defaults. Choose the lead for planning and decomposition with `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT`; choose each worker for execution with `fleet-job start --model --effort`. You can swap them independently unless the owner named a model. Write every worker's brief on the [hand-off template](brief.md) before starting it. The lead stays on Claude Code for its file hook.
 
 - **Opus 5.5 at xhigh** is the owner's standard builder (since the first fleet, 2026-09-30). It uses tools well and finishes a 25 to 45 minute slice without drifting.
 - **Fable 5.1 at max** is the owner's standard independent reviewer. "Ultra" in the owner's words means max, the Claude CLI's top level. It is slower and dearer, which is worth it where a missed bug costs more than tokens. A reviewer on a different model from the builder does not share the builder's blind spots.

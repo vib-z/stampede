@@ -10,6 +10,14 @@ OWNER = re.compile(r'[a-z0-9][a-z0-9_-]{0,40}')  # a bot slug, as herdr-events-o
 SHA = re.compile(r'[0-9a-f]{40}([0-9a-f]{24})?')
 GATE = re.compile(r'[0-9a-f]{12}')
 ASK_CMD = os.environ.get('FLEET_ASK_CMD', 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h')
+BRIEF_SECTIONS = ('Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked')
+
+
+def missing_sections(text):
+    """Required brief headings whose section has no non-blank line, or is absent."""
+    parts = re.split(r'(?m)^ {0,3}#{1,6}[ \t]+([^\n]*)\n?', text)
+    filled = [parts[i].strip().lower() for i in range(1, len(parts), 2) if parts[i + 1].strip()]
+    return [name for name in BRIEF_SECTIONS if not any(heading.startswith(name.lower()) for heading in filled)]
 
 
 def line(value):
@@ -509,6 +517,13 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     if not NAME.fullmatch(agent):
         raise ValueError('agent names are <role>-<scope>, lowercase')
     lead = agent == roster(job)[1]  # a restarted lead keeps the lead's hooks
+    if not lead:
+        if not Path(brief).is_file():
+            raise ValueError(f'brief {brief} does not exist')
+        missing = missing_sections(Path(brief).read_text())
+        if missing:
+            raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
+                             'fill them in on skills/herdr-fleet/references/brief.md and start again')
     if yolo_in is not None:
         if lead:
             raise PermissionError('yolo is never for the lead')

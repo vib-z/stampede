@@ -16,14 +16,14 @@ When agents span several worktrees or repos, use `<main checkout>/.claude/worktr
 | File | Written by | Holds |
 |---|---|---|
 | `_common.md` | lead | Rules for every agent (the ownership rules below, plus project facts) |
-| `<agent>.md` | lead | One brief: goal, owned files, inputs, checks, what to report |
-| `_review.md` | lead | The reviewer's brief: diff range, what to check, what it may fix |
-| `fixes-<scope>.md` | lead | Accepted review findings for a builder to fix |
+| `<agent>.md` | lead | One brief on the [hand-off template](brief.md) |
+| `_review.md` | lead | A review brief on the [hand-off template](brief.md): diff range, checks, what it may fix |
+| `fixes-<scope>.md` | lead | Accepted findings to fix, on the [hand-off template](brief.md), with unchanged sections referenced |
 | `register.md` | lead | Roster (agent, pane, model, worktree, port), status and each lane's reviewed commit, so anyone can resume the fleet |
 | `reports/<lane>.md` | each agent, one per lane | Its last action for that lane: done, files touched, unverified, decisions. An agent with one lane may name it `reports/<agent>.md`. Its Stop hook announces a finished report (`Status: DONE`, `PASS` or `FINDINGS`) each time it changes, so a second lane needs its own file (another `--report`) |
 | `questions/<agent>.md` | any agent | A decision it cannot make. It writes the question and carries on with other work |
 
-Start every brief with "Read `_common.md` first" and use absolute paths in prompts.
+Start every brief's Inputs with "Read `_common.md` first" and use absolute paths in prompts.
 
 ## Messages
 

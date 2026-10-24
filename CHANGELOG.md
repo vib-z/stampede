@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Complete worker hand-offs.** Your lead writes each worker's brief on the hand-off template; `stampede start` refuses a missing brief or a missing or empty section before writing hooks or calling Herdr. The playbooks and examples use the template, and the docs explain stateful leads, stateless workers and independently swappable models per role. Tested with fake Herdr, including restarted leads with their generated briefs.
+
 ## 0.1.2 (23 Oct 2026)
 
 - **Small jobs stay in Herdr:** a small job still needs no stampede job, but it runs as one agent session in a single Herdr pane of its own, tagged with `herdr-events-owner` and prompted with `herdr-send`, never as a bare agent CLI call over SSH or nohup outside Herdr. Updated in herdr-fleet, grokbot-herdr, SKILL.md and the README.
