@@ -13,6 +13,8 @@
 - **All the communication goes through the bot,** to your local Mac and your local agents: updates come back by webhook, and the bot asks you in chat when a question or a gate needs your yes.
 - **Recommended for everyone, not required.** stampede is designed and tested with Grok Bot, and that is the best setup. It also runs straight from Claude, Codex or whatever agent you use ([Without a bot](#without-a-bot)).
 
+**Get the Grok Bot.** [Stompy](https://x.ai/bot/_mNMq-0M5aA02AQMNOHTy) sets up stampede between your Grok Bot and your Mac, end to end, and then keeps it healthy, so one ask runs as a Herdr job that holds every merge, push, send or spend until you say yes.
+
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
   <a href="CHANGELOG.md"><img alt="Version 0.1.3" src="https://img.shields.io/badge/version-0.1.3-black"></a>
