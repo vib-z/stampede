@@ -13,9 +13,11 @@
 - **All the communication goes through the bot,** to your local Mac and your local agents: updates come back by webhook, and the bot asks you in chat when a question or a gate needs your yes.
 - **Recommended for everyone, not required.** stampede is designed and tested with Grok Bot, and that is the best setup. It also runs straight from Claude, Codex or whatever agent you use ([Without a bot](#without-a-bot)).
 
+**Get the Grok Bot.** [Stompy](https://x.ai/bot/_mNMq-0M5aA02AQMNOHTy) sets up stampede between your Grok Bot and your Mac, end to end, and then keeps it healthy, so one ask runs as a Herdr job that holds every merge, push, send or spend until you say yes.
+
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="CHANGELOG.md"><img alt="Version 0.1.2" src="https://img.shields.io/badge/version-0.1.2-black"></a>
+  <a href="CHANGELOG.md"><img alt="Version 0.1.3" src="https://img.shields.io/badge/version-0.1.3-black"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black"></a>
   <a href="https://github.com/vib-z/stampede/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/vib-z/stampede?style=flat&color=black&label=stars"></a>
   <a href="https://herdr.dev"><img alt="Herdr 0.9.4 or later" src="https://img.shields.io/badge/Herdr-0.9.4%2B-black"></a>
@@ -244,7 +246,7 @@ cd ~/stampede
 ./install.sh --dry-run               # prints each link it would make, changes nothing
 ./install.sh                         # links the skills and the commands
 export PATH="$HOME/.local/bin:$PATH" # add this line to your shell profile too
-stampede --version                   # 0.1.2
+stampede --version                   # 0.1.3
 herdr-trust ~/code/my-app            # once per repo, before agents start there
 ```
 
@@ -538,7 +540,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **0.1.2, 23 Oct 2026. Plugin installs:** from a sandboxed test of the whole plugin lifecycle. A plugin update or reinstall moves stampede's own links (the same file, in an older checkout of the same install) to Herdr's new checkout, so nothing dangles after Herdr deletes the old one; `herdr-doctor` reports links outside the plugin's checkout, and warns when `FLEET_TRUST_ROOT` is missing; `stampede update` and the daily check name `herdr plugin update stampede --yes` in a plugin install; the README shows the plugin install, and SETUP.md the full uninstall, comparing link targets as plain text. Tested with fake managed checkouts, another plugin named `stampede-helper-abc`, a backup tree, glob characters in a path, both uninstall recipes run from SETUP.md in bash and zsh, a fake `herdr` and scratch git repos; the `herdr plugin` commands themselves were run only in that sandbox test.
 
-**Unreleased, 24 Oct 2026. Worker hand-offs:** a required brief template and a start check for missing or empty sections, tested with fake Herdr and no start side effects; lead and worker models stay independently configurable.
+**0.1.3, 25 Oct 2026. Complete worker briefs:** `stampede start` refuses a brief that is missing a section of the hand-off template or leaves one empty, and each role's model is set on its own (`FLEET_LEAD_MODEL` for the lead, `--model` per worker). Tested with fake Herdr.
 
 **Site and brand, 22 Oct 2026:** the hero (PR #16), the brand kit (PR #20) and the landing page around the film (PR #3) are done. The site is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 

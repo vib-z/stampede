@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.3 (25 Oct 2026)
+
 - **Complete worker hand-offs.** Your lead writes each worker's brief on the hand-off template; `stampede start` refuses a missing brief or a missing or empty section before writing hooks or calling Herdr. The playbooks and examples use the template, and the docs explain stateful leads, stateless workers and independently swappable models per role. Tested with fake Herdr, including restarted leads with their generated briefs.
 
 ## 0.1.2 (23 Oct 2026)
