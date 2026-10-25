@@ -92,6 +92,8 @@ Every lane is a Herdr pane with its own agent, so the owner sees it, Moshi reach
 
 A built-in subagent (Claude's Agent or Task tool, a Codex sub-agent) is only for a quick lookup the lead reads itself: find a file, check a flag, skim one page. A brief that says "in parallel" without naming panes still means panes: name them `<role>-<scope>` (`research-web`, `research-local`) in a tab of their own. Seen 2026-10-17: a promo lead ran both research lanes as hidden subagents because its brief named a pane for every step except research.
 
+With pstack installed (optional, `/pstack:...`), a coding job's fan-out, models, commits, contract and todo list follow [references/pstack.md](references/pstack.md).
+
 ## Start an agent
 
 ```bash
