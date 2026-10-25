@@ -1,6 +1,6 @@
 id = "stampede"
 name = "stampede"
-version = "0.1.2"
+version = "0.1.3"
 min_herdr_version = "0.9.4"
 description = "The Grok Bot is the inlet: it spins up a team of local agents on your Mac over Tailscale, with the agent CLIs you already have. A lead plans and runs the job in Herdr; it works without a bot too."
 platforms = ["macos"]
