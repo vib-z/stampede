@@ -5,7 +5,7 @@ description: One ask starts a Herdr job run by a lead agent that opens panes onl
 
 # stampede
 
-The Grok Bot is the inlet on top: it spins up a team of local agents on the owner's Mac over Tailscale, and every update and question goes back through it (it works without a bot too). One ask, one lead, and a pane only when it's worth it. The lead plans in `plan.md`, works, and brings the owner only the questions and gates that are theirs.
+The owner texts a task to a Grok Bot, which reaches the owner's Mac over Tailscale, and every update and question goes back through it (it works without a bot too). One ask, one lead, and a pane only when it's worth it. The lead plans in `plan.md`, works, and brings the owner only the questions and gates that are theirs.
 
 - **Running the job** (the lead, or a chat that will open panes): read [skills/herdr-fleet/SKILL.md](skills/herdr-fleet/SKILL.md).
 - **A bot front door** (outside Herdr, over SSH): read [skills/grokbot-herdr/SKILL.md](skills/grokbot-herdr/SKILL.md).

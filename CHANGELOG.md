@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A demo GIF and a plainer opener.** The README opens with one line on what stampede does, from your text to Grok Bot to your yes, then the new demo GIF (`assets/demo.gif`) where the teaser was. The plugin card and SKILL.md now say the same. Stompy, a Grok Bot that sets stampede up, is linked from the opener. `assets/teaser.gif` stays for the film.
+
 - **Optional pstack support for the lead.** If the Claude Code plugin pstack is installed, a lead loads it like any Claude Code session and, for coding jobs only, follows [references/pstack.md](skills/herdr-fleet/references/pstack.md) wherever pstack says otherwise: its fan-out runs as Herdr panes, the fleet model table and Herdr ownership win, the architect sketch is the contract commit, and the todo list is `todo.md` in the job folder. herdr-fleet points to it from "Panes, not built-in subagents"; the README has a short "Works well with" section. Without pstack nothing changes.
 
 ## 0.1.3 (25 Oct 2026)

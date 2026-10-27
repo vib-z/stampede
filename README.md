@@ -1,19 +1,10 @@
 <h1 align="center">stampede</h1>
 
-**The Grok Bot is the inlet on top.** You get a Grok Bot, and it spins up a team of local agents on your own laptop or Mac, over Tailscale on a private network, using the agent connectors you already have on that machine (Claude Code, Codex, Cursor):
+**You text a task to your Grok Bot. It reaches your Mac over Tailscale, where a Claude Code lead does the job in [Herdr](https://herdr.dev) and adds Codex or Cursor panes only when parallel work helps. Nothing is merged, pushed, sent or spent until you say yes.**
 
-1. You talk to Grok, in your Tesla or anywhere else.
-2. Grok talks to your stampede Grok Bot.
-3. The bot hands the job to the Claude Code lead on your laptop, in [Herdr](https://herdr.dev).
-4. The lead orchestrates the other agents to do the job.
-5. The lead reports back to the bot, and the bot reports back to you.
+Grok Bot is the setup we recommend, but you don't need it: stampede also runs when you start it straight from Claude, Codex or any agent ([Without a bot](#without-a-bot)). Either way you can watch every agent in Herdr, and every question comes back to you.
 
-- **The lead is the valve below the bot.** It directs all the work as it sees fit and passes each agent only the context it needs. Splitting the job across more agents is optional and depends on how big the job is.
-- **Each bot owns its own Herdr workspace** for what it is working on, with its own tabs and panes, so you can watch every agent.
-- **All the communication goes through the bot,** to your local Mac and your local agents: updates come back by webhook, and the bot asks you in chat when a question or a gate needs your yes.
-- **Recommended for everyone, not required.** stampede is designed and tested with Grok Bot, and that is the best setup. It also runs straight from Claude, Codex or whatever agent you use ([Without a bot](#without-a-bot)).
-
-**Get the Grok Bot.** [Stompy](https://x.ai/bot/_mNMq-0M5aA02AQMNOHTy) sets up stampede between your Grok Bot and your Mac, end to end, and then keeps it healthy, so one ask runs as a Herdr job that holds every merge, push, send or spend until you say yes.
+**Let a Grok Bot set it up.** [Stompy](https://x.ai/bot/_mNMq-0M5aA02AQMNOHTy) is a Grok Bot that sets up stampede between your Grok Bot and your Mac, end to end, and keeps it healthy.
 
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
@@ -23,6 +14,12 @@
   <a href="https://herdr.dev"><img alt="Herdr 0.9.4 or later" src="https://img.shields.io/badge/Herdr-0.9.4%2B-black"></a>
   <img alt="Python 3.9 or later" src="https://img.shields.io/badge/python-3.9%2B-black">
 </p>
+
+<p align="center">
+  <img src="assets/demo.gif" alt="Demo: a task texted to Grok Bot reaches a Mac over Tailscale, a Claude Code lead works on it in Herdr with a Codex and a Cursor worker beside it, the bot asks before merging, then reports back." width="640">
+</p>
+
+<p align="center"><sub>An animated mock-up of one job, 27 Oct 2026.</sub></p>
 
 <p align="center">
   <a href="#install">Install</a> ·
@@ -181,12 +178,6 @@ Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 
 ![The build tab of a fleet in Herdr: four panes side by side. build-steps-plan and build-steps-run are Claude Code agents that have just finished; build-scripts and build-app are Codex agents still working.](docs/images/fleet-build-tab.png)
 
 <sub>Real, drawn: the <code>build</code> tab of the fleet that built stampede's first version, drawn from each pane's own screen text (<code>herdr agent read</code>), personal paths replaced with <code>~</code>, 18 Oct 2026. A lean job opens fewer panes; each looks the same.</sub>
-
-<p align="center">
-  <img src="assets/teaser.gif" alt="The stampede teaser: horses charge at the camera, turn into terminal glyphs, then into a pile of agent windows, with the lines One AI agent at a time is slow, and A dozen at once is chaos." width="480">
-</p>
-
-<sub>The teaser, from the launch film, 17 Oct 2026.</sub>
 
 ## How it works
 
@@ -501,7 +492,7 @@ scripts/stampede_update.py   the daily release check and stampede update
 scripts/herdr-plugin-event   the Herdr plugin's event hook
 remote/                 front-door guides
 docs/                   SETUP.md, RUNS.md, superpowers/specs/ (the design), images/ (screenshots, logos/)
-assets/                 the poster and the teaser
+assets/                 the poster, the teaser and the demo GIF
 site/                   the hero site: index.html, assets/
 site/brand/             the identity assets and the brand guide
 tests/                  python3 -m unittest discover tests
