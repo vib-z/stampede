@@ -364,7 +364,7 @@ class Fixes(unittest.TestCase):
         self.assertIn('--model claude-fable-5-1 --effort max', log)
 
     def test_new_forks_the_planning_chat_into_the_lead_but_not_into_the_reopen_record(self):
-        sid = '58c4a180-63da-42f6-bb18-fad21596f8db'
+        sid = '0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37'
         _, job, log = self.run_new('idle', fork=sid)
         self.assertIn(f'--kind claude --pane w9:p2 --timeout 90000 -- --resume {sid} --fork-session --permission-mode auto', log)
         self.assertIn('planning chat', (job / 'briefs/lead-fix-login-bug.md').read_text())
