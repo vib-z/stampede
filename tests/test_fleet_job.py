@@ -363,6 +363,21 @@ class Fixes(unittest.TestCase):
         _, _, log = self.run_new('idle', {'FLEET_LEAD_MODEL': 'claude-fable-5-1', 'FLEET_LEAD_EFFORT': 'max'})
         self.assertIn('--model claude-fable-5-1 --effort max', log)
 
+    def test_new_forks_the_planning_chat_into_the_lead_but_not_into_the_reopen_record(self):
+        sid = '58c4a180-63da-42f6-bb18-fad21596f8db'
+        _, job, log = self.run_new('idle', fork=sid)
+        self.assertIn(f'--kind claude --pane w9:p2 --timeout 90000 -- --resume {sid} --fork-session --permission-mode auto', log)
+        self.assertIn('planning chat', (job / 'briefs/lead-fix-login-bug.md').read_text())
+        self.assertNotIn(sid, (job / 'agents.tsv').read_text())
+        _, job, log = self.run_new('idle')
+        self.assertNotIn('--resume', log)
+        self.assertNotIn('planning chat', (job / 'briefs/lead-fix-login-bug.md').read_text())
+
+    def test_new_refuses_a_fork_that_is_not_a_session_id(self):
+        with self.assertRaises(ValueError) as refused:
+            self.run_new('idle', fork='--dangerously-skip-permissions')
+        self.assertIn('--fork takes a Claude session id', str(refused.exception))
+
     def test_new_holds_the_pointer_for_a_blocked_lead(self):
         out, job, _ = self.run_new('blocked')
         self.assertIn('BLOCKED lead-fix-login-bug: clear the startup dialog, then fleet-job tell ' + str(job) + ' lead "Read '

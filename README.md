@@ -310,6 +310,8 @@ lead-make-hello-txt-with-hi <repo>/.herdr-make-hello-txt-with-hi
 
 Inside Herdr, `--workspace` defaults to the current workspace and the lead gets a new `lead` tab; `--pane <id>` puts it in an empty pane instead, and `--name <slug>` names the job. A front door outside Herdr (a bot, a desktop app) has no current workspace, so it passes `--workspace` or `--pane`: it creates a workspace for the job (`herdr workspace create`) and passes its root pane, as in [SKILL.md](SKILL.md#front-door). The chat tells you `lead-make-hello-txt-with-hi` and stops.
 
+**Plan in chat, then fork it into the lead.** A Claude chat where you and Claude already worked out the plan, in Herdr or the Claude desktop app, adds `--fork "$CLAUDE_CODE_SESSION_ID"`: the lead starts as a fork of that chat (`claude --resume <id> --fork-session`), so it keeps the whole conversation and writes the agreed plan into `plan.md` instead of planning again. Your chat stays as it was. The reopen record leaves the fork out, so `reopen.sh` resumes the lead's own session. Guide: [remote/claude-code.md](remote/claude-code.md#plan-here-then-fork-the-lead).
+
 The lead reads `ask.md`, writes `plan.md` and goes on at once. Here it writes `briefs/review-hello.md` on the [hand-off template](skills/herdr-fleet/references/brief.md), then starts one reviewer on another model:
 
 ```console
@@ -448,7 +450,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 
 | command | flags | does |
 |---|---|---|
-| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review` | makes the job folder, starts the lead with its hooks, prints `<lead> <job dir>` |
+| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--fork <session id>` (the lead starts as a fork of that Claude chat; a value that is not a UUID exits 2) | makes the job folder, starts the lead with its hooks, prints `<lead> <job dir>` |
 | `start <job> <agent> --kind claude\|codex\|cursor --pane <id> --brief <file>` | `--model`, `--effort`, `--report <path>` (repeatable), `--yolo-in <worktree>` | refuses a missing brief or a missing or empty section (exit 2); otherwise starts a worker with hooks and auto mode, records it and sends its brief pointer |
 | `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file; another CLI through `herdr-send` |
 | `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background: a `question` event to the bot that started the job, else your phone; prints `ASKED <id>` |

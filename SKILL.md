@@ -28,4 +28,6 @@ P=$(herdr workspace create --cwd <repo> --label <job> --no-focus | jq -r .result
 stampede new --file <ask.md> --pane "$P"
 ```
 
-It prints `<lead name> <job dir>`. Tell the owner the lead's name; never plan or run the job yourself. `stampede` is the same command as `fleet-job`.
+When you are a Claude chat in which the owner already worked out the plan with you, add `--fork "$CLAUDE_CODE_SESSION_ID"`: the lead starts as a fork of this chat and keeps the whole conversation. Put the agreed plan in the ask file as well.
+
+It prints `<lead name> <job dir>`. Tell the owner the lead's name; never run the job yourself. `stampede` is the same command as `fleet-job`.

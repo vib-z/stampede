@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fork the planning chat into the lead.** `stampede new --fork <session id>` starts the lead as a fork of that Claude chat (`claude --resume <id> --fork-session`, with the lead's hooks), so a job you planned with Claude in the desktop app or a Herdr pane keeps the whole conversation; the lead writes the agreed plan into `plan.md` instead of planning again. A front-door chat passes `--fork "$CLAUDE_CODE_SESSION_ID"`. A value that is not a UUID exits 2 before anything is made, and the reopen record leaves the fork out. Guide: [remote/claude-code.md](remote/claude-code.md#plan-here-then-fork-the-lead).
+
 ## 0.1.4 (28 Oct 2026)
 
 Optional pstack support for the lead (coding jobs only), and a README that opens with a short demo of one job. No breaking changes. Update with `stampede update` or `herdr plugin update stampede --yes`.

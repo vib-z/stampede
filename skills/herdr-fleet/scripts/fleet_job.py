@@ -556,11 +556,17 @@ def slug(ask):
     return out or 'job'
 
 
-def new(ask_file, workspace, name=None, review=False, pane=None):
+SESSION = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
     """Front door: make the job, start its lead on Claude with hooks, print the lead's name.
-    pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab."""
+    pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab.
+    fork: a Claude session id (the chat that planned the job); the lead starts as a fork of it and keeps that conversation."""
     if not (workspace or pane):
         raise ValueError('new needs --workspace or --pane, or run it inside Herdr')
+    if fork is not None and not SESSION.fullmatch(fork):
+        raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     ask = Path(ask_file).expanduser().read_text()
     info = herdr('pane', 'get', pane)['pane'] if pane else None
     # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
@@ -588,6 +594,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None):
     brief.parent.mkdir()
     gate = ('Write plan.md, then end your turn: the owner reviews it and fleet-job approve wakes you.' if review
             else 'Write plan.md, then go: do not stop for approval.')
+    if fork:
+        gate = ('The conversation before this is the owner\'s planning chat, forked into your pane: you are no longer that chat '
+                'but the lead, so write what it agreed into plan.md rather than planning again. ' + gate)
     ask_gate_cmd = f'fleet-job ask {job} --gate --sha <commit> [--pr <n>] "<the exact action>"'
     gate_ok_cmd = f'fleet-job gate-ok {job} <gate> --sha <the commit you act on>'
     gate_route = (f'ask it with {ask_gate_cmd}; it goes back to {owner}, which asks the owner in chat. ' if owner else
@@ -604,7 +613,8 @@ def new(ask_file, workspace, name=None, review=False, pane=None):
     args = cli_args(job, lead, 'claude', os.environ.get('FLEET_LEAD_MODEL', 'claude-opus-5-5'),
                     os.environ.get('FLEET_LEAD_EFFORT', 'xhigh'), [], lead=True)
     herdr('pane', 'rename', pane, lead)
-    blocked = launch(lead, 'claude', pane, args)
+    blocked = launch(lead, 'claude', pane, (['--resume', fork, '--fork-session'] if fork else []) + args)
+    # the reopen record leaves the fork out: a reopen resumes the lead's own session, not the planning chat
     subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'), 'record', str(job), lead,
                     'claude', str(brief), '--', *args], check=True)
     if blocked:
@@ -620,6 +630,7 @@ def main(argv):
     p = sub.add_parser('new'); p.add_argument('--file', required=True); p.add_argument('--workspace', default=os.environ.get('HERDR_WORKSPACE_ID'))
     p.add_argument('--name'); p.add_argument('--review', action='store_true')
     p.add_argument('--pane', help="an existing empty pane for the lead (a fresh workspace's root pane); its tab becomes lead")
+    p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
     p = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind', required=True)
     p.add_argument('--pane', required=True); p.add_argument('--brief', required=True); p.add_argument('--model'); p.add_argument('--effort')
     p.add_argument('--report', action='append', default=[]); p.add_argument('--yolo-in', help='a worker in its own git worktree: no-checks mode')
@@ -649,7 +660,7 @@ def main(argv):
 
 def run(a):
     if a.cmd == 'new':
-        return new(a.file, a.workspace, a.name, a.review, a.pane)
+        return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork)
     if a.cmd == 'start':
         return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in)
     if a.cmd == 'tell':
