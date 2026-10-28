@@ -44,6 +44,16 @@ class HerdrTrust(unittest.TestCase):
         self.assertEqual(toml.count(f'[projects."{self.repo}"]'), 1)
         self.assertIn('url = "u"\n\n[projects.', toml)
 
+    def test_no_codex_home_skips_codex(self):
+        # A Mac without Codex keeps no ~/.codex, so herdr-doctor stays clean after a trust.
+        self.codex.unlink()
+        self.codex.parent.rmdir()
+        out = self.trust(self.repo)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('codex: skipped, no ~/.codex', out.stdout)
+        self.assertFalse(self.codex.parent.exists())
+        self.assertTrue(json.loads(self.claude.read_text())['projects'][str(self.repo)]['hasTrustDialogAccepted'])
+
     def test_outside_code_or_not_a_repo_is_refused(self):
         other = self.home / 'elsewhere'
         other.mkdir()

@@ -73,7 +73,7 @@ Flags: `--relay` forces relay checks; `-h` / `--help` prints usage. Exit 0 means
 ## Unattended agents
 
 Agents start and run without a visit to their pane only after two one-time steps, which you run yourself (an agent cannot change its own permissions):
-- `herdr-trust <repo dir>` for each repo, before agents start there. It marks the repo's main checkout trusted for Claude (`~/.claude.json`) and Codex (`~/.codex/config.toml`); worktrees are covered. It refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`).
+- `herdr-trust <repo dir>` for each repo, before agents start there. It marks the repo's main checkout trusted for Claude (`~/.claude.json`) and, when `~/.codex` exists, for Codex (`~/.codex/config.toml`); worktrees are covered. It refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`).
 - The Claude settings for auto mode and the lead's Herdr commands: [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md).
 
 ## Configure
@@ -130,7 +130,7 @@ Job folders (`<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herd
 |---|---|
 | relay `PROBLEM` lines on a local install | a relay signal remains; finish relay setup, or remove only the unused relay configuration you own |
 | `stampede --version does not match VERSION` | inspect PATH and existing links; the installer skips links to another checkout, so remove only stale links you own and re-run it |
-| `~/.claude/skills/... not linked` or `~/.codex/skills/... not linked` | run the installer after the agent home exists; inspect any skipped path before replacing it. On a Mac without Codex, `herdr-trust` makes `~/.codex` when it writes Codex's trust file, so run the installer once more after it |
+| `~/.claude/skills/... not linked` or `~/.codex/skills/... not linked` | run the installer after the agent home exists; inspect any skipped path before replacing it |
 | `stampede: command not found` | `~/.local/bin` is not on PATH; add it to your shell profile |
 | `skip ... left as is` | something of yours is at that path; remove it if you want stampede's link there, then re-run |
 | `refused: there is no ~/code folder to trust repos under`, or `warn no ~/code (FLEET_TRUST_ROOT)` from `herdr-doctor` | the trust root (`FLEET_TRUST_ROOT`, default `~/code`) does not exist; create it or change the key |
