@@ -36,7 +36,7 @@ fi
 # the installer links skills only for agent homes that exist
 for app in .claude .codex; do
   [ -d "$HOME/$app" ] || continue
-  for skill in herdr-fleet grokbot-herdr share-plan; do
+  for skill in stampede herdr-fleet grokbot-herdr share-plan; do
     if [ -L "$HOME/$app/skills/$skill" ] && [ -f "$HOME/$app/skills/$skill/SKILL.md" ]; then ok "~/$app/skills/$skill linked"
     else problem "~/$app/skills/$skill not linked: run install.sh; it leaves existing files alone"; fi
   done
@@ -47,7 +47,7 @@ managed=$(herdr plugin list --json 2>/dev/null | jq -r '.result.plugins[]? | sel
 if [ -n "$managed" ] && command -v python3 >/dev/null; then
   top=$(cd "$managed" 2>/dev/null && pwd -P); top=${top:-$managed}
   outside=""
-  for l in "$(command -v stampede)" "$HOME"/.claude/skills/{herdr-fleet,grokbot-herdr,share-plan} "$HOME"/.codex/skills/{herdr-fleet,grokbot-herdr,share-plan}; do
+  for l in "$(command -v stampede)" "$HOME"/.claude/skills/{stampede,herdr-fleet,grokbot-herdr,share-plan} "$HOME"/.codex/skills/{stampede,herdr-fleet,grokbot-herdr,share-plan}; do
     { [ -e "$l" ] || [ -L "$l" ]; } || continue
     case "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$l")" in "$top"/*) ;; *) outside="$outside ${l/#$HOME/~}";; esac
   done

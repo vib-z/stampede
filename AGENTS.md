@@ -54,8 +54,8 @@ The README is the front door. It covers every point at least briefly, then links
 - Render the README the way GitHub does (`gh api markdown -F text=@README.md`) and look at it. Fix overflow, stacked badges and broken images.
 
 ## 2. The skills and the playbooks
-- **Where they live:** the playbooks are `skills/` (the three skills) and `remote/` (the front-door guides).
-- **The three skills are copies.** `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` come from the owner's own skills, which are their source. Change a skill there first, then copy it here and scrub it (section 3); never edit it here first. Only what makes the copy public (a scrubbed name or path, a setting with a default) differs from the source.
+- **Where they live:** the playbooks are `skills/` (the four skills) and `remote/` (the front-door guides).
+- **The four skills are copies.** `skills/stampede`, `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` come from the owner's own skills, which are their source. Change a skill there first, then copy it here and scrub it (section 3); never edit it here first. Only what makes the copy public (a scrubbed name or path, a setting with a default) differs from the source.
 - **One context per agent:** every skill, guide and brief stands on its own. An agent gets only its own file plus its brief, never the whole repo.
 - **Line limits:** a skill's `SKILL.md` at most 140 lines, every other playbook file at most 160 (`test_shape.py`).
 - **Credit:** a linked role or skill from someone else names its owner, its license and a pinned commit.

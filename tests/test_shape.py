@@ -219,7 +219,7 @@ class Shape(unittest.TestCase):
 
     def test_front_doors_outside_herdr_name_a_target(self):
         """Outside Herdr there is no current workspace, so `stampede new` needs --workspace or --pane (review round 1, R3)."""
-        for name in ("SKILL.md", "README.md", "remote/other.md"):
+        for name in ("skills/stampede/SKILL.md", "README.md", "remote/other.md"):
             lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
             self.assertTrue(any("outside Herdr" in l and "--workspace" in l and "--pane" in l for l in lines), name)
 

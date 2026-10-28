@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ('herdr-fleet', 'grokbot-herdr', 'share-plan')
+SKILLS = ('stampede', 'herdr-fleet', 'grokbot-herdr', 'share-plan')
 
 
 class Install(unittest.TestCase):
