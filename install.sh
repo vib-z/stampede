@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install stampede from this checkout: link its three skills into Claude Code and Codex, and its commands into
+# Install stampede from this checkout: link its four skills into Claude Code and Codex, and its commands into
 # ~/.local/bin. Safe to re-run. Never replaces what is already there, except its own link into another checkout of this
 # same Herdr plugin install (Herdr deletes that one at its next start); never installs Herdr or an agent CLI.
 set -euo pipefail
@@ -31,7 +31,7 @@ link() {  # link <target> <path>
 }
 for app in .claude .codex; do
   [ -d "$HOME/$app" ] || { echo "skip ~/$app/skills: no ~/$app"; continue; }
-  for skill in herdr-fleet grokbot-herdr share-plan; do link "$ROOT/skills/$skill" "$HOME/$app/skills/$skill"; done
+  for skill in stampede herdr-fleet grokbot-herdr share-plan; do link "$ROOT/skills/$skill" "$HOME/$app/skills/$skill"; done
 done
 for f in "$ROOT/scripts/stampede" "$ROOT"/skills/grokbot-herdr/scripts/*; do
   case "${f##*/}" in test-*) continue;; esac

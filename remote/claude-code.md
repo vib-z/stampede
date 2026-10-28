@@ -25,3 +25,17 @@ Approve the plan                               # review jobs only; the session r
 - **Events:** the session lives inside Herdr and needs no webhook; the lead's own questions reach you in the Claude app and through Moshi.
 - **Keep the machine awake;** the session reconnects when the machine comes back.
 - The rules every remote follows: [README.md](README.md).
+
+## Plan here, then fork the lead
+Talk the job through with Claude first, in the Claude desktop app or any Claude Code chat on the machine. Once the plan is agreed, say "start it with stampede, forked from this chat". The chat writes the ask with the agreed plan, makes a workspace for the job and starts the lead as a fork of itself:
+
+```bash
+P=$(herdr workspace create --cwd <repo> --label <job> --no-focus | jq -r .result.root_pane.pane_id)
+stampede new --file <ask.md> --pane "$P" --fork "$CLAUDE_CODE_SESSION_ID"
+```
+
+- The lead runs `claude --resume <id> --fork-session` with the lead's hooks, so it starts with the whole conversation, and writes the agreed plan into `plan.md` instead of planning again. Your chat is left as it was.
+- **The ask file stays the source of truth.** The fork carries the chat's saved transcript, and a saved transcript can miss some of the chat's messages (seen in the Claude desktop app on 28 Oct 2026: tool calls and results were all there, some plain replies were not). Put the agreed plan and every fact the lead must not miss in the ask.
+- Claude Code sets `CLAUDE_CODE_SESSION_ID` in every session; the chat's folder can differ from the repo.
+- The fork carries the chat's whole context into the lead, so fork a focused planning chat, not a long one.
+- `reopen.sh` resumes the lead's own session, never the planning chat.

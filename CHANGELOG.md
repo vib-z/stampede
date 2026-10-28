@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **"Use stampede" works in any chat.** The front door is now its own skill, `skills/stampede`, which `install.sh` links into `~/.claude/skills/` and `~/.codex/skills/` beside the other three, and `herdr-doctor` checks. In any project chat (the Claude desktop app or a Herdr pane), "use stampede: ..." sizes the job, writes the ask, runs `herdr-trust` on the project, opens a Herdr workspace for it and starts the lead with `stampede new`, forked from the chat when the plan was worked out there. Before this, only the three playbook skills were installed, so a fresh chat had nothing that answered to "stampede". The root SKILL.md now points to it. Run `stampede update` (or `herdr plugin update stampede --yes`) to get the new link; a `stampede` skill of your own is left as is.
+- **Fork the planning chat into the lead.** `stampede new --fork <session id>` starts the lead as a fork of that Claude chat (`claude --resume <id> --fork-session`, with the lead's hooks), so a job you planned with Claude in the desktop app or a Herdr pane keeps the whole conversation; the lead writes the agreed plan into `plan.md` instead of planning again. A front-door chat passes `--fork "$CLAUDE_CODE_SESSION_ID"`. A value that is not a UUID exits 2 before anything is made, and the reopen record leaves the fork out. Guide: [remote/claude-code.md](remote/claude-code.md#plan-here-then-fork-the-lead).
+
 ## 0.1.4 (28 Oct 2026)
 
 Optional pstack support for the lead (coding jobs only), and a README that opens with a short demo of one job. No breaking changes. Update with `stampede update` or `herdr plugin update stampede --yes`.

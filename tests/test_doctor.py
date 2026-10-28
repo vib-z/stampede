@@ -173,9 +173,10 @@ exit 0
         new = self.home / '.config/herdr/plugins/github-installations/stampede-x/2-0/checkout'
         new.mkdir(parents=True)  # Herdr updated the plugin; the links still point at the old checkout
         self.assert_problem(self.doctor(TEST_MANAGED=str(new)),
-                            f'~/.local/bin/stampede ~/.claude/skills/herdr-fleet ~/.claude/skills/grokbot-herdr '
-                            f'~/.claude/skills/share-plan ~/.codex/skills/herdr-fleet ~/.codex/skills/grokbot-herdr '
-                            f'~/.codex/skills/share-plan not in the plugin checkout {new}: bash {new}/install.sh relinks')
+                            f'~/.local/bin/stampede ~/.claude/skills/stampede ~/.claude/skills/herdr-fleet '
+                            f'~/.claude/skills/grokbot-herdr ~/.claude/skills/share-plan ~/.codex/skills/stampede '
+                            f'~/.codex/skills/herdr-fleet ~/.codex/skills/grokbot-herdr ~/.codex/skills/share-plan '
+                            f'not in the plugin checkout {new}: bash {new}/install.sh relinks')
         self.assertNotIn('plugin checkout', self.doctor().stdout)  # a clone, no managed plugin: no check
 
     def test_a_missing_trust_root_is_a_warning(self):

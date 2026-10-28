@@ -28,7 +28,7 @@ cd ~/stampede
 ./install.sh
 ```
 
-- **Skills:** `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` are linked into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists.
+- **Skills:** `skills/stampede` (the front door), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` are linked into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists.
 - **Commands:** `scripts/stampede` (also as `fleet-job`, its first name) and every `skills/grokbot-herdr/scripts/herdr-*` helper are linked into `~/.local/bin`. `stampede --version` prints the version. Put it on your PATH, also for non-interactive SSH shells if a bot will call it.
 - **Safe to re-run:** a link already in place prints `ok`. Run from a Herdr-managed checkout (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install is moved to this checkout and prints `relinked`; a clone relinks nothing. Anything else already at that path prints `skip ... left as is` and is never replaced. That keeps your own copy of a skill or helper.
 - **Flags:** `--dry-run` prints `would link` lines and changes nothing; `--from-plugin` is what Herdr's plugin build passes (the same links); `--help`. Exit 0 done, 2 usage.
