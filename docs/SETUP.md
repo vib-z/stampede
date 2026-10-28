@@ -73,7 +73,7 @@ Flags: `--relay` forces relay checks; `-h` / `--help` prints usage. Exit 0 means
 ## Unattended agents
 
 Agents start and run without a visit to their pane only after two one-time steps, which you run yourself (an agent cannot change its own permissions):
-- `herdr-trust <repo dir>` for each repo, before agents start there. It marks the repo's main checkout trusted for Claude (`~/.claude.json`) and Codex (`~/.codex/config.toml`); worktrees are covered. It refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`).
+- `herdr-trust <repo dir>` for each repo, before agents start there. It marks the repo's main checkout trusted for Claude (`~/.claude.json`) and, when `~/.codex` exists, for Codex (`~/.codex/config.toml`); worktrees are covered. It refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`).
 - The Claude settings for auto mode and the lead's Herdr commands: [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md).
 
 ## Configure
@@ -135,5 +135,5 @@ Job folders (`<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herd
 | `skip ... left as is` | something of yours is at that path; remove it if you want stampede's link there, then re-run |
 | `refused: there is no ~/code folder to trust repos under`, or `warn no ~/code (FLEET_TRUST_ROOT)` from `herdr-doctor` | the trust root (`FLEET_TRUST_ROOT`, default `~/code`) does not exist; create it or change the key |
 | `... not in the plugin checkout ...` from `herdr-doctor` | the links point at an old plugin checkout, which Herdr deletes at its next start: rerun the current one's installer ([Update](#update)) |
-| `ASK FAILED ... exit 127` in the lead's inbox | `moshi-hook` is not installed; install Moshi or set `FLEET_ASK_CMD` |
+| `ASK FAILED ... exit 127` in the lead's inbox | `moshi-hook` is not installed, so no question or gate left the Mac, though `stampede ask` printed `ASKED` or `GATE ... on the phone`: type your answer in the lead's pane, or install Moshi or set `FLEET_ASK_CMD` |
 | a dialog at an agent's start | [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md) and [failure-modes.md](../skills/herdr-fleet/references/failure-modes.md) |

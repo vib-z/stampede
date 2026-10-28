@@ -1,6 +1,6 @@
 #!/bin/bash
 # herdr-trust <dir>: pre-trust the git repo holding <dir> for Claude Code (~/.claude.json) and Codex
-# (~/.codex/config.toml), so agents started there skip the folder-trust dialog. Owner-approved 2026-10-16 for
+# (~/.codex/config.toml, only when ~/.codex exists), so agents started there skip the folder-trust dialog. Owner-approved 2026-10-16 for
 # fleet setup. Only repos under $FLEET_TRUST_ROOT (default ~/code). Trusts the main checkout's root, which covers its worktrees. Idempotent.
 set -euo pipefail
 dir="${1:?usage: herdr-trust <dir>}"
@@ -24,8 +24,9 @@ else:
     print('claude: trusted', root)
 EOF
 c="$HOME/.codex/config.toml"; head="[projects.\"$root\"]"
-if [ -f "$c" ] && grep -qF "$head" "$c"; then echo "codex: already listed $root (left as is)"
+if [ ! -d "$HOME/.codex" ]; then echo "codex: skipped, no ~/.codex"
+elif [ -f "$c" ] && grep -qF "$head" "$c"; then echo "codex: already listed $root (left as is)"
 else
-  mkdir -p "$(dirname "$c")"; [ -s "$c" ] && [ -n "$(tail -c1 "$c")" ] && echo >> "$c"
+  [ -s "$c" ] && [ -n "$(tail -c1 "$c")" ] && echo >> "$c"
   printf '\n%s\ntrust_level = "trusted"\n' "$head" >> "$c"; echo "codex: trusted $root"
 fi
