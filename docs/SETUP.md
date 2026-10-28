@@ -130,10 +130,10 @@ Job folders (`<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herd
 |---|---|
 | relay `PROBLEM` lines on a local install | a relay signal remains; finish relay setup, or remove only the unused relay configuration you own |
 | `stampede --version does not match VERSION` | inspect PATH and existing links; the installer skips links to another checkout, so remove only stale links you own and re-run it |
-| `~/.claude/skills/... not linked` or `~/.codex/skills/... not linked` | run the installer after the agent home exists; inspect any skipped path before replacing it |
+| `~/.claude/skills/... not linked` or `~/.codex/skills/... not linked` | run the installer after the agent home exists; inspect any skipped path before replacing it. On a Mac without Codex, `herdr-trust` makes `~/.codex` when it writes Codex's trust file, so run the installer once more after it |
 | `stampede: command not found` | `~/.local/bin` is not on PATH; add it to your shell profile |
 | `skip ... left as is` | something of yours is at that path; remove it if you want stampede's link there, then re-run |
 | `refused: there is no ~/code folder to trust repos under`, or `warn no ~/code (FLEET_TRUST_ROOT)` from `herdr-doctor` | the trust root (`FLEET_TRUST_ROOT`, default `~/code`) does not exist; create it or change the key |
 | `... not in the plugin checkout ...` from `herdr-doctor` | the links point at an old plugin checkout, which Herdr deletes at its next start: rerun the current one's installer ([Update](#update)) |
-| `ASK FAILED ... exit 127` in the lead's inbox | `moshi-hook` is not installed; install Moshi or set `FLEET_ASK_CMD` |
+| `ASK FAILED ... exit 127` in the lead's inbox | `moshi-hook` is not installed, so no question or gate left the Mac, though `stampede ask` printed `ASKED` or `GATE ... on the phone`: type your answer in the lead's pane, or install Moshi or set `FLEET_ASK_CMD` |
 | a dialog at an agent's start | [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md) and [failure-modes.md](../skills/herdr-fleet/references/failure-modes.md) |

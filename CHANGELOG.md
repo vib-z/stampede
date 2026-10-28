@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+## 0.1.4 (28 Oct 2026)
+
+Optional pstack support for the lead (coding jobs only), and a README that opens with a short demo of one job. No breaking changes. Update with `stampede update` or `herdr plugin update stampede --yes`.
+
 - **A demo GIF and a plainer opener.** The README opens with one line on what stampede does, from your text to Grok Bot to your yes, then the new demo GIF (`assets/demo.gif`) where the teaser was. The plugin card and SKILL.md now say the same. Stompy, a Grok Bot that sets stampede up, is linked from the opener. `assets/teaser.gif` stays for the film.
 
 - **Optional pstack support for the lead.** If the Claude Code plugin pstack is installed, a lead loads it like any Claude Code session and, for coding jobs only, follows [references/pstack.md](skills/herdr-fleet/references/pstack.md) wherever pstack says otherwise: its fan-out runs as Herdr panes, the fleet model table and Herdr ownership win, the architect sketch is the contract commit, and the todo list is `todo.md` in the job folder. herdr-fleet points to it from "Panes, not built-in subagents"; the README has a short "Works well with" section. Without pstack nothing changes.
+
+- **A first install, checked from scratch.** Both install routes ran in a throwaway home with no stampede, and the README now matches what a new user sees. The Quick start runs `herdr-doctor` (exit 0 with Herdr running) and points to the one-time unattended setup before the first ask. Troubleshoot has two new rows: Herdr not running, and a lead held at Claude's sign-in screen. SETUP.md explains why Codex skills show as unlinked after `herdr-trust` on a Mac without Codex, and what to do when a question fails because Moshi is not installed.
 
 ## 0.1.3 (25 Oct 2026)
 
