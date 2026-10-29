@@ -557,5 +557,39 @@ class ReviewWatchdog(Shell):
         self.assertIn(f'removed stale owner tag {done}', self.log())
 
 
+
+class ReviewOneWake(CoreCase):
+    """review-claude minor 10: one Core permission prompt, told by the agent's own hook and by the follower, wakes the bot
+    once, in either order; a second episode is still its own event (review-codex R4)."""
+
+    def test_the_hook_and_the_follower_are_one_wake_per_episode(self):
+        job, key = self.core_job(workers=[('build-api', 'claude'), ('review-api', 'claude')], owner='alpha')
+        (job / 'core.json').write_text(json.dumps({'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'},
+                                                   'review-api': {'state': 'live', 'address': 't4', 'role': 'worker'}}))
+        records = []
+        for address, agent in (('t3', 'build-api'), ('t4', 'review-api')):
+            labels = {'stampede.job': key, 'stampede.agent': agent, 'stampede.role': 'worker'}
+            self.add_terminal(address, name=agent, labels=labels)
+            records.append({'address': address, 'name': agent, 'state': 'live', 'turn': 0, 'status': {'state': 'idle'}, 'labels': labels})
+        follower = follower_module().Follower(job)
+        follower.line({'channel': None, 'seq': 1, 'terminals': records})
+
+        def hook(address):  # what the owner's Claude relay hook posts for a permission prompt in that terminal
+            event = {'source': 'claude', 'state': 'Notification', 'notification_type': 'permission_prompt',
+                     'pane': f'hc:{key}/{address}', 'workspace': key, 'owner': 'alpha'}
+            subprocess.run([str(RELAY / 'herdr-event-post'), json.dumps(event)], check=True, timeout=30)
+        hook('t3')
+        follower.line(status('t3', 'blocked', kind='permission'))
+        follower.line(status('t3', 'working'))
+        follower.line(status('t3', 'blocked', kind='question'))
+        hook('t3')
+        follower.line(status('t4', 'blocked', kind='permission'))
+        hook('t4')
+        queue = self.root / 'queue/queue'
+        events = sorted((json.loads(p.read_text())['payload'] for p in queue.glob('*.json')), key=lambda e: (e['pane'], e['source']))
+        self.assertEqual([(e['pane'][-2:], e['source'], e.get('kind') or e.get('notification_type')) for e in events],
+                         [('t3', 'claude', 'permission_prompt'), ('t3', 'hc', 'question'), ('t4', 'hc', 'permission')])
+
+
 if __name__ == '__main__':
     unittest.main()

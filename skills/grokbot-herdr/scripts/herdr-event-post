@@ -66,11 +66,16 @@ fi
 # A Herdr Core job's follower names each episode (event_id): two episodes are two events, the same one is one.
 eid=$(jq -r '.event_id // empty' <<<"$payload")
 [ -n "$eid" ] && key="$key|$eid"
+# Its blocked or permission episode also answers for the pane's plain attention key (recorded with its event_id), so
+# the agent's own hook and the follower are one wake for one episode, whichever comes first; a later episode is new.
+akey=""; [ -n "$eid" ] && [ "${key#attention|}" != "$key" ] && akey="attention|$pane"
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
 exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
 touch "$DB"
 seen(){ awk -F'\t' -v k="$1" -v n="$now" -v w="$2" '$1==k && n-$2<w {f=1} END{exit !f}' "$DB"; }
 if [ "$STRICT" = 0 ] && seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summary"; exit 0; fi
+merged=0   # the agent's own hook (a record with no event_id) already sent this episode
+[ -n "$akey" ] && awk -F'\t' -v k="$akey" -v n="$now" -v w="$DEDUPE_SECS" '$1==k && n-$2<w {hit=1; by=$3} END{exit !(hit && by=="")}' "$DB" && merged=1
 # One event per turn: herdr done/idle, claude Stop and codex agent-turn-complete report the same turn end within
 # a second or two. Keep the first per pane for TURN_SECS. Claude's idle_prompt Notification comes 60 s after a turn
 # end and only repeats it, so drop it when that pane's turn end went out in the last IDLE_SECS.
@@ -83,9 +88,11 @@ if [ -n "$tkey" ]; then
     *) tkey="";;
   esac
 fi
-awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" '$1!=k && $1!=t && n-$2<600' "$DB" >"$DB.tmp"
+awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" -v a="$akey" '$1!=k && $1!=t && (a=="" || $1!=a) && n-$2<600' "$DB" >"$DB.tmp"
 printf '%s\t%s\n' "$key" "$now" >>"$DB.tmp"; [ -n "$tkey" ] && printf '%s\t%s\n' "$tkey" "$now" >>"$DB.tmp"
+[ -n "$akey" ] && printf '%s\t%s\t%s\n' "$akey" "$now" "$eid" >>"$DB.tmp"
 mv "$DB.tmp" "$DB"
+if [ "$merged" = 1 ]; then log "dedupe-skip (its hook sent this episode): $summary"; exit 0; fi
 
 # --- owner routing ---
 if [ -z "$owner" ] && [ -n "$ws" ] && [ -r "$D/owners/$ws" ]; then owner=$(sed -n 's/^owner=//p' "$D/owners/$ws" | head -1); fi
