@@ -4,6 +4,8 @@
 #    or: herdr-event-post '{"...json..."}'   or: herdr-event-post key=value ...
 #    --strict first (stampede's questions and gates): only the owner's own route, never default; no de-dupe;
 #    exit 3 when that route has no URL, 4 when the queue write fails, 0 only once the event is queued.
+#    An event with an event_id (a Herdr Core job's follower) is recorded for de-dupe only once it is queued, and exits
+#    5 when the queue write fails, so the follower tries it again; 0 means queued, or meant to stay on the machine.
 # Routes: $HERDR_EVENTS_ROUTES_DIR (default $HERDR_EVENTS_DIR/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
 # HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/ and the default routes/.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
@@ -88,11 +90,14 @@ if [ -n "$tkey" ]; then
     *) tkey="";;
   esac
 fi
-awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" -v a="$akey" '$1!=k && $1!=t && (a=="" || $1!=a) && n-$2<600' "$DB" >"$DB.tmp"
-printf '%s\t%s\n' "$key" "$now" >>"$DB.tmp"; [ -n "$tkey" ] && printf '%s\t%s\n' "$tkey" "$now" >>"$DB.tmp"
-[ -n "$akey" ] && printf '%s\t%s\t%s\n' "$akey" "$now" "$eid" >>"$DB.tmp"
-mv "$DB.tmp" "$DB"
-if [ "$merged" = 1 ]; then log "dedupe-skip (its hook sent this episode): $summary"; exit 0; fi
+seen_now(){   # the de-dupe record of this event
+  awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" -v a="$akey" '$1!=k && $1!=t && (a=="" || $1!=a) && n-$2<600' "$DB" >"$DB.tmp"
+  printf '%s\t%s\n' "$key" "$now" >>"$DB.tmp"; [ -n "$tkey" ] && printf '%s\t%s\n' "$tkey" "$now" >>"$DB.tmp"
+  [ -n "$akey" ] && printf '%s\t%s\t%s\n' "$akey" "$now" "$eid" >>"$DB.tmp"
+  mv "$DB.tmp" "$DB"
+}
+[ -z "$eid" ] && seen_now   # an event with an event_id is recorded only once queued, so a cut-off post is tried again
+if [ "$merged" = 1 ]; then seen_now; log "dedupe-skip (its hook sent this episode): $summary"; exit 0; fi
 
 # --- owner routing ---
 if [ -z "$owner" ] && [ -n "$ws" ] && [ -r "$D/owners/$ws" ]; then owner=$(sed -n 's/^owner=//p' "$D/owners/$ws" | head -1); fi
@@ -102,13 +107,15 @@ payload=$(jq -c --arg o "${owner:-}" --arg w "$ws" --arg r "$route" '. + {owner:
 summary="$summary owner=${owner:--} route=$route"
 URL=""; KEY=""
 [ -r "$RD/$route" ] && . "$RD/$route"
-if [ -z "$URL" ]; then [ "$STRICT" = 1 ] && refuse 3 "route $route has no URL"; echo "$(date +%Y-%m-%dT%H:%M:%S%z) logged-only (no route URL):$summary" >> "$LOG"; exit 0; fi
+if [ -z "$URL" ]; then [ "$STRICT" = 1 ] && refuse 3 "route $route has no URL"; [ -n "$eid" ] && seen_now; echo "$(date +%Y-%m-%dT%H:%M:%S%z) logged-only (no route URL):$summary" >> "$LOG"; exit 0; fi
 unset URL KEY
 # durable queue: write atomically, then flush (fast path). Queue holds route name only, never URL/KEY.
 QH="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"; mkdir -p "$QH/queue" 2>/dev/null || { [ "$STRICT" = 1 ] && refuse 4 "cannot make $QH/queue"; }
 qname="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.json"
 if jq -c --arg r "$route" '{route:$r, payload:.}' <<<"$payload" >"$QH/queue/.tmp-$qname" && mv "$QH/queue/.tmp-$qname" "$QH/queue/$qname"; then
+  [ -n "$eid" ] && seen_now
   log "queued $qname: $summary"
-else rm -f "$QH/queue/.tmp-$qname"; [ "$STRICT" = 1 ] && refuse 4 "queue write failed"; log "queue-write-failed: $summary"; exit 0; fi
+else rm -f "$QH/queue/.tmp-$qname"; [ "$STRICT" = 1 ] && refuse 4 "queue write failed"; log "queue-write-failed: $summary"
+  [ -n "$eid" ] && exit 5; exit 0; fi
 "$HOME/.local/bin/herdr-event-flush" </dev/null >/dev/null 2>&1
 exit 0

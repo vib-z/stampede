@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 GIVE_UP = 600  # seconds of failed reconnects before RELAY DOWN
 RETRY_EVERY = 30  # seconds between tries of the bot events the relay did not take
 STALL_EVERY = 60  # seconds between reads of the working terminals' screens
+POST_TIMEOUT = 60  # seconds herdr-event-post may take before the event counts as not taken
 clock, sleep, wall = time.monotonic, time.sleep, time.time
 FRESH = {'status': None, 'last': None, 'turn': 0, 'finished': False, 'reported': {}, 'episodes': {}}
 
@@ -166,7 +167,8 @@ class Follower:
     def post(self, event):
         """False when the relay did not take the event: it hung for 60 s, failed, or is not there."""
         try:
-            return subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True, timeout=60).returncode == 0
+            return subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True,
+                                  timeout=POST_TIMEOUT).returncode == 0  # 0: queued, or meant to stay home
         except (subprocess.TimeoutExpired, OSError):
             return False
 

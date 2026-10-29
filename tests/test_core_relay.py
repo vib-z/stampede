@@ -1,6 +1,6 @@
 """Herdr Core on the relay side: the owner's relay hooks, herdr-event-post, owner tags, the watchdog, herdr-doctor --core,
 the core check that never starts a core, and the job's follower (herdr-event-core), replayed from fake streams."""
-import importlib.util, json, os, socket, socketserver, subprocess, sys, tempfile, threading, time, unittest
+import importlib.util, json, os, shutil, socket, socketserver, subprocess, sys, tempfile, threading, time, unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
@@ -727,6 +727,77 @@ class ReviewTagEndpoint(Shell):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.events / 'owners' / KEY).exists(), 'its own core still runs the job')
         self.assertFalse((self.home / 'core/calls').exists(), 'never asked the default core')
+
+
+
+class ReviewDurable(CoreCase):
+    """review-codex round 3, R9: a follower event counts as taken only once herdr-event-post has queued it; a timeout
+    before the queue write, or a failed queue write, leaves it to retry, through a restart too: one queued file in the end."""
+
+    def setUp(self):
+        super().setUp()
+        self.job_dir, self.key = self.core_job(workers=[('build-api', 'claude')], owner='alpha')
+        (self.job_dir / 'core.json').write_text(json.dumps({'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'}}))
+        self.add_terminal('t3', name='build-api', status={'state': 'working'},
+                          labels={'stampede.job': self.key, 'stampede.agent': 'build-api'})
+        jq = shutil.which('jq', path='/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin')
+        self.slow = self.root / 'slow-queue'
+        wrapper = self.root / 'home/.local/bin/jq'  # herdr-event-post puts ~/.local/bin first on its PATH
+        wrapper.parent.mkdir(parents=True)
+        wrapper.write_text(f'#!/bin/sh\ncase "$*" in *"payload:."*) [ -f {self.slow} ] && sleep 2;; esac\nexec {jq} "$@"\n')
+        wrapper.chmod(0o755)
+        self.queue = self.root / 'queue/queue'
+
+    def queued(self):
+        finalized = [p for p in self.queue.glob('*.json') if not p.name.startswith('.')] if self.queue.is_dir() else []
+        return [json.loads(p.read_text())['payload'] for p in finalized]  # a hidden .tmp- file is not queued
+
+    def follower(self, core):
+        return core.Follower(self.job_dir)
+
+    def rows(self):
+        record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
+                  'labels': {'stampede.job': self.key, 'stampede.agent': 'build-api'}}
+        return {'channel': None, 'seq': 1, 'terminals': [record]}, status('t3', 'blocked', kind='permission')
+
+    def settle(self, core, restart):
+        follower = self.follower(core)
+        if restart:
+            follower = self.follower(core)
+        follower.retry(now=True)
+        state = json.loads((self.job_dir / 'relay-state.json').read_text())
+        self.assertEqual(state['unsent'], {})
+        self.assertIn('t3|blocked|1', state['sent'])
+        self.assertEqual([(e['state'], e['event_id']) for e in self.queued()], [('blocked', f'{self.key}/t3|blocked|1')])
+
+    def timeout_before_the_queue(self, restart):
+        core = follower_module()
+        with mock.patch.object(core, 'POST_TIMEOUT', 0.6):
+            self.slow.touch()
+            follower = self.follower(core)
+            for row in self.rows():
+                follower.line(row)
+            self.assertEqual(list(json.loads((self.job_dir / 'relay-state.json').read_text())['unsent']), ['t3|blocked|1'])
+            self.assertEqual(self.queued(), [])
+            self.slow.unlink()
+            time.sleep(2.5)  # the cut-off post's jq finishes and lets go of the de-dupe lock
+            self.settle(core, restart)
+
+    def test_a_timeout_before_the_queue_write_is_retried(self):
+        self.timeout_before_the_queue(restart=False)
+
+    def test_a_timeout_before_the_queue_write_is_retried_after_a_restart(self):
+        self.timeout_before_the_queue(restart=True)
+
+    def test_a_failed_queue_write_is_retried(self):
+        core = follower_module()
+        (self.root / 'queue').write_text('a file where the queue folder should be')
+        follower = self.follower(core)
+        for row in self.rows():
+            follower.line(row)
+        self.assertEqual(list(json.loads((self.job_dir / 'relay-state.json').read_text())['unsent']), ['t3|blocked|1'])
+        (self.root / 'queue').unlink()
+        self.settle(core, restart=True)
 
 
 if __name__ == '__main__':
