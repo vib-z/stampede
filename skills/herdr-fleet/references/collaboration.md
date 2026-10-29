@@ -2,16 +2,7 @@
 
 ## Files are the channel
 
-Put one folder per initiative at the root of the shared worktree, `.herdr-<initiative>/`, and keep it out of git:
-
-```bash
-mkdir -p .herdr-<initiative>/reports
-echo ".herdr-<initiative>/" >> "$(git rev-parse --git-common-dir)/info/exclude"   # skip outside a git repo
-```
-
-A Codex agent on `--approve-for-me` writes only inside its cwd. If this folder is not under it, start it with `--add-dir <abs path of this folder>`.
-
-When agents span several worktrees or repos, use `<main checkout>/.claude/worktrees/_briefs/` instead.
+The job folder `fleet-job new` made, `~/code/herdr-jobs/jobs/<date>-<owner>-<slug>/`, is the one channel. It sits outside every repo, so it needs no git exclude and serves agents in several worktrees or repos alike; `fleet-job start` gives each agent `--add-dir <job folder>` so it can write there from its own cwd.
 
 | File | Written by | Holds |
 |---|---|---|

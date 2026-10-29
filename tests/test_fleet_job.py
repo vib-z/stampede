@@ -356,10 +356,49 @@ class Fixes(unittest.TestCase):
         # new writes ~/.config/herdr-events/jobs/<workspace>; keep that off a real home
         if 'HOME' not in extra and not os.environ.get('HOME', '').startswith(tempfile.gettempdir()):
             extra['HOME'] = tempfile.mkdtemp()
+        root = Path(extra.get('FLEET_JOBS_ROOT', repo.parent / 'herdr-jobs'))
         out = io.StringIO()
-        with mock.patch.dict(os.environ, {'HERDR': herdr, **extra}), contextlib.redirect_stdout(out):
+        with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': str(root), **extra}), contextlib.redirect_stdout(out):
             fj.new(ask, 'w9', **kw)
-        return out.getvalue(), repo / '.herdr-fix-login-bug', log.read_text()
+        return out.getvalue(), max((root / 'jobs').iterdir(), key=lambda j: j.stat().st_mtime_ns), log.read_text()
+
+    def test_new_puts_the_job_under_the_jobs_root_and_keeps_the_repo_as_cwd(self):
+        from datetime import date
+        out, job, log = self.run_new('idle')
+        repo = job.parents[2] / 'repo'
+        self.assertEqual(job, job.parents[2] / 'herdr-jobs/jobs' / (date.today().isoformat() + '-local-fix-login-bug'))
+        self.assertEqual((job / 'workdir').read_text(), str(repo) + '\n')
+        self.assertEqual(list(repo.iterdir()), [])                       # nothing Herdr-related lands in the repo
+        self.assertIn('tab create --workspace w9 --cwd ' + str(repo) + ' ', log)
+        self.assertIn('--add-dir ' + str(job) + ' ', log)               # the lead may write its job folder outside its cwd
+        self.assertTrue(out.endswith('lead-fix-login-bug ' + str(job) + '\n'))
+
+    def test_the_jobs_root_defaults_to_code_herdr_jobs(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {'FLEET_JOBS_ROOT': ''}):
+            self.assertEqual(fj.jobs_root(), Path.home() / 'code/herdr-jobs')
+        with mock.patch.dict(os.environ, {'FLEET_JOBS_ROOT': '~/elsewhere'}):
+            self.assertEqual(fj.jobs_root(), Path.home() / 'elsewhere')
+
+    def test_the_same_ask_twice_the_same_day_gets_its_own_job_and_a_valid_lead(self):
+        root = Path(tempfile.mkdtemp())
+        first = self.run_new('idle', {'FLEET_JOBS_ROOT': str(root)})[1]
+        out, second, log = self.run_new('idle', {'FLEET_JOBS_ROOT': str(root)})
+        self.assertEqual(second.name, first.name + '-2')
+        self.assertIn('agent start lead-fix-login-bug-2 ', log)
+        self.assertEqual((second / 'lead').read_text(), 'lead-fix-login-bug-2\n')
+        root, name = Path(tempfile.mkdtemp()), 'a' * 27       # lead-<27> is exactly 32
+        self.run_new('idle', {'FLEET_JOBS_ROOT': str(root)}, name=name)
+        self.run_new('idle', {'FLEET_JOBS_ROOT': str(root)}, name=name)
+        leads = sorted((j / 'lead').read_text().strip() for j in (root / 'jobs').iterdir())
+        self.assertEqual(leads, ['lead-' + 'a' * 25 + '-2', 'lead-' + name])
+        self.assertTrue(all(fj.NAME.fullmatch(l) for l in leads))
+
+    def test_claude_and_cursor_workers_may_write_the_job_folder(self):
+        job = Path(tempfile.mkdtemp()) / 'job'
+        for kind in ('claude', 'cursor'):
+            args = fj.cli_args(job, 'build-x', kind, None, None, [])
+            self.assertEqual(args[args.index('--add-dir') + 1], str(job.absolute()), kind)
 
     def test_new_starts_the_lead_on_the_table_model(self):
         _, _, log = self.run_new('idle')
@@ -962,3 +1001,139 @@ class Gates(unittest.TestCase):
         for event in events:
             self.assertIn('ANSWER ' + event['ask'] + ' ' + event['question'] + ': ', event['answer'])
         self.assertEqual(len({event['answer'] for event in events}), 2)
+
+
+def screen_herdr(screen):
+    """A fake herdr whose `agent read` shows this screen; every other call answers an empty result."""
+    folder = Path(tempfile.mkdtemp())
+    (folder / 'screen.txt').write_text(screen)
+    script = folder / 'herdr'
+    script.write_text('#!/bin/bash\ncase "$1 $2" in\n  "agent read") cat ' + str(folder / 'screen.txt') + ';;\n'
+                      '  *) echo \'{"result":{}}\';;\nesac\n')
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+CARD = 'Which nudge copy?\n❯ 1. Option A\n  2. Option B\n  4. Type something.\nEnter to select · ↑/↓ to navigate · Esc to cancel\n'
+
+
+class FrontDoor(unittest.TestCase):
+    """A chat outside Herdr stays the owner's only contact: the lead posts to <job>/outbox and the front door relays it."""
+    def setUp(self):
+        from unittest import mock
+        self.job = job_with([('lead-demo', 'claude'), ('build-x', 'claude')])
+        (self.job / 'front-door').write_text('relay\n')
+        patch = mock.patch.dict(os.environ, {'HERDR': screen_herdr('❯ \n')})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def quiet(self, fn, *args):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = fn(*args)
+        return result, out.getvalue()
+
+    def test_post_numbers_items_copies_files_and_logs_one_line(self):
+        shot = Path(tempfile.mkdtemp()) / 'after.png'
+        shot.write_bytes(b'png')
+        _, out = self.quiet(fj.post, self.job, 'Screens for the nudge', [str(shot)])
+        self.assertIn('POSTED 001', out)
+        self.assertEqual((self.job / 'outbox/001/after.png').read_bytes(), b'png')
+        self.assertIn(str(self.job.absolute() / 'outbox/001/after.png'), (self.job / 'outbox/001.md').read_text())
+        self.quiet(fj.post, self.job, 'Report ready', [])
+        self.assertEqual((self.job / 'outbox.log').read_text().splitlines(),
+                         ['001 post Screens for the nudge', '002 post Report ready'])
+        with self.assertRaises(ValueError):
+            fj.post(self.job, 'missing', ['/nonexistent/file.png'])
+
+    def test_wait_prints_unseen_items_once_then_times_out(self):
+        self.quiet(fj.post, self.job, 'PLAN READY: two lanes', [])
+        code, out = self.quiet(fj.wait, self.job, 5, 0)
+        self.assertEqual(code, 0)
+        self.assertIn('# 001 post', out)
+        self.assertIn('PLAN READY: two lanes', out)
+        code, out = self.quiet(fj.wait, self.job, 0, 0)
+        self.assertEqual(code, 3)
+        self.assertIn('TIMEOUT', out)
+
+    def test_wait_and_tell_see_a_lead_held_at_a_card(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {'HERDR': screen_herdr(CARD)}):
+            code, out = self.quiet(fj.wait, self.job, 5, 0)
+            self.assertEqual(code, 0)
+            self.assertIn('BLOCKED_ON_CARD lead-demo', out)
+            self.assertIn('Which nudge copy?', out)
+            code, out = self.quiet(fj.tell, self.job, 'lead', 'ANSWER: option B')
+        self.assertEqual(code, 3)
+        self.assertIn('BLOCKED_ON_CARD lead-demo', out)
+        self.assertNotIn('DELIVERED', out)
+        self.assertIn('ANSWER: option B', (self.job / 'inbox/lead-demo.md').read_text())  # still queued for after the card
+        code, out = self.quiet(fj.tell, self.job, 'lead', 'next')
+        self.assertIsNone(code)
+        self.assertIn('DELIVERED lead-demo', out)
+
+    def test_a_question_goes_to_the_outbox_not_the_phone(self):
+        ident, out = self.quiet(fj.ask, self.job, 'Customer.io copy too?', ['yes', 'no'])
+        self.assertIn('posted to the front door as outbox 001', out)
+        item = (self.job / 'outbox/001.md').read_text()
+        self.assertIn('Customer.io copy too?\n- yes\n- no', item)
+        self.assertIn(f'ANSWER {ident}', item)
+        self.assertFalse((self.job / 'asks').exists())  # no phone card was started
+
+    def test_a_gate_goes_to_the_outbox_and_the_front_door_records_the_quoted_yes(self):
+        from unittest import mock
+        sha = 'a' * 40
+        _, out = self.quiet(fj.ask_gate, self.job, 'mark PR #444 ready for review', sha, 444)
+        ident = next((self.job / 'gates').glob('*.json')).stem
+        item = (self.job / 'outbox/001.md').read_text()
+        self.assertIn(f'# 001 gate', item)
+        self.assertIn(f'approve-gate {self.job.absolute()} {ident} --sha {sha}', item)
+        self.assertEqual(fj.load_gate(self.job, ident)['route'], 'front-door')
+        with mock.patch.object(fj, 'inside_herdr', return_value=False):
+            self.quiet(fj.approve_gate, self.job, ident, sha, "owner in desktop chat: 'push the PR'")
+        _, out = self.quiet(fj.gate_ok, self.job, ident, sha)
+        self.assertIn("APPROVED " + ident + " by owner in desktop chat: 'push the PR'", out)
+        with mock.patch.object(fj, 'inside_herdr', return_value=True), self.assertRaises(PermissionError):
+            fj.approve_gate(self.job, ident, sha, 'the lead itself')
+
+    def test_the_leads_own_card_and_files_become_posts(self):
+        card = {'tool_input': {'questions': [{'question': 'Ready + DM?', 'options': [{'label': 'Yes', 'description': 'both'}]}]}}
+        decision = json.loads(fj.ask_lead(self.job, 'lead-demo', card))['hookSpecificOutput']
+        self.assertEqual(decision['permissionDecision'], 'deny')
+        self.assertIn('outbox 001', decision['permissionDecisionReason'])
+        self.assertIn('Ready + DM?\n- Yes: both', (self.job / 'outbox/001.md').read_text())
+        shot = Path(tempfile.mkdtemp()) / 'plan.md'
+        shot.write_text('the plan')
+        decision = json.loads(fj.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)], 'caption': 'The plan'}}))
+        self.assertEqual(decision['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertEqual((self.job / 'outbox/002/plan.md').read_text(), 'the plan')
+        self.assertEqual(fj.send_file(self.job, 'build-x', {'tool_input': {'files': [str(shot)]}}), '{}')  # only the lead's
+        (self.job / 'front-door').unlink()
+        self.assertEqual(fj.ask_lead(self.job, 'lead-demo', card), '{}')   # a job without a front door: the card goes ahead
+        self.assertEqual(fj.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)]}}), '{}')
+
+    def test_a_plan_is_approved_only_once_it_was_posted_as_it_stands(self):
+        plan = self.job / 'plan.md'
+        plan.write_text('Size: big\n# Plan v1\n')
+        with self.assertRaises(PermissionError) as refused:
+            fj.approve(self.job, "owner in desktop chat: 'ok - lets go'")
+        self.assertIn('has not been shown this plan', str(refused.exception))
+        self.quiet(fj.post, self.job, 'PLAN READY', [str(plan)])
+        self.quiet(fj.approve, self.job, "owner in desktop chat: 'approve as written'")
+        self.assertIn('approve as written', (self.job / 'approved').read_text())
+        plan.write_text('Size: big\n# Plan v2\n')   # changed after the owner saw it
+        with self.assertRaises(PermissionError):
+            fj.approve(self.job, 'owner')
+
+    def test_new_with_a_front_door_writes_the_relay_brief(self):
+        out, job, log = Fixes.run_new(self, 'idle', front=True, review=True)
+        self.assertTrue((job / 'front-door').is_file())
+        brief = (job / 'briefs/lead-fix-login-bug.md').read_text()
+        self.assertIn('post it with fleet-job post', brief)
+        self.assertIn('never to your pane', brief)
+        self.assertIn('it goes to the front door', brief)
+        self.assertIn('SendUserFile', (job / 'hooks/lead-fix-login-bug-claude.json').read_text())
+        out, job, _ = Fixes.run_new(self, 'idle')
+        self.assertFalse((job / 'front-door').exists())
+        self.assertNotIn('never to your pane', (job / 'briefs/lead-fix-login-bug.md').read_text())

@@ -122,7 +122,7 @@ Already uninstalled? Then `herdr plugin list` no longer names the checkout. Find
 
 If you set up the relay, unload its two launchd jobs and remove only its hook/notify entries before removing its helper links. See [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks) for their labels and commands. Uninstalling the plugin alone does not remove timers, hooks or route files.
 
-Job folders (`<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herdr-events/` stay until you remove them yourself. So does the daily update check's one-line cache: `rm -rf ~/.cache/stampede` (or `$XDG_CACHE_HOME/stampede` when that is set).
+Job folders (`~/code/herdr-jobs/`, or `FLEET_JOBS_ROOT`; older ones in `<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herdr-events/` stay until you remove them yourself. So does the daily update check's one-line cache: `rm -rf ~/.cache/stampede` (or `$XDG_CACHE_HOME/stampede` when that is set).
 
 ## Setup problems
 

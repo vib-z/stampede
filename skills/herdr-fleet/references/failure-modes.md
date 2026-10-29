@@ -80,7 +80,7 @@ herdr agent prompt "$N" "You were restarted after a hang in a browser call. Re-r
 
 | Symptom | Fix |
 |---|---|
-| A parallel session flips the main checkout's branch mid-task | Do branch work in a worktree (`git worktree add .claude/worktrees/<name> <branch>`), symlink `node_modules`, copy `.env.local`. |
+| A parallel session flips the main checkout's branch mid-task | Do branch work in a worktree (`git worktree add ~/code/herdr-jobs/worktrees/<name> <branch>`), symlink `node_modules`, copy `.env.local`. |
 | Copied helper scripts `cd` to another worktree's hard-coded path | Copies must `cd "$(dirname "$0")/.."`. |
 | Two agents append to the same DECISIONS file and collide | Give each agent its own section letter. Resolve with a keep-both union. Renumber at merge if main took the letter. |
 | `workspace close` (after the owner's yes) returns `workspace_group_close_required` | Linked worktree workspaces are still open. Close those you created, with the same yes; never add `--group` just to get past it (0.9.4 has no `--group`; the 0.9.5 docs add it). |

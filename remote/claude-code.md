@@ -31,7 +31,7 @@ Talk the job through with Claude first, in the Claude desktop app or any Claude 
 
 ```bash
 P=$(herdr workspace create --cwd <repo> --label <job> --no-focus | jq -r .result.root_pane.pane_id)
-stampede new --file <ask.md> --pane "$P" --fork "$CLAUDE_CODE_SESSION_ID"
+stampede new --file <ask.md> --pane "$P" --front-door --fork "$CLAUDE_CODE_SESSION_ID"
 ```
 
 - The lead runs `claude --resume <id> --fork-session` with the lead's hooks, so it starts with the whole conversation, and writes the agreed plan into `plan.md` instead of planning again. Your chat is left as it was.
@@ -39,3 +39,4 @@ stampede new --file <ask.md> --pane "$P" --fork "$CLAUDE_CODE_SESSION_ID"
 - Claude Code sets `CLAUDE_CODE_SESSION_ID` in every session; the chat's folder can differ from the repo.
 - The fork carries the chat's whole context into the lead, so fork a focused planning chat, not a long one.
 - `reopen.sh` resumes the lead's own session, never the planning chat.
+- **The desktop chat stays your contact** (`--front-door`): you never need to watch the lead's pane. The lead posts its plan, questions, gates, screenshots and report to `<job>/outbox/`; the chat waits on it with `stampede wait <job>` in the background, sends you each item and passes your answers back. Its loop: [skills/stampede](../skills/stampede/SKILL.md#relay-a---front-door-job).
