@@ -13,7 +13,6 @@ FAKE_HC = ROOT / 'tests/fake_hc.py'
 SNAPSHOT = ROOT / 'skills/grokbot-herdr/scripts/herdr-reopen-snapshot'
 SHA = 'a' * 40
 LEAD = 'lead-fix-login-bug'
-contract = unittest.expectedFailure  # the Core contract before it is built; each phase B commit removes it from its class
 
 
 def git(*args, cwd):
@@ -684,7 +683,6 @@ class CoreHooks(CoreCase):
         self.assertEqual((job / 'inbox.log').read_text(), 'GONE build-api other\n')
 
 
-@contract
 class CoreReopen(CoreCase):
     """Build order 7: the Core reopen record, reopen.sh, --lead, and unread news reaching a resumed lead."""
 
@@ -714,6 +712,7 @@ class CoreReopen(CoreCase):
 
         def watch():
             time.sleep(delay)
+            fj.watch_paths(self.job, LEAD, True)  # SessionStart: the watch-paths hook makes absent files
             while not stop.is_set():
                 for path in paths:
                     delivered.extend(fj.wake(self.job, LEAD, {'file_path': str(path)}))

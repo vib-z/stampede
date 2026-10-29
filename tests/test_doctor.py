@@ -199,7 +199,7 @@ exit 0
         for flag in ('--help', '-h'):
             result = self.doctor(flag)
             self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, 'usage: herdr-doctor [--relay] [-h|--help]\n')
+            self.assertEqual(result.stdout, 'usage: herdr-doctor [--relay] [--core] [-h|--help]\n')
         for args in (('--unknown',), ('relay',), ('--relay', 'extra')):
             result = self.doctor(*args)
             self.assertEqual(result.returncode, 2)

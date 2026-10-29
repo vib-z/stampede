@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_core import CoreCase, FAKE_HC, ROOT, contract
+from test_core import CoreCase, FAKE_HC, ROOT
 
 RELAY = ROOT / 'skills/grokbot-herdr/scripts'
 FOLLOWER = RELAY / 'herdr-event-core'
@@ -214,7 +214,6 @@ class CoreAlive(Shell):
         self.assertEqual(core.socket_path({'HOME': '/h', 'XDG_CONFIG_HOME': str(self.home / 'config')}), Path('/from/config.sock'))
 
 
-@contract
 class CoreDoctor(Shell):
     """Build order 7: herdr-doctor --core, read-only."""
 
@@ -223,6 +222,8 @@ class CoreDoctor(Shell):
         for app in ('.claude', '.codex'):
             (self.home / app).mkdir()
         self.env['STAMPEDE_NO_UPDATE_CHECK'] = '1'
+        del self.env['HC']  # the doctor runs hc --version itself, through the fake on its PATH
+        (self.events / 'routes').rmdir()  # no relay installed: a routes folder would turn its checks on
         subprocess.run(['bash', str(ROOT / 'install.sh')], env=self.env, check=True, capture_output=True, timeout=30)
         self.fake('hc', 'echo "hc ${TEST_HC_VERSION:-0.1.13}"\n')
         self.fake('claude', 'echo "${TEST_CLAUDE_VERSION:-2.1.312} (Claude Code)"\n')

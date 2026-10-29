@@ -1,6 +1,6 @@
 """fleet-job: a Herdr job's messages, background owner questions, plan approval and per-CLI hooks.
 Ported from stampede (scripts/stampede_hooks.py at 0871ae3) and cut down."""
-import contextlib, fcntl, glob, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, uuid
+import contextlib, fcntl, glob, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, time, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -426,7 +426,15 @@ def wake(job, agent, payload):
         complete = addition.rfind(b'\n') + 1
         state[str(changed)] = offset + complete
         state_path.write_text(json.dumps(state) + '\n')
-    return [line(row.decode('utf-8', 'replace')) for row in addition[:complete].split(b'\n')[:-1] if row.strip()]
+        lines = [line(row.decode('utf-8', 'replace')) for row in addition[:complete].split(b'\n')[:-1] if row.strip()]
+        attempts = [found.group(1) for found in (re.fullmatch('REOPENED ' + re.escape(agent) + ' ([0-9a-f]{12})', row)
+                                                  for row in lines) if found]
+        if attempts:  # this file's hook delivered a reopen's line: that reopen's proof the restarted agent reads this file
+            ack_path = job / 'hooks' / ('ack-' + agent + '.json')
+            acks = json.loads(ack_path.read_text()) if ack_path.is_file() else {}
+            acks[str(changed)] = (acks.get(str(changed), []) + attempts)[-10:]
+            ack_path.write_text(json.dumps(acks) + '\n')
+    return lines
 
 
 def claude_stop(job, agent, payload):
@@ -775,7 +783,7 @@ def core_run(job, agent, role, program, cwd):
     lock, and bind it. A failed hc run that spawned all the same (a call that timed out) is adopted by its labels;
     otherwise the entry is failed and the error raised."""
     key = core_key(job)
-    bind(job, agent, {'state': 'starting', 'role': role, 'session': os.environ.get('HC_SESSION', ''),
+    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), 'session': os.environ.get('HC_SESSION', ''),
                       'socket': os.environ.get('HC_SOCKET', '')}, fresh=True)
     labels = [part for k, v in (('job', key), ('agent', agent), ('role', role)) for part in ('--label', f'stampede.{k}={v}')]
     name = agent
@@ -849,7 +857,93 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
         record(job, agent, kind, brief, args, session)
         pointer = f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
         address = core_run(job, agent, 'lead' if lead else 'worker', program + [pointer], cwd)
+        snapshot(job)
         return 0 if core_outcome(job, agent, address, 'lead' if lead else agent, brief) == 'started' else 1
+
+
+def snapshot(job):
+    """Refresh a Core job's reopen record (REOPEN.md and reopen.sh, from agents.tsv and core.json)."""
+    subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'), core_key(job), str(job)],
+                   check=True, capture_output=True)
+
+
+FOLLOWER = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-core'
+REOPEN_EVERY, REOPEN_DEADLINE = 5, 90  # seconds between a reopen's REOPENED writes, and before it gives up
+
+
+def agent_rows(job):
+    """agents.tsv: name -> {kind, session, brief, args}."""
+    path, rows = Path(job) / 'agents.tsv', {}
+    for row in (path.read_text().splitlines() if path.is_file() else []):
+        if row and not row.startswith('#'):
+            cells = (row.split('\t') + [''] * 5)[:5]
+            rows[cells[0]] = dict(zip(('kind', 'session', 'brief', 'args'), cells[1:]))
+    return rows
+
+
+def reopen(job, lead_only=False, prompt=False):
+    """Start what is missing of a Core job, once each and never a second copy of a live one: for an open job its marker,
+    owner tag and follower; its lead, resumed; with no lead_only, each worker that is not live (Claude resumed, Codex
+    fresh, with its brief pointer only with prompt). A finished job resumes its agents for inspection only. A restarted
+    lead of an open job must acknowledge both its inbox files (exit 3 when it does not)."""
+    job = Path(job).absolute()
+    key, (people, lead), rows = core_key(job), roster(job), agent_rows(job)
+    finished = (job / 'finished').is_file()
+    if not finished:
+        mark_job(key, job)
+        if job_owner(job):
+            (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
+            (events_dir() / 'owners' / key).write_text('owner=' + job_owner(job) + '\n')
+        relay = 'relay-' + key[3:]
+        with launching(job, relay):
+            if not live_terminal(job, relay):
+                print(f'RESTARTED {relay} ({core_run(job, relay, "relay", [str(FOLLOWER), str(job)], job.parent)})')
+    restarted = [agent for agent in [lead] + ([] if lead_only else [a for a in people if a != lead])
+                 if reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead)]
+    snapshot(job)
+    return acknowledged(job, lead) if lead in restarted and not finished else 0
+
+
+def reopen_agent(job, agent, row, prompt, lead):
+    """Restart one agent unless a live terminal of the job runs it. True when it was started."""
+    with launching(job, agent):
+        if live_terminal(job, agent):
+            return False
+        kind, args, session = row.get('kind', 'claude'), shlex.split(row.get('args', '')), row.get('session', '')
+        pointer = f'You are {agent} in a herdr fleet. Read {row.get("brief")} and do everything it says.'
+        if kind == 'claude' and session:
+            program = [cli(kind), '--resume', session] + args
+        elif kind == 'claude':
+            session = str(uuid.uuid4())
+            record(job, agent, kind, row.get('brief') or '-', args, session)
+            program = [cli(kind)] + args + ['--session-id', session, pointer]
+        else:
+            program = [cli(kind)] + args + ([pointer] if prompt else [])
+        cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
+        print(f'RESTARTED {agent} ({core_run(job, agent, "lead" if lead else "worker", program, cwd)})')
+        return True
+
+
+def acknowledged(job, lead):
+    """A restarted lead reads its two inbox files once its own wake hook delivers them: write REOPENED <lead> <attempt>
+    to each every REOPEN_EVERY seconds until that file's hook has acknowledged this attempt, or REOPEN_DEADLINE passes.
+    Reopen never moves a read offset, so each delivery carries every line written there while the lead was down."""
+    attempt, acks = uuid.uuid4().hex[:12], Path(job) / 'hooks' / ('ack-' + lead + '.json')
+    pending, deadline = {str(p.resolve()) for p in watched(job, lead, True)}, time.time() + REOPEN_DEADLINE
+    while pending and time.time() < deadline:
+        for path in sorted(pending):
+            append(path, f'REOPENED {lead} {attempt}')
+        until = min(deadline, time.time() + REOPEN_EVERY)
+        while pending and time.time() < until:
+            seen = json.loads(acks.read_text()) if acks.is_file() else {}
+            pending = {path for path in pending if attempt not in seen.get(path, [])}
+            time.sleep(min(0.5, REOPEN_EVERY / 10))
+    if not pending:
+        print(f'ACKNOWLEDGED {lead}: its wake delivered both inbox files')
+        return 0
+    for path in sorted(pending):
+        print(f'NOT ACKNOWLEDGED {path}: once {lead} is up, run: echo "REOPENED {lead} {attempt}" >> {path}')
+    return 3
 
 
 def caller_ids(job):
@@ -1043,7 +1137,7 @@ def new_core(ask_file, name, review, fork, cwd):
     relay = 'relay-' + key[3:]
     try:
         with launching(job, relay):
-            core_run(job, relay, 'relay', [str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-core'), str(job)], repo)
+            core_run(job, relay, 'relay', [str(FOLLOWER), str(job)], repo)
         with launching(job, lead):
             program = [claude] + (['--resume', fork, '--fork-session'] if fork else []) + args + ['--session-id', session]
             address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo)
@@ -1052,6 +1146,7 @@ def new_core(ask_file, name, review, fork, cwd):
         return start_failed(job, key, relay, line(error))
     if outcome == 'failed':
         return start_failed(job, key, relay, core_entries(job)[lead].get('reason', 'the lead ended'))
+    snapshot(job)
     if outcome == 'started':
         print(lead + ' ' + str(job))
         return 0
@@ -1106,6 +1201,9 @@ def main(argv):
     p = sub.add_parser('finish'); p.add_argument('job'); p.add_argument('summary', nargs='+')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
     p.add_argument('payload', nargs='?', help="Codex's notify JSON, passed as the last argument; other hooks read stdin")
+    p = sub.add_parser('_reopen', help='a Herdr Core job: start what is missing (reopen.sh runs it)'); p.add_argument('job')
+    p.add_argument('--lead', action='store_true', help='only the follower and the lead')
+    p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
     p.add_argument('--gate')
     p.add_argument('question', nargs='+')
@@ -1148,6 +1246,8 @@ def run(a):
         return approve(a.job, a.by)
     if a.cmd == 'finish':
         return finish(a.job, ' '.join(a.summary))
+    if a.cmd == '_reopen':
+        return reopen(a.job, a.lead, a.prompt)
     if a.cmd == '_ask':
         return ask_now(a.job, ' '.join(a.question), a.option, a.command, a.gate)
     raw = a.payload if a.payload is not None else sys.stdin.read()
