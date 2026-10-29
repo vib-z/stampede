@@ -1156,24 +1156,22 @@ def caller_ids(job):
 
 EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›) *$',
                           re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt
-CLEAR_PAUSE = 1  # seconds after ctrl+c before typing, as herdr-send waits
 
 
-def clear_draft(address):
-    """herdr-send's rule: ctrl+c once to clear leftover typed input, only when the screen shows no empty-prompt marker
-    (ctrl+c on an empty Codex prompt quits Codex). A screen Core cannot read is left alone."""
+def drafted(address):
+    """True when the last screen lines show no empty-prompt marker: text already typed, which Core would paste after.
+    A screen Core cannot read counts as empty."""
     try:
-        screen = hc('read', address, '--lines', '8').get('text', '')
+        return not EMPTY_PROMPT.search(hc('read', address, '--lines', '8').get('text', ''))
     except HcError:
-        return
-    if not EMPTY_PROMPT.search(screen):
-        hc('keys', '--', address, 'ctrl+c')
-        time.sleep(CLEAR_PAUSE)
+        return False
 
 
 def tell_core(job, name, text):
     """Prompt a Codex agent in its Core terminal by its status: idle types only while idle (atomic); done types at once,
-    so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line."""
+    so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line.
+    It writes only through hc send, which refuses a blocked terminal: no key is ever pressed, since Core cannot guard
+    one. A slash command, or text already typed in the prompt, is refused with the step to do by hand."""
     target(job)
     address, lost = core_entries(job).get(name, {}).get('address'), None
     try:
@@ -1192,12 +1190,16 @@ def tell_core(job, name, text):
         why = refused[word]
     else:
         try:
-            clear_draft(address)  # Core pastes after whatever sits typed there
-            if text.startswith('/') and '\n' not in text:  # a slash command (/quit): pasted, Codex takes it as chat
-                hc('keys', '--', address, *['space' if c == ' ' else c for c in text], 'enter')
+            if text.startswith('/') and '\n' not in text:  # pasted, Codex takes a slash command as chat
+                keys = ' '.join(['space' if c == ' ' else c for c in text] + ['enter'])
+                why = (f'a slash command needs typed keys, which Core cannot guard: when hc get {address} shows idle, '
+                       f'run hc keys {address} {keys}')
+            elif drafted(address):  # Core pastes after it; clearing it could erase someone's own typing
+                why = (f'text is already typed in its prompt; Core cannot clear it safely: read it with hc read {address}, '
+                       f'clear it with hc keys {address} ctrl+c when hc get shows idle, then tell again')
             else:
                 hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text)
-            return print(f'SUBMITTED {name} ({address})')
+                return print(f'SUBMITTED {name} ({address})')
         except HcError as error:
             why = {9: refused['blocked'], 10: refused['working'], 11: 'not ready'}.get(error.code, line(error))
     print(f'FAILED {name} ({why})')

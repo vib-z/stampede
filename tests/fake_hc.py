@@ -133,7 +133,7 @@ def command(state, argv):
         if cmd == 'read':
             if state.get('read_error', {}).get(t['address']):
                 fail(state['read_error'][t['address']], 'no answer')
-            return print(json.dumps({'text': t.get('screen', 'last screen line'), 'complete': True, 'how': 'screen'}))
+            return print(json.dumps({'text': t.get('screen', '\u203a '), 'complete': True, 'how': 'screen'}))  # an empty prompt
         if cmd == 'keys':
             t.setdefault('keys', []).append(rest[1:])
             for key in rest[1:]:

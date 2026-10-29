@@ -43,9 +43,6 @@ class CoreCase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
-        pause = mock.patch.object(fj, 'CLEAR_PAUSE', 0)  # no real wait after a cleared draft
-        pause.start()
-        self.addCleanup(pause.stop)
         for name in ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER',
                      'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET'):
             os.environ.pop(name, None)
@@ -1410,7 +1407,8 @@ class ReviewDefaultSocket(CoreCase):
 
 
 class ReviewDraft(CoreCase):
-    """test-claude TC-F5: a tell to a Codex worker first clears leftover typed input, by herdr-send's rule."""
+    """test-claude TC-F5 and TC-F1, as review-codex R10 settled them: a Core tell writes only through hc send --if idle.
+    A draft in a Codex prompt and a slash command are refused with the manual step; no key ever reaches the terminal."""
 
     def setUp(self):
         super().setUp()
@@ -1418,36 +1416,53 @@ class ReviewDraft(CoreCase):
         (self.job_dir / 'core.json').write_text(json.dumps({'review-api': {'state': 'live', 'address': 't1'}}))
         self.add_terminal('t1', name='review-api', labels={'stampede.job': self.key, 'stampede.agent': 'review-api'})
 
-    def tell(self, text='Fix the nit'):
-        self.quiet(fj.tell, self.job_dir, 'review-api', text)
+    def told(self, text='Fix the nit'):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                fj.tell(self.job_dir, 'review-api', text)
+                code = 0
+            except SystemExit as stop:
+                code = stop.code
         terminal = self.state()['terminals']['t1']
-        return terminal['sent'], terminal.get('keys', [])
+        return out.getvalue().strip(), code, terminal['sent'], terminal.get('keys', [])
 
-    def test_a_leftover_draft_is_cleared_first(self):
+    def test_a_leftover_draft_is_refused_never_cleared(self):
         self.terminal('t1', draft='zzz', screen='\u203a zzz\n  ? for help')
-        self.assertEqual(self.tell(), (['Fix the nit'], [['ctrl+c']]))
+        out, code, sent, keys = self.told()
+        self.assertEqual((code, sent, keys), (2, [], []))
+        self.assertEqual(out, 'FAILED review-api (text is already typed in its prompt; Core cannot clear it safely: read it with '
+                              'hc read t1, clear it with hc keys t1 ctrl+c when hc get shows idle, then tell again)')
 
-    def test_an_empty_prompt_is_never_sent_ctrl_c(self):
+    def test_an_empty_prompt_or_an_unreadable_screen_is_sent(self):
         for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts'):
-            self.terminal('t1', screen=screen, sent=[], keys=[])
-            self.assertEqual(self.tell(), (['Fix the nit'], []), screen)
-
-    def test_a_screen_core_cannot_read_is_left_alone(self):
+            self.terminal('t1', screen=screen, sent=[])
+            self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []), screen)
         self.shape(read_error={'t1': 'unavailable'})
-        self.terminal('t1', draft='')
-        self.assertEqual(self.tell(), (['Fix the nit'], []))
+        self.terminal('t1', sent=[])
+        self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []))
 
-
-    def test_a_slash_command_is_typed_as_keys(self):  # test-claude TC-F1
+    def test_a_slash_command_is_refused_with_its_keys(self):
         self.terminal('t1', screen='\u203a Ask Codex to do anything')
-        self.assertEqual(self.tell('/quit'), (['/quit'], [['/', 'q', 'u', 'i', 't', 'enter']]))
-        self.terminal('t1', sent=[], keys=[])
-        self.assertEqual(self.tell('/model o3'), (['/model o3'], [['/', 'm', 'o', 'd', 'e', 'l', 'space', 'o', '3', 'enter']]))
-        self.assertEqual(self.calls('send'), [], 'a paste is chat to Codex, not a command')
-        self.terminal('t1', status={'state': 'working'}, keys=[])
-        with self.assertRaises(SystemExit):
-            self.tell('/quit')
-        self.assertEqual(self.state()['terminals']['t1']['keys'], [], 'the same status rule as any tell')
+        out, code, sent, keys = self.told('/quit')
+        self.assertEqual((code, sent, keys), (2, [], []))
+        self.assertEqual(out, 'FAILED review-api (a slash command needs typed keys, which Core cannot guard: when hc get t1 '
+                              'shows idle, run hc keys t1 / q u i t enter)')
+        self.assertIn('hc keys t1 / m o d e l space o 3 enter', self.told('/model o3')[0])
+        self.assertEqual(self.calls('send'), [])
+
+    def test_a_worker_that_turns_busy_or_blocked_after_the_check_gets_no_key(self):  # review-codex R10, repros A and B
+        cases = [({'state': 'working'}, None, 'Fix the nit', '\u203a zzz'),                     # A: no marker, then working
+                 ({'state': 'working'}, None, 'Fix the nit', '\u203a Ask Codex to do anything'),
+                 ({'state': 'blocked', 'kind': 'permission'}, 'unavailable', '/quit', ''),     # B: blocked, screen unread
+                 ({'state': 'blocked', 'kind': 'permission'}, None, '/quit', '\u203a Ask Codex to do anything'),
+                 ({'state': 'blocked', 'kind': 'permission'}, None, 'Fix the nit', '\u203a Ask Codex to do anything')]
+        for after, read_error, text, screen in cases:
+            self.shape(after_get={'t1': {'status': after}}, read_error={'t1': read_error} if read_error else {})
+            self.terminal('t1', status={'state': 'idle'}, screen=screen, sent=[], keys=[])
+            out, code, sent, keys = self.told(text)
+            self.assertEqual((code, sent, keys), (2, [], []), (after, text, out))
+            self.assertTrue(out.startswith('FAILED review-api ('), out)
 
 
 if __name__ == '__main__':
