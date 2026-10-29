@@ -15,7 +15,7 @@ stampede new --core --file ask.md --cwd ~/code/my-app [--name <slug>] [--review]
 ```
 
 - `--cwd` is the repo, under `FLEET_TRUST_ROOT`; the default is the git root of the current folder. `--pane` and `--workspace` are refused, and so is a job path where an earlier job's terminals still run (the key is the path's hash): kill them or use another `--name`.
-- It writes the job record first, then starts the job's follower `relay-<12 hex>`, then the lead with its brief pointer as the first prompt. Every terminal has no parent and no notes, and carries the labels `stampede.job=<key>`, `stampede.agent=<name>` and `stampede.role=lead|worker|relay|wait`.
+- It writes the job record first, then starts the job's follower `relay-<12 hex>`, then the lead with its brief pointer as the first prompt. Every terminal has no parent and no notes, and carries the labels `stampede.job=<key>`, `stampede.agent=<name>` and `stampede.role=lead|worker|relay|wait`; a Claude agent's also `stampede.session=<its session id>`.
 - `<lead> <job dir>`, exit 0: the lead is working.
 - `BLOCKED <lead>: <kind>` or `NOT READY <lead>: <status>`, exit 1: the lead runs but is not ready. Read it with `hc read <address>`, clear a dialog with `hc keys <address> <keys>`, then `stampede tell <job> lead "Read <brief>"` if it went idle without its first prompt. It stays the job's one lead: never run `new` again for that folder.
 - `FAILED <lead>` or `FAILED relay-<12 hex>` (the follower ended at start), exit 1: nothing of the job runs; the folder stays, with `start-failed`. A retry is a new job.
@@ -28,7 +28,7 @@ stampede new --core --file ask.md --cwd ~/code/my-app [--name <slug>] [--review]
 | `backend` | `core` |
 | `endpoint` | the core it was made on: `HC_SESSION` and `HC_SOCKET` at `new`. Every later command for the job uses it; a shell set to another core is refused |
 | `workspace` | the key `hc-<12 hex>`, in place of a workspace id: the marker `jobs/<key>`, the owner tag `owners/<key>`, each event's `workspace` |
-| `core.json` | each agent's terminal: `state` (`starting`, `live`, `failed`), `address`, `name`, `role`, `cwd`, `session`, `socket`, `reason` |
+| `core.json` | each agent's terminal: `state` (`starting`, `live`, `failed`), `address`, `name`, `role`, `cwd`, `session`, `socket`, `reason`, and per Claude session whether it ran (`launches`: `ran`, `never`, `unknown`) |
 | `locks/<agent>.lock` | held by whoever is starting that agent |
 | `relay-state.json` | what the follower saw and sent |
 | `start-failed` | why a start never ran |
@@ -91,7 +91,7 @@ hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<ke
 - With no flag: an open job's marker, owner tag and follower; the lead, its session resumed; each worker (Claude resumed, Codex fresh). `--prompt` sends a restarted Codex worker its brief.
 - `--lead`: only the follower and the lead, when either is gone and the workers still run.
 - A restarted lead must take a `REOPENED` line through its own wake hook in both inbox files (written every 5 s for 90 s). Exit 3 names a file it missed, with the line to write once the lead is up. Exit 2: another caller is starting one of them. Until both files are acknowledged, `reopen-pending` stays and every later reopen asks again, even with the lead live.
-- An agent that never ran (its start was `UNKNOWN` and nothing spawned) starts fresh with its recorded session id and its brief, not resumed.
+- A Claude agent resumes its recorded session only when that session ran: a confirmed start, a terminal of it in `hc ls --all`, or Claude's own session file. One that never ran (a failed start, or no terminal of it while Core still keeps a finished one, 24 h) starts fresh with that session id and its brief. Anything else is `UNKNOWN <agent>: cannot tell whether its session ... ever ran`, with what to check; that agent is not restarted and reopen exits 1.
 - A follower that ends at once is `FAILED relay-<12 hex>`; any `FAILED` or `UNKNOWN` restart makes reopen exit 1.
 - A finished job resumes its agents for inspection only: no follower, no marker.
 

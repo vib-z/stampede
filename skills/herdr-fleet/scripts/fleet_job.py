@@ -809,20 +809,67 @@ def live_terminal(job, agent):
     found = [t for t in hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent).get('terminals', [])
              if t.get('state', 'live') == 'live']
     if found:
-        bind(job, agent, {'state': 'live', 'address': found[0]['address'], 'name': found[0].get('name') or agent, 'ran': True})
+        bind(job, agent, {'state': 'live', 'address': found[0]['address'], 'name': found[0].get('name') or agent})
+        try:  # hc ls shows no labels; the terminal's own record says which Claude session it runs
+            session = (hc('get', found[0]['address']).get('labels') or {}).get('stampede.session')
+        except HcError:
+            session = None
+        if session:
+            prove(job, agent, session, 'ran')
         return found[0]
     return None
 
 
-def core_run(job, agent, role, program, cwd):
+CORE_KEEPS = 86400  # seconds Herdr Core keeps a finished terminal's record (RETAIN_MS)
+
+
+def prove(job, agent, session, proof):
+    """Record whether one Claude session of an agent ran: 'ran', 'never' or 'unknown' (core.json, per session)."""
+    launches = dict(core_entries(job).get(agent, {}).get('launches', {}))
+    launches[session] = {**launches.get(session, {'at': int(time.time())}), 'proof': proof}
+    bind(job, agent, {'launches': launches})
+
+
+def claude_session_file(session):
+    """Claude Code's own record of a session it ran, if this machine has one."""
+    home = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude').expanduser()
+    return next(iter(sorted(home.glob('projects/*/' + session + '.jsonl'))), None)
+
+
+def session_proof(job, agent, session):
+    """Whether this Claude session of the agent ever ran. A recorded 'ran' or 'never' stands; an unknown launch is placed
+    by a terminal of it in hc ls --all, or Claude's session file ('ran'), or, while Core still keeps a finished record
+    (24 h), by finding neither ('never'). Anything else stays 'unknown': the caller refuses rather than guess."""
+    launch = core_entries(job).get(agent, {}).get('launches', {}).get(session)
+    if launch and launch.get('proof') in ('ran', 'never'):
+        return launch['proof']
+    try:
+        found = hc('ls', '--all', '--label', 'stampede.job=' + core_key(job), '--label', 'stampede.agent=' + agent,
+                   '--label', 'stampede.session=' + session).get('terminals', [])
+    except HcError:
+        return 'unknown'
+    if found or claude_session_file(session):
+        proof = 'ran'
+    elif launch and time.time() - launch.get('at', 0) < CORE_KEEPS:
+        proof = 'never'
+    else:
+        return 'unknown'
+    prove(job, agent, session, proof)
+    return proof
+
+
+def core_run(job, agent, role, program, cwd, session=None):
     """Start one program of this job in its own Core terminal (no parent, no notes), the caller holding the agent's launch
-    lock, and bind it. A failed hc run that spawned all the same (a call that timed out) is adopted by its labels;
-    otherwise the entry is failed and the error raised."""
+    lock, and bind it. session: the Claude session it runs, labelled on the terminal and proved per session. A failed
+    hc run that spawned all the same (a call that timed out) is adopted by its labels; otherwise the entry is failed
+    and the error raised."""
     key = core_key(job)
-    before = core_entries(job).get(agent, {})
-    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), **endpoint(job), 'ran': bool(before.get('ran'))},
-         fresh=True)
+    launches = dict(core_entries(job).get(agent, {}).get('launches', {}))
+    if session and launches.get(session, {}).get('proof') != 'ran':
+        launches[session] = {'proof': 'unknown', 'at': int(time.time())}  # a new launch has not run until shown
+    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), **endpoint(job), 'launches': launches}, fresh=True)
     labels = [part for k, v in (('job', key), ('agent', agent), ('role', role)) for part in ('--label', f'stampede.{k}={v}')]
+    labels += ['--label', 'stampede.session=' + session] if session else []
     name = agent
     while True:
         try:
@@ -833,17 +880,22 @@ def core_run(job, agent, role, program, cwd):
             if error.kind == 'name_taken' and name == agent:
                 name = agent[:27] + '-' + key[3:7]  # another job's terminal holds the name; identity is the address
                 continue
-            try:
-                spawned = hc('ls', *labels[:4]).get('terminals', [])
+            try:  # this launch's terminal, live or already finished
+                spawned = hc('ls', '--all', *labels[:4], *labels[6:]).get('terminals', [])
             except HcError as lookup:  # the entry stays starting: a later start or reopen reconciles it by its labels
                 raise CoreUnknown(agent, f'hc run answered {line(error)}, and hc ls could not tell whether it started '
                                          f'({line(lookup)})') from None
-            if not spawned:
-                bind(job, agent, {'state': 'failed', 'reason': line(error)})
+            live = [t for t in spawned if t.get('state', 'live') == 'live']
+            if not live:
+                if session:
+                    prove(job, agent, session, 'ran' if spawned else 'never')
+                bind(job, agent, {'state': 'failed', 'reason': line(error) + ('; it started, then ended' if spawned else '')})
                 raise
-            terminal = spawned[0]
+            terminal = live[0]
             break
-    bind(job, agent, {'state': 'live', 'address': terminal['address'], 'name': terminal.get('name') or name, 'ran': True})
+    if session:
+        prove(job, agent, session, 'ran')
+    bind(job, agent, {'state': 'live', 'address': terminal['address'], 'name': terminal.get('name') or name})
     return terminal['address']
 
 
@@ -912,7 +964,7 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
         record(job, agent, kind, brief, args, session)
         pointer = f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
         try:
-            address = core_run(job, agent, 'lead' if lead else 'worker', program + [pointer], cwd)
+            address = core_run(job, agent, 'lead' if lead else 'worker', program + [pointer], cwd, session or None)
         except CoreUnknown as error:
             snapshot(job)
             return unknown(job, error)
@@ -978,10 +1030,10 @@ def reopen(job, lead_only=False, prompt=False):
     return acked or code
 
 
-def reopen_run(job, agent, role, program, cwd, plain=False):
+def reopen_run(job, agent, role, program, cwd, plain=False, session=None):
     """One restart and what came of it: 'started', 'failed' (confirmed, said) or 'unknown' (kept, said)."""
     try:
-        address = core_run(job, agent, role, program, cwd)
+        address = core_run(job, agent, role, program, cwd, session)
     except CoreUnknown as error:
         unknown(job, error)
         return 'unknown'
@@ -1002,7 +1054,13 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None):
             return 'live'
         kind, args, session = row.get('kind', 'claude'), shlex.split(row.get('args', '')), row.get('session', '')
         pointer = f'You are {agent} in a herdr fleet. Read {row.get("brief")} and do everything it says.'
-        if kind == 'claude' and session and core_entries(job).get(agent, {}).get('ran'):
+        proof = session_proof(job, agent, session) if kind == 'claude' and session else 'never'
+        if kind == 'claude' and proof == 'unknown':
+            print(f'UNKNOWN {agent}: cannot tell whether its session {session} ever ran (no terminal of it in hc ls --all '
+                  f'--label stampede.job={core_key(job)} --label stampede.agent={agent}, no Claude session file): check '
+                  'there, then start it again with fleet-job start; nothing was restarted')
+            return 'unknown'
+        if kind == 'claude' and proof == 'ran':
             program = [cli(kind), '--resume', session] + args
         elif kind == 'claude':  # it never ran: its own session id, fresh, with its brief
             if not session:
@@ -1014,7 +1072,7 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None):
         cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
         if pending:
             pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
-        return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd)
+        return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None)
 
 
 def acknowledged(job, lead):
@@ -1256,7 +1314,7 @@ def new_core(ask_file, name, review, fork, cwd):
             return 1
         with launching(job, lead):
             program = [claude] + (['--resume', fork, '--fork-session'] if fork else []) + args + ['--session-id', session]
-            address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo)
+            address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo, session)
             outcome = core_outcome(job, lead, address, 'lead', brief)
     except CoreUnknown as error:
         snapshot(job)

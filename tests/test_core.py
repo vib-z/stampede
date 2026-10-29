@@ -334,7 +334,9 @@ class CoreNew(CoreCase):
         self.assertEqual(self.option(relay, '--name'), 'relay-' + key[3:])
         self.assertEqual(self.labels(relay), {'stampede.job': key, 'stampede.agent': 'relay-' + key[3:], 'stampede.role': 'relay'})
         self.assertEqual(self.program(relay)[-2:], [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core'), str(job)])
-        self.assertEqual(self.labels(lead), {'stampede.job': key, 'stampede.agent': LEAD, 'stampede.role': 'lead'})
+        session = fj.agent_rows(job)[LEAD]['session']
+        self.assertEqual(self.labels(lead), {'stampede.job': key, 'stampede.agent': LEAD, 'stampede.role': 'lead',
+                                             'stampede.session': session})
         for run in (relay, lead):
             self.assertIn('--bg', run)
             self.assertIn('--no-parent', run)
@@ -489,7 +491,8 @@ class CoreStart(CoreCase):
         (run,) = self.calls('run')
         self.assertEqual(self.option(run, '--name'), 'build-api')
         self.assertEqual(self.option(run, '--cwd'), str(self.repo))
-        self.assertEqual(self.labels(run), {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'})
+        self.assertEqual(self.labels(run), {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker',
+                                            'stampede.session': fj.agent_rows(job)['build-api']['session']})
         self.assertIn('--no-parent', run)
         program = self.program(run)
         self.assertEqual(program[0], str(self.bin / 'claude'))
@@ -1137,7 +1140,7 @@ class ReviewAdopted(CoreCase):
         self.shape(run_error={}, ls_error=None, lookup_error=None)
         with mock.patch.object(fj, 'acknowledged', return_value=0):
             self.quiet(fj.reopen, self.job, lead_only=True)  # adopts t2
-            self.assertTrue(self.entries(self.job)[LEAD]['ran'])
+            self.assertEqual(self.entries(self.job)[LEAD]['launches'][session]['proof'], 'ran')
             self.terminal('t2', state='finished', reason='host_shutdown')
             self.quiet(fj.reopen, self.job, lead_only=True)
         program = self.program(self.calls('run')[-1])
@@ -1166,6 +1169,65 @@ class ReviewEarlierJob(CoreCase):
         self.assertFalse(self.job.exists())
         self.shape(ls_error=None)
         self.assertEqual(self.new_core()[0], 0, 'only finished terminals: the path is free')
+
+
+
+class ReviewSessions(CoreCase):
+    """review-codex R8: whether a launch ran is known per Claude session, and reopen never guesses."""
+
+    def last_program(self):
+        return self.program(self.calls('run')[-1])
+
+    def test_a_failed_new_session_is_started_fresh_not_resumed(self):  # sequence A
+        job, key = self.core_job()
+        brief = str(self.brief(job, 'build-api'))
+        self.assertEqual(self.quiet(fj.start, job, 'build-api', 'claude', None, brief)[0], 0)
+        first = fj.agent_rows(job)['build-api']['session']
+        self.terminal('t1', state='finished', reason='exited')
+        self.shape(run_error={'build-api': 'spawn_failed'})
+        self.assertEqual(self.quiet(fj.start, job, 'build-api', 'claude', None, brief)[0], 1)
+        second = fj.agent_rows(job)['build-api']['session']
+        self.assertNotEqual(first, second)
+        self.shape(run_error={})
+        outcome, _ = self.quiet(fj.reopen_agent, job, 'build-api', fj.agent_rows(job)['build-api'], False, False)
+        program = self.last_program()
+        self.assertEqual(outcome, 'started')
+        self.assertNotIn('--resume', program)
+        self.assertEqual(program[program.index('--session-id') + 1], second)
+        self.assertIn('stampede.session=' + second, self.calls('run')[-1])
+
+    def test_an_unknown_launch_that_ran_and_ended_is_resumed(self):  # sequence B
+        self.shape(run_error={LEAD: 'unavailable'}, spawn_also=True, lookup_error='unavailable')
+        self.assertEqual(self.new_core()[0], 1)
+        session = fj.agent_rows(self.job)[LEAD]['session']
+        self.terminal('t2', state='finished', reason='exited')
+        self.shape(run_error={}, ls_error=None, lookup_error=None)
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, _ = self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.last_program()[1:3], ['--resume', session])
+        self.assertNotIn('--session-id', self.last_program())
+
+    def test_a_launch_nothing_can_place_is_refused_and_a_session_file_places_it(self):
+        self.shape(run_error={LEAD: 'unavailable'}, lookup_error='unavailable')
+        self.assertEqual(self.new_core()[0], 1)
+        session = fj.agent_rows(self.job)[LEAD]['session']
+        entry = self.entries(self.job)[LEAD]
+        entry['launches'][session]['at'] -= 2 * 86400  # older than Core keeps a finished terminal's record
+        (self.job / 'core.json').write_text(json.dumps({**self.entries(self.job), LEAD: entry}))
+        self.shape(run_error={}, ls_error=None, lookup_error=None)
+        runs = len(self.calls('run'))
+        code, out = self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual(code, 1)
+        self.assertIn(f'UNKNOWN {LEAD}: cannot tell whether its session {session} ever ran', out)
+        self.assertIn('hc ls --all --label', out)
+        self.assertEqual(len(self.calls('run')), runs, 'neither resumed nor started fresh')
+        project = self.root / 'home/.claude/projects/-code-repo'
+        project.mkdir(parents=True)
+        (project / (session + '.jsonl')).write_text('{}\n')
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, _ = self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual((code, self.last_program()[1:3]), (0, ['--resume', session]))
 
 
 if __name__ == '__main__':
