@@ -1377,5 +1377,21 @@ class ReviewSessionKept(CoreCase):
         self.assertEqual(fj.session_proof(job, 'build-api', session), 'ran')
 
 
+
+class ReviewDefaultSocket(CoreCase):
+    """test-claude TC-F4: HC_SOCKET set to the default socket's own path is the default core, as HC_SESSION=default is."""
+
+    def test_the_default_path_is_the_default_core(self):
+        job, _ = self.core_job()
+        for name in ('XDG_RUNTIME_DIR', 'XDG_STATE_HOME', 'XDG_CONFIG_HOME'):
+            os.environ.pop(name, None)
+        default = self.root / 'home/.local/state/herdr-core/default/default.sock'
+        with mock.patch.dict(os.environ, {'HC_SOCKET': str(default)}):
+            fj.target(job)
+            self.assertNotIn('HC_SOCKET', os.environ, 'the job runs on the default core: no socket is pinned')
+        with mock.patch.dict(os.environ, {'HC_SOCKET': str(self.root / 'another.sock')}), self.assertRaises(ValueError):
+            fj.target(job)
+
+
 if __name__ == '__main__':
     unittest.main()

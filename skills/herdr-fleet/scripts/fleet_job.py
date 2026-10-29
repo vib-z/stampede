@@ -598,12 +598,21 @@ def endpoint(job):
     return json.loads(path.read_text()) if path.is_file() else {'session': '', 'socket': ''}
 
 
+def default_socket(session):
+    """The socket path Core uses for a session when HC_SOCKET is unset (the follower holds Core's rule)."""
+    env = {**os.environ, 'HC_SESSION': session, 'HC_SOCKET': ''}
+    found = subprocess.run([str(FOLLOWER), '--socket'], capture_output=True, text=True, env=env)
+    return os.path.normpath(found.stdout.strip()) if found.returncode == 0 and found.stdout.strip() else None
+
+
 def target(job):
     """Point every hc call of this process, and every terminal it starts, at the job's own core. A caller whose
     HC_SESSION or HC_SOCKET names another core is refused, never retargeted: there the job would start a second time."""
     recorded = endpoint(job)
     for name, key, default in (('HC_SESSION', 'session', 'default'), ('HC_SOCKET', 'socket', '')):
         mine, want = (os.environ.get(name) or '').strip(), recorded.get(key) or ''
+        if name == 'HC_SOCKET' and mine and not want and os.path.normpath(mine) == default_socket(recorded.get('session') or ''):
+            mine = ''  # the default socket's own path is the default core
         if mine and mine != (want or default):
             raise ValueError(f'{Path(job).absolute()} runs on Herdr Core {name}={want or "(default)"}, but {name} here is '
                              f'{mine}: unset it or set it to the job\'s, so the job never starts a second time on another core')

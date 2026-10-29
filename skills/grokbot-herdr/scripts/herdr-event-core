@@ -5,6 +5,7 @@ it as relay-<12 hex of the key> in the job's launch environment; reopen.sh start
   herdr-event-core <job dir>   follow the job's terminals (hc events --label stampede.job=<key>) until the job is finished
                                or never started (<job>/finished or <job>/start-failed); exit 0, or 1 after RELAY DOWN
   herdr-event-core --alive     exit 0 when the selected core answers hello on its socket, else 1; never starts a core
+  herdr-event-core --socket    print the selected core's socket path, as Core finds it
 
 To the lead, in <job>/inbox.log, for every terminal but the lead's and its own: BLOCKED <agent> <kind>, ERROR <agent> <msg>,
 GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone),
@@ -388,6 +389,8 @@ class Follower:
 def main(argv):
     if argv == ['--alive']:
         return 0 if alive() else 1
+    if argv == ['--socket']:
+        return print(socket_path()) or 0
     if len(argv) != 1 or argv[0].startswith('-'):
         print(__doc__.strip(), file=sys.stderr)
         return 2
