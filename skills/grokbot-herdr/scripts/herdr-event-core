@@ -9,7 +9,8 @@ it as relay-<12 hex of the key> in the job's launch environment; reopen.sh start
 To the lead, in <job>/inbox.log, for every terminal but the lead's and its own: BLOCKED <agent> <kind>, ERROR <agent> <msg>,
 GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone).
 To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, workspace <key>): blocked, error, done and idle
-turn ends, dead (it finished while working or blocked, or failed with no status ever, or was lost) and relay_down.
+turn ends, dead (it finished while working or blocked, or failed with no status ever, or was lost) and relay_down,
+each with an event_id (<key>/<address>|<state>|<episode>, ...|turn|<n>, ...|finished), so the relay never merges two.
 <job>/relay-state.json keeps what it saw and sent, so a restarted follower resumes and never sends one thing twice."""
 import fcntl, json, os, re, socket, subprocess, sys, time
 from pathlib import Path
@@ -140,7 +141,7 @@ class Follower:
         if lead:
             append(self.job / 'inbox.log', lead)
         if post:
-            self.post(self.payload(address, post))
+            self.post(self.payload(address, {**post, 'event_id': f'{self.key}/{ident}'}))
         self.sent.add(ident)
         self.save()
 
@@ -280,7 +281,8 @@ class Follower:
                 append(self.job / 'inbox.log', 'RELAY DOWN ' + reason)
                 path = self.job / 'core.json'
                 address = (json.loads(path.read_text()) if path.is_file() else {}).get(self.relay, {}).get('address')
-                self.post(self.payload(address, {'state': 'relay_down', 'agent': self.relay, 'reason': reason}))
+                self.post(self.payload(address, {'state': 'relay_down', 'agent': self.relay, 'reason': reason,
+                                                  'event_id': f'{self.key}/relay_down'}))
                 return 1
             sleep(delay)
             delay = min(delay * 2, 60)

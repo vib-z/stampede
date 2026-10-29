@@ -480,5 +480,28 @@ class Follower(CoreCase):
         self.assertEqual(self.calls(), [], 'it exits before connecting when the job never started')
 
 
+
+class ReviewEpisodes(CoreCase):
+    """review-codex R4: every episode the follower tells reaches the queue through the real herdr-event-post."""
+
+    def test_two_blocked_and_two_error_episodes_are_four_events(self):
+        job, key = self.core_job(workers=[('build-api', 'claude')], owner='alpha')
+        (job / 'core.json').write_text(json.dumps({'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'}}))
+        self.add_terminal('t3', name='build-api', labels={'stampede.job': key, 'stampede.agent': 'build-api'})
+        follower = follower_module().Follower(job)
+        record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'idle'},
+                  'labels': {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'}}
+        for row in ({'channel': None, 'seq': 1, 'terminals': [record]}, status('t3', 'blocked', kind='permission'),
+                    status('t3', 'working'), status('t3', 'blocked', kind='question'), status('t3', 'error', msg='one'),
+                    status('t3', 'working'), status('t3', 'error', msg='two')):
+            follower.line(row)
+        queue = self.root / 'queue/queue'
+        events = sorted((json.loads(p.read_text())['payload'] for p in queue.glob('*.json')), key=lambda e: e['event_id'])
+        self.assertEqual([(e['state'], e.get('kind') or e.get('msg')) for e in events],
+                         [('blocked', 'permission'), ('blocked', 'question'), ('error', 'one'), ('error', 'two')])
+        self.assertEqual(len((job / 'inbox.log').read_text().splitlines()), 4)
+        self.assertTrue(all(e['event_id'].startswith(key + '/t3|') for e in events))
+
+
 if __name__ == '__main__':
     unittest.main()

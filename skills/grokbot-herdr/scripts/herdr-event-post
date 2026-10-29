@@ -63,6 +63,9 @@ esac
 if [ "$esource" = stampede ] && [ "$state" = done ]; then
   key="$key|$(jq -r '.job // empty' <<<"$payload")|$(jq -r '.summary // empty' <<<"$payload")"
 fi
+# A Herdr Core job's follower names each episode (event_id): two episodes are two events, the same one is one.
+eid=$(jq -r '.event_id // empty' <<<"$payload")
+[ -n "$eid" ] && key="$key|$eid"
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
 exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
 touch "$DB"
