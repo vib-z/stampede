@@ -28,4 +28,6 @@ herdr-send <agent> "/exit"                               # Claude and Hermes; Co
 | `FAILED <agent> (blocked at a dialog; read the screen)` | the agent waits at a dialog; exit 1 |
 | `FAILED <agent> (status before: ..., now: ...)` | the prompt did not start a turn; read the screen; exit 1 |
 
+On Herdr Core there is no `herdr-send`: inside a job use `stampede tell` (it prompts Codex with `hc send` by its status), and read with `hc read <address>` ([core.md](../../skills/herdr-fleet/references/core.md)).
+
 `SUBMITTED` means the agent admitted the message, not that it has acted on it; wait for its report. Usage errors exit 2. How each CLI behaves: [agents-and-models.md](../../skills/herdr-fleet/references/agents-and-models.md).

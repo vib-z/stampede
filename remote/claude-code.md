@@ -39,3 +39,4 @@ stampede new --file <ask.md> --pane "$P" --fork "$CLAUDE_CODE_SESSION_ID"
 - Claude Code sets `CLAUDE_CODE_SESSION_ID` in every session; the chat's folder can differ from the repo.
 - The fork carries the chat's whole context into the lead, so fork a focused planning chat, not a long one.
 - `reopen.sh` resumes the lead's own session, never the planning chat.
+- **On Herdr Core:** no workspace; the chat runs `stampede new --core --file <ask.md> --cwd <repo> --fork "$CLAUDE_CODE_SESSION_ID"` ([core.md](../skills/herdr-fleet/references/core.md)).
