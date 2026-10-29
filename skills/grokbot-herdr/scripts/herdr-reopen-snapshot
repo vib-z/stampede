@@ -104,7 +104,7 @@ def snapshot(ws_id, job):
     if not ws:
         sys.exit(f'no live workspace {ws_id} (herdr workspace list)')
     owner = (ws.get('tokens') or {}).get('owner', '')
-    tag = Path.home() / '.config/herdr-events/owners' / ws_id
+    tag = Path(os.environ.get('HERDR_EVENTS_DIR') or Path.home() / '.config/herdr-events') / 'owners' / ws_id
     if not owner and tag.exists():
         owner = next((l[6:] for l in tag.read_text().splitlines() if l.startswith('owner=')), '')
     tabs = herdr('tab', 'list', '--workspace', ws_id)['tabs']

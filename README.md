@@ -402,9 +402,13 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `FLEET_WATCH_NOTIFY` | `1` | `0` turns off the watch's phone push |
 | `HERDR_EVENTS_MACHINE` | `hostname -s` | the machine label sent with every event |
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
-| `HERDR_EVENTS_ROUTES_DIR` | `~/.config/herdr-events/routes` | one file per route, `URL=` and `KEY=` |
+| `HERDR_EVENTS_ROUTES_DIR` | `$HERDR_EVENTS_DIR/routes` | one file per route, `URL=` and `KEY=` |
+| `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
 | `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
+| `HC` | `hc` | the Herdr Core binary, 0.1.13 or later |
+| `HC_SESSION` | `default` | Herdr Core's own: which core; each name is a separate core with its own terminals and state. stampede passes it to every terminal of a Core job |
+| `HC_SOCKET` | Core's default path for the session | Herdr Core's own: that core's socket; passed on like `HC_SESSION` |
 | `STAMPEDE_NO_UPDATE_CHECK` | `0` | `1` turns off the daily check for a newer release ([Updating](#updating)) |
 | `STAMPEDE_UPDATE_URL` | `https://api.github.com/repos/vib-z/stampede/releases/latest` | where the check reads the latest release; the tests point it at a local file |
 </details>
@@ -556,7 +560,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 **0.1.5, 29 Oct 2026. Quieter events while a job is open, and a lead forked from the planning chat:** `stampede new` writes `~/.config/herdr-events/jobs/<workspace>`. Plain turn ends in that workspace stay on the machine, and `stampede finish` sends one done and removes the marker. Blocked and permission prompts for one pane are one message for 120 seconds. A Codex turn with no Herdr pane is not sent. Tested with the relay sample payloads and fake Herdr: a mid-job worker Stop was dropped, finish posted once, blocked from two sources posted once, a done in a workspace with no job still posted, a Codex turn with no pane was dropped, and StopFailure still posted. A chat in the desktop app was forked into a lead in a fresh Herdr workspace on a scratch repo: the lead started with the conversation, started a reviewer on another model, and got its pass through the hook. A fresh install linked the new `stampede` skill, and a chat told "use stampede" loaded it first.
 
 **Next:**
-- Herdr Core (`hc` 0.1.13) as a second place to run a job, next to the Herdr TUI: planned, in progress. Its contract tests are in; nothing is built yet.
+- Herdr Core (`hc` 0.1.13) as a second place to run a job, next to the Herdr TUI: planned, in progress. Its contract tests are in. Built so far: the settings `HC`, `HC_SESSION`, `HC_SOCKET` and `HERDR_EVENTS_DIR`, a Core job's key, and the record of its terminals. No command starts a Core job yet.
 - One live job from Grok Bot.
 - Starting workers on the other agents Herdr detects, not only Claude, Codex and Cursor.
 - Workers on a second machine over Tailscale.

@@ -4,7 +4,8 @@
 #    or: herdr-event-post '{"...json..."}'   or: herdr-event-post key=value ...
 #    --strict first (stampede's questions and gates): only the owner's own route, never default; no de-dupe;
 #    exit 3 when that route has no URL, 4 when the queue write fails, 0 only once the event is queued.
-# Routes: $HERDR_EVENTS_ROUTES_DIR (default ~/.config/herdr-events/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
+# Routes: $HERDR_EVENTS_ROUTES_DIR (default $HERDR_EVENTS_DIR/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
+# HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/ and the default routes/.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 LOG="$HOME/Library/Logs/herdr-events.log"
 STATE_DIR="$HOME/.local/state/herdr-events"
@@ -25,7 +26,7 @@ payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENT
 summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state//"-")"' <<<"$payload")
 
 # Workspace, for the job marker and for routing.
-D="$HOME/.config/herdr-events"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
+D="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
 owner=$(jq -r '.owner // empty' <<<"$payload")
 ws=$(jq -r '.workspace // empty' <<<"$payload")
 [ -z "$ws" ] && ws=$(jq -r '.pane // empty | split(":")[0]' <<<"$payload")
@@ -35,7 +36,7 @@ if [ -z "$ws" ]; then  # cwd match against herdr agents
 fi
 read -r pane state ntype < <(jq -r '[.pane//.session_id//"-", .state//"-", .notification_type//"-"] | @tsv' <<<"$payload")
 esource=$(jq -r '.source // empty' <<<"$payload")
-# An open job marks ~/.config/herdr-events/jobs/<workspace>. While that file is there, a plain turn end
+# An open job marks $D/jobs/<workspace>. While that file is there, a plain turn end
 # stays on the machine: the lead sends one done with fleet-job finish. Blocked, permission, StopFailure,
 # stale, dead, questions, gates and finish still post. No marker: unchanged.
 plain=0

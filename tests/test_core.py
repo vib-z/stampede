@@ -127,7 +127,6 @@ class CoreCase(unittest.TestCase):
         return json.loads(path.read_text()) if path.is_file() else {}
 
 
-@contract
 class CoreContract(CoreCase):
     """Build order 3: hc(), HC, HERDR_EVENTS_DIR, backend, the key, core.json and its lock, the launch environment."""
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Herdr Core, in progress.** stampede is learning to run a whole job on Herdr Core (`hc` 0.1.13) next to the Herdr TUI; the TUI path does not change. So far: `HERDR_EVENTS_DIR` moves owner tags, job markers and the default routes folder (default `~/.config/herdr-events`, as before), and the settings `HC`, `HC_SESSION` and `HC_SOCKET` are in [config.example](config.example).
+
 ## 0.1.5 (29 Oct 2026)
 
 Plan a job in chat and fork that chat into the lead, a "use stampede" skill that works in any chat, and quieter events while a job is open. One change in behaviour: a bot now gets one done event per job, from `stampede finish`, not one for every turn end. Update with `stampede update` or `herdr plugin update stampede --yes`, which also links the new skill.

@@ -1,6 +1,6 @@
 """fleet-job: a Herdr job's messages, background owner questions, plan approval and per-CLI hooks.
 Ported from stampede (scripts/stampede_hooks.py at 0871ae3) and cut down."""
-import fcntl, glob, hashlib, json, os, re, shlex, signal, subprocess, sys, uuid
+import contextlib, fcntl, glob, hashlib, json, os, re, shlex, signal, subprocess, sys, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +10,7 @@ OWNER = re.compile(r'[a-z0-9][a-z0-9_-]{0,40}')  # a bot slug, as herdr-events-o
 SHA = re.compile(r'[0-9a-f]{40}([0-9a-f]{24})?')
 GATE = re.compile(r'[0-9a-f]{12}')
 WS_ID = re.compile(r'w[0-9A-Za-z]+')
+KEY = re.compile(r'hc-[0-9a-f]{12}')  # a Herdr Core job's key, where a TUI job has its workspace id
 ASK_CMD = os.environ.get('FLEET_ASK_CMD', 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h')
 BRIEF_SECTIONS = ('Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked')
 
@@ -132,11 +133,16 @@ def job_owner(job):
     return owner
 
 
+def events_dir():
+    """Owner tags, job markers and the default routes folder: HERDR_EVENTS_DIR, else ~/.config/herdr-events."""
+    return Path(os.environ.get('HERDR_EVENTS_DIR') or Path.home() / '.config/herdr-events').expanduser()
+
+
 def starter(workspace):
     """At fleet-job new: HERDR_EVENTS_OWNER, else the workspace's owner tag (herdr-events-owner); '' when local.
     A slug that is set but malformed is refused: it must never turn a bot's job into a local one."""
     owner, source = os.environ.get('HERDR_EVENTS_OWNER', '').strip(), 'HERDR_EVENTS_OWNER'
-    tag = Path.home() / '.config/herdr-events/owners' / str(workspace)
+    tag = events_dir() / 'owners' / str(workspace)
     if not owner and workspace and tag.is_file():
         owner = next((row[len('owner='):].strip() for row in tag.read_text().splitlines() if row.startswith('owner=')), '')
         source = 'the owner tag of ' + str(workspace)
@@ -146,10 +152,10 @@ def starter(workspace):
 
 
 def job_marker(workspace):
-    """File whose presence means this workspace has an open job. None when the id is not a workspace id."""
-    if not workspace or not WS_ID.fullmatch(str(workspace)):
+    """File whose presence means this workspace (or Core job key) has an open job. None for any other id."""
+    if not workspace or not (WS_ID.fullmatch(str(workspace)) or KEY.fullmatch(str(workspace))):
         return None
-    return Path.home() / '.config/herdr-events/jobs' / str(workspace)
+    return events_dir() / 'jobs' / str(workspace)
 
 
 def mark_job(workspace, job):
@@ -542,6 +548,104 @@ def cli_args(job, agent, kind, model, effort, reports, lead=False, yolo_in=None)
         (plugin / 'hooks/hooks.json').write_text(json.dumps({'version': 1, 'hooks': {'stop': [{'command': hook_command(job, agent, 'cursor-stop')}]}}) + '\n')
         return mode + ['--trust', '--plugin-dir', str(plugin)] + (['--model', model] if model else [])
     raise ValueError('fleet-job starts claude, codex or cursor; start ' + kind + ' by hand and record it with herdr-reopen-snapshot')
+
+
+def backend(job):
+    """'core' for a job stampede new --core made; 'tui' for every other job, those made before Core included."""
+    path = Path(job) / 'backend'
+    return 'core' if path.is_file() and path.read_text().strip() == 'core' else 'tui'
+
+
+def job_key(job):
+    """A new Core job's key: hc- and the first 12 hex of the SHA-256 of the job folder's absolute path."""
+    return 'hc-' + hashlib.sha256(str(Path(job).absolute()).encode()).hexdigest()[:12]
+
+
+def core_key(job):
+    """The key a Core job recorded at new, in its workspace file."""
+    path = Path(job) / 'workspace'
+    key = path.read_text().strip() if path.is_file() else ''
+    if not KEY.fullmatch(key):
+        raise ValueError(f'{job} is no Herdr Core job: its workspace file holds no hc- key')
+    return key
+
+
+class HcError(RuntimeError):
+    def __init__(self, message, kind='', code=1):
+        super().__init__(message)
+        self.kind, self.code = kind, code
+
+
+def hc(*args):
+    """One Herdr Core command (HC names the binary) and its JSON answer; on failure Core's error kind and exit code."""
+    try:
+        result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True)
+    except OSError as error:
+        raise ValueError('Herdr Core is not installed (' + line(error) + '): install hc 0.1.13 or later, or set HC') from None
+    if result.returncode:
+        try:
+            error = json.loads(result.stderr or '{}').get('error') or {}
+        except (ValueError, AttributeError):
+            error = {}
+        raise HcError('hc ' + args[0] + ': ' + line(error.get('message') or result.stderr or 'exit ' + str(result.returncode)),
+                      error.get('kind', ''), result.returncode)
+    return json.loads(result.stdout or '{}')
+
+
+def core_entries(job):
+    path = Path(job) / 'core.json'
+    return json.loads(path.read_text()) if path.is_file() else {}
+
+
+def bind(job, agent, fields, fresh=False):
+    """Update one agent's entry in core.json ({state, address, name, role, session, socket, reason}): under core.json.lock
+    only for this write, by a temporary file and os.replace, so no writer clobbers another's. fresh: a new launch's entry."""
+    job = Path(job)
+    with (job / 'core.json.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        entries = core_entries(job)
+        entries[agent] = dict(fields) if fresh else {**entries.get(agent, {}), **fields}
+        temporary = job / ('.core.json.' + str(os.getpid()))
+        temporary.write_text(json.dumps(entries, indent=1) + '\n')
+        os.replace(temporary, job / 'core.json')
+    return entries[agent]
+
+
+@contextlib.contextmanager
+def launching(job, agent):
+    """Own this agent's launch: an exclusive lock on <job>/locks/<agent>.lock, held until its entry is live or failed.
+    The kernel drops it when the caller dies, so a lock nobody holds means no launch is in flight, whatever core.json says."""
+    path = Path(job) / 'locks' / (agent + '.lock')
+    path.parent.mkdir(exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = os.read(fd, 32).decode(errors='replace').strip() or 'unknown'
+            raise ValueError(f'{agent} is being started by another caller (pid {holder})') from None
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, str(os.getpid()).encode(), 0)
+        yield
+    finally:
+        os.close(fd)
+
+
+CONFIG_KEYS = ('FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_TRUST_ROOT', 'FLEET_WATCH_INTERVAL',
+               'FLEET_WATCH_PASSES', 'FLEET_WATCH_NOTIFY', 'HERDR_EVENTS_MACHINE', 'HERDR_EVENTS_HOME', 'HERDR_EVENTS_ROUTES_DIR',
+               'HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_DIR', 'HC', 'HC_SESSION', 'HC_SOCKET', 'STAMPEDE_NO_UPDATE_CHECK',
+               'STAMPEDE_UPDATE_URL')  # every key in config.example; a test keeps them equal
+HERDR_IDS = ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER')
+
+
+def launch_env(job):
+    """The front of every Core launch. A Core terminal gets the core's environment, not the caller's, and hc run has no
+    --env: so the caller's PATH and settings, the job's key and the job's own owner, and never the caller's Herdr ids."""
+    env = ['/usr/bin/env'] + [part for name in HERDR_IDS for part in ('-u', name)]
+    env += ['PATH=' + os.environ.get('PATH', ''), 'STAMPEDE_JOB_KEY=' + core_key(job)]
+    env += [name + '=' + os.environ[name] for name in CONFIG_KEYS if name in os.environ]
+    owner = job_owner(job)
+    return env + (['HERDR_EVENTS_OWNER=' + owner] if owner else [])
 
 
 class HerdrError(RuntimeError):

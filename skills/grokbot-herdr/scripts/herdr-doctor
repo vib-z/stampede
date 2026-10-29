@@ -65,7 +65,8 @@ elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart neede
 else ok "herdr client and server $cv"; fi
 
 # relay configuration is the signal, not the helper scripts installed for every user
-R="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"
+EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"
+R="${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}"
 # Codex's notify array, from its line to the closing bracket (it may span lines)
 codex_notify=$(awk '/^notify *=/{f=1} f{print} f && /]/{exit}' "$HOME/.codex/config.toml" 2>/dev/null)
 if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.plist" ] \
@@ -123,7 +124,7 @@ else
 fi
 
 # owner tags
-O="$HOME/.config/herdr-events/owners"
+O="$EV/owners"
 live=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null)
 n=0
 for f in "$O"/*; do

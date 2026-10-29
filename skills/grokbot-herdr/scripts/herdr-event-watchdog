@@ -37,7 +37,7 @@ if [ -f "$S/seen" ]; then
 fi
 mv "$S/seen.new" "$S/seen"
 # owner tags: delete a malformed one at once, and one whose workspace has been gone a day. Skipped if herdr fails.
-O="$HOME/.config/herdr-events/owners"; G="$S/gone"; mkdir -p "$G"
+O="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}/owners"; G="$S/gone"; mkdir -p "$G"
 if wsl=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null) && [ -n "$wsl" ]; then
   for f in "$O"/*; do
     [ -f "$f" ] || continue; ws=$(basename "$f"); ow=$(sed -n 's/^owner=//p' "$f" | head -1)

@@ -4,7 +4,7 @@
 # herdr-events-owner <workspace-id>              show owner
 # The id is the literal workspace_id (e.g. w1K), never the JSON of .result.workspace.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
-set -e; D="$HOME/.config/herdr-events/owners"; mkdir -p "$D"
+set -e; EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; D="$EV/owners"; mkdir -p "$D"
 ws="$1"; [ -n "$ws" ] || { echo "usage: herdr-events-owner <workspace-id> [bot-slug|--clear]" >&2; exit 2; }
 [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]] || { echo "bad workspace id (want e.g. w1K, the .workspace_id field)" >&2; exit 2; }
 case "${2:-}" in
@@ -15,5 +15,5 @@ case "${2:-}" in
      herdr workspace get "$ws" >/dev/null 2>&1 || { echo "no live workspace $ws" >&2; exit 2; }
      printf 'owner=%s\n' "$2" > "$D/$ws"; echo "$ws owner=$2"
      herdr workspace report-metadata "$ws" --source bots --token "owner=$2" >/dev/null 2>&1 || echo "note: sidebar label not set" >&2
-     [ -r "${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the default route" >&2;;
+     [ -r "${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the default route" >&2;;
 esac
