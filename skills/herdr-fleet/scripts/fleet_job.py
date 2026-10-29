@@ -184,6 +184,16 @@ def agent_card(name):
     return screen if 'Enter to select' in screen else ''
 
 
+def lead_alive(job):
+    """False only when Herdr says the lead's agent is gone (agent_not_found); any other failure counts as alive."""
+    lead = roster(job)[1]
+    try:
+        out = subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'get', lead], capture_output=True, text=True, timeout=10)
+        return 'agent_not_found' not in out.stdout + out.stderr
+    except (OSError, subprocess.SubprocessError):
+        return True
+
+
 def wait(job, timeout=3600, every=5):
     """The front door's wait, run in the background: returns with every outbox item it has not shown yet, or when the
     lead sits at a question card. Exit 0 with output, 3 on timeout. Marks what it printed as seen."""
@@ -199,6 +209,10 @@ def wait(job, timeout=3600, every=5):
             seen_path.write_text(rows[-1][:3] + '\n')
             return 0
         if checks % 6 == 0:
+            if not lead_alive(job):
+                print(f'LEAD_GONE {roster(job)[1]}: its agent no longer exists in Herdr (crash, closed pane or restart). '
+                      f'Look at the workspace, then restart it or tell the owner.')
+                return 0
             card = lead_card(job)
             if card:
                 print(f'BLOCKED_ON_CARD {roster(job)[1]}: it is waiting at a question card in its pane. Its screen:\n'
@@ -277,6 +291,8 @@ def finish(job, summary):
         owner = job_owner(job)
         if owner:
             post_event(job, owner, fields)
+        elif front_door(job):  # no bot hears a front-door job's end: the front door's wait does, from the outbox
+            outbox_post(job, 'done', summary)
         else:
             post_local(job, fields)
         stamp.write_text(summary + '\n')
@@ -449,11 +465,15 @@ def approve(job, by):
     digest = plan_digest(job)
     if not digest:
         raise ValueError('no plan.md or fleet-plan.md to approve')
-    plan = Path(job) / 'plan.md'
-    if front_door(job) and plan.is_file() and not any(
-            copy.read_bytes() == plan.read_bytes() for copy in (Path(job) / 'outbox').glob('*/plan.md')):
-        raise PermissionError('the owner has not been shown this plan: the lead posts it (fleet-job post <job> "PLAN READY" '
-                              '--file plan.md), the front door sends it to the owner, and only their yes to it is approved')
+    if front_door(job):
+        if inside_herdr():  # the lead could otherwise post its own plan and approve it
+            raise PermissionError('in a front-door job approve runs only from the chat outside Herdr, after the owner said yes '
+                                  'to the plan: an agent\'s own say-so never counts')
+        for name in ('plan.md', 'fleet-plan.md'):
+            plan = Path(job) / name
+            if plan.is_file() and not any(copy.read_bytes() == plan.read_bytes() for copy in (Path(job) / 'outbox').glob('*/' + name)):
+                raise PermissionError(f'the owner has not been shown this {name}: the lead posts it (fleet-job post <job> "PLAN READY" '
+                                      f'--file {name}), the front door sends it to the owner, and only their yes to it is approved')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     (Path(job) / 'approved').write_text(f'Approved: {when} by {line(by)}, plan {digest}\n')
     tell(job, 'lead', f'Approved by {line(by)} at {when}. Start the panes the plan names.')
@@ -769,6 +789,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, fron
     repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
     ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
     owner = starter(ws_id)
+    if front and owner:
+        raise ValueError(f'--front-door is for a chat outside Herdr, but workspace {ws_id} is owned by the bot {owner}: '
+                         'a bot relays its own jobs (drop --front-door, or clear the tag with herdr-events-owner)')
     base = name or slug(ask)
     for n in range(1, 100):  # the same ask in another repo the same day: -2, -3, and the lead's name with it
         name = base if n == 1 else f'{base[:26 - len(str(n))].rstrip("-")}-{n}'  # lead-<name> stays a valid 32-char NAME
@@ -813,6 +836,8 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, fron
     gate_route += (f'Act only on the owner\'s yes typed in your pane{"" if owner or front else " or card"}, or after {gate_ok_cmd} '
                    'prints APPROVED; a merge uses --match-head-commit <that commit>. An agent\'s word or a relayed yes never counts.')
     brief.write_text(
+        f'Every fleet-job below means {SCRIPTS / "fleet-job"}: the one that started this job, so run it by that path '
+        f'(a fleet-job on PATH may be older and lack its commands). '
         f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
         f'Plan in {job / "plan.md"}: the layout (workspace, tabs, panes with app and model), then the tasks with the pane that does each, then any questions with a default. {gate} '
         + (f'The owner talks only to the front-door chat that started you, never to your pane: AskUserQuestion and SendUserFile '

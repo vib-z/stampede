@@ -1114,6 +1114,10 @@ class FrontDoor(unittest.TestCase):
         self.assertEqual(fj.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)]}}), '{}')
 
     def test_a_plan_is_approved_only_once_it_was_posted_as_it_stands(self):
+        from unittest import mock
+        patch = mock.patch.object(fj, 'inside_herdr', return_value=False)
+        patch.start()
+        self.addCleanup(patch.stop)
         plan = self.job / 'plan.md'
         plan.write_text('Size: big\n# Plan v1\n')
         with self.assertRaises(PermissionError) as refused:
@@ -1125,6 +1129,36 @@ class FrontDoor(unittest.TestCase):
         plan.write_text('Size: big\n# Plan v2\n')   # changed after the owner saw it
         with self.assertRaises(PermissionError):
             fj.approve(self.job, 'owner')
+        plan.write_text('Size: big\n# Plan v1\n')
+        (self.job / 'fleet-plan.md').write_text('layout, never posted')   # the detailed plan counts too
+        with self.assertRaises(PermissionError) as refused:
+            fj.approve(self.job, 'owner')
+        self.assertIn('fleet-plan.md', str(refused.exception))
+
+    def test_the_lead_cannot_approve_its_own_plan_in_a_front_door_job(self):
+        from unittest import mock
+        (self.job / 'plan.md').write_text('Size: big\n')
+        self.quiet(fj.post, self.job, 'PLAN READY', [str(self.job / 'plan.md')])
+        with mock.patch.object(fj, 'inside_herdr', return_value=True), self.assertRaises(PermissionError) as refused:
+            fj.approve(self.job, 'the lead itself')
+        self.assertIn('outside Herdr', str(refused.exception))
+        self.assertFalse((self.job / 'approved').exists())
+
+    def test_finish_posts_to_the_outbox_and_wait_notices_a_lead_that_is_gone(self):
+        from unittest import mock
+        code, out = self.quiet(fj.wait, self.job, 5, 0)   # nothing posted, lead alive: times out
+        self.assertEqual(code, 3)
+        self.quiet(fj.finish, self.job, 'all merged')
+        self.assertIn('# 001 done', (self.job / 'outbox/001.md').read_text())
+        code, out = self.quiet(fj.wait, self.job, 5, 0)
+        self.assertEqual((code, '# 001 done' in out), (0, True))
+        gone = Path(tempfile.mkdtemp()) / 'herdr'
+        gone.write_text('#!/bin/sh\necho \'{"error":{"code":"agent_not_found"}}\'; exit 1\n')
+        gone.chmod(0o755)
+        with mock.patch.dict(os.environ, {'HERDR': str(gone)}):
+            code, out = self.quiet(fj.wait, self.job, 5, 0)
+        self.assertEqual(code, 0)
+        self.assertIn('LEAD_GONE lead-demo', out)
 
     def test_new_with_a_front_door_writes_the_relay_brief(self):
         out, job, log = Fixes.run_new(self, 'idle', front=True, review=True)
@@ -1134,6 +1168,9 @@ class FrontDoor(unittest.TestCase):
         self.assertIn('never to your pane', brief)
         self.assertIn('it goes to the front door', brief)
         self.assertIn('SendUserFile', (job / 'hooks/lead-fix-login-bug-claude.json').read_text())
+        with self.assertRaises(ValueError) as refused:   # a bot-owned workspace is not a front door
+            Fixes.run_new(self, 'idle', env={'HERDR_EVENTS_OWNER': 'alpha'}, front=True)
+        self.assertIn('owned by the bot alpha', str(refused.exception))
         out, job, _ = Fixes.run_new(self, 'idle')
         self.assertFalse((job / 'front-door').exists())
         self.assertNotIn('never to your pane', (job / 'briefs/lead-fix-login-bug.md').read_text())

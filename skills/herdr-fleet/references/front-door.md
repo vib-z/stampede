@@ -9,6 +9,8 @@
 - **A question:** `fleet-job ask <job> "<question>" --option <a> --option <b>`. It is posted with the exact command that answers it; the answer arrives as `ANSWER <id> ...` in your inbox. Keep working on whatever it does not block.
 - **Screens for review:** save before and after images in the job folder (`screens/NN-<surface>-before.png`, `-after.png`, desktop width and one phone width where text can wrap) with an `INDEX.md` that pairs them, old text and new text, then post `INDEX.md` and every image in one post.
 
+- **Finish:** `fleet-job finish <job> "<one line>"` posts a `done` item for the front door; write your report with `fleet-job post` first.
+
 ## Plan review (`--review`)
 
 - Write `plan.md`, post it (`fleet-job post <job> "PLAN READY: <one line>" --file <job>/plan.md`), and end your turn. Open no pane, edit nothing and start nothing on defaults until `fleet-job approve` wakes you.
