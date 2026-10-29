@@ -6,6 +6,7 @@ A job started with `stampede new --core` runs on Herdr Core (`hc` 0.1.13 or late
 
 - Core is the owner's call, in the ask or from the front door. A job is all Core or all TUI (`<job>/backend`).
 - Cursor runs on the TUI only: it reports no OSC 7501 status, so `stampede start --kind cursor` is refused on Core.
+- Install this version's relay scripts (`install.sh`, or `stampede update`): the owner's global Claude and Codex relay hooks run from `~/.local/bin`, and an older copy posts a Core agent's plain turn ends to the default route.
 - Check the machine once: `herdr-doctor --core` (hc, the selected core, Claude 2.1.295 or later, Codex with `--no-daemon`). Never start or stop a core yourself.
 
 ## Start the job
@@ -71,6 +72,8 @@ The agents' own hooks carry over: your file hook, a worker's Stop and question c
 | `WAITED <name> exit <code>` | a wait terminal ended |
 | `RELAY DOWN <reason>` | the follower gave up after 10 minutes without Core: once Core is up, `bash <job>/reopen.sh --lead` |
 | `REOPENED <lead> <attempt>` | reopen restarted you: read every line since |
+
+A Codex worker's finished turn is a `TURN` line, never a `REPORT` line (that comes from Claude's Stop hook): wait for its `TURN`, then read the report file it wrote.
 
 ## Wait on CI or a build
 

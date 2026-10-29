@@ -374,7 +374,7 @@ The `start` refusal exits 2. The approval holds a fingerprint of `plan.md`; any 
 
 ## Herdr Core
 
-[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) is Herdr's terminal runtime: programs in persistent terminals that report their own status (OSC 7501), with labels and an event stream, and no workspaces, tabs or panes. `stampede new --core` runs a whole job there instead of on the Herdr TUI. One job is all Core or all TUI; every TUI job and command works as before.
+[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) is Herdr's terminal runtime: programs in persistent terminals that report their own status (OSC 7501), with labels and an event stream, and no workspaces, tabs or panes. `stampede new --core` runs a whole job there instead of on the Herdr TUI. One job is all Core or all TUI; every TUI job and command works as before. Run this version's `install.sh` (or `stampede update`) before a Core job: the owner's global Claude and Codex relay hooks run from `~/.local/bin`, and an older copy posts a Core agent's plain turn ends to the default route.
 
 What changes on Core, in short: each agent is its own terminal with no parent, so a worker never ends with the lead; its brief goes in with its start; its start, prompt and wake come from its own status, not its screen; one follower per job, `herdr-event-core`, reports every worker's block, error and exit to the lead (a hard kill included) and to a bot; a job outlives every window and comes back with `reopen.sh`; and only a recorded yes passes a gate. Cursor stays on the TUI (it reports no status). The lead's playbook: [references/core.md](skills/herdr-fleet/references/core.md).
 
