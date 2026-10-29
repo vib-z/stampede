@@ -809,7 +809,7 @@ def live_terminal(job, agent):
     found = [t for t in hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent).get('terminals', [])
              if t.get('state', 'live') == 'live']
     if found:
-        bind(job, agent, {'state': 'live', 'address': found[0]['address'], 'name': found[0].get('name') or agent})
+        bind(job, agent, {'state': 'live', 'address': found[0]['address'], 'name': found[0].get('name') or agent, 'ran': True})
         return found[0]
     return None
 

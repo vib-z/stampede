@@ -1124,5 +1124,24 @@ class ReviewSmallOnes(CoreCase):
         self.assertEqual((self.events / 'owners' / key).read_text(), 'owner=alpha\n')
 
 
+
+class ReviewAdopted(CoreCase):
+    """review-claude minor 9: an adopted terminal has run, so a later reopen resumes its session."""
+
+    def test_an_adopted_lead_is_resumed_not_started_fresh(self):
+        self.shape(run_error={LEAD: 'unavailable'}, spawn_also=True, lookup_error='unavailable')
+        self.assertEqual(self.new_core()[0], 1)  # UNKNOWN, though t2 spawned
+        session = fj.agent_rows(self.job)[LEAD]['session']
+        self.shape(run_error={}, ls_error=None, lookup_error=None)
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            self.quiet(fj.reopen, self.job, lead_only=True)  # adopts t2
+            self.assertTrue(self.entries(self.job)[LEAD]['ran'])
+            self.terminal('t2', state='finished', reason='host_shutdown')
+            self.quiet(fj.reopen, self.job, lead_only=True)
+        program = self.program(self.calls('run')[-1])
+        self.assertEqual(program[1:3], ['--resume', session])
+        self.assertNotIn('--session-id', program)
+
+
 if __name__ == '__main__':
     unittest.main()
