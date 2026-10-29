@@ -1154,6 +1154,23 @@ def caller_ids(job):
     return {'workspace': key, **({'lead_pane': f'hc:{key}/{address}'} if address else {})}
 
 
+EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›) *$',
+                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt
+CLEAR_PAUSE = 1  # seconds after ctrl+c before typing, as herdr-send waits
+
+
+def clear_draft(address):
+    """herdr-send's rule: ctrl+c once to clear leftover typed input, only when the screen shows no empty-prompt marker
+    (ctrl+c on an empty Codex prompt quits Codex). A screen Core cannot read is left alone."""
+    try:
+        screen = hc('read', address, '--lines', '8').get('text', '')
+    except HcError:
+        return
+    if not EMPTY_PROMPT.search(screen):
+        hc('keys', '--', address, 'ctrl+c')
+        time.sleep(CLEAR_PAUSE)
+
+
 def tell_core(job, name, text):
     """Prompt a Codex agent in its Core terminal by its status: idle types only while idle (atomic); done types at once,
     so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line."""
@@ -1175,6 +1192,7 @@ def tell_core(job, name, text):
         why = refused[word]
     else:
         try:
+            clear_draft(address)  # Core pastes after whatever sits typed there
             hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text)
             return print(f'SUBMITTED {name} ({address})')
         except HcError as error:

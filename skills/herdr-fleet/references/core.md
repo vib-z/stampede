@@ -50,7 +50,7 @@ stampede start <job> <agent> --kind claude|codex --brief <file> [--cwd <dir>] [-
 
 ## Talk to an agent
 
-- `stampede tell <job> <agent> "<text>"`. A Claude agent reads its inbox file, as on the TUI. A Codex agent gets `hc send` once its terminal shows this job's labels: at `idle` it types only while still idle; at `done` it types at once, so a worker that turned `working` in between takes it as a message during its turn.
+- `stampede tell <job> <agent> "<text>"`. A Claude agent reads its inbox file, as on the TUI. A Codex agent gets `hc send` once its terminal shows this job's labels, after leftover typed input is cleared by `herdr-send`'s rule (one `ctrl+c` when the screen shows no empty-prompt marker, never on an empty prompt): at `idle` it types only while still idle; at `done` it types at once, so a worker that turned `working` in between takes it as a message during its turn.
 - `working`, `blocked`, `error`, no status, another job's terminal, or Core not answering: one line, `FAILED <agent> (<why>)`, exit 2. Tell a working agent after its turn.
 - Any other `hc` failure is one line on stderr, `fleet-job <command>: <reason>`, exit 1.
 - Watch a terminal with `hc attach --observe <address>`. Core cannot tell stampede that you are watching or typing, so type into an attached lead only when no `tell` is due: text you type can interleave with one.

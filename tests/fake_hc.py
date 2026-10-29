@@ -9,6 +9,8 @@ State is FAKE_HC/state.json; every call is one JSON line in FAKE_HC/calls. A tes
   get_error {address: kind}      `get` of it fails with this error kind
   ls_error  kind                 every `ls` fails with this error kind
   read_error {address: kind}     `read` of it fails with this error kind
+A terminal's `draft` is what sits typed in its input: `keys` add to it (`ctrl+c` clears it, `enter` submits it), and
+`send` submits the draft with the text after it, as Core pastes after whatever is there; `sent` keeps what arrived.
   lookup_error kind              after a `run` fails, every `ls` fails with this kind (a lost answer, then no lookup)
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
@@ -132,6 +134,15 @@ def command(state, argv):
             if state.get('read_error', {}).get(t['address']):
                 fail(state['read_error'][t['address']], 'no answer')
             return print(json.dumps({'text': t.get('screen', 'last screen line'), 'complete': True, 'how': 'screen'}))
+        if cmd == 'keys':
+            t.setdefault('keys', []).append(rest[1:])
+            for key in rest[1:]:
+                if key == 'ctrl+c':
+                    t['draft'] = ''
+                elif key == 'enter':
+                    t['sent'].append(t.pop('draft', ''))
+                else:
+                    t['draft'] = t.get('draft', '') + (' ' if key == 'space' else key)
         return print(json.dumps({'turn': t['turn'], 'status': word(t)}))
     if cmd == 'send':
         o, rest = options(args, {'--json', '--force', '--wait'}, {'--if', '--timeout'})
@@ -144,7 +155,7 @@ def command(state, argv):
             fail(state['send_error'][t['address']], 'refused')
         if o.get('if') and word(t) != o['if']:
             fail('status_mismatch', f'{t["address"]} is {word(t)}, not {o["if"]}')
-        t['sent'].append(rest[1])
+        t['sent'].append(t.pop('draft', '') + rest[1])
         return print(json.dumps({'started': True, 'status': word(t), 'turn': t['turn']}))
     if cmd == 'events':
         n = state.get('connections', 0)

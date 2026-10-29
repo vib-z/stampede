@@ -43,6 +43,9 @@ class CoreCase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
+        pause = mock.patch.object(fj, 'CLEAR_PAUSE', 0)  # no real wait after a cleared draft
+        pause.start()
+        self.addCleanup(pause.stop)
         for name in ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER',
                      'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET'):
             os.environ.pop(name, None)
@@ -1403,6 +1406,36 @@ class ReviewDefaultSocket(CoreCase):
             self.assertNotIn('HC_SOCKET', os.environ, 'the job runs on the default core: no socket is pinned')
         with mock.patch.dict(os.environ, {'HC_SOCKET': str(self.root / 'another.sock')}), self.assertRaises(ValueError):
             fj.target(job)
+
+
+
+class ReviewDraft(CoreCase):
+    """test-claude TC-F5: a tell to a Codex worker first clears leftover typed input, by herdr-send's rule."""
+
+    def setUp(self):
+        super().setUp()
+        self.job_dir, self.key = self.core_job(workers=[('review-api', 'codex')])
+        (self.job_dir / 'core.json').write_text(json.dumps({'review-api': {'state': 'live', 'address': 't1'}}))
+        self.add_terminal('t1', name='review-api', labels={'stampede.job': self.key, 'stampede.agent': 'review-api'})
+
+    def tell(self, text='Fix the nit'):
+        self.quiet(fj.tell, self.job_dir, 'review-api', text)
+        terminal = self.state()['terminals']['t1']
+        return terminal['sent'], terminal.get('keys', [])
+
+    def test_a_leftover_draft_is_cleared_first(self):
+        self.terminal('t1', draft='zzz', screen='\u203a zzz\n  ? for help')
+        self.assertEqual(self.tell(), (['Fix the nit'], [['ctrl+c']]))
+
+    def test_an_empty_prompt_is_never_sent_ctrl_c(self):
+        for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts'):
+            self.terminal('t1', screen=screen, sent=[], keys=[])
+            self.assertEqual(self.tell(), (['Fix the nit'], []), screen)
+
+    def test_a_screen_core_cannot_read_is_left_alone(self):
+        self.shape(read_error={'t1': 'unavailable'})
+        self.terminal('t1', draft='')
+        self.assertEqual(self.tell(), (['Fix the nit'], []))
 
 
 if __name__ == '__main__':
