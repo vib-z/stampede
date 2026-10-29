@@ -1193,7 +1193,10 @@ def tell_core(job, name, text):
     else:
         try:
             clear_draft(address)  # Core pastes after whatever sits typed there
-            hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text)
+            if text.startswith('/') and '\n' not in text:  # a slash command (/quit): pasted, Codex takes it as chat
+                hc('keys', '--', address, *['space' if c == ' ' else c for c in text], 'enter')
+            else:
+                hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text)
             return print(f'SUBMITTED {name} ({address})')
         except HcError as error:
             why = {9: refused['blocked'], 10: refused['working'], 11: 'not ready'}.get(error.code, line(error))

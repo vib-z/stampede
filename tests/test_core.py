@@ -1438,5 +1438,17 @@ class ReviewDraft(CoreCase):
         self.assertEqual(self.tell(), (['Fix the nit'], []))
 
 
+    def test_a_slash_command_is_typed_as_keys(self):  # test-claude TC-F1
+        self.terminal('t1', screen='\u203a Ask Codex to do anything')
+        self.assertEqual(self.tell('/quit'), (['/quit'], [['/', 'q', 'u', 'i', 't', 'enter']]))
+        self.terminal('t1', sent=[], keys=[])
+        self.assertEqual(self.tell('/model o3'), (['/model o3'], [['/', 'm', 'o', 'd', 'e', 'l', 'space', 'o', '3', 'enter']]))
+        self.assertEqual(self.calls('send'), [], 'a paste is chat to Codex, not a command')
+        self.terminal('t1', status={'state': 'working'}, keys=[])
+        with self.assertRaises(SystemExit):
+            self.tell('/quit')
+        self.assertEqual(self.state()['terminals']['t1']['keys'], [], 'the same status rule as any tell')
+
+
 if __name__ == '__main__':
     unittest.main()
