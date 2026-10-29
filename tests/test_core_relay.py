@@ -503,5 +503,29 @@ class ReviewEpisodes(CoreCase):
         self.assertTrue(all(e['event_id'].startswith(key + '/t3|') for e in events))
 
 
+
+class ReviewHung(CoreCase):
+    """review-claude minor 1: a hung hc or relay call never kills the follower; a post that hung is not marked sent."""
+
+    def test_the_follower_outlives_hung_calls(self):
+        job, key = self.core_job(workers=[('build-api', 'claude')], owner='alpha')
+        (job / 'core.json').write_text(json.dumps({'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'}}))
+        core = follower_module()
+        follower = core.Follower(job)
+        record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
+                  'labels': {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'}}
+
+        def hung(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, kw.get('timeout'))
+        with mock.patch.object(core.subprocess, 'run', hung):
+            for row in ({'channel': None, 'seq': 1, 'terminals': [record]}, status('t3', 'blocked', kind='permission'),
+                        status('t3', None), finished('t3', 0)):
+                self.assertTrue(follower.line(row))
+        self.assertEqual((job / 'inbox.log').read_text().splitlines(), ['BLOCKED build-api permission', 'GONE build-api exited exit 0'])
+        sent = json.loads((job / 'relay-state.json').read_text())['sent']
+        self.assertIn('t3|blocked|1 lead', sent)
+        self.assertNotIn('t3|blocked|1', sent, 'the hung post is not recorded as sent')
+
+
 if __name__ == '__main__':
     unittest.main()

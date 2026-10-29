@@ -60,8 +60,12 @@ def alive(env=None):
 
 
 def hc(*args):
-    """(exit code, JSON answer) of one hc command; 3 is Core's not_found."""
-    result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True, timeout=60)
+    """(exit code, JSON answer) of one hc command; 3 is Core's not_found. A call that hangs 60 s is a failure (1)."""
+    try:
+        result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True,
+                                timeout=60)
+    except subprocess.TimeoutExpired:
+        return 1, {}
     try:
         return result.returncode, json.loads(result.stdout or '{}')
     except ValueError:
@@ -132,17 +136,20 @@ class Follower:
         return {k: v for k, v in event.items() if v is not None}
 
     def post(self, event):
-        subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True, timeout=60)
+        """False when the relay hung for 60 s: then the event is not sent."""
+        try:
+            subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return False
 
     def notify(self, ident, address, lead=None, post=None):
-        """Each notification once, by its identity: (address, state, episode), (address, turn) or (address, finished)."""
-        if ident in self.sent:
-            return
-        if lead:
+        """Each notification once, by its identity: (address, state, episode), (address, turn) or (address, finished).
+        The lead's line and the bot's event are recorded apart, so a post that hung is never marked sent."""
+        if lead and ident + ' lead' not in self.sent:
             append(self.job / 'inbox.log', lead)
-        if post:
-            self.post(self.payload(address, {**post, 'event_id': f'{self.key}/{ident}'}))
-        self.sent.add(ident)
+            self.sent.add(ident + ' lead')
+        if post and ident not in self.sent and self.post(self.payload(address, {**post, 'event_id': f'{self.key}/{ident}'})) is not False:
+            self.sent.add(ident)
         self.save()
 
     def observe(self, address, status, turn=None):
