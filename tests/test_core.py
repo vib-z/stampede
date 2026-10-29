@@ -1285,5 +1285,25 @@ class ReviewReopenParity(CoreCase):
         self.assertEqual((code, sorted(self.runs())), (0, sorted(['relay-' + self.key[3:], LEAD])))
 
 
+    def test_fresh_starts_each_missing_agent_on_a_new_session(self):  # parity W3
+        self.make()
+        before = fj.agent_rows(self.job)
+        self.gone(LEAD, 'build-api', 'review-api')
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, _ = self.quiet(fj.reopen, self.job, fresh=True)
+        runs, after = self.runs(), fj.agent_rows(self.job)
+        self.assertEqual((code, sorted(runs)), (0, sorted([LEAD, 'build-api', 'review-api'])))
+        for agent in (LEAD, 'build-api'):
+            program = runs[agent]
+            self.assertNotIn('--resume', program)
+            self.assertIn('--settings', program, 'its recorded flags')
+            new = program[program.index('--session-id') + 1]
+            self.assertNotEqual(new, before[agent]['session'])
+            self.assertEqual(after[agent]['session'], new)
+            self.assertTrue(program[-1].startswith(f'You are {agent} in a herdr fleet. Read '))
+        self.assertNotIn('resume', runs['review-api'])
+        self.assertTrue(runs['review-api'][-1].startswith('You are review-api in a herdr fleet. Read '))
+
+
 if __name__ == '__main__':
     unittest.main()

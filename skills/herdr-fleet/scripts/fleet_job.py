@@ -997,11 +997,12 @@ def agent_rows(job):
     return rows
 
 
-def reopen(job, lead_only=False, prompt=False):
+def reopen(job, lead_only=False, prompt=False, fresh=False):
     """Start what is missing of a Core job, once each and never a second copy of a live one: for an open job its marker,
     owner tag and follower; its lead, resumed; with no lead_only, each worker that is not live (Claude resumed, Codex
     fresh, with its brief pointer only with prompt). A finished job resumes its agents for inspection only. A restarted
-    lead of an open job must acknowledge both its inbox files (exit 3 when it does not)."""
+    lead of an open job must acknowledge both its inbox files (exit 3 when it does not). fresh: every agent it starts
+    begins a new session, with its recorded flags and its brief, and nothing is resumed."""
     job = Path(job).absolute()
     key, (people, lead), rows = core_key(job), roster(job), agent_rows(job)
     finished, outcomes = (job / 'finished').is_file(), {}
@@ -1024,7 +1025,7 @@ def reopen(job, lead_only=False, prompt=False):
     pending = job / 'reopen-pending'  # a restarted lead that has not yet acknowledged both inbox files
     for agent in selected:
         outcomes[agent] = reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead,
-                                       pending if agent == lead and not finished else None)
+                                       pending if agent == lead and not finished else None, fresh)
     snapshot(job)
     if not [agent for agent, outcome in outcomes.items() if outcome != 'live']:
         print(f'LIVE {key}: no agent to restart')
@@ -1053,7 +1054,7 @@ def reopen_run(job, agent, role, program, cwd, plain=False, session=None):
     return 'started'
 
 
-def reopen_agent(job, agent, row, prompt, lead, pending=None):
+def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
     """Restart one agent unless a live terminal of the job runs it: 'live', 'started', 'failed' or 'unknown'.
     pending: written before the lead starts, so even an interrupted reopen leaves its acknowledgement owed."""
     with launching(job, agent):
@@ -1061,6 +1062,15 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None):
             return 'live'
         kind, args, session = row.get('kind', 'claude'), shlex.split(row.get('args', '')), row.get('session', '')
         pointer = f'You are {agent} in a herdr fleet. Read {row.get("brief")} and do everything it says.'
+        if fresh:  # a new session, the recorded flags and the brief; nothing resumed
+            if kind == 'claude':
+                session = str(uuid.uuid4())
+                record(job, agent, kind, row.get('brief') or '-', args, session)
+            program = [cli(kind)] + args + (['--session-id', session] if kind == 'claude' else []) + [pointer]
+            cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
+            if pending:
+                pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
+            return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None)
         proof = session_proof(job, agent, session) if kind == 'claude' and session else 'never'
         if kind == 'claude' and proof == 'unknown':
             print(f'UNKNOWN {agent}: cannot tell whether its session {session} ever ran (no terminal of it in hc ls --all '
@@ -1394,6 +1404,7 @@ def main(argv):
     p = sub.add_parser('_reopen', help='a Herdr Core job: start what is missing (reopen.sh runs it)'); p.add_argument('job')
     p.add_argument('--lead', action='store_true', help='only the follower and the lead')
     p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
+    p.add_argument('--fresh', action='store_true', help='each agent it starts begins a new session with its brief')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
     p.add_argument('--gate')
     p.add_argument('question', nargs='+')
@@ -1440,7 +1451,7 @@ def run(a):
     if a.cmd == 'finish':
         return finish(a.job, ' '.join(a.summary))
     if a.cmd == '_reopen':
-        return reopen(a.job, a.lead, a.prompt)
+        return reopen(a.job, a.lead, a.prompt, a.fresh)
     if a.cmd == '_ask':
         return ask_now(a.job, ' '.join(a.question), a.option, a.command, a.gate)
     raw = a.payload if a.payload is not None else sys.stdin.read()
