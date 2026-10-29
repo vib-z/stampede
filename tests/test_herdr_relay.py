@@ -1,4 +1,5 @@
-"""grokbot-herdr's relay scripts (B1 one event per turn, B2 Codex helper turns, B3 owner tags, B10 outage) on sample
+"""grokbot-herdr's relay scripts (B1 one event per turn, B2 Codex helper turns, B3 owner tags, B10 outage,
+B12 an open job) on sample
 payloads: runs scripts/test-relay.sh, which uses a throwaway HOME with fake herdr and curl (stdlib)."""
 import subprocess
 import unittest

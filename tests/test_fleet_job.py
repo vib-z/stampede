@@ -352,8 +352,12 @@ class Fixes(unittest.TestCase):
         ask = repo.parent / 'ask.md'
         ask.write_text('Fix the login bug\n')
         herdr, log = fake_herdr(repo, status, start_error=start_error)
+        extra = dict(env)
+        # new writes ~/.config/herdr-events/jobs/<workspace>; keep that off a real home
+        if 'HOME' not in extra and not os.environ.get('HOME', '').startswith(tempfile.gettempdir()):
+            extra['HOME'] = tempfile.mkdtemp()
         out = io.StringIO()
-        with mock.patch.dict(os.environ, {'HERDR': herdr, **dict(env)}), contextlib.redirect_stdout(out):
+        with mock.patch.dict(os.environ, {'HERDR': herdr, **extra}), contextlib.redirect_stdout(out):
             fj.new(ask, 'w9', **kw)
         return out.getvalue(), repo / '.herdr-fix-login-bug', log.read_text()
 
@@ -663,6 +667,52 @@ class Gates(unittest.TestCase):
             self.assertEqual((job / 'owner').read_text().strip() if (job / 'owner').exists() else '', owner)
             self.assertIn('gate-ok', brief)
             self.assertIn('goes back to alpha' if owner else 'your own question card', brief)
+
+    def test_new_marks_the_workspace_and_tells_the_lead_to_finish(self):
+        home = Path(tempfile.mkdtemp())
+        _, job, _ = Fixes.run_new(self, 'idle', {'HOME': str(home)})
+        marker = home / '.config/herdr-events/jobs/w9'
+        self.assertEqual(marker.read_text().strip(), str(job.absolute()))
+        self.assertEqual((job / 'workspace').read_text().strip(), 'w9')
+        self.assertIn('fleet-job finish ' + str(job) + ' "<one line on where it ended>" once',
+                      (job / 'briefs/lead-fix-login-bug.md').read_text())
+
+    def test_finish_posts_one_done_and_clears_the_marker(self):
+        self.bot_job()
+        (self.job / 'workspace').write_text('w9\n')
+        marker = self.home / '.config/herdr-events/jobs/w9'
+        marker.parent.mkdir(parents=True)
+        marker.write_text(str(self.job.absolute()) + '\n')
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'finish', str(self.job), 'shipped the fix'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('FINISHED ' + str(self.job.absolute()), result.stdout)
+        queued = [json.loads(p.read_text()) for p in (self.home / 'events/queue').glob('*.json')]
+        self.assertEqual(len(queued), 1)
+        event = queued[0]['payload']
+        self.assertEqual(queued[0]['route'], 'alpha')
+        self.assertEqual((event['source'], event['state'], event['summary'], event['owner']),
+                         ('stampede', 'done', 'shipped the fix', 'alpha'))
+        self.assertNotIn('pane', event)
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.job / 'finished').read_text().strip(), 'shipped the fix')
+        again = subprocess.run([str(SCRIPTS / 'fleet-job'), 'finish', str(self.job), 'again'],
+                               capture_output=True, text=True)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(len(list((self.home / 'events/queue').glob('*.json'))), 1)
+
+    def test_finish_on_a_local_job_clears_the_marker(self):
+        (self.job / 'workspace').write_text('w9\n')
+        marker = self.home / '.config/herdr-events/jobs/w9'
+        marker.parent.mkdir(parents=True)
+        marker.write_text(str(self.job.absolute()) + '\n')
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'finish', str(self.job), 'stopped for good'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists())
+        queue = self.home / 'events/queue'
+        queued = list(queue.glob('*.json')) if queue.is_dir() else []
+        self.assertEqual(queued, [])  # no route of its own: the ordinary relay logs it
 
     def test_a_bot_started_gate_posts_a_gate_event(self):
         self.bot_job()
