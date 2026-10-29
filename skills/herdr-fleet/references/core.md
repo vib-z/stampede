@@ -89,7 +89,7 @@ hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<ke
 
 `<job>/reopen.sh` is written at every start (`herdr-reopen-snapshot <key> <job>` refreshes it). It starts only what is not live, once each, and never a second copy of a live agent:
 
-- With no flag: an open job's marker, owner tag and follower; the lead, its session resumed; each worker (Claude resumed, Codex fresh). `--prompt` sends a restarted Codex worker its brief.
+- With no flag: an open job's marker, owner tag and follower; the lead, its session resumed; each worker (Claude resumed; Codex resumed as `codex resume ... --no-daemon <session>` once its own notify recorded the session after a turn, else fresh). `--prompt` sends a restarted Codex worker its brief.
 - `--lead`: only the follower and the lead, when either is gone and the workers still run.
 - `--fresh`: each agent it starts begins a new session with its recorded flags and its brief; nothing is resumed. The same locks and acknowledgements hold.
 - Before it starts anything it checks the folder of every agent it may start; a missing one is named with its agents (`cwd gone: ...`), exit 2, and nothing starts.

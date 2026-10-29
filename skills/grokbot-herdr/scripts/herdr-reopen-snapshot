@@ -301,7 +301,7 @@ def snapshot_core(key, job):
     out = [f'# Reopen record: Herdr Core job {key}', '',
            f'Snapshot {when} of `{job}` by `herdr-reopen-snapshot {key} {job}`; stampede refreshes it at every start.', '',
            f'After a reboot, a lost holder or any part gone: `bash {job}/reopen.sh` starts only what is not live: the follower, '
-           'the lead (its session resumed) and each worker (Claude resumed by its session id, Codex fresh; `--prompt` sends '
+           'the lead (its session resumed) and each worker (Claude resumed by its session id; Codex resumed by the session its notify recorded, else fresh; `--prompt` sends '
            'a Codex worker its brief again). `--lead` starts only the follower and the lead; `--fresh` starts each on a new session with its brief. A live agent is never started twice.', '',
            f'The job runs on Herdr Core {on}; every command for it targets that core, and a shell set to another is refused.', '',
            '| agent | role | CLI | model | effort | session | terminal | state | brief |', '|---|---|---|---|---|---|---|---|---|']

@@ -1305,5 +1305,32 @@ class ReviewReopenParity(CoreCase):
         self.assertTrue(runs['review-api'][-1].startswith('You are review-api in a herdr fleet. Read '))
 
 
+    def test_a_codex_worker_resumes_the_session_its_notify_recorded(self):  # parity W4
+        self.make()
+        thread = '0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f'
+        home = self.root / 'codex'
+        (home / 'sessions/2026/10/29').mkdir(parents=True)
+        (home / 'sessions/2026/10/29' / ('rollout-2026-10-29T10-00-00-' + thread + '.jsonl')).write_text(
+            json.dumps({'type': 'session_meta', 'payload': {'id': thread}}) + '\n')
+        turn = {'type': 'agent-turn-complete', 'thread-id': thread, 'last-assistant-message': 'reviewed'}
+        with mock.patch.dict(os.environ, {'CODEX_HOME': str(home)}):
+            fj.codex_notify(self.job, 'review-api', turn)
+            tui = self.repo / '.herdr-tui'
+            tui.mkdir()
+            (tui / 'lead').write_text('lead-tui\n')
+            (tui / 'agents.tsv').write_text('# herdr-reopen-snapshot: name\tkind\tsession\tbrief\targs\nreview-api\tcodex\t\t\t\n')
+            fj.codex_notify(tui, 'review-api', turn)
+        self.assertEqual(fj.agent_rows(self.job)['review-api']['session'], thread)
+        self.assertIn('--no-daemon', fj.agent_rows(self.job)['review-api']['args'], 'its flags are kept')
+        self.assertEqual(fj.agent_rows(tui)['review-api']['session'], '', 'a TUI job keeps the snapshot as its source')
+        self.gone('review-api')
+        self.quiet(fj.reopen, self.job, prompt=True)
+        program = self.runs()['review-api']
+        self.assertEqual(program[1], 'resume')
+        self.assertIn('--no-daemon', program)
+        self.assertEqual(program[-2], thread)
+        self.assertTrue(program[-1].startswith('You are review-api in a herdr fleet. Read '))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -498,6 +498,9 @@ def codex_notify(job, agent, payload):
         first = json.loads(source.readline()).get('payload', {})
     if first.get('parent_thread_id') or isinstance(first.get('source'), dict) and first['source'].get('subagent'):
         return
+    row = agent_rows(job).get(agent) if backend(job) == 'core' else None
+    if row is not None and row.get('session') != thread:  # on Core no snapshot sees Codex's session: its own turn names it
+        record(job, agent, 'codex', row.get('brief') or '-', shlex.split(row.get('args', '')), thread)
     append(Path(job) / 'inbox.log', line('TURN ' + agent + ' ' + payload.get('last-assistant-message', '')))
 
 
@@ -1084,6 +1087,8 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
                 session = str(uuid.uuid4())
                 record(job, agent, kind, row.get('brief') or '-', args, session)
             program = [cli(kind)] + args + ['--session-id', session, pointer]
+        elif session:  # Codex, with the session its own notify recorded: resumed, without its daemon as at start
+            program = [cli(kind), 'resume'] + args + [session] + ([pointer] if prompt else [])
         else:
             program = [cli(kind)] + args + ([pointer] if prompt else [])
         cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
