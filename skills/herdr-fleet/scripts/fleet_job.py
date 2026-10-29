@@ -9,6 +9,7 @@ NAME = re.compile(r'[a-z][a-z0-9_-]{0,31}')
 OWNER = re.compile(r'[a-z0-9][a-z0-9_-]{0,40}')  # a bot slug, as herdr-events-owner takes it
 SHA = re.compile(r'[0-9a-f]{40}([0-9a-f]{24})?')
 GATE = re.compile(r'[0-9a-f]{12}')
+WS_ID = re.compile(r'w[0-9A-Za-z]+')
 ASK_CMD = os.environ.get('FLEET_ASK_CMD', 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h')
 BRIEF_SECTIONS = ('Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked')
 
@@ -142,6 +143,67 @@ def starter(workspace):
     if owner and not OWNER.fullmatch(owner):
         raise ValueError(f'{source} holds no bot slug ({line(owner)}): fix it with herdr-events-owner, then start again')
     return owner
+
+
+def job_marker(workspace):
+    """File whose presence means this workspace has an open job. None when the id is not a workspace id."""
+    if not workspace or not WS_ID.fullmatch(str(workspace)):
+        return None
+    return Path.home() / '.config/herdr-events/jobs' / str(workspace)
+
+
+def mark_job(workspace, job):
+    path = job_marker(workspace)
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(Path(job).absolute()) + '\n')
+    (Path(job) / 'workspace').write_text(str(workspace) + '\n')
+
+
+def clear_job_marker(workspace, job):
+    path = job_marker(workspace)
+    if path is None or not path.is_file():
+        return
+    if path.read_text().strip() == str(Path(job).absolute()):
+        path.unlink()
+
+
+def post_local(job, fields):
+    """Ordinary relay, not strict: a local job's finish. Logged when no route has a URL."""
+    event = {'source': 'stampede', 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields}
+    for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID')):
+        if os.environ.get(name):
+            event[key] = os.environ[name]
+    script = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'
+    result = subprocess.run([str(script), json.dumps(event)], capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError('the relay did not accept the finish event ('
+                         + (line(result.stderr) or 'exit ' + str(result.returncode)) + ')')
+
+
+def finish(job, summary):
+    """One done event, then drop the workspace marker. A second call does not post again.
+    A job a bot started uses the strict route; a local job uses the ordinary relay."""
+    job = Path(job).absolute()
+    summary = line(summary)
+    if not summary:
+        raise ValueError('finish needs one line on where the job ended')
+    stamp = job / 'finished'
+    if not stamp.is_file():
+        fields = {'state': 'done', 'summary': summary}
+        workspace = (job / 'workspace').read_text().strip() if (job / 'workspace').is_file() else ''
+        if workspace:
+            fields['workspace'] = workspace
+        owner = job_owner(job)
+        if owner:
+            post_event(job, owner, fields)
+        else:
+            post_local(job, fields)
+        stamp.write_text(summary + '\n')
+    if (job / 'workspace').is_file():
+        clear_job_marker((job / 'workspace').read_text().strip(), job)
+    print('FINISHED ' + str(job))
 
 
 def post_event(job, owner, fields):
@@ -571,7 +633,8 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
     info = herdr('pane', 'get', pane)['pane'] if pane else None
     # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
     repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
-    owner = starter(info.get('workspace_id', pane.split(':')[0]) if info else workspace)
+    ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
+    owner = starter(ws_id)
     job = repo / ('.herdr-' + (name or slug(ask)))
     job.mkdir(parents=True, exist_ok=False)
     probe = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)
@@ -609,7 +672,8 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
         f'Ask the owner with: fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
         f'Answer a worker with: fleet-job tell {job} <agent> "<text>". Start a worker with: fleet-job start. '
         f'A merge or another gate (the herdr-fleet list): {gate_route} '
-        f'When idle, end your turn; hooks wake you.\n')
+        f'When idle, end your turn; hooks wake you.\n'
+        f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')
     args = cli_args(job, lead, 'claude', os.environ.get('FLEET_LEAD_MODEL', 'claude-opus-5-5'),
                     os.environ.get('FLEET_LEAD_EFFORT', 'xhigh'), [], lead=True)
     herdr('pane', 'rename', pane, lead)
@@ -617,6 +681,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
     # the reopen record leaves the fork out: a reopen resumes the lead's own session, not the planning chat
     subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'), 'record', str(job), lead,
                     'claude', str(brief), '--', *args], check=True)
+    mark_job(ws_id, job)
     if blocked:
         return print(f'BLOCKED {lead}: clear the startup dialog, then fleet-job tell {job} lead "Read {brief}"')
     tell(job, lead, f'You are {lead}. Read {brief} and do everything it says.')
@@ -643,6 +708,7 @@ def main(argv):
     p = sub.add_parser('gate-ok'); p.add_argument('job'); p.add_argument('gate'); p.add_argument('--sha', required=True)
     p = sub.add_parser('cancel'); p.add_argument('job'); p.add_argument('ident')
     p = sub.add_parser('approve'); p.add_argument('job'); p.add_argument('--by', required=True)
+    p = sub.add_parser('finish'); p.add_argument('job'); p.add_argument('summary', nargs='+')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
     p.add_argument('payload', nargs='?', help="Codex's notify JSON, passed as the last argument; other hooks read stdin")
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
@@ -679,6 +745,8 @@ def run(a):
         return cancel(a.job, a.ident)
     if a.cmd == 'approve':
         return approve(a.job, a.by)
+    if a.cmd == 'finish':
+        return finish(a.job, ' '.join(a.summary))
     if a.cmd == '_ask':
         return ask_now(a.job, ' '.join(a.question), a.option, a.command, a.gate)
     raw = a.payload if a.payload is not None else sys.stdin.read()

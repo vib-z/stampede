@@ -28,6 +28,19 @@ case "\$1 \$2" in
 esac
 EOF
 chmod +x "$B/curl" "$B/herdr"
+# herdr-event-flush asks for BSD stat (-f %m, -f %z). On a GNU host, answer with the same numbers.
+cat > "$B/stat" <<'EOF'
+#!/bin/bash
+if [ "${1:-}" = -f ] && ! /usr/bin/stat -f %m / >/dev/null 2>&1; then
+  fmt=$2; shift 2
+  case "$fmt" in
+    %m) exec /usr/bin/stat -c %Y "$@";;
+    %z) exec /usr/bin/stat -c %s "$@";;
+  esac
+fi
+exec /usr/bin/stat "$@"
+EOF
+chmod +x "$B/stat"
 
 fail(){ echo "FAIL: $*"; exit 1; }
 sent(){ grep -c . "$F/sent.jsonl" 2>/dev/null || echo 0; }
@@ -44,7 +57,9 @@ post '{"source":"herdr","state":"blocked","pane":"w1:p1"}'
 post '{"source":"claude","state":"Notification","notification_type":"idle_prompt","pane":"w1:p1"}'
 [ "$(sent)" = 2 ] || fail "B1 idle_prompt after a turn end was sent"
 post '{"source":"claude","state":"Notification","notification_type":"permission_prompt","pane":"w1:p1"}'
-[ "$(sent)" = 3 ] || fail "B1 permission notification was dropped"
+[ "$(sent)" = 2 ] || fail "B1 permission on a pane that just sent blocked was sent again"
+post '{"source":"claude","state":"Notification","notification_type":"permission_prompt","pane":"w1:p10"}'
+[ "$(sent)" = 3 ] || fail "B1 permission on another pane was dropped"
 post '{"source":"claude","state":"Notification","notification_type":"idle_prompt","pane":"w1:p9"}'
 [ "$(sent)" = 4 ] || fail "B1 idle_prompt with no turn end was dropped"
 post '{"source":"herdr","state":"done","pane":"w1:p2"}'
@@ -102,5 +117,39 @@ rm "$F/down"; herdr-event-flush
 grep -q '"state":"blocked"' "$F/sent.jsonl" && fail "B10 an out-of-date state was sent"
 [ "$(ls "$T/.herdr-events/dead" | grep -c superseded)" = 1 ] || fail "B10 superseded event not moved to dead/"
 [ -z "$(ls "$Q")" ] || fail "B10 queue not empty"
+
+# B12: an open job drops plain turn ends. Finish, blocked, StopFailure and a pane with no marker still post.
+mkdir -p "$T/.config/herdr-events/jobs"
+printf '%s\n' '/tmp/job-w1' > "$T/.config/herdr-events/jobs/w1"
+rm -f "$F/sent.jsonl"
+post '{"source":"claude","state":"Stop","pane":"w1:p20","workspace":"w1"}'
+post '{"source":"herdr","state":"idle","pane":"w1:p21","workspace":"w1"}'
+post '{"source":"herdr","state":"done","pane":"w1:p21","workspace":"w1"}'
+post '{"source":"codex","state":"agent-turn-complete","pane":"w1:p22","workspace":"w1"}'
+post '{"source":"claude","state":"Notification","notification_type":"idle_prompt","pane":"w1:p23","workspace":"w1"}'
+[ "$(sent)" = 0 ] || fail "B12 a plain turn end in an open job was sent ($(sent))"
+post '{"source":"claude","state":"StopFailure","pane":"w1:p20","workspace":"w1"}'
+[ "$(sent)" = 1 ] || fail "B12 StopFailure in an open job was dropped"
+post '{"source":"herdr","state":"blocked","pane":"w1:p24","workspace":"w1"}'
+post '{"source":"claude","state":"Notification","notification_type":"permission_prompt","pane":"w1:p24","workspace":"w1"}'
+[ "$(sent)" = 2 ] || fail "B12 blocked from two sources sent $(sent), want 2"
+post '{"source":"herdr-watchdog","state":"dead","pane":"w1:p20","workspace":"w1"}'
+[ "$(sent)" = 3 ] || fail "B12 a dead watchdog in an open job was dropped"
+post '{"source":"stampede","state":"done","summary":"shipped","job":"/tmp/job-w1","workspace":"w1"}'
+post '{"source":"stampede","state":"done","summary":"shipped","job":"/tmp/job-w1","workspace":"w1"}'
+[ "$(sent)" = 4 ] || fail "B12 finish was dropped or sent twice ($(sent))"
+post '{"source":"stampede","state":"done","summary":"the other job","job":"/tmp/job-w2","workspace":"w1"}'
+[ "$(sent)" = 5 ] || fail "B12 a second job's finish was dropped"
+post '{"source":"stampede","state":"question","ask":"abc123abc123","question":"Go?","workspace":"w1"}'
+[ "$(sent)" = 6 ] || fail "B12 a question in an open job was dropped"
+post '{"source":"herdr","state":"done","pane":"w2:p1","workspace":"w2"}'
+[ "$(sent)" = 7 ] || fail "B12 a done in a workspace with no job was dropped"
+herdr-event-codex-notify '{"type":"agent-turn-complete","thread-id":"desktop-1","last-assistant-message":"outside"}'
+[ "$(sent)" = 7 ] || fail "B12 a codex turn with no pane was sent"
+HERDR_PANE_ID=w1:p25 HERDR_WORKSPACE_ID=w1 herdr-event-codex-notify '{"type":"agent-turn-complete","last-assistant-message":"worker"}'
+[ "$(sent)" = 7 ] || fail "B12 a codex turn in an open job was sent"
+rm "$T/.config/herdr-events/jobs/w1"
+post '{"source":"claude","state":"Stop","pane":"w1:p26","workspace":"w1"}'
+[ "$(sent)" = 8 ] || fail "B12 a Stop after the job marker was removed was dropped"
 
 echo PASS

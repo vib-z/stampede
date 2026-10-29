@@ -24,8 +24,43 @@ if ! payload=$(jq -c . <<<"$payload" 2>/dev/null) || [ -z "$payload" ]; then [ "
 payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENTS_MACHINE:-$(hostname -s)}" '. + {machine:$m, timestamp:$ts}' <<<"$payload")
 summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state//"-")"' <<<"$payload")
 
-# de-dupe identical pane+state within DEDUPE_SECS; every gate and every question is its own event
+# Workspace, for the job marker and for routing.
+D="$HOME/.config/herdr-events"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
+owner=$(jq -r '.owner // empty' <<<"$payload")
+ws=$(jq -r '.workspace // empty' <<<"$payload")
+[ -z "$ws" ] && ws=$(jq -r '.pane // empty | split(":")[0]' <<<"$payload")
+if [ -z "$ws" ]; then  # cwd match against herdr agents
+  cwd=$(jq -r '.cwd // empty' <<<"$payload")
+  [ -n "$cwd" ] && ws=$(herdr agent list 2>/dev/null | jq -r --arg c "$cwd" '[.result.agents[]|select(.cwd==$c or .foreground_cwd==$c).workspace_id]|first // empty')
+fi
+read -r pane state ntype < <(jq -r '[.pane//.session_id//"-", .state//"-", .notification_type//"-"] | @tsv' <<<"$payload")
+esource=$(jq -r '.source // empty' <<<"$payload")
+# An open job marks ~/.config/herdr-events/jobs/<workspace>. While that file is there, a plain turn end
+# stays on the machine: the lead sends one done with fleet-job finish. Blocked, permission, StopFailure,
+# stale, dead, questions, gates and finish still post. No marker: unchanged.
+plain=0
+case "$esource:$state:$ntype" in
+  herdr:done:*|herdr:idle:*|claude:Stop:*|codex:agent-turn-complete:*) plain=1;;
+  claude:Notification:idle_prompt) plain=1;;
+esac
+job_open=0
+case "$ws" in
+  ''|*[!A-Za-z0-9_-]*) ;;
+  *) [ "$esource" != stampede ] && [ "$plain" = 1 ] && [ -f "$D/jobs/$ws" ] && job_open=1;;
+esac
+if [ "$job_open" = 1 ]; then log "job-skip (turn end while a job is open): $summary workspace=$ws"; exit 0; fi
+
+# de-dupe identical pane+state within DEDUPE_SECS; every gate and every question is its own event.
+# Blocked and permission prompts for one pane are one wake for DEDUPE_SECS, whichever source arrives first.
 key=$(jq -r '"\(.source//"")|\(.pane//.session_id//"")|\(.state//"")\(if (.gate//.ask) then "|"+(.gate//.ask) else "" end)"' <<<"$payload")
+kind=$(printf '%s %s' "$state" "$ntype" | tr '[:upper:]' '[:lower:]')
+case "$kind" in
+  *blocked*|*permission*) [ "$pane" != "-" ] && key="attention|$pane";;
+esac
+# Each finish is its own event. Two jobs can end within the same 120 s.
+if [ "$esource" = stampede ] && [ "$state" = done ]; then
+  key="$key|$(jq -r '.job // empty' <<<"$payload")|$(jq -r '.summary // empty' <<<"$payload")"
+fi
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
 exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
 touch "$DB"
@@ -35,7 +70,6 @@ if [ "$STRICT" = 0 ] && seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summ
 # a second or two. Keep the first per pane for TURN_SECS. Claude's idle_prompt Notification comes 60 s after a turn
 # end and only repeats it, so drop it when that pane's turn end went out in the last IDLE_SECS.
 TURN_SECS=15; IDLE_SECS=300
-read -r pane state ntype < <(jq -r '[.pane//.session_id//"-", .state//"-", .notification_type//"-"] | @tsv' <<<"$payload")
 tkey=""; [ "$pane" != "-" ] && tkey="turn-end|$pane"
 if [ -n "$tkey" ]; then
   case "$state" in
@@ -49,14 +83,6 @@ printf '%s\t%s\n' "$key" "$now" >>"$DB.tmp"; [ -n "$tkey" ] && printf '%s\t%s\n'
 mv "$DB.tmp" "$DB"
 
 # --- owner routing ---
-D="$HOME/.config/herdr-events"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
-owner=$(jq -r '.owner // empty' <<<"$payload")
-ws=$(jq -r '.workspace // empty' <<<"$payload")
-[ -z "$ws" ] && ws=$(jq -r '.pane // empty | split(":")[0]' <<<"$payload")
-if [ -z "$ws" ]; then  # cwd match against herdr agents
-  cwd=$(jq -r '.cwd // empty' <<<"$payload")
-  [ -n "$cwd" ] && ws=$(herdr agent list 2>/dev/null | jq -r --arg c "$cwd" '[.result.agents[]|select(.cwd==$c or .foreground_cwd==$c).workspace_id]|first // empty')
-fi
 if [ -z "$owner" ] && [ -n "$ws" ] && [ -r "$D/owners/$ws" ]; then owner=$(sed -n 's/^owner=//p' "$D/owners/$ws" | head -1); fi
 route="default"; if [ -n "$owner" ] && [ -r "$RD/$owner" ]; then route="$owner"; fi
 if [ "$STRICT" = 1 ] && { [ -z "$owner" ] || [ "$route" != "$owner" ]; }; then refuse 3 "no route of its own for owner ${owner:-(none)} in $RD"; fi

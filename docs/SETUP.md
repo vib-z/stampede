@@ -89,7 +89,7 @@ The full table: [README, Configure](../README.md#configure). `stampede`, the hoo
 
 ## The event relay, for a remote bot
 
-This is optional for local use and required for a bot that receives job events. A bot outside Herdr (Grok Bot, or any bot with a webhook) hears when an agent is done or stuck through the relay, so it never polls. Set it up in this order:
+This is optional for local use and required for a bot that receives job events. A bot outside Herdr hears when a job finishes or an agent is stuck through the relay, so it never polls. While a stampede job is open, ordinary turn ends in that workspace stay on the machine; `stampede finish` is the done event ([remote/events.md](../remote/events.md)). Set it up in this order:
 1. The Herdr plugin (above).
 2. A route file per bot, and the tag on each workspace: [remote/events.md](../remote/events.md).
 3. The Claude Code and Codex hooks that send turn ends: [remote/events.md, Hooks](../remote/events.md#hooks).

@@ -5,8 +5,8 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 ## Do
 - Give each bot a route: a webhook URL and secret, in a file only you can read.
 - Tag each workspace with its bot before its agents start.
-- An untagged workspace, or a bot with no route file, uses the default route for its turn events; no route file at all means logged only. A question or a gate (below) goes only through its bot's own route, with `herdr-event-post --strict`: no route of its own (exit 3) or no queue (exit 4) is a refusal the lead sees, and a queued one waits out a route with no URL instead of being dropped. Its lead hears it as one `UNDELIVERED` line in `inbox.log` when it is held, and another if it is still undelivered after 24 h.
-- One message per turn end: the same pane and state inside 120 seconds is sent once. Every gate is its own message.
+- An untagged workspace, or a bot with no route file, uses the default route for its turn events; no route file at all means logged only. A question or a gate (below), and `stampede finish` in a job a bot started, go only through that bot's own route, with `herdr-event-post --strict`: no route of its own (exit 3) or no queue (exit 4) is a refusal the lead sees, and a queued one waits out a route with no URL instead of being dropped. Its lead hears it as one `UNDELIVERED` line in `inbox.log` when it is held, and another if it is still undelivered after 24 h.
+- One message per turn end, in a workspace with no open job: the same pane and state inside 120 seconds is sent once. While a job is open, plain turn ends in that workspace stay on the machine (below). Every gate is its own message. Blocked and permission prompts for one pane are one message for 120 seconds.
 - A send that fails waits in a queue; after an outage only each pane's newest event goes.
 - On an event, read that pane once. Never poll.
 
@@ -17,7 +17,7 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 | claude | Stop, StopFailure, Notification | `herdr-event-claude-hook`, a Claude Code hook |
 | codex | agent-turn-complete | `herdr-event-codex-notify`, the Codex `notify` command |
 | herdr-watchdog | stale, dead | `herdr-event-watchdog` ([watchdogs.md](watchdogs.md)) |
-| stampede | question, gate | `stampede ask` and `stampede ask --gate` in a job a bot started: below |
+| stampede | question, gate, done | `stampede ask`, `stampede ask --gate`, and `stampede finish` |
 
 ```bash
 mkdir -p ~/.config/herdr-events/routes
@@ -32,6 +32,19 @@ herdr-event-flush                                    # send what is queued, olde
 - **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`): ask the owner in chat, then run it with their words.
 - **A gate:** `job`, `agent` (the lead), `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and the two answers as commands: `approve` (`stampede approve-gate <job> <gate> --sha <sha> --by "owner in <bot> chat"`) and `deny` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat with the action, PR and commit; run `approve` over SSH only on their yes to that gate, else `deny` with their words. Never type a yes into a pane.
 - **Delivery:** an HTTP POST of the JSON to `URL`, with `Authorization: Bearer <KEY>` when `KEY` is set. URL and KEY are never logged. Queue and dead letters: `HERDR_EVENTS_HOME` (default `~/.herdr-events`). Log: `~/Library/Logs/herdr-events.log`.
+
+## While a job is open
+
+`stampede new` (the same command as `fleet-job new`) writes `~/.config/herdr-events/jobs/<workspace>`, holding the job folder's path. The lead's brief tells it to run `stampede finish <job> "<one line on where it ended>"` once when the job is done or stopped for good. Until that removes the marker, these stay on the machine (logged, not sent):
+
+- Herdr `done` and `idle`
+- Claude `Stop`
+- Claude's `idle_prompt` notification
+- Codex `agent-turn-complete`
+
+These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question` or `gate`. `finish` sends one event, `source` stampede, `state` done, plus `summary`. In a job a bot started, that uses the same strict route as a question (exit 3 with no route of its own, exit 4 if it is not queued). In a job started locally, it uses the ordinary relay and still clears the marker. A second `finish` does not send again.
+
+A Codex turn with no Herdr pane (`HERDR_PANE_ID` empty), including the Codex desktop app, is not sent. After the marker is gone, that workspace behaves as before.
 
 ## Hooks
 

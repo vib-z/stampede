@@ -4,6 +4,13 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 json="${@: -1}"
 PREV="$HOME/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
 [ -x "$PREV" ] && "$PREV" turn-ended "$json" >/dev/null 2>&1 &
+# A turn with no Herdr pane (the Codex desktop app, or any notify outside Herdr) is not a fleet event.
+if [ -z "${HERDR_PANE_ID:-}" ]; then
+  mkdir -p "$(dirname "$HOME/Library/Logs/herdr-events.log")"
+  printf '%s skip: codex turn with no herdr pane\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>"$HOME/Library/Logs/herdr-events.log"
+  wait
+  exit 0
+fi
 # Codex also notifies for turns that are not the agent's own (checked live on 0.162.1, 2026-10-16):
 # a sub-agent or the --approve-for-me guardian, whose rollout's first line names a parent_thread_id,
 # and the chat-title side conversation, which has no rollout file at all. Skip both; inside Herdr the
