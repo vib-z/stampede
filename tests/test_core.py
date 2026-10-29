@@ -1050,5 +1050,26 @@ class ReviewEndpoint(CoreCase):
         self.assertEqual(self.calls(), [])
 
 
+
+class ReviewAckFile(CoreCase):
+    """review-claude minor 3: a reopen polling the ack file never crashes on a torn or empty one."""
+
+    def test_an_empty_or_partial_ack_file_is_not_yet_acknowledged(self):
+        job, _ = self.core_job()
+        (job / 'hooks').mkdir()
+        for torn in ('', '{"' + str(job / 'inbox.log')):
+            (job / 'hooks/ack-lead-demo.json').write_text(torn)
+            with mock.patch.multiple(fj, REOPEN_EVERY=0.05, REOPEN_DEADLINE=0.2):
+                code, out = self.quiet(fj.acknowledged, job, 'lead-demo')
+            self.assertEqual(code, 3, out)
+
+    def test_wake_replaces_the_ack_file_whole(self):
+        job, _ = self.core_job()
+        fj.append(job / 'inbox.log', 'REOPENED lead-demo 0123456789ab')
+        fj.wake(job, 'lead-demo', {'file_path': str(job / 'inbox.log')})
+        self.assertEqual(sorted(p.name for p in (job / 'hooks').iterdir() if 'ack' in p.name), ['ack-lead-demo.json'])
+        self.assertEqual(json.loads((job / 'hooks/ack-lead-demo.json').read_text()), {str(job / 'inbox.log'): ['0123456789ab']})
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -433,7 +433,9 @@ def wake(job, agent, payload):
             ack_path = job / 'hooks' / ('ack-' + agent + '.json')
             acks = json.loads(ack_path.read_text()) if ack_path.is_file() else {}
             acks[str(changed)] = (acks.get(str(changed), []) + attempts)[-10:]
-            ack_path.write_text(json.dumps(acks) + '\n')
+            temporary = ack_path.with_name('.' + ack_path.name + '.' + str(os.getpid()))
+            temporary.write_text(json.dumps(acks) + '\n')
+            os.replace(temporary, ack_path)  # reopen reads it without the wake lock
     return lines
 
 
@@ -1022,7 +1024,10 @@ def acknowledged(job, lead):
             append(path, f'REOPENED {lead} {attempt}')
         until = min(deadline, time.time() + REOPEN_EVERY)
         while pending and time.time() < until:
-            seen = json.loads(acks.read_text()) if acks.is_file() else {}
+            try:
+                seen = json.loads(acks.read_text())
+            except (OSError, ValueError):  # none yet, or not whole: not acknowledged yet
+                seen = {}
             pending = {path for path in pending if attempt not in seen.get(path, [])}
             time.sleep(min(0.5, REOPEN_EVERY / 10))
     if not pending:
