@@ -527,5 +527,35 @@ class ReviewHung(CoreCase):
         self.assertNotIn('t3|blocked|1', sent, 'the hung post is not recorded as sent')
 
 
+
+class ReviewWatchdog(Shell):
+    """review-claude minor 6: a finished Core job's tag expires with no Herdr TUI up; anything uncertain keeps it."""
+
+    def test_core_tags_need_no_tui(self):
+        self.fake('herdr', 'exit 1\n')  # no Herdr TUI at all
+        (self.home / 'Library/Logs').mkdir(parents=True)  # always there on a Mac; the watchdog never makes it
+        self.link('herdr-event-post', 'herdr-event-core')
+        socket_file, server = core_socket(self.home)
+        self.addCleanup(server.shutdown)
+        done, running, opened = 'hc-0000000000a1', 'hc-0000000000b2', 'hc-0000000000c3'
+        gone = self.home / '.local/state/herdr-events/watchdog/gone'
+        gone.mkdir(parents=True)
+        for key in (done, running, opened):
+            (self.events / 'owners' / key).write_text('owner=alpha\n')
+            (gone / key).write_text(str(int(time.time()) - 90000) + '\n')
+        (self.events / 'jobs' / opened).write_text('/repo/.herdr-demo\n')
+        (self.home / 'core').mkdir()
+        (self.home / 'core/state.json').write_text(json.dumps({'next': 2, 'terminals': {'t1': {
+            'address': 't1', 'state': 'live', 'labels': {'stampede.job': running}, 'status': None, 'turn': 0}}}))
+        result = self.run_script('herdr-event-watchdog', HC_SOCKET=str(self.home / 'none.sock'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(p.name for p in (self.events / 'owners').iterdir()), sorted([done, running, opened]),
+                         'Core down: every tag kept')
+        result = self.run_script('herdr-event-watchdog', HC_SOCKET=str(socket_file))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(p.name for p in (self.events / 'owners').iterdir()), sorted([running, opened]))
+        self.assertIn(f'removed stale owner tag {done}', self.log())
+
+
 if __name__ == '__main__':
     unittest.main()

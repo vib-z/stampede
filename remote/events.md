@@ -53,7 +53,7 @@ A job started with `stampede new --core` has no Herdr workspace: its key, `hc-<1
 
 - **The follower:** `herdr-event-core <job>` runs as the job's `relay-<12 hex>` terminal. It follows `hc events --label stampede.job=<key>` and posts, with `agent` and `output_tail`: `blocked` (with `kind` and `msg`) and `error`, once per new episode; `done` and `idle` turn ends; `dead` when a terminal finishes while working or blocked, or fails with no status ever, or its record is gone (`reason` lost); and `relay_down` when Core stays unreachable for 10 minutes. It skips its own terminal and the job's wait terminals. Each event carries an `event_id` (`<key>/<address>|<state>|<episode>`), and `herdr-event-post` adds it to its de-dupe key: two blocked or error episodes on one terminal are two messages, the same one sent twice is one.
 - **The relay hooks** inside a Core terminal stampede started (`STAMPEDE_JOB_KEY` and `HC_TERMINAL_ID` set, no `HERDR_PANE_ID`) send `pane` `hc:<key>/<address>` and `workspace` `<key>`, so a Codex turn there is no longer dropped. In any other Core terminal they behave as before.
-- **Owner tags:** `herdr-events-owner <key> <bot>` works only while the job is open; it never calls `herdr`. The watchdog keeps a key's tag while the job is open or Core still runs one of its terminals, skips it when Core cannot be reached, and removes it a day after.
+- **Owner tags:** `herdr-events-owner <key> <bot>` works only while the job is open; it never calls `herdr`. The watchdog, with or without the Herdr TUI, keeps a key's tag while the job is open or Core still runs one of its terminals, keeps it when Core cannot be reached, and removes it a day after Core confirmed neither.
 
 ## Hooks
 
