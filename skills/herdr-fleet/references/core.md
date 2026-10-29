@@ -40,7 +40,7 @@ stampede start <job> <agent> --kind claude|codex --brief <file> [--cwd <dir>] [-
 ```
 
 - One live launch per agent: refused while another caller starts it, or while a live terminal of the job runs it (`already running at <address>`).
-- `--cwd` defaults to the repo. `--yolo-in` must be the same folder as `--cwd`, a linked worktree.
+- `--cwd` defaults to the repo. `--yolo-in` must be the same folder as `--cwd`, a linked worktree. A relative `--brief` is made absolute, so it resolves from any `--cwd`.
 - Claude gets `--session-id` (recorded for reopen); Codex gets `--no-daemon`. The brief pointer is the first prompt.
 - `STARTED <agent> (<address>)`, exit 0. `BLOCKED` or `NOT READY`, exit 1: it is still the job's agent, so recover it as for the lead and never start a second. `FAILED`, exit 1: its terminal ended.
 - A worker has no parent, so it never ends with the lead.

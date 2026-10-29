@@ -846,7 +846,7 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
     labels name), else start it with its hooks, its brief pointer as the first prompt, and Codex without its daemon."""
     if kind == 'cursor':
         raise ValueError(CURSOR_ON_CORE)
-    job = Path(job).absolute()
+    job, brief = Path(job).absolute(), Path(brief).expanduser().absolute()  # the agent may start in another folder
     cwd = Path(cwd or job.parent).expanduser().resolve()
     if yolo_in is not None and Path(yolo_in).expanduser().resolve() != cwd:
         raise PermissionError(f'--yolo-in {yolo_in} must be the --cwd the worker starts in ({cwd}): its own worktree')

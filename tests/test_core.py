@@ -869,5 +869,25 @@ class ReviewRoster(CoreCase):
         self.assertEqual(sorted(p.name for p in job.iterdir() if p.name.startswith('agents.tsv')), ['agents.tsv', 'agents.tsv.lock'])
 
 
+
+class ReviewBrief(CoreCase):
+    """review-codex R7: on Core a relative --brief is made absolute before it is recorded or sent."""
+
+    def test_a_relative_brief_reaches_a_worker_started_elsewhere(self):
+        job, _ = self.core_job()
+        brief = self.brief(job, 'review-api')
+        tree = self.root / 'code/review-tree'
+        tree.mkdir()
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.repo)
+        code, _ = self.quiet(fj.start, '.herdr-demo', 'review-api', 'codex', None, '.herdr-demo/briefs/review-api.md', cwd=str(tree))
+        self.assertEqual(code, 0)
+        run = self.calls('run')[0]
+        self.assertEqual(self.option(run, '--cwd'), str(tree))
+        self.assertEqual(self.program(run)[-1], f'You are review-api in a herdr fleet. Read {brief} and do everything it says.')
+        self.assertEqual(fj.agent_rows(job)['review-api']['brief'], str(brief))
+
+
 if __name__ == '__main__':
     unittest.main()
