@@ -48,7 +48,7 @@
     addEventListener('scroll', onScroll, {passive: true});
     onScroll();
 
-    const prompt = 'Install stampede from https://github.com/vib-z/stampede using its README. Clone it to ~/stampede (if that path exists, inspect it and preserve existing files). In that folder, run ./install.sh --dry-run, then ./install.sh. Ensure ~/.local/bin is on my PATH and check that stampede --version prints 0.1.4. Report any skipped links and missing prerequisites: Herdr, signed-in Claude Code, Python 3, git, jq and curl. Explain the optional tools, including Moshi for phone questions, and any remaining owner-run setup. Ask which project to trust before running herdr-trust. Stop before starting the first job.';
+    const prompt = 'Install stampede from https://github.com/vib-z/stampede using its README. Clone it to ~/stampede (if that path exists, inspect it and preserve existing files). In that folder, run ./install.sh --dry-run, then ./install.sh. Ensure ~/.local/bin is on my PATH and check that stampede --version prints 0.1.5. Report any skipped links and missing prerequisites: Herdr, signed-in Claude Code, Python 3, git, jq and curl. Explain the optional tools, including Moshi for phone questions, and any remaining owner-run setup. Ask which project to trust before running herdr-trust. Stop before starting the first job.';
     const go = document.querySelector('.go'), status = document.querySelector('.go-status');
     const panel = document.querySelector('#install-prompt'), text = panel.querySelector('textarea');
     text.value = prompt;
