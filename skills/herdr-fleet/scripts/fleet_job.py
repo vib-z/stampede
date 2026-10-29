@@ -1048,7 +1048,7 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
     snapshot(job)
     if not [agent for agent, outcome in outcomes.items() if outcome != 'live']:
         print(f'LIVE {key}: no agent to restart')
-    code = 1 if [outcome for outcome in outcomes.values() if outcome in ('failed', 'unknown')] else 0
+    code = 1 if [outcome for outcome in outcomes.values() if outcome in ('failed', 'unknown', 'not ready')] else 0
     if finished or not pending.exists() or outcomes.get(lead) not in ('started', 'live'):
         return code
     acked = acknowledged(job, lead)  # also on a retry with the lead live: an earlier reopen may have timed out
@@ -1057,8 +1057,9 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
     return acked or code
 
 
-def reopen_run(job, agent, role, program, cwd, plain=False, session=None):
-    """One restart and what came of it: 'started', 'failed' (confirmed, said) or 'unknown' (kept, said)."""
+def reopen_run(job, agent, role, program, cwd, plain=False, session=None, brief=None):
+    """One restart and what came of it, said by start's rule: 'started', 'not ready' (a live terminal blocked, at an
+    error or silent: still the job's), 'failed' (confirmed) or 'unknown' (kept). plain: the follower, which has no status."""
     try:
         address = core_run(job, agent, role, program, cwd, session)
     except CoreUnknown as error:
@@ -1067,8 +1068,10 @@ def reopen_run(job, agent, role, program, cwd, plain=False, session=None):
     except HcError as error:
         print(f'FAILED {agent} ({line(error)}): it did not start')
         return 'failed'
+    if not plain:
+        return core_outcome(job, agent, address, 'lead' if role == 'lead' else agent, brief)
     print(f'RESTARTED {agent} ({address})')
-    if plain and core_outcome(job, agent, address, agent, None, plain=True) != 'started':
+    if core_outcome(job, agent, address, agent, None, plain=True) != 'started':
         return 'failed' if core_entries(job).get(agent, {}).get('state') == 'failed' else 'unknown'
     return 'started'
 
@@ -1089,7 +1092,8 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
             cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
             if pending:
                 pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
-            return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None)
+            return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None,
+                              brief=row.get('brief'))
         proof = session_proof(job, agent, session) if kind == 'claude' and session else 'never'
         if kind == 'claude' and proof == 'unknown':
             print(f'UNKNOWN {agent}: cannot tell whether its session {session} ever ran (no terminal of it in hc ls --all '
@@ -1110,7 +1114,8 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
         cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
         if pending:
             pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
-        return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None)
+        return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None,
+                          brief=row.get('brief'))
 
 
 def acknowledged(job, lead):

@@ -861,6 +861,18 @@ class CoreReopen(CoreCase):
         code, out = self.reopen(lead_only=True)
         self.assertEqual((code, out.strip()), (0, f'LIVE {self.key}: no agent to restart'))
 
+    def test_each_restart_is_reported_as_start_reports_it(self):  # test-claude TC-F3
+        self.prepare()
+        self.gone('build-api', 'review-api')
+        self.shape(on_run={'review-api': {'status': None}})  # a Codex at its first dialog: no status yet
+        code, out = self.reopen()
+        self.assertEqual(code, 1)
+        self.assertIn('STARTED build-api (', out)
+        self.assertIn('NOT READY review-api: no status', out)
+        self.assertIn('hc read ', out)
+        self.assertNotIn('RESTARTED review-api', out)
+        self.assertEqual(sorted(self.started()), ['build-api', 'review-api'], 'it went on to every agent')
+
     def test_wake_records_the_reopen_attempts_it_delivered(self):
         self.prepare()
         fj.append(self.job / 'inbox.log', f'REOPENED {LEAD} 0123456789ab')
