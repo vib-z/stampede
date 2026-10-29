@@ -45,13 +45,14 @@ stampede start <job> <agent> --kind claude|codex --brief <file> [--cwd <dir>] [-
 - One live launch per agent: refused while another caller starts it, or while a live terminal of the job runs it (`already running at <address>`).
 - `--cwd` defaults to the repo. `--yolo-in` must be the same folder as `--cwd`, a linked worktree. A relative `--brief` is made absolute, so it resolves from any `--cwd`.
 - Claude gets `--session-id` (recorded for reopen); Codex gets `--no-daemon`. The brief pointer is the first prompt.
-- `STARTED <agent> (<address>)`, exit 0. `BLOCKED` or `NOT READY`, exit 1: it is still the job's agent, so recover it as for the lead and never start a second. `UNKNOWN`, exit 1: as for the lead; a later `start` adopts it or says it is running. `FAILED`, exit 1: its terminal ended.
+- `STARTED <agent> (<address>)`, exit 0. `BLOCKED` or `NOT READY`, exit 1: it is still the job's agent, so recover it as for the lead and never start a second. `UNKNOWN`, exit 1: as for the lead; a later `start` adopts it or says it is running. `FAILED <agent> (<reason>)`, exit 1: its terminal ended, or it never started.
 - A worker has no parent, so it never ends with the lead.
 
 ## Talk to an agent
 
 - `stampede tell <job> <agent> "<text>"`. A Claude agent reads its inbox file, as on the TUI. A Codex agent gets `hc send` once its terminal shows this job's labels: at `idle` it types only while still idle; at `done` it types at once, so a worker that turned `working` in between takes it as a message during its turn.
-- `working`, `blocked`, `error`, no status, or another job's terminal: one line, `FAILED <agent> (<why>)`, exit 2. Tell a working agent after its turn.
+- `working`, `blocked`, `error`, no status, another job's terminal, or Core not answering: one line, `FAILED <agent> (<why>)`, exit 2. Tell a working agent after its turn.
+- Any other `hc` failure is one line on stderr, `fleet-job <command>: <reason>`, exit 1.
 - Read any of the job's agents with `hc read <address>`. Never `hc send --force`, `hc keys` or `hc kill` a terminal you did not start, and never answer an agent's dialog that is not yours to answer.
 
 ## What wakes you

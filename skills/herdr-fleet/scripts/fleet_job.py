@@ -916,6 +916,10 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
         except CoreUnknown as error:
             snapshot(job)
             return unknown(job, error)
+        except HcError as error:  # confirmed: no terminal of the job runs it, and its entry says failed
+            snapshot(job)
+            print(f'FAILED {agent} ({line(error)})')
+            return 1
         snapshot(job)
         return 0 if core_outcome(job, agent, address, 'lead' if lead else agent, brief) == 'started' else 1
 
@@ -1053,14 +1057,16 @@ def tell_core(job, name, text):
     """Prompt a Codex agent in its Core terminal by its status: idle types only while idle (atomic); done types at once,
     so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line."""
     target(job)
-    address = core_entries(job).get(name, {}).get('address')
+    address, lost = core_entries(job).get(name, {}).get('address'), None
     try:
         terminal = hc('get', address) if address else {}
-    except HcError:
-        terminal = {}
+    except HcError as error:
+        terminal, lost = {}, None if error.kind == 'not_found' else error
     labels, word = terminal.get('labels') or {}, core_status(terminal)
     refused = {'working': 'working: tell it after its turn', 'blocked': f'blocked: hc read {address}', 'error': f'error: hc read {address}'}
-    if labels.get('stampede.job') != core_key(job) or labels.get('stampede.agent') != name:
+    if lost:
+        why = 'Herdr Core did not answer: ' + line(lost)
+    elif labels.get('stampede.job') != core_key(job) or labels.get('stampede.agent') != name:
         why = "not this job's terminal"
     elif terminal.get('state') != 'live' or word not in ('idle', 'done', *refused):
         why = 'not ready'
@@ -1324,6 +1330,9 @@ def main(argv):
             raise
         print('fleet-job ' + a.cmd + ': ' + line(error), file=sys.stderr)
         return 2
+    except HcError as error:  # Herdr Core failed: one line, never a traceback (a TUI job never calls hc)
+        print('fleet-job ' + a.cmd + ': ' + line(error), file=sys.stderr)
+        return 1
 
 
 def run(a):

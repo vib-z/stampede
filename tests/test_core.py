@@ -1071,5 +1071,32 @@ class ReviewAckFile(CoreCase):
         self.assertEqual(json.loads((job / 'hooks/ack-lead-demo.json').read_text()), {str(job / 'inbox.log'): ['0123456789ab']})
 
 
+
+class ReviewOneLine(CoreCase):
+    """review-claude minor 5: on Core a failed hc call is one line and an exit code, never a traceback."""
+
+    def cli(self, *args):
+        return subprocess.run([str(SCRIPTS / 'fleet-job'), *args], capture_output=True, text=True, timeout=60)
+
+    def test_start_tell_and_reopen_say_it_in_one_line(self):
+        job, key = self.core_job(workers=[('review-api', 'codex')])
+        self.shape(run_error={'build-api': 'spawn_failed'})
+        result = self.cli('start', str(job), 'build-api', '--kind', 'claude', '--brief', str(self.brief(job, 'build-api')))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertRegex(result.stdout, r'(?m)^FAILED build-api \(hc run: .+\)$')
+        self.assertNotIn('Traceback', result.stderr)
+        (job / 'core.json').write_text(json.dumps({'review-api': {'state': 'live', 'address': 't1'}}))
+        self.add_terminal('t1', name='review-api', labels={'stampede.job': key, 'stampede.agent': 'review-api'})
+        self.shape(get_error={'t1': 'unavailable'}, ls_error='unavailable')
+        result = self.cli('tell', str(job), 'review-api', 'hello')
+        self.assertEqual((result.returncode, result.stderr), (2, ''))
+        self.assertEqual(result.stdout.splitlines(), ['FAILED review-api (Herdr Core did not answer: hc get: no answer)'])
+        result = self.cli('_reopen', str(job))
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+        self.assertTrue(result.stderr.startswith('fleet-job _reopen: hc '), result.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()
