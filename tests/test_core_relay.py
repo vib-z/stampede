@@ -848,5 +848,45 @@ class ReviewHookQueue(CoreCase):
         self.assertEqual([(e['source'], e['state']) for e in self.queued()], [('claude', 'Notification')])
 
 
+
+class ReviewWorkspaceGrammar(Shell):
+    """test-codex F1: an explicit workspace names a file only when well formed: a Core key in full, or a plain id."""
+
+    BAD = ('hc-aaaaaaaaaaa', 'hc-AAAAAAAAAAAA', 'hc-../owners/beta', '../owners/beta')
+
+    def setUp(self):
+        super().setUp()
+        for bot in ('alpha', 'beta'):
+            (self.events / 'routes' / bot).write_text('URL=http://127.0.0.1:9/never\n')
+            (self.events / 'owners' / bot).write_text(f'owner={bot}\n')  # what a traversal-shaped value would reach
+        for good in ('w1', KEY, 'hc-aaaaaaaaaaa', 'hc-AAAAAAAAAAAA'):
+            (self.events / 'owners' / good).write_text('owner=beta\n')
+
+    def post(self, *flags, **event):
+        return self.run_script('herdr-event-post', *flags, json.dumps(event), HERDR_EVENTS_ROUTES_DIR=str(self.events / 'routes'))
+
+    def queued(self):
+        queue = self.home / 'queue/queue'
+        return [json.loads(p.read_text()) for p in sorted(queue.glob('*.json')) if not p.name.startswith('.')] if queue.is_dir() else []
+
+    def test_strict_refuses_a_malformed_workspace_and_queues_nothing(self):
+        for bad in self.BAD:
+            result = self.post('--strict', source='stampede', state='question', workspace=bad, owner='alpha', ask=bad[:6])
+            self.assertEqual(result.returncode, 6, bad)
+            self.assertIn('malformed workspace', result.stderr)
+        self.assertEqual(self.queued(), [])
+        self.assertEqual(self.post('--strict', source='stampede', state='question', workspace=KEY, owner='alpha', ask='ok').returncode, 0)
+        self.assertEqual([q['payload']['workspace'] for q in self.queued()], [KEY])
+
+    def test_an_ordinary_event_drops_it_and_never_picks_an_owner_tag_by_it(self):
+        for bad in self.BAD:
+            self.assertEqual(self.post(source='hc', state='blocked', workspace=bad, agent=bad[:6]).returncode, 0)
+        self.assertEqual(self.queued(), [], 'no owner tag selected: the default route has no file, so it is logged only')
+        self.assertEqual(self.log().count('dropped malformed workspace'), 4)
+        for good, pane in (('w1', 'w1:p1'), (KEY, f'hc:{KEY}/t3')):
+            self.post(source='hc', state='blocked', workspace=good, pane=pane, agent='ok')
+        self.assertEqual([(q['route'], q['payload']['workspace']) for q in self.queued()], [('beta', 'w1'), ('beta', KEY)])
+
+
 if __name__ == '__main__':
     unittest.main()

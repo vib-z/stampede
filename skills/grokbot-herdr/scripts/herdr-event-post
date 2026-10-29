@@ -3,7 +3,7 @@
 # Usage: echo '{"source":"x","pane":"w1:p1","state":"done"}' | herdr-event-post
 #    or: herdr-event-post '{"...json..."}'   or: herdr-event-post key=value ...
 #    --strict first (stampede's questions and gates): only the owner's own route, never default; no de-dupe;
-#    exit 3 when that route has no URL, 4 when the queue write fails, 0 only once the event is queued.
+#    exit 3 when that route has no URL, 4 when the queue write fails, 6 for a malformed workspace, 0 only once queued.
 #    An event for a Herdr Core pane (hc:..., the follower's and the agents' own hooks') is recorded for de-dupe only once
 #    it is queued, so a failed queue write suppresses no later copy. One with an event_id (the follower) exits 5 when
 #    the queue write fails, so the follower tries it again; 0 means queued, or meant to stay on the machine.
@@ -32,6 +32,18 @@ summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state
 D="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
 owner=$(jq -r '.owner // empty' <<<"$payload")
 ws=$(jq -r '.workspace // empty' <<<"$payload")
+# An explicit workspace names files (owner tag, job marker) only when well formed: a Core key is hc- and 12 lowercase
+# hex; anything else holding characters outside [A-Za-z0-9_-] is no workspace either. --strict refuses it (6).
+malformed=0
+case "$ws" in
+  hc-*) [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]] || malformed=1;;
+  *[!A-Za-z0-9_-]*) malformed=1;;
+esac
+if [ "$malformed" = 1 ]; then
+  [ "$STRICT" = 1 ] && refuse 6 "malformed workspace $(printf '%q' "$ws" | cut -c1-60): want a workspace id or hc-<12 hex>"
+  log "dropped malformed workspace $(printf '%q' "$ws" | cut -c1-60): $summary"
+  ws=""; payload=$(jq -c 'del(.workspace)' <<<"$payload")
+fi
 # a Herdr pane w1:p2 names its workspace; a Core terminal hc:<key>/<address> names its job's key, when well formed
 [ -z "$ws" ] && ws=$(jq -r '.pane // empty | if startswith("hc:") then (capture("^hc:(?<k>hc-[0-9a-f]{12})/").k // empty) else split(":")[0] end' <<<"$payload")
 if [ -z "$ws" ]; then  # cwd match against herdr agents
