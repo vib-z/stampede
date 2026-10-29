@@ -26,6 +26,7 @@ stampede new --core --file ask.md --cwd ~/code/my-app [--name <slug>] [--review]
 | file | holds |
 |---|---|
 | `backend` | `core` |
+| `endpoint` | the core it was made on: `HC_SESSION` and `HC_SOCKET` at `new`. Every later command for the job uses it; a shell set to another core is refused |
 | `workspace` | the key `hc-<12 hex>`, in place of a workspace id: the marker `jobs/<key>`, the owner tag `owners/<key>`, each event's `workspace` |
 | `core.json` | each agent's terminal: `state` (`starting`, `live`, `failed`), `address`, `name`, `role`, `cwd`, `session`, `socket`, `reason` |
 | `locks/<agent>.lock` | held by whoever is starting that agent |

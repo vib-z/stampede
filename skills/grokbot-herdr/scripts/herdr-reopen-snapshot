@@ -280,6 +280,8 @@ def snapshot_core(key, job):
         sys.exit(f'{job} is not the Herdr Core job {key} (its workspace file)')
     rows = load_agents(job)
     entries = json.loads((job / 'core.json').read_text()) if (job / 'core.json').is_file() else {}
+    core = json.loads((job / 'endpoint').read_text()) if (job / 'endpoint').is_file() else {}
+    on = f'HC_SESSION={core.get("session") or "(default)"}' + (f', HC_SOCKET={core["socket"]}' if core.get('socket') else '')
     fleet = Path(__file__).resolve().parents[2] / 'herdr-fleet/scripts/fleet-job'
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     sh = job / 'reopen.sh'
@@ -289,7 +291,8 @@ def snapshot_core(key, job):
         '# Usage: reopen.sh [--lead] [--prompt]',
         '#   default: the follower, the lead (its session resumed) and each worker that is not live, once each; live ones',
         '#   keep running. --lead: only the follower and the lead. --prompt: a restarted Codex worker gets its brief again.',
-        '# Exit 0; 2 another caller is starting one of them; 3 the restarted lead did not acknowledge its inbox files.',
+        '# Exit 0; 1 a restart failed or is unknown; 2 another caller is starting one, or this shell names another core;',
+        f'# 3 the restarted lead did not acknowledge its inbox files. It always works on the job\'s own core: {on}.',
         f'F={q(fleet)}; [ -x "$F" ] || F=fleet-job',
         f'exec "$F" _reopen {q(job)} "$@"', '']))
     sh.chmod(0o755)
@@ -298,6 +301,7 @@ def snapshot_core(key, job):
            f'After a reboot, a lost holder or any part gone: `bash {job}/reopen.sh` starts only what is not live: the follower, '
            'the lead (its session resumed) and each worker (Claude resumed by its session id, Codex fresh; `--prompt` sends '
            'a Codex worker its brief again). `--lead` starts only the follower and the lead. A live agent is never started twice.', '',
+           f'The job runs on Herdr Core {on}; every command for it targets that core, and a shell set to another is refused.', '',
            '| agent | role | CLI | model | effort | session | terminal | state | brief |', '|---|---|---|---|---|---|---|---|---|']
     for name, entry in entries.items():
         a = rows.get(name, {})

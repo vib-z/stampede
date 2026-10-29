@@ -967,5 +967,54 @@ class ReviewUnknown(CoreCase):
         self.assertEqual(self.entries(self.job)[LEAD]['state'], 'live')
 
 
+
+class ReviewEndpoint(CoreCase):
+    """review-codex R2: a job stays on the Herdr Core it was made on; a caller on another core is refused."""
+
+    def other(self, session):
+        path = self.core / session / 'state.json'
+        state = json.loads(path.read_text()) if path.is_file() else {'next': 1, 'terminals': {}}
+        calls = self.core / session / 'calls'
+        return state, [json.loads(row) for row in calls.read_text().splitlines()] if calls.is_file() else []
+
+    def make(self):
+        with mock.patch.dict(os.environ, {'HC_SESSION': 'isolated'}):
+            self.assertEqual(self.new_core()[0], 0)
+        self.relay = 'relay-' + fj.job_key(self.job)[3:]
+
+    def test_a_fresh_shell_works_on_the_jobs_own_core(self):
+        self.make()
+        self.assertEqual(json.loads((self.job / 'endpoint').read_text()), {'session': 'isolated', 'socket': ''})
+        state, _ = self.other('isolated')
+        for address in ('t1', 't2'):
+            state['terminals'][address].update(state='finished', reason='host_shutdown')
+        (self.core / 'isolated/state.json').write_text(json.dumps(state))
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, out = self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual(code, 0, out)
+        brief = self.job / 'briefs/review-api.md'
+        brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in fj.BRIEF_SECTIONS))
+        self.assertEqual(self.quiet(fj.start, self.job, 'review-api', 'codex', None, str(brief))[0], 0)
+        self.quiet(fj.tell, self.job, 'review-api', 'Check the error path')
+        state, calls = self.other('isolated')
+        self.assertEqual([c[0] for c in calls].count('run'), 5)
+        self.assertEqual(state['terminals']['t5']['sent'], ['Check the error path'])
+        self.assertEqual(self.calls(), [], 'nothing reached the default core')
+        self.assertEqual({e['session'] for e in self.entries(self.job).values()}, {'isolated'})
+
+    def test_a_caller_on_another_core_is_refused(self):
+        self.make()
+        brief = self.job / 'briefs/review-api.md'
+        brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in fj.BRIEF_SECTIONS))
+        for env in ({'HC_SESSION': 'other'}, {'HC_SOCKET': '/tmp/another-core.sock'}):
+            with mock.patch.dict(os.environ, env):
+                for call in (lambda: fj.reopen(self.job), lambda: fj.start(self.job, 'review-api', 'codex', None, str(brief))):
+                    with self.assertRaises(ValueError) as refused:
+                        self.quiet(call)
+                    self.assertIn('HC_SESSION=isolated' if 'HC_SESSION' in env else 'HC_SOCKET=(default)', str(refused.exception))
+        self.assertEqual(self.other('other')[1], [])
+        self.assertEqual(self.calls(), [])
+
+
 if __name__ == '__main__':
     unittest.main()

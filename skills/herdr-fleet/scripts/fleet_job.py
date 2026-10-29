@@ -587,6 +587,27 @@ def core_key(job):
     return key
 
 
+def endpoint(job):
+    """The Herdr Core a job was made on: HC_SESSION and HC_SOCKET as they were at new; '' is Core's default."""
+    path = Path(job) / 'endpoint'
+    return json.loads(path.read_text()) if path.is_file() else {'session': '', 'socket': ''}
+
+
+def target(job):
+    """Point every hc call of this process, and every terminal it starts, at the job's own core. A caller whose
+    HC_SESSION or HC_SOCKET names another core is refused, never retargeted: there the job would start a second time."""
+    recorded = endpoint(job)
+    for name, key, default in (('HC_SESSION', 'session', 'default'), ('HC_SOCKET', 'socket', '')):
+        mine, want = (os.environ.get(name) or '').strip(), recorded.get(key) or ''
+        if mine and mine != (want or default):
+            raise ValueError(f'{Path(job).absolute()} runs on Herdr Core {name}={want or "(default)"}, but {name} here is '
+                             f'{mine}: unset it or set it to the job\'s, so the job never starts a second time on another core')
+        if want:
+            os.environ[name] = want
+        else:
+            os.environ.pop(name, None)
+
+
 class HcError(RuntimeError):
     def __init__(self, message, kind='', code=1):
         super().__init__(message)
@@ -797,8 +818,8 @@ def core_run(job, agent, role, program, cwd):
     otherwise the entry is failed and the error raised."""
     key = core_key(job)
     before = core_entries(job).get(agent, {})
-    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), 'session': os.environ.get('HC_SESSION', ''),
-                      'socket': os.environ.get('HC_SOCKET', ''), 'ran': bool(before.get('ran'))}, fresh=True)
+    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), **endpoint(job), 'ran': bool(before.get('ran'))},
+         fresh=True)
     labels = [part for k, v in (('job', key), ('agent', agent), ('role', role)) for part in ('--label', f'stampede.{k}={v}')]
     name = agent
     while True:
@@ -871,6 +892,7 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
     if kind == 'cursor':
         raise ValueError(CURSOR_ON_CORE)
     job, brief = Path(job).absolute(), Path(brief).expanduser().absolute()  # the agent may start in another folder
+    target(job)
     cwd = Path(cwd or job.parent).expanduser().resolve()
     if yolo_in is not None and Path(yolo_in).expanduser().resolve() != cwd:
         raise PermissionError(f'--yolo-in {yolo_in} must be the --cwd the worker starts in ({cwd}): its own worktree')
@@ -924,6 +946,7 @@ def reopen(job, lead_only=False, prompt=False):
     job = Path(job).absolute()
     key, (people, lead), rows = core_key(job), roster(job), agent_rows(job)
     finished, outcomes = (job / 'finished').is_file(), {}
+    target(job)
     if not finished:
         mark_job(key, job)
         if job_owner(job):
@@ -1014,6 +1037,7 @@ def caller_ids(job):
 def tell_core(job, name, text):
     """Prompt a Codex agent in its Core terminal by its status: idle types only while idle (atomic); done types at once,
     so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line."""
+    target(job)
     address = core_entries(job).get(name, {}).get('address')
     try:
         terminal = hc('get', address) if address else {}
@@ -1177,6 +1201,9 @@ def new_core(ask_file, name, review, fork, cwd):
     lead = make_job(repo, job, ask, owner, review)
     key = job_key(job)
     (job / 'backend').write_text('core\n')
+    (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
+                                              'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')
+    target(job)
     brief = job / 'briefs' / (lead + '.md')
     brief.parent.mkdir()
     brief.write_text(lead_brief(job, lead, owner, review, fork, key))

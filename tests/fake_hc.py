@@ -11,11 +11,13 @@ State is FAKE_HC/state.json; every call is one JSON line in FAKE_HC/calls. A tes
   lookup_error kind              after a `run` fails, every `ls` fails with this kind (a lost answer, then no lookup)
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
-Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1."""
+Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1.
+Each HC_SESSION other than the default is a core of its own: its state and calls live in FAKE_HC/<session>/."""
 import fcntl, json, os, sys, time
 from pathlib import Path
 
-HOME = Path(os.environ['FAKE_HC'])
+SESSION = (os.environ.get('HC_SESSION') or '').strip()
+HOME = Path(os.environ['FAKE_HC']) / ('' if SESSION in ('', 'default') else SESSION)
 CODES = {'usage': 2, 'not_found': 3, 'blocked': 9, 'status_mismatch': 10, 'finished': 11}
 
 

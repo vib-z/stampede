@@ -223,6 +223,7 @@ owner         the bot that started the job, when one did: its gates go back to i
 workspace     the Herdr workspace id, or a Herdr Core job's key hc-<12 hex>; while the job is open,
               ~/.config/herdr-events/jobs/<id> names this job
 backend       core, for a Herdr Core job (no file: the Herdr TUI)
+endpoint      the Herdr Core a Core job was made on (HC_SESSION, HC_SOCKET); every later command uses it
 core.json     a Core job's terminals: state, address, name, role, cwd per agent
 locks/        a Core job's launch locks, one per agent
 relay-state.json   what a Core job's follower saw and sent
@@ -470,7 +471,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
 | `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
 | `HC` | `hc` | the Herdr Core binary, 0.1.13 or later |
-| `HC_SESSION` | `default` | Herdr Core's own: which core; each name is a separate core with its own terminals and state. stampede passes it to every terminal of a Core job |
+| `HC_SESSION` | `default` | Herdr Core's own: which core; each name is a separate core with its own terminals and state. A Core job keeps the one it was made with (`<job>/endpoint`) and passes it to every terminal; a command from a shell set to another is refused |
 | `HC_SOCKET` | Core's default path for the session | Herdr Core's own: that core's socket; passed on like `HC_SESSION` |
 | `STAMPEDE_NO_UPDATE_CHECK` | `0` | `1` turns off the daily check for a newer release ([Updating](#updating)) |
 | `STAMPEDE_UPDATE_URL` | `https://api.github.com/repos/vib-z/stampede/releases/latest` | where the check reads the latest release; the tests point it at a local file |
@@ -493,6 +494,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `PROBLEM Herdr Core not running` from `herdr-doctor --core` | start the core yourself (`hc server start`), then check again; the doctor and stampede never start one |
 | `BLOCKED <lead>: <kind>` or `NOT READY <lead>: ...` from `stampede new --core` (exit 1) | the lead runs but is not ready: `hc read <address>`, clear a dialog with `hc keys <address> <keys>`, then send the printed `stampede tell` line; never run `new` again for that folder |
 | `FAILED <lead> (...): nothing of <job> runs` | the start never ran, or the follower ended at once (`start-failed` in the folder says why): fix it, then start a new job with another `--name` |
+| `... runs on Herdr Core HC_SESSION=<a>, but HC_SESSION here is <b>` | the job lives on another core: unset `HC_SESSION` (or `HC_SOCKET`), or set it to the job's, and run the command again |
 | `UNKNOWN <agent>: ... Nothing was taken back` | Herdr Core lost an answer during the start: once it answers, run the printed `reopen.sh`, which adopts the agent or starts it, never twice |
 | `fleet-job start: <agent> is already running at <address>` or `... is being started by another caller (pid <n>)` | a Core job runs one terminal per agent: tell it instead, or wait for the other start |
 | `fleet-job start: Cursor reports no OSC 7501 status ...` | Cursor workers run on the Herdr TUI only; start a Claude or Codex worker on Core |
