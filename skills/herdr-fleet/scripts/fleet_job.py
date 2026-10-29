@@ -254,9 +254,10 @@ def ask_gate(job, action, sha, pr=None):
     (job / 'gates').mkdir(exist_ok=True)
     (job / 'gates' / (ident + '.json')).write_text(json.dumps(gate) + '\n')
     check = f'fleet-job gate-ok {job} {ident} --sha <the commit you act on>'
+    typed = '' if backend(job) == 'core' else ', or on the owner\'s yes typed in your pane'  # on Core, anything can type
     if not owner:
         ask_background(job, gate_question(gate), [], gate=ident)
-        return print(f'GATE {ident} on the phone; act after {check} prints APPROVED, or on the owner\'s yes typed in your pane')
+        return print(f'GATE {ident} on the phone; act after {check} prints APPROVED{typed}')
     try:
         post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
                                 'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--by', 'owner in ' + owner + ' chat']),
@@ -264,8 +265,7 @@ def ask_gate(job, action, sha, pr=None):
     except ValueError:
         (job / 'gates' / (ident + '.json')).unlink()  # a gate its bot never hears is no gate
         raise
-    print(f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED, '
-          'or on the owner\'s yes typed in your pane')
+    print(f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED{typed}')
 
 
 def gate_question(gate):
@@ -292,12 +292,17 @@ def record_yes(job, ident, sha, by, asked=None):
                       f'Run fleet-job gate-ok {Path(job).absolute()} {ident} --sha <the commit you act on>, then act.')
 
 
+CORE_TERMINAL = ('HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE')  # set by Herdr Core in each of its terminals
+AGENT_HOSTS = ('herdr', 'herdr-core', 'hc')  # the Herdr server, and Herdr Core's core, holder and CLI
+
+
 def inside_herdr(env=None, pid=None):
-    """True for a command run in a Herdr pane, or anywhere under the Herdr server: an agent's own command.
+    """True for a command run in a Herdr pane or a Herdr Core terminal, or anywhere under the Herdr server or a Core
+    process (hc exec included): an agent's own command.
     ponytail: same Unix user, so a determined agent could still write the record or reach this over ssh; the boundary
     is auto mode plus this refusal. Upgrade: an approval signed on the bot's own computer."""
     env = os.environ if env is None else env
-    if env.get('HERDR_ENV') or env.get('HERDR_PANE_ID'):
+    if env.get('HERDR_ENV') or env.get('HERDR_PANE_ID') or any(env.get(name) for name in CORE_TERMINAL):
         return True
     ps = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True)
     if ps.returncode:
@@ -310,7 +315,7 @@ def inside_herdr(env=None, pid=None):
     pid, seen = os.getpid() if pid is None else pid, set()
     while pid > 1 and pid in tree and pid not in seen:
         seen.add(pid)
-        if tree[pid][1] == 'herdr':
+        if tree[pid][1] in AGENT_HOSTS:
             return True
         pid = tree[pid][0]
     return False
@@ -318,11 +323,16 @@ def inside_herdr(env=None, pid=None):
 
 def approve_gate(job, ident, sha, by):
     """The starting bot's command, run outside Herdr: the owner said yes in its chat to this gate at this commit."""
+    core = backend(job) == 'core'
     if inside_herdr():
+        if core:
+            raise PermissionError('approve-gate runs only outside Herdr and Herdr Core (over plain ssh, never hc exec), from '
+                                  'the bot that started the job: an agent\'s own say-so never counts. The owner answers the bot in chat')
         raise PermissionError('approve-gate runs only outside Herdr, from the bot that started the job: an agent\'s own '
                               'say-so never counts. The owner answers the bot in chat, or types yes in the lead\'s pane')
     if load_gate(job, ident)['route'] == 'local':
-        raise PermissionError(f'gate {ident} belongs to a job started locally: the owner answers on the phone or in Herdr')
+        raise PermissionError(f'gate {ident} belongs to a job started locally: the owner answers on the phone'
+                              + ('' if core else ' or in Herdr'))
     if not line(by):
         raise ValueError('--by says who said yes and where, e.g. "owner in Grok Bot chat"')
     record_yes(job, ident, sha, by)
@@ -334,7 +344,8 @@ def gate_ok(job, ident, sha):
     gate = load_gate(job, ident)
     path = Path(job) / 'gates' / (ident + '.approved')
     if not path.is_file():
-        raise PermissionError(f'gate {ident} has no recorded yes: wait for it, or the owner\'s yes typed in your pane')
+        raise PermissionError(f'gate {ident} has no recorded yes: wait for it'
+                              + ('' if backend(job) == 'core' else ', or the owner\'s yes typed in your pane'))
     record = json.loads(path.read_text())
     if record.get('gate') != ident:
         raise PermissionError(f'the yes recorded under gate {ident} is for gate {record.get("gate")}: ask again')

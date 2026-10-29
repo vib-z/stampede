@@ -65,7 +65,7 @@ Either way:
 - **One ask, one lead.** A Claude Code lead plans the job and does it.
 - **Workers only when it's worth it.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
 - **Hooks, not polling.** Workers report to the lead through hooks, and you can watch every pane in Herdr.
-- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job, and a yes typed in Herdr always works. The lead keeps working while it waits.
+- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job, and a yes typed in a Herdr pane works too (on Herdr Core only the recorded yes counts). The lead keeps working while it waits.
 
 ## Quick start
 
@@ -377,8 +377,9 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 - **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`:
   - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.
   - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
-  - **either way,** a yes typed in the lead's Herdr pane works.
-- **The lead acts on your yes typed in its pane for that exact action, or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge also passes `--match-head-commit` on that commit, so a push after your yes means asking again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
+  - **either way, on the Herdr TUI,** a yes typed in the lead's Herdr pane works.
+- **The lead acts on your yes typed in its pane for that exact action (Herdr TUI only), or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge also passes `--match-head-commit` on that commit, so a push after your yes means asking again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
+- **On Herdr Core only the recorded yes counts.** In a job started with `stampede new --core` the lead acts only after `gate-ok` prints `APPROVED`: a yes typed into the lead, an answer to its own question card, and any message never count, because on Core another program can type into any terminal (`hc send`, `hc keys`). Your tap on a phone card (`FLEET_ASK_CMD`) and a bot's `approve-gate` are recorded and count. `approve-gate` also refuses inside a Herdr Core terminal (`HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` set) and under a `herdr-core` or `hc` process, so `hc exec` cannot run it: a bot runs it over plain ssh. Core's own `blocked` state is never a gate.
 - **Auto mode, never no-checks mode, by default:** Claude `--permission-mode auto`, Codex `--approve-for-me`, Cursor `--auto-review`. `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode only when its pane's shell sits in its own linked git worktree, and never the lead.
 - **Plan approval** (only when you asked to see the plan) lets the lead work inside the job's own folder and branch; it is not a gate and covers no merge or spend.
 - **Nothing closes by itself.** The last step is always the question whether to close; no answer is a no.
@@ -432,7 +433,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `fleet-job ask: the relay did not queue this for <bot>` | a job that bot started asks it by its own route only, never the default route: add `~/.config/herdr-events/routes/<bot>` with a `URL=` (the same webhook as `default` is fine) and check the queue folder with `herdr-doctor --relay` ([remote/events.md](remote/events.md)); meanwhile answer in the lead's pane |
 | `UNDELIVERED gate <id> for <bot> held: route <bot> has no URL` in `inbox.log` | the gate or question is queued, but its bot's route lost its URL: put the `URL=` back in `~/.config/herdr-events/routes/<bot>` and the flusher sends it within 2 minutes. After 24 h it moves to `dead/` (a second `UNDELIVERED` line says so): ask again, or ask the owner in the lead's pane |
 | `fleet-job gate-ok: gate ... was approved for <sha>, not <sha>` | a push came after the yes: ask the gate again at the new commit |
-| `fleet-job approve-gate: approve-gate runs only outside Herdr` | it is the starting bot's command, over SSH; inside Herdr, type yes in the lead's pane instead |
+| `fleet-job approve-gate: approve-gate runs only outside Herdr` | it is the starting bot's command, over SSH; inside Herdr, type yes in the lead's pane instead. For a Herdr Core job the message names Herdr Core too: run it over plain ssh, never `hc exec`, since a typed yes does not count there |
 | relay `PROBLEM` lines on a Mac without a bot | a routes folder, a relay launch agent or a relay hook is left over, so the relay counts as installed: finish its setup ([remote/events.md](remote/events.md)) or remove what you no longer use |
 | `PROBLEM ... not in the plugin checkout ...` from `herdr-doctor`, or `stampede: command not found` after a Herdr restart | the links point at an old plugin checkout, which Herdr deletes at its next start: rerun the current checkout's installer, which moves them ([docs/SETUP.md, Update](docs/SETUP.md#update)) |
 | `stampede` still works after `herdr plugin uninstall stampede` | Herdr keeps its checkout until its server next starts and never removes the links: [docs/SETUP.md, Uninstall](docs/SETUP.md#uninstall) |
@@ -463,7 +464,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file; another CLI through `herdr-send` |
 | `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background: a `question` event to the bot that started the job, else your phone; prints `ASKED <id>` |
 | `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option`: a gate is yes or no | a gate: a `gate` event to the bot that started the job, else your phone; prints `GATE <id>` |
-| `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot records your yes in chat, run outside Herdr; refuses inside Herdr, a local job's gate or another commit |
+| `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot records your yes in chat, run outside Herdr; refuses inside Herdr or a Herdr Core terminal (or under a `herdr`, `herdr-core` or `hc` process), a local job's gate or another commit |
 | `gate-ok <job> <gate> --sha <commit>` | | the lead's check before it acts: prints `APPROVED ...` only for your recorded yes at that commit |
 | `cancel <job> <id>` | | stops an asked question and its phone card (a question sent to a bot has no card: refused) |
 | `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead |
@@ -471,7 +472,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 
-**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr, `cancel` of a question that is no phone card), with the reason on stderr; 1 Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
+**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr or Herdr Core, `cancel` of a question that is no phone card), with the reason on stderr; 1 Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
 </details>
 
 <details>

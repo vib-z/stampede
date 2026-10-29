@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Herdr Core, in progress.** stampede is learning to run a whole job on Herdr Core (`hc` 0.1.13) next to the Herdr TUI; the TUI path does not change. So far: `HERDR_EVENTS_DIR` moves owner tags, job markers and the default routes folder (default `~/.config/herdr-events`, as before), and the settings `HC`, `HC_SESSION` and `HC_SOCKET` are in [config.example](config.example).
+- **Herdr Core, in progress.** stampede is learning to run a whole job on Herdr Core (`hc` 0.1.13) next to the Herdr TUI; the TUI path does not change. So far: `HERDR_EVENTS_DIR` moves owner tags, job markers and the default routes folder (default `~/.config/herdr-events`, as before), and the settings `HC`, `HC_SESSION` and `HC_SOCKET` are in [config.example](config.example). `approve-gate` also refuses inside a Herdr Core terminal and under a `herdr-core` or `hc` process, so a bot runs it over plain ssh, never `hc exec`; in a Core job only the recorded yes counts, and no message offers a yes typed into the lead.
 
 ## 0.1.5 (29 Oct 2026)
 

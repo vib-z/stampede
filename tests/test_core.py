@@ -265,7 +265,6 @@ class CoreUnchanged(CoreCase):
         self.assertIn('the following arguments are required: --pane', result.stderr)
 
 
-@contract
 class CoreSafety(CoreCase):
     """Build order 4: the not-an-agent check covers Core, and a Core job counts only the recorded yes."""
 
