@@ -223,8 +223,10 @@ owner         the bot that started the job, when one did: its gates go back to i
 workspace     the Herdr workspace id, or a Herdr Core job's key hc-<12 hex>; while the job is open,
               ~/.config/herdr-events/jobs/<id> names this job
 backend       core, for a Herdr Core job (no file: the Herdr TUI)
-endpoint      the Herdr Core a Core job was made on (HC_SESSION, HC_SOCKET); every later command uses it
-core.json     a Core job's terminals: state, address, name, role, cwd per agent, and whether each Claude session ran
+endpoint      the Herdr Core a Core job was made on (HC_SESSION, HC_SOCKET);
+              every later command uses it
+core.json     a Core job's terminals: state, address, name, role, cwd per agent,
+              and whether each Claude session ran
 locks/        a Core job's launch locks, one per agent
 relay-state.json   what a Core job's follower saw and sent
 start-failed  why a Core job's start never ran
@@ -580,8 +582,8 @@ README.md  CHANGELOG.md  CONTRIBUTING.md  RELEASING.md  SECURITY.md  LICENSE  VE
 AGENTS.md  CLAUDE.md  SKILL.md  config.example  install.sh  herdr-plugin.toml
 .github/                issue and pull request templates, workflows/ci.yml (macOS CI)
 skills/herdr-fleet/     the job: SKILL.md, references/, scripts/fleet-job, fleet_job.py, fleet-watch.sh
-skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor, the relay,
-                        herdr-event-core: a Herdr Core job's follower)
+skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor,
+                        the relay, herdr-event-core: a Herdr Core job's follower)
 skills/share-plan/      the plan review, on request
 skills/stampede/        the front door: "use stampede" in any chat starts a lead
 scripts/stampede        the command (also linked as fleet-job); answers --version and update
@@ -592,7 +594,8 @@ docs/                   SETUP.md, RUNS.md, superpowers/specs/ (the design), imag
 assets/                 the poster, the teaser and the demo GIF
 site/                   the hero site: index.html, assets/
 site/brand/             the identity assets and the brand guide
-tests/                  python3 -m unittest discover tests; fake_hc.py (a fake Herdr Core), core_smoke.py (CI, a real one)
+tests/                  python3 -m unittest discover tests; fake_hc.py (a fake Herdr Core),
+                        core_smoke.py (CI, a real one)
 ```
 </details>
 
