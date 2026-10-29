@@ -800,5 +800,53 @@ class ReviewDurable(CoreCase):
         self.settle(core, restart=True)
 
 
+
+class ReviewHookQueue(CoreCase):
+    """review-codex round 4, R9: on a Core pane the hook's copy of an episode suppresses the follower's only once queued."""
+
+    def setUp(self):
+        super().setUp()
+        self.job_dir, self.key = self.core_job(workers=[('build-api', 'claude')], owner='alpha')
+        (self.job_dir / 'core.json').write_text(json.dumps({'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'}}))
+        self.add_terminal('t3', name='build-api', status={'state': 'working'},
+                          labels={'stampede.job': self.key, 'stampede.agent': 'build-api'})
+        hooks = self.root / 'home/.local/bin'  # the owner's Claude hook posts through the herdr-event-post on its PATH
+        hooks.mkdir(parents=True)
+        (hooks / 'herdr-event-post').symlink_to(RELAY / 'herdr-event-post')
+        self.queue = self.root / 'queue/queue'
+
+    def queued(self):
+        finalized = [p for p in self.queue.glob('*.json') if not p.name.startswith('.')] if self.queue.is_dir() else []
+        return sorted((json.loads(p.read_text())['payload'] for p in finalized), key=lambda e: e['source'])
+
+    def hook(self):
+        event = json.dumps({'hook_event_name': 'Notification', 'notification_type': 'permission_prompt', 'session_id': 's1'})
+        subprocess.run([str(RELAY / 'herdr-event-claude-hook')], input=event, text=True, check=True, timeout=30,
+                       env={**os.environ, 'HC_TERMINAL_ID': 't3', 'STAMPEDE_JOB_KEY': self.key, 'HERDR_EVENTS_OWNER': 'alpha'})
+
+    def follow(self, core):
+        record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
+                  'labels': {'stampede.job': self.key, 'stampede.agent': 'build-api'}}
+        follower = core.Follower(self.job_dir)
+        follower.line({'channel': None, 'seq': 1, 'terminals': [record]})
+        follower.line(status('t3', 'blocked', kind='permission'))
+        follower.retry(now=True)
+        core.Follower(self.job_dir).retry(now=True)  # and a restarted follower
+        return json.loads((self.job_dir / 'relay-state.json').read_text())
+
+    def test_a_failed_hook_queue_write_leaves_the_follower_its_alert(self):
+        (self.root / 'queue').write_text('a file where the queue folder should be')
+        self.hook()  # its queue write fails
+        (self.root / 'queue').unlink()
+        state = self.follow(follower_module())
+        self.assertEqual([(e['source'], e['state']) for e in self.queued()], [('hc', 'blocked')])
+        self.assertEqual(state['unsent'], {})
+
+    def test_a_queued_hook_copy_is_still_one_message(self):
+        self.hook()
+        self.follow(follower_module())
+        self.assertEqual([(e['source'], e['state']) for e in self.queued()], [('claude', 'Notification')])
+
+
 if __name__ == '__main__':
     unittest.main()
