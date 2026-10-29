@@ -1219,8 +1219,15 @@ def new_core(ask_file, name, review, fork, cwd):
     job = repo / ('.herdr-' + (name or slug(ask)))
     if job.exists():
         raise ValueError(f'{job} already exists: a job folder is used once; start another job with --name')
+    key = job_key(job)  # the path's hash: a folder made again at this path has the same key
+    try:
+        earlier = hc('ls', '--label', 'stampede.job=' + key).get('terminals', [])
+    except HcError as error:
+        raise ValueError(f'Herdr Core did not answer ({line(error)}): nothing was made') from None
+    if earlier:
+        raise ValueError('terminals of an earlier job at this path still run: kill them '
+                         f'(hc ls --all --label stampede.job={key}) or use another --name')
     lead = make_job(repo, job, ask, owner, review)
-    key = job_key(job)
     (job / 'backend').write_text('core\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
                                               'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')

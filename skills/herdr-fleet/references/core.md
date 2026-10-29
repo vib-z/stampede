@@ -14,7 +14,7 @@ A job started with `stampede new --core` runs on Herdr Core (`hc` 0.1.13 or late
 stampede new --core --file ask.md --cwd ~/code/my-app [--name <slug>] [--review] [--fork "$CLAUDE_CODE_SESSION_ID"]
 ```
 
-- `--cwd` is the repo, under `FLEET_TRUST_ROOT`; the default is the git root of the current folder. `--pane` and `--workspace` are refused.
+- `--cwd` is the repo, under `FLEET_TRUST_ROOT`; the default is the git root of the current folder. `--pane` and `--workspace` are refused, and so is a job path where an earlier job's terminals still run (the key is the path's hash): kill them or use another `--name`.
 - It writes the job record first, then starts the job's follower `relay-<12 hex>`, then the lead with its brief pointer as the first prompt. Every terminal has no parent and no notes, and carries the labels `stampede.job=<key>`, `stampede.agent=<name>` and `stampede.role=lead|worker|relay|wait`.
 - `<lead> <job dir>`, exit 0: the lead is working.
 - `BLOCKED <lead>: <kind>` or `NOT READY <lead>: <status>`, exit 1: the lead runs but is not ready. Read it with `hc read <address>`, clear a dialog with `hc keys <address> <keys>`, then `stampede tell <job> lead "Read <brief>"` if it went idle without its first prompt. It stays the job's one lead: never run `new` again for that folder.

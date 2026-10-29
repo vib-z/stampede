@@ -496,6 +496,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `BLOCKED <lead>: <kind>` or `NOT READY <lead>: ...` from `stampede new --core` (exit 1) | the lead runs but is not ready: `hc read <address>`, clear a dialog with `hc keys <address> <keys>`, then send the printed `stampede tell` line; never run `new` again for that folder |
 | `FAILED <lead> (...): nothing of <job> runs` | the start never ran, or the follower ended at once (`start-failed` in the folder says why): fix it, then start a new job with another `--name` |
 | `... runs on Herdr Core HC_SESSION=<a>, but HC_SESSION here is <b>` | the job lives on another core: unset `HC_SESSION` (or `HC_SOCKET`), or set it to the job's, and run the command again |
+| `terminals of an earlier job at this path still run` from `stampede new --core` | a job made at this path before (same `--name`, so the same key) still has live terminals: kill them (`hc ls --all --label stampede.job=<key>`) or pick another `--name` |
 | `UNKNOWN <agent>: ... Nothing was taken back` | Herdr Core lost an answer during the start: once it answers, run the printed `reopen.sh`, which adopts the agent or starts it, never twice |
 | `fleet-job start: <agent> is already running at <address>` or `... is being started by another caller (pid <n>)` | a Core job runs one terminal per agent: tell it instead, or wait for the other start |
 | `fleet-job start: Cursor reports no OSC 7501 status ...` | Cursor workers run on the Herdr TUI only; start a Claude or Codex worker on Core |

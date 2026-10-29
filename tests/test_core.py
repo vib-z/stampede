@@ -931,7 +931,7 @@ class ReviewUnknown(CoreCase):
         return 'relay-' + fj.job_key(self.job)[3:]
 
     def test_a_lost_run_answer_and_a_failed_lookup_take_nothing_back(self):
-        self.shape(run_error={LEAD: 'unavailable'}, spawn_also=True, ls_error='unavailable')
+        self.shape(run_error={LEAD: 'unavailable'}, spawn_also=True, lookup_error='unavailable')
         with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
             code, out = self.new_core()
         key = fj.job_key(self.job)
@@ -944,7 +944,7 @@ class ReviewUnknown(CoreCase):
         self.assertFalse((self.job / 'start-failed').exists())
         self.assertEqual(self.entries(self.job)[LEAD]['state'], 'starting')
         self.assertEqual([t['state'] for t in self.state()['terminals'].values()], ['live', 'live'])
-        self.shape(ls_error=None)
+        self.shape(ls_error=None, lookup_error=None)
         with mock.patch.object(fj, 'acknowledged', return_value=0):
             code, out = self.quiet(fj.reopen, self.job, lead_only=True)
         self.assertEqual(code, 0, out)
@@ -952,10 +952,10 @@ class ReviewUnknown(CoreCase):
         self.assertEqual((self.entries(self.job)[LEAD]['state'], self.entries(self.job)[LEAD]['address']), ('live', 't2'))
 
     def test_a_lead_that_never_started_is_started_fresh_with_its_own_session(self):
-        self.shape(run_error={LEAD: 'unavailable'}, ls_error='unavailable')
+        self.shape(run_error={LEAD: 'unavailable'}, lookup_error='unavailable')
         self.assertEqual(self.new_core()[0], 1)
         session = fj.agent_rows(self.job)[LEAD]['session']
-        self.shape(run_error={}, ls_error=None)
+        self.shape(run_error={}, ls_error=None, lookup_error=None)
         with mock.patch.object(fj, 'acknowledged', return_value=0):
             code, _ = self.quiet(fj.reopen, self.job, lead_only=True)
         program = self.program(self.calls('run')[-1])
@@ -1118,6 +1118,8 @@ class ReviewSmallOnes(CoreCase):
         self.assertEqual(self.new_core()[0], 0)
         self.assertFalse((self.events / 'owners' / key).exists(), 'a local job leaves no tag of the old bot')
         shutil.rmtree(self.job)
+        for address in ('t1', 't2'):
+            self.terminal(address, state='finished')  # the earlier job's terminals are gone (else new refuses the path)
         (self.events / 'owners' / key).write_text('owner=beta\n')
         with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
             self.assertEqual(self.new_core()[0], 0)
@@ -1141,6 +1143,29 @@ class ReviewAdopted(CoreCase):
         program = self.program(self.calls('run')[-1])
         self.assertEqual(program[1:3], ['--resume', session])
         self.assertNotIn('--session-id', program)
+
+
+
+class ReviewEarlierJob(CoreCase):
+    """review-claude minor 12: new --core never adopts an earlier job's terminals at the same path."""
+
+    def test_live_terminals_of_an_earlier_job_at_this_path_are_refused(self):
+        key = fj.job_key(self.job)
+        self.add_terminal('t1', name=LEAD, labels={'stampede.job': key, 'stampede.agent': LEAD, 'stampede.role': 'lead'})
+        with self.assertRaises(ValueError) as refused:
+            self.new_core()
+        self.assertEqual(str(refused.exception), 'terminals of an earlier job at this path still run: kill them '
+                         f'(hc ls --all --label stampede.job={key}) or use another --name')
+        self.assertFalse(self.job.exists())
+        self.assertEqual(self.calls('run'), [])
+        self.terminal('t1', state='finished')
+        self.shape(ls_error='unavailable')
+        with self.assertRaises(ValueError) as refused:
+            self.new_core()
+        self.assertIn('Herdr Core did not answer', str(refused.exception))
+        self.assertFalse(self.job.exists())
+        self.shape(ls_error=None)
+        self.assertEqual(self.new_core()[0], 0, 'only finished terminals: the path is free')
 
 
 if __name__ == '__main__':
