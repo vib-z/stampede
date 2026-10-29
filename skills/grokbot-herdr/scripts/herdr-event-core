@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""herdr-event-core: the follower of one Herdr Core job, the authority on its terminals' lives. stampede new --core starts
+it as relay-<12 hex of the key> in the job's launch environment; reopen.sh starts it again when it is gone.
+
+  herdr-event-core <job dir>   follow the job's terminals (hc events --label stampede.job=<key>) until the job is finished
+                               or never started (<job>/finished or <job>/start-failed); exit 0, or 1 after RELAY DOWN
+  herdr-event-core --alive     exit 0 when the selected core answers hello on its socket, else 1; never starts a core
+
+To the lead, in <job>/inbox.log, for every terminal but the lead's and its own: BLOCKED <agent> <kind>, ERROR <agent> <msg>,
+GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone).
+To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, workspace <key>): blocked, error, done and idle
+turn ends, dead (it finished while working or blocked, or failed with no status ever, or was lost) and relay_down.
+<job>/relay-state.json keeps what it saw and sent, so a restarted follower resumes and never sends one thing twice."""
+import fcntl, json, os, re, socket, subprocess, sys, time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+GIVE_UP = 600  # seconds of failed reconnects before RELAY DOWN
+clock, sleep = time.monotonic, time.sleep
+FRESH = {'status': None, 'last': None, 'turn': 0, 'finished': False, 'reported': {}, 'episodes': {}}
+
+
+def line(value):
+    return ' '.join(str(value).split())
+
+
+def socket_path(env=None):
+    """The selected core's socket, as Core 0.1.13 finds it (crates/herdr-core/src/paths.rs): HC_SOCKET, else the config's
+    socket, else <XDG_RUNTIME_DIR or /run/user/<uid>>/herdr-core/<session>.sock, else beside the session's state."""
+    env = os.environ if env is None else env
+    home = Path(env.get('HOME') or '/')
+    session = (env.get('HC_SESSION') or '').strip() or 'default'
+    if env.get('HC_SOCKET'):
+        return Path(env['HC_SOCKET'])
+    try:
+        config = (Path(env.get('XDG_CONFIG_HOME') or home / '.config') / 'herdr-core/config.toml').read_text()
+        found = re.search(r'''(?m)^\s*socket\s*=\s*["']([^"']+)["']''', config)
+    except OSError:
+        found = None
+    if found:
+        return Path(found.group(1))
+    run = env.get('XDG_RUNTIME_DIR') or ''
+    if not run and Path(f'/run/user/{os.getuid()}').is_dir():
+        run = f'/run/user/{os.getuid()}'
+    state = Path(env.get('XDG_STATE_HOME') or home / '.local/state') / 'herdr-core' / session
+    return (Path(run) / 'herdr-core' if run else state) / (session + '.sock')
+
+
+def alive(env=None):
+    """Whether the selected core answers hello. Any doubt is down, and no hc command runs: one would start a core."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(3)
+            conn.connect(str(socket_path(env)))
+            conn.sendall(b'{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}\n')
+            return 'result' in json.loads(conn.makefile('rb').readline())
+    except (OSError, ValueError):
+        return False
+
+
+def hc(*args):
+    """(exit code, JSON answer) of one hc command; 3 is Core's not_found."""
+    result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True, timeout=60)
+    try:
+        return result.returncode, json.loads(result.stdout or '{}')
+    except ValueError:
+        return result.returncode or 1, {}
+
+
+def append(path, text):
+    with open(path, 'a') as out:
+        fcntl.flock(out, fcntl.LOCK_EX)
+        out.write(line(text) + '\n')
+
+
+class Follower:
+    def __init__(self, job):
+        self.job = Path(job).absolute()
+        self.key = (self.job / 'workspace').read_text().strip()
+        self.relay = 'relay-' + self.key[3:]
+        owner = self.job / 'owner'
+        self.owner = owner.read_text().strip() if owner.is_file() else ''
+        path = self.job / 'relay-state.json'
+        state = json.loads(path.read_text()) if path.is_file() else {}
+        self.terminals, self.sent, self.floor = state.get('terminals', {}), set(state.get('sent', [])), None
+        self.known()
+
+    def closed(self):
+        return (self.job / 'finished').exists() or (self.job / 'start-failed').exists()
+
+    def save(self):
+        path = self.job / 'relay-state.json'
+        temporary = path.with_name('.relay-state.json.tmp')
+        temporary.write_text(json.dumps({'terminals': self.terminals, 'sent': sorted(self.sent)}))
+        os.replace(temporary, path)
+
+    def track(self, address, agent, role):
+        record = self.terminals.setdefault(address, json.loads(json.dumps(FRESH)))
+        record.update(agent=agent, role=role)
+        return record
+
+    def known(self):
+        """Every terminal core.json binds: its agent, and its role (lead, worker, relay)."""
+        path, lead = self.job / 'core.json', self.job / 'lead'
+        entries = json.loads(path.read_text()) if path.is_file() else {}
+        lead = lead.read_text().strip() if lead.is_file() else ''
+        for agent, entry in entries.items():
+            if entry.get('address'):
+                self.track(entry['address'], agent, entry.get('role') or
+                           ('relay' if agent == self.relay else 'lead' if agent == lead else 'worker'))
+
+    def adopt(self, terminal):
+        """A terminal the stream shows: known, or new with this job's labels (a worker, or a wait the lead started)."""
+        address, labels = terminal.get('address'), terminal.get('labels') or {}
+        if address in self.terminals:
+            return self.terminals[address]
+        if not address or labels.get('stampede.job') != self.key:
+            return None
+        return self.track(address, labels.get('stampede.agent') or terminal.get('name') or address, labels.get('stampede.role') or 'worker')
+
+    def payload(self, address, fields):
+        record = self.terminals.get(address, {})
+        event = {'source': 'hc', 'workspace': self.key, 'job': str(self.job), 'agent': record.get('agent', self.relay), **fields}
+        if address:
+            event['pane'] = f'hc:{self.key}/{address}'
+        if self.owner:
+            event['owner'] = self.owner
+        if address and fields['state'] != 'relay_down':
+            code, read = hc('read', address, '--lines', '40')
+            event['output_tail'] = read.get('text', '') if code == 0 else ''
+        return {k: v for k, v in event.items() if v is not None}
+
+    def post(self, event):
+        subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True, timeout=60)
+
+    def notify(self, ident, address, lead=None, post=None):
+        """Each notification once, by its identity: (address, state, episode), (address, turn) or (address, finished)."""
+        if ident in self.sent:
+            return
+        if lead:
+            append(self.job / 'inbox.log', lead)
+        if post:
+            self.post(self.payload(address, post))
+        self.sent.add(ident)
+        self.save()
+
+    def observe(self, address, status, turn=None):
+        """A new blocked or error episode: the root state enters it, or is in it on a later turn than the one reported."""
+        record = self.terminals[address]
+        if record['finished']:
+            return
+        record['turn'] = max(record['turn'], turn or 0)
+        word = (status or {}).get('state')
+        if word in ('blocked', 'error') and (record['status'] != word or record['turn'] > record['reported'].get(word, -1)):
+            record['episodes'][word] = record['episodes'].get(word, 0) + 1
+            record['reported'][word] = record['turn']
+            self.attention(address, word, status, record['episodes'][word])
+        record['status'] = word
+        record['last'] = word or record['last']
+
+    def attention(self, address, word, status, episode):
+        record = self.terminals[address]
+        kind, msg = status.get('kind') or 'unknown', status.get('msg') or ''
+        lead = None if record['role'] == 'lead' else (f'BLOCKED {record["agent"]} {kind}' if word == 'blocked'
+                                                     else f'ERROR {record["agent"]} {msg}')
+        self.notify(f'{address}|{word}|{episode}', address, lead, {'state': word, 'kind': status.get('kind'), 'msg': status.get('msg')})
+
+    def turned(self, address, data):
+        record, n, word = self.terminals[address], data.get('turn') or 0, data.get('state')
+        record['turn'] = max(record['turn'], n)
+        if word in ('blocked', 'error') and record['status'] == word:
+            record['reported'][word] = max(record['reported'].get(word, -1), n)  # the episode already told is this turn's
+        if word in ('done', 'idle'):
+            self.notify(f'{address}|turn|{n}', address, post={'state': word, 'turn': n})
+
+    def finish(self, address, data):
+        record = self.terminals[address]
+        if record['finished']:
+            return
+        record['finished'] = True
+        code, reason, agent = data.get('exit_code'), data.get('reason') or 'exited', record['agent']
+        shown = '-' if code is None else code
+        if record['role'] == 'wait':
+            return self.notify(f'{address}|finished', address, f'WAITED {agent} exit {shown}')
+        dead = record['last'] in ('working', 'blocked') or (record['last'] is None and code != 0)
+        self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else f'GONE {agent} {reason} exit {shown}',
+                    {'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason} if dead else None)
+
+    def lost(self, address):
+        record = self.terminals[address]
+        record['finished'] = True
+        self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else f'LOST {record["agent"]}',
+                    None if record['role'] == 'wait' else {'state': 'dead', 'last_state': record['last'], 'reason': 'lost'})
+
+    def snapshot(self, terminals):
+        """Reconcile: every shown terminal's state, then every known one not shown (finished or lost while away)."""
+        self.known()
+        shown = set()
+        for terminal in terminals:
+            if self.adopt(terminal) is None or self.terminals[terminal['address']]['role'] == 'relay':
+                continue
+            shown.add(terminal['address'])
+            if terminal.get('state') == 'finished':
+                self.finish(terminal['address'], terminal)
+            else:
+                self.observe(terminal['address'], terminal.get('status'), terminal.get('turn'))
+        for address, record in list(self.terminals.items()):
+            if address in shown or record['finished'] or record['role'] == 'relay':
+                continue
+            code, terminal = hc('get', address)
+            if code == 3:
+                self.lost(address)
+            elif code == 0 and terminal.get('state') == 'finished':
+                self.finish(address, terminal)
+        self.save()
+
+    def event(self, params):
+        address, kind, data = params.get('terminal'), params.get('type'), params.get('data') or {}
+        if kind == 'created':
+            self.adopt(data)
+        record = self.terminals.get(address)
+        if record is None or record['role'] == 'relay':
+            return
+        if kind == 'status':
+            self.observe(address, data.get('status'))
+        elif kind == 'turn':
+            self.turned(address, data)
+        elif kind == 'finished':
+            self.finish(address, data)
+        elif kind == 'removed' and not record['finished']:
+            self.lost(address)
+        self.save()
+
+    def line(self, row):
+        """One line of a stream; False once the job is finished or never started."""
+        if self.closed():
+            return False
+        if row.get('method') is None and 'terminals' in row:  # the snapshot that opens every connection
+            self.floor = None
+            self.snapshot(row['terminals'])
+        elif row.get('method') == 'missed':
+            self.floor = row['params'].get('seq')
+            self.snapshot(row['params'].get('terminals', []))
+        elif row.get('method') == 'event' and (self.floor is None or (row['params'].get('seq') or 0) > self.floor):
+            self.event(row['params'])
+        return not self.closed()
+
+    def stream(self):
+        """One connection's lines; seq restarts with each core process, so it is compared within one connection only."""
+        process = subprocess.Popen([os.environ.get('HC') or 'hc', 'events', '--json', '--label', 'stampede.job=' + self.key],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        try:
+            for row in process.stdout:
+                try:
+                    yield json.loads(row)
+                except ValueError:
+                    continue
+        finally:
+            process.kill()
+            process.wait()
+
+    def follow(self):
+        """Until the job is finished or never started (0). A lost stream reconnects with backoff (1, 2, 4 ... 60 s), only
+        to a core that is up; after GIVE_UP seconds of that, RELAY DOWN to the lead and the bot (1)."""
+        down_since, delay = None, 1
+        while not self.closed():
+            reason = 'core not reachable'
+            if alive():
+                reason, reached = 'stream ended', False
+                for row in self.stream():
+                    reached = True
+                    if not self.line(row):
+                        return 0
+                if reached:
+                    down_since, delay = None, 1
+            if self.closed():
+                return 0
+            down_since = clock() if down_since is None else down_since
+            if clock() - down_since >= GIVE_UP:
+                append(self.job / 'inbox.log', 'RELAY DOWN ' + reason)
+                path = self.job / 'core.json'
+                address = (json.loads(path.read_text()) if path.is_file() else {}).get(self.relay, {}).get('address')
+                self.post(self.payload(address, {'state': 'relay_down', 'agent': self.relay, 'reason': reason}))
+                return 1
+            sleep(delay)
+            delay = min(delay * 2, 60)
+        return 0
+
+
+def main(argv):
+    if argv == ['--alive']:
+        return 0 if alive() else 1
+    if len(argv) != 1 or argv[0].startswith('-'):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    return Follower(argv[0]).follow()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main(sys.argv[1:]))

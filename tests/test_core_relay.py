@@ -73,7 +73,6 @@ class Shell(unittest.TestCase):
         return path.read_text() if path.is_file() else ''
 
 
-@contract
 class CoreRelayHooks(Shell):
     """Build order 6: the owner's Claude and Codex relay hooks inside a Core terminal stampede started."""
 
@@ -99,7 +98,6 @@ class CoreRelayHooks(Shell):
         self.assertIn('skip: codex turn with no herdr pane', self.log())
 
 
-@contract
 class CoreEventPost(Shell):
     """Build order 6: herdr-event-post reads the key from an hc: pane and keeps a Core job's plain turn ends home."""
 
@@ -136,7 +134,6 @@ class CoreEventPost(Shell):
         self.assertEqual(self.log().count('logged-only (no route URL)'), 3)
 
 
-@contract
 class CoreOwnerTags(Shell):
     """Build order 6: herdr-events-owner, the watchdog and the doctor take a Core key."""
 
@@ -186,7 +183,6 @@ class CoreOwnerTags(Shell):
         self.assertIn(f'warn owner tag {KEY} (alpha) for a finished Core job: herdr-events-owner {KEY} --clear', result.stdout)
 
 
-@contract
 class CoreAlive(Shell):
     """Build order 6: whether the selected core is up, asked of its socket; never by an hc command that would start one."""
 
@@ -283,7 +279,6 @@ def finished(terminal, code=0, reason='exited', seq=0, signal=None):
     return ev('finished', terminal, {'reason': reason, 'exit_code': code, 'signal': signal, 'finished_ms': 1}, seq)
 
 
-@contract
 class Follower(CoreCase):
     """Build order 6: herdr-event-core, the lifecycle authority for a Core job, from fake streams and snapshots."""
 

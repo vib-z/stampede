@@ -672,7 +672,6 @@ class CoreTell(CoreCase):
         self.assertEqual(self.calls('send'), [])
 
 
-@contract
 class CoreHooks(CoreCase):
     """Build order 6: on Core the follower reports every exit, so SessionEnd writes nothing."""
 

@@ -18,6 +18,7 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 | codex | agent-turn-complete | `herdr-event-codex-notify`, the Codex `notify` command |
 | herdr-watchdog | stale, dead | `herdr-event-watchdog` ([watchdogs.md](watchdogs.md)) |
 | stampede | question, gate, done | `stampede ask`, `stampede ask --gate`, and `stampede finish` |
+| hc | blocked, error, done, idle, dead, relay_down | `herdr-event-core`, the follower of a Herdr Core job ([below](#a-herdr-core-job)) |
 
 ```bash
 mkdir -p ~/.config/herdr-events/routes
@@ -45,6 +46,14 @@ herdr-event-flush                                    # send what is queued, olde
 These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question` or `gate`. `finish` sends one event, `source` stampede, `state` done, plus `summary`. In a job a bot started, that uses the same strict route as a question (exit 3 with no route of its own, exit 4 if it is not queued). In a job started locally, it uses the ordinary relay and still clears the marker. A second `finish` does not send again.
 
 A Codex turn with no Herdr pane (`HERDR_PANE_ID` empty), including the Codex desktop app, is not sent. After the marker is gone, that workspace behaves as before.
+
+## A Herdr Core job
+
+A job started with `stampede new --core` has no Herdr workspace: its key, `hc-<12 hex>` (in `<job>/workspace`), stands in for the workspace id in its marker (`jobs/<key>`), its owner tag (`owners/<key>`) and every event's `workspace`. A Core terminal is named `hc:<key>/<address>` in `pane`. Plain turn ends (`hc` done and idle) stay on the machine while its marker is there, as for a workspace.
+
+- **The follower:** `herdr-event-core <job>` runs as the job's `relay-<12 hex>` terminal. It follows `hc events --label stampede.job=<key>` and posts, with `agent` and `output_tail`: `blocked` (with `kind` and `msg`) and `error`, once per new episode; `done` and `idle` turn ends; `dead` when a terminal finishes while working or blocked, or fails with no status ever, or its record is gone (`reason` lost); and `relay_down` when Core stays unreachable for 10 minutes. It skips its own terminal and the job's wait terminals.
+- **The relay hooks** inside a Core terminal stampede started (`STAMPEDE_JOB_KEY` and `HC_TERMINAL_ID` set, no `HERDR_PANE_ID`) send `pane` `hc:<key>/<address>` and `workspace` `<key>`, so a Codex turn there is no longer dropped. In any other Core terminal they behave as before.
+- **Owner tags:** `herdr-events-owner <key> <bot>` works only while the job is open; it never calls `herdr`. The watchdog keeps a key's tag while the job is open or Core still runs one of its terminals, skips it when Core cannot be reached, and removes it a day after.
 
 ## Hooks
 

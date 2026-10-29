@@ -37,11 +37,21 @@ if [ -f "$S/seen" ]; then
 fi
 mv "$S/seen.new" "$S/seen"
 # owner tags: delete a malformed one at once, and one whose workspace has been gone a day. Skipped if herdr fails.
-O="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}/owners"; G="$S/gone"; mkdir -p "$G"
+# A Herdr Core job's tag (hc-<12 hex>) is kept while its job is open or Core still runs one of its terminals; when
+# Core cannot be reached it is skipped (never an hc command that would start a core), else it goes after a day.
+EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; O="$EV/owners"; G="$S/gone"; mkdir -p "$G"
 if wsl=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null) && [ -n "$wsl" ]; then
   for f in "$O"/*; do
     [ -f "$f" ] || continue; ws=$(basename "$f"); ow=$(sed -n 's/^owner=//p' "$f" | head -1)
-    if ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then rm -f "$f"; echo "$(date '+%FT%T%z') watchdog: removed malformed owner tag (owner=$ow)" >>"$LOG"
+    if [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]]; then
+      if [ -f "$EV/jobs/$ws" ]; then rm -f "$G/$ws"; continue; fi
+      herdr-event-core --alive >/dev/null 2>&1 || continue
+      if "${HC:-hc}" ls --json --label "stampede.job=$ws" 2>/dev/null | jq -e '.terminals | length > 0' >/dev/null 2>&1; then rm -f "$G/$ws"; continue; fi
+      if [ ! -f "$G/$ws" ]; then echo "$now" > "$G/$ws"
+      elif [ $((now-$(cat "$G/$ws"))) -ge 86400 ]; then
+        rm -f "$f" "$G/$ws"; echo "$(date '+%FT%T%z') watchdog: removed stale owner tag $ws (owner=$ow, Core job finished 24h)" >>"$LOG"
+      fi
+    elif ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then rm -f "$f"; echo "$(date '+%FT%T%z') watchdog: removed malformed owner tag (owner=$ow)" >>"$LOG"
     elif grep -qx "$ws" <<<"$wsl"; then rm -f "$G/$ws"
     elif [ ! -f "$G/$ws" ]; then echo "$now" > "$G/$ws"
     elif [ $((now-$(cat "$G/$ws"))) -ge 86400 ]; then

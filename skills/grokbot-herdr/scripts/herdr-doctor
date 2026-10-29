@@ -129,7 +129,9 @@ live=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_
 n=0
 for f in "$O"/*; do
   [ -f "$f" ] || continue; ws=$(basename "$f"); n=$((n+1))
-  if ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then warn "malformed owner tag file in $O (not a workspace id): delete it"
+  if [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]]; then
+    [ -f "$EV/jobs/$ws" ] || warn "owner tag $ws ($(sed -n 's/^owner=//p' "$f")) for a finished Core job: herdr-events-owner $ws --clear"
+  elif ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then warn "malformed owner tag file in $O (not a workspace id): delete it"
   elif [ -n "$live" ] && ! grep -qx "$ws" <<<"$live"; then warn "owner tag $ws ($(sed -n 's/^owner=//p' "$f")) for a closed workspace: herdr-events-owner $ws --clear"; fi
 done
 ok "$n owner tags checked"

@@ -492,8 +492,9 @@ def codex_notify(job, agent, payload):
 
 
 def session_end(job, agent, payload):
-    """A worker's session ended (exit, crash, closed pane): tell the lead. Never for the lead itself."""
-    if agent != roster(job)[1]:
+    """A worker's session ended (exit, crash, closed pane): tell the lead. Never for the lead itself, and never on Herdr
+    Core, where the job's follower reports every exit, a hard kill that runs no hook included."""
+    if agent != roster(job)[1] and backend(job) != 'core':
         append(Path(job) / 'inbox.log', line('GONE ' + agent + ' ' + payload.get('reason', '')))
     return ''
 

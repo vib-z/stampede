@@ -29,7 +29,8 @@ summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state
 D="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; RD="${HERDR_EVENTS_ROUTES_DIR:-$D/routes}"
 owner=$(jq -r '.owner // empty' <<<"$payload")
 ws=$(jq -r '.workspace // empty' <<<"$payload")
-[ -z "$ws" ] && ws=$(jq -r '.pane // empty | split(":")[0]' <<<"$payload")
+# a Herdr pane w1:p2 names its workspace; a Core terminal hc:<key>/<address> names its job's key, when well formed
+[ -z "$ws" ] && ws=$(jq -r '.pane // empty | if startswith("hc:") then (capture("^hc:(?<k>hc-[0-9a-f]{12})/").k // empty) else split(":")[0] end' <<<"$payload")
 if [ -z "$ws" ]; then  # cwd match against herdr agents
   cwd=$(jq -r '.cwd // empty' <<<"$payload")
   [ -n "$cwd" ] && ws=$(herdr agent list 2>/dev/null | jq -r --arg c "$cwd" '[.result.agents[]|select(.cwd==$c or .foreground_cwd==$c).workspace_id]|first // empty')
@@ -41,7 +42,7 @@ esource=$(jq -r '.source // empty' <<<"$payload")
 # stale, dead, questions, gates and finish still post. No marker: unchanged.
 plain=0
 case "$esource:$state:$ntype" in
-  herdr:done:*|herdr:idle:*|claude:Stop:*|codex:agent-turn-complete:*) plain=1;;
+  herdr:done:*|herdr:idle:*|hc:done:*|hc:idle:*|claude:Stop:*|codex:agent-turn-complete:*) plain=1;;
   claude:Notification:idle_prompt) plain=1;;
 esac
 job_open=0
