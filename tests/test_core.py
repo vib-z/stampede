@@ -1245,5 +1245,45 @@ class ReviewTagCore(CoreCase):
         self.assertEqual((self.events / 'owners' / key).read_text(), 'owner=alpha\nsession=isolated\n')
 
 
+
+class ReviewReopenParity(CoreCase):
+    """parity W6, W3 and W4: reopen checks every folder first, can start fresh, and resumes a Codex worker's session."""
+
+    def make(self, trees=False):
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
+            self.new_core()
+        self.key, self.trees = fj.job_key(self.job), {}
+        for agent, kind in (('build-api', 'claude'), ('review-api', 'codex')):
+            brief = self.job / 'briefs' / (agent + '.md')
+            brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in fj.BRIEF_SECTIONS))
+            cwd = None
+            if trees:
+                cwd = self.trees[agent] = self.root / 'code' / ('tree-' + agent)
+                cwd.mkdir()
+            self.quiet(fj.start, self.job, agent, kind, None, str(brief), cwd=str(cwd) if cwd else None)
+        self.ran = len(self.calls('run'))
+
+    def gone(self, *agents):
+        for agent in agents:
+            self.terminal(self.entries(self.job)[agent]['address'], state='finished', reason='host_shutdown')
+
+    def runs(self):
+        return {self.labels(r)['stampede.agent']: self.program(r) for r in self.calls('run')[self.ran:]}
+
+    def test_every_missing_folder_is_named_before_anything_starts(self):
+        self.make(trees=True)
+        self.gone('relay-' + self.key[3:], LEAD, 'build-api', 'review-api')
+        for tree in self.trees.values():
+            tree.rmdir()
+        with self.assertRaises(ValueError) as refused:
+            self.quiet(fj.reopen, self.job)
+        for agent, tree in self.trees.items():
+            self.assertIn(f'{tree} ({agent})', str(refused.exception))
+        self.assertEqual(self.runs(), {}, 'nothing started')
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, _ = self.quiet(fj.reopen, self.job, lead_only=True)  # --lead selects only the follower and the lead
+        self.assertEqual((code, sorted(self.runs())), (0, sorted(['relay-' + self.key[3:], LEAD])))
+
+
 if __name__ == '__main__':
     unittest.main()

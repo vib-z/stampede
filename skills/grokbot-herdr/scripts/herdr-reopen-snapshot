@@ -291,7 +291,8 @@ def snapshot_core(key, job):
         '# Usage: reopen.sh [--lead] [--prompt]',
         '#   default: the follower, the lead (its session resumed) and each worker that is not live, once each; live ones',
         '#   keep running. --lead: only the follower and the lead. --prompt: a restarted Codex worker gets its brief again.',
-        '# Exit 0; 1 a restart failed or is unknown; 2 another caller is starting one, or this shell names another core;',
+        '# Exit 0; 1 a restart failed or is unknown; 2 another caller is starting one, a folder is gone (checked first,',
+        '# each named, nothing started), or this shell names another core;',
         f'# 3 the restarted lead did not acknowledge its inbox files. It always works on the job\'s own core: {on}.',
         f'F={q(fleet)}; [ -x "$F" ] || F=fleet-job',
         f'exec "$F" _reopen {q(job)} "$@"', '']))

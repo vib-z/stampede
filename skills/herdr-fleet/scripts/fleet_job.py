@@ -1006,6 +1006,13 @@ def reopen(job, lead_only=False, prompt=False):
     key, (people, lead), rows = core_key(job), roster(job), agent_rows(job)
     finished, outcomes = (job / 'finished').is_file(), {}
     target(job)
+    selected = [lead] + ([] if lead_only else [a for a in people if a != lead])
+    folders = {}  # every folder this reopen may start something in, checked before anything starts
+    for agent in selected + ([] if finished else ['relay-' + key[3:]]):
+        folders.setdefault(str(core_entries(job).get(agent, {}).get('cwd') or job.parent), []).append(agent)
+    gone = [f'{folder} ({", ".join(agents)})' for folder, agents in folders.items() if not Path(folder).is_dir()]
+    if gone:
+        raise ValueError('cwd gone: ' + '; '.join(gone) + ': git worktree add each back first; nothing was started')
     if not finished:
         mark_job(key, job)
         if job_owner(job):
@@ -1015,7 +1022,7 @@ def reopen(job, lead_only=False, prompt=False):
             if not live_terminal(job, relay):
                 outcomes[relay] = reopen_run(job, relay, 'relay', [str(FOLLOWER), str(job)], job.parent, plain=True)
     pending = job / 'reopen-pending'  # a restarted lead that has not yet acknowledged both inbox files
-    for agent in [lead] + ([] if lead_only else [a for a in people if a != lead]):
+    for agent in selected:
         outcomes[agent] = reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead,
                                        pending if agent == lead and not finished else None)
     snapshot(job)
