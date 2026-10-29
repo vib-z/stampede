@@ -824,6 +824,40 @@ class CoreReopen(CoreCase):
         self.assertNotIn('NOT ACKNOWLEDGED ' + str(self.job / 'inbox.log'), out)
         self.assertIn(f'echo "REOPENED {LEAD} ', out)
 
+    def growth_watcher(self):
+        """The lead's FileChanged watches, registered now: a file's hook runs only when that file grows after this."""
+        paths = [self.job / 'inbox.log', self.job / 'inbox' / (LEAD + '.md')]
+        fj.watch_paths(self.job, LEAD, True)
+        sizes = {path: path.stat().st_size for path in paths}
+        delivered, stop = [], threading.Event()
+
+        def watch():
+            while not stop.is_set():
+                for path in paths:
+                    if path.stat().st_size != sizes[path]:
+                        sizes[path] = path.stat().st_size
+                        delivered.extend(fj.wake(self.job, LEAD, {'file_path': str(path)}))
+                time.sleep(0.01)
+        thread = threading.Thread(target=watch, daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (stop.set(), thread.join()))
+        return delivered
+
+    def test_a_reopen_that_timed_out_is_acknowledged_by_the_next(self):
+        self.prepare()
+        self.gone(self.relay, LEAD)
+        fj.append(self.job / 'inbox.log', 'REPORT reports/api.md')
+        code, out = self.reopen(lead_only=True)  # no watch registered yet: it times out
+        self.assertEqual(code, 3, out)
+        self.assertTrue((self.job / 'reopen-pending').exists())
+        delivered = self.growth_watcher()
+        code, out = self.reopen(lead_only=True)  # the lead is live now; nothing else writes to its files
+        self.assertEqual(code, 0, out)
+        self.assertEqual(delivered.count('REPORT reports/api.md'), 1)
+        self.assertFalse((self.job / 'reopen-pending').exists())
+        code, out = self.reopen(lead_only=True)
+        self.assertEqual((code, out.strip()), (0, f'LIVE {self.key}: no agent to restart'))
+
     def test_wake_records_the_reopen_attempts_it_delivered(self):
         self.prepare()
         fj.append(self.job / 'inbox.log', f'REOPENED {LEAD} 0123456789ab')

@@ -956,13 +956,20 @@ def reopen(job, lead_only=False, prompt=False):
         with launching(job, relay):
             if not live_terminal(job, relay):
                 outcomes[relay] = reopen_run(job, relay, 'relay', [str(FOLLOWER), str(job)], job.parent, plain=True)
+    pending = job / 'reopen-pending'  # a restarted lead that has not yet acknowledged both inbox files
     for agent in [lead] + ([] if lead_only else [a for a in people if a != lead]):
-        outcomes[agent] = reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead)
+        outcomes[agent] = reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead,
+                                       pending if agent == lead and not finished else None)
     snapshot(job)
     if not [agent for agent, outcome in outcomes.items() if outcome != 'live']:
         print(f'LIVE {key}: no agent to restart')
     code = 1 if [outcome for outcome in outcomes.values() if outcome in ('failed', 'unknown')] else 0
-    return (acknowledged(job, lead) or code) if outcomes.get(lead) == 'started' and not finished else code
+    if finished or not pending.exists() or outcomes.get(lead) not in ('started', 'live'):
+        return code
+    acked = acknowledged(job, lead)  # also on a retry with the lead live: an earlier reopen may have timed out
+    if acked == 0:
+        pending.unlink()
+    return acked or code
 
 
 def reopen_run(job, agent, role, program, cwd, plain=False):
@@ -981,8 +988,9 @@ def reopen_run(job, agent, role, program, cwd, plain=False):
     return 'started'
 
 
-def reopen_agent(job, agent, row, prompt, lead):
-    """Restart one agent unless a live terminal of the job runs it: 'live', 'started', 'failed' or 'unknown'."""
+def reopen_agent(job, agent, row, prompt, lead, pending=None):
+    """Restart one agent unless a live terminal of the job runs it: 'live', 'started', 'failed' or 'unknown'.
+    pending: written before the lead starts, so even an interrupted reopen leaves its acknowledgement owed."""
     with launching(job, agent):
         if live_terminal(job, agent):
             return 'live'
@@ -998,6 +1006,8 @@ def reopen_agent(job, agent, row, prompt, lead):
         else:
             program = [cli(kind)] + args + ([pointer] if prompt else [])
         cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
+        if pending:
+            pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
         return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd)
 
 

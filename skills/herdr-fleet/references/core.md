@@ -32,6 +32,7 @@ stampede new --core --file ask.md --cwd ~/code/my-app [--name <slug>] [--review]
 | `locks/<agent>.lock` | held by whoever is starting that agent |
 | `relay-state.json` | what the follower saw and sent |
 | `start-failed` | why a start never ran |
+| `reopen-pending` | a restarted lead that has not acknowledged both inbox files yet: every reopen asks again until it has |
 
 An agent is its address in `core.json`, never its name: a name another job's terminal holds gets `-<4 hex of the key>`.
 
@@ -88,7 +89,7 @@ hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<ke
 
 - With no flag: an open job's marker, owner tag and follower; the lead, its session resumed; each worker (Claude resumed, Codex fresh). `--prompt` sends a restarted Codex worker its brief.
 - `--lead`: only the follower and the lead, when either is gone and the workers still run.
-- A restarted lead must take a `REOPENED` line through its own wake hook in both inbox files (written every 5 s for 90 s). Exit 3 names a file it missed, with the line to write once the lead is up. Exit 2: another caller is starting one of them.
+- A restarted lead must take a `REOPENED` line through its own wake hook in both inbox files (written every 5 s for 90 s). Exit 3 names a file it missed, with the line to write once the lead is up. Exit 2: another caller is starting one of them. Until both files are acknowledged, `reopen-pending` stays and every later reopen asks again, even with the lead live.
 - An agent that never ran (its start was `UNKNOWN` and nothing spawned) starts fresh with its recorded session id and its brief, not resumed.
 - A follower that ends at once is `FAILED relay-<12 hex>`; any `FAILED` or `UNKNOWN` restart makes reopen exit 1.
 - A finished job resumes its agents for inspection only: no follower, no marker.
