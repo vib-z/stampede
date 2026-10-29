@@ -11,8 +11,8 @@ GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), 
 STALE <agent> no new output for <N>m (working, and its screen unchanged for HERDR_EVENTS_STALE_MINUTES, default 30).
 With FLEET_WATCH_NOTIFY=1 a stall and a terminal's end also go straight to the owner's phone (moshi-hook notify).
 To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, workspace <key>): blocked, error, done and idle
-turn ends, stale (with minutes_unchanged), dead (it finished while working or blocked, or failed with no status ever, or
-was lost) and relay_down,
+turn ends, stale (with minutes_unchanged), dead (it finished while working or blocked, or with no status ever, unless
+it exited 0 by itself; or was lost) and relay_down,
 each with an event_id (<key>/<address>|<state>|<episode>, ...|turn|<n>, ...|finished), so the relay never merges two.
 <job>/relay-state.json keeps what it saw and sent, and every bot event the relay did not take (retried every
 RETRY_EVERY seconds, after a reconnect and a restart too, until it does), so a restarted follower resumes and never
@@ -240,7 +240,8 @@ class Follower:
         shown = '-' if code is None else code
         if record['role'] == 'wait':
             return self.notify(f'{address}|finished', address, f'WAITED {agent} exit {shown}')
-        dead = record['last'] in ('working', 'blocked') or (record['last'] is None and code != 0)
+        clean = reason == 'exited' and code == 0  # its own exit 0 (a graceful /exit, say): told to the lead, no alarm
+        dead = not clean and (record['last'] in ('working', 'blocked') or record['last'] is None)
         phone(f'{agent} left its terminal', f'{reason}, exit {shown} (Herdr Core job {self.key}).', error=True)
         self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else f'GONE {agent} {reason} exit {shown}',
                     {'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason} if dead else None)

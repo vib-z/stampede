@@ -329,8 +329,8 @@ class Follower(CoreCase):
 
     def test_working_then_null_then_finished_is_dead_and_gone(self):
         _, f = self.follower()
-        self.feed(f, self.snap(self.record('t3', 'working')), status('t3', None), finished('t3', 0))
-        self.assertEqual(self.inbox(), ['GONE build-api exited exit 0'])
+        self.feed(f, self.snap(self.record('t3', 'working')), status('t3', None), finished('t3', 3))
+        self.assertEqual(self.inbox(), ['GONE build-api exited exit 3'])
         self.assertEqual(self.sent(), [('dead', 'build-api')])
         self.assertEqual(self.posts[0]['last_state'], 'working')
         self.assertEqual(self.posts[0]['pane'], f'hc:{self.key}/t3')
@@ -479,6 +479,15 @@ class Follower(CoreCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [], 'it exits before connecting when the job never started')
 
+
+
+    def test_only_an_unclean_end_is_dead(self):  # test-claude TC-F2: a graceful exit 0 is GONE, not dead
+        _, f = self.follower()
+        self.feed(f, self.snap(self.record('t1', 'working'), self.record('t3', 'working'), self.record('t4', 'working')),
+                  status('t1', None), finished('t1', 0), status('t3', None), finished('t3', 0),
+                  status('t4', None), finished('t4', None, 'killed', signal=15))
+        self.assertEqual(self.inbox(), ['GONE build-api exited exit 0', 'GONE review-api killed exit -'])
+        self.assertEqual(self.sent(), [('dead', 'review-api')])
 
 
 class ReviewEpisodes(CoreCase):
@@ -886,6 +895,7 @@ class ReviewWorkspaceGrammar(Shell):
         for good, pane in (('w1', 'w1:p1'), (KEY, f'hc:{KEY}/t3')):
             self.post(source='hc', state='blocked', workspace=good, pane=pane, agent='ok')
         self.assertEqual([(q['route'], q['payload']['workspace']) for q in self.queued()], [('beta', 'w1'), ('beta', KEY)])
+
 
 
 if __name__ == '__main__':
