@@ -11,12 +11,15 @@ GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), 
 To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, workspace <key>): blocked, error, done and idle
 turn ends, dead (it finished while working or blocked, or failed with no status ever, or was lost) and relay_down,
 each with an event_id (<key>/<address>|<state>|<episode>, ...|turn|<n>, ...|finished), so the relay never merges two.
-<job>/relay-state.json keeps what it saw and sent, so a restarted follower resumes and never sends one thing twice."""
+<job>/relay-state.json keeps what it saw and sent, and every bot event the relay did not take (retried every
+RETRY_EVERY seconds, after a reconnect and a restart too, until it does), so a restarted follower resumes and never
+sends one thing twice."""
 import fcntl, json, os, re, socket, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GIVE_UP = 600  # seconds of failed reconnects before RELAY DOWN
+RETRY_EVERY = 30  # seconds between tries of the bot events the relay did not take
 clock, sleep = time.monotonic, time.sleep
 FRESH = {'status': None, 'last': None, 'turn': 0, 'finished': False, 'reported': {}, 'episodes': {}}
 
@@ -88,6 +91,7 @@ class Follower:
         path = self.job / 'relay-state.json'
         state = json.loads(path.read_text()) if path.is_file() else {}
         self.terminals, self.sent, self.floor = state.get('terminals', {}), set(state.get('sent', [])), None
+        self.unsent, self.retried = state.get('unsent', {}), None  # identity -> event, for the bot, not yet taken
         self.known()
 
     def closed(self):
@@ -96,7 +100,7 @@ class Follower:
     def save(self):
         path = self.job / 'relay-state.json'
         temporary = path.with_name('.relay-state.json.tmp')
-        temporary.write_text(json.dumps({'terminals': self.terminals, 'sent': sorted(self.sent)}))
+        temporary.write_text(json.dumps({'terminals': self.terminals, 'sent': sorted(self.sent), 'unsent': self.unsent}))
         os.replace(temporary, path)
 
     def track(self, address, agent, role):
@@ -136,11 +140,23 @@ class Follower:
         return {k: v for k, v in event.items() if v is not None}
 
     def post(self, event):
-        """False when the relay hung for 60 s: then the event is not sent."""
+        """False when the relay did not take the event: it hung for 60 s, failed, or is not there."""
         try:
-            subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True, timeout=60)
-        except subprocess.TimeoutExpired:
+            return subprocess.run([str(HERE / 'herdr-event-post'), json.dumps(event)], capture_output=True, timeout=60).returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
             return False
+
+    def retry(self, now=False):
+        """Send again, oldest first, each bot event the relay did not take; stop at the first it still does not."""
+        if not self.unsent or not now and self.retried is not None and clock() - self.retried < RETRY_EVERY:
+            return
+        self.retried = clock()
+        for ident, event in list(self.unsent.items()):
+            if self.post(event) is False:
+                break
+            self.sent.add(ident)
+            del self.unsent[ident]
+        self.save()
 
     def notify(self, ident, address, lead=None, post=None):
         """Each notification once, by its identity: (address, state, episode), (address, turn) or (address, finished).
@@ -148,8 +164,12 @@ class Follower:
         if lead and ident + ' lead' not in self.sent:
             append(self.job / 'inbox.log', lead)
             self.sent.add(ident + ' lead')
-        if post and ident not in self.sent and self.post(self.payload(address, {**post, 'event_id': f'{self.key}/{ident}'})) is not False:
-            self.sent.add(ident)
+        if post and ident not in self.sent and ident not in self.unsent:
+            event = self.payload(address, {**post, 'event_id': f'{self.key}/{ident}'})
+            if self.post(event) is False:
+                self.unsent[ident] = event  # retried until the relay takes it
+            else:
+                self.sent.add(ident)
         self.save()
 
     def observe(self, address, status, turn=None):
@@ -241,6 +261,7 @@ class Follower:
 
     def line(self, row):
         """One line of a stream; False once the job is finished or never started."""
+        self.retry()
         if self.closed():
             return False
         if row.get('method') is None and 'terminals' in row:  # the snapshot that opens every connection
@@ -268,10 +289,17 @@ class Follower:
             process.wait()
 
     def follow(self):
-        """Until the job is finished or never started (0). A lost stream reconnects with backoff (1, 2, 4 ... 60 s), only
-        to a core that is up; after GIVE_UP seconds of that, RELAY DOWN to the lead and the bot (1)."""
+        """Until the job is finished or never started (0), with one last try of what the relay has not taken yet."""
+        code = self.watch()
+        self.retry(now=True)
+        return code
+
+    def watch(self):
+        """A lost stream reconnects with backoff (1, 2, 4 ... 60 s), only to a core that is up; after GIVE_UP seconds of
+        that, RELAY DOWN to the lead and the bot (1)."""
         down_since, delay = None, 1
         while not self.closed():
+            self.retry()  # the relay needs no core
             reason = 'core not reachable'
             if alive():
                 reason, reached = 'stream ended', False

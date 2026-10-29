@@ -591,5 +591,48 @@ class ReviewOneWake(CoreCase):
                          [('t3', 'claude', 'permission_prompt'), ('t3', 'hc', 'question'), ('t4', 'hc', 'permission')])
 
 
+
+class ReviewRetry(CoreCase):
+    """review-codex R9: a bot event the relay did not take is kept and sent later, after a restart too, once."""
+
+    def hang_then_post(self, restart):
+        job, key = self.core_job(workers=[('build-api', 'claude')], owner='alpha')
+        (job / 'core.json').write_text(json.dumps({'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'}}))
+        self.add_terminal('t3', name='build-api', labels={'stampede.job': key, 'stampede.agent': 'build-api'})
+        core, relay_up, posted = follower_module(), [False], []
+
+        def post(follower, event):
+            if not relay_up[0]:
+                return False  # what post() returns when herdr-event-post hung for 60 s
+            posted.append(event)
+        record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
+                  'labels': {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'}}
+        snapshot = {'channel': None, 'seq': 1, 'terminals': [record]}
+        heartbeat = {'jsonrpc': '2.0', 'method': 'heartbeat', 'params': {'seq': 9}}
+        with mock.patch.object(core.Follower, 'post', post), mock.patch.object(core, 'RETRY_EVERY', 0):
+            follower = core.Follower(job)
+            for row in (snapshot, status('t3', 'blocked', kind='permission'), turn('t3', 1, 'blocked'), status('t3', None),
+                        finished('t3', 1)):
+                follower.line(row)
+            self.assertEqual(posted, [])
+            relay_up[0] = True
+            if restart:
+                follower = core.Follower(job)
+            follower.line(heartbeat if not restart else {**snapshot, 'terminals': []})
+            follower.line(heartbeat)
+        self.assertEqual([e['state'] for e in posted], ['blocked', 'dead'])
+        self.assertEqual([e['event_id'] for e in posted], [f'{key}/t3|blocked|1', f'{key}/t3|finished'])
+        state = json.loads((job / 'relay-state.json').read_text())
+        self.assertEqual(state['unsent'], {})
+        self.assertIn('t3|blocked|1', state['sent'])
+        self.assertEqual((job / 'inbox.log').read_text().splitlines(), ['BLOCKED build-api permission', 'GONE build-api exited exit 1'])
+
+    def test_sent_once_the_relay_answers(self):
+        self.hang_then_post(restart=False)
+
+    def test_sent_by_a_restarted_follower(self):
+        self.hang_then_post(restart=True)
+
+
 if __name__ == '__main__':
     unittest.main()
