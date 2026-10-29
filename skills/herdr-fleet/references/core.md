@@ -6,8 +6,8 @@ A job started with `stampede new --core` runs on Herdr Core (`hc` 0.1.13 or late
 
 - Core is the owner's call, in the ask or from the front door. A job is all Core or all TUI (`<job>/backend`).
 - Cursor runs on the TUI only: it reports no OSC 7501 status, so `stampede start --kind cursor` is refused on Core.
-- Install this version's relay scripts (`install.sh`, or `stampede update`): the owner's global Claude and Codex relay hooks run from `~/.local/bin`, and an older copy posts a Core agent's plain turn ends to the default route.
-- Check the machine once: `herdr-doctor --core` (hc, the selected core, Claude 2.1.295 or later, Codex with `--no-daemon`). Never start or stop a core yourself.
+- Install this version (`install.sh`, or `stampede update`) before a Core job: the lead runs the installed `fleet-job`, and the CLIs' relay hooks run from `~/.local/bin`. An older copy can end a job without the stamp its follower waits for, and post plain turn ends to the default route.
+- Check the machine once: `herdr-doctor --core` (hc, the selected core, Claude 2.1.295 or later, Codex with `--no-daemon`). Never start or stop a core yourself. Run from a checkout that is not installed, it also prints `PROBLEM` lines for the install itself (stampede not on PATH, skills not linked, the relay's launchd jobs), expected until `install.sh` runs; the Core checks are the `ok hc`, `ok Herdr Core answers`, `ok claude` and `ok codex` lines.
 
 ## Start the job
 
