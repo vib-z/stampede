@@ -18,6 +18,7 @@ keep their kind and session id from an earlier snapshot (agents.tsv), so exiting
 Panes are matched to agents by name (the fleet convention: a pane is labelled with its agent's name).
 HERDR overrides the herdr binary (tests). This script never changes Herdr.
 """
+import fcntl
 import json
 import os
 import re
@@ -58,7 +59,19 @@ def load_agents(job):
 def save_agents(job, rows):
     lines = ['# herdr-reopen-snapshot: ' + '\t'.join(COLS)]
     lines += ['\t'.join(r.get(c, '') for c in COLS) for r in rows.values()]
-    (job / 'agents.tsv').write_text('\n'.join(lines) + '\n')
+    temporary = job / ('.agents.tsv.' + str(os.getpid()))
+    temporary.write_text('\n'.join(lines) + '\n')
+    os.replace(temporary, job / 'agents.tsv')
+
+
+def update_agents(job, change):
+    """Read agents.tsv, change its rows and replace it, all under agents.tsv.lock (never across a herdr or hc call),
+    so two starts at once never lose each other's row."""
+    with open(job / 'agents.tsv.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = load_agents(job)
+        change(rows)
+        save_agents(job, rows)
 
 
 def record(argv):
@@ -69,12 +82,13 @@ def record(argv):
         sys.exit('usage: herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>')
     job, name, kind, brief = Path(argv[0]).expanduser(), argv[1], argv[2], argv[3]
     job.mkdir(parents=True, exist_ok=True)
-    rows = load_agents(job)
-    old = rows.get(name, {})
-    kept = old.get('session', '') if old.get('kind') == kind else ''
-    rows[name] = {'name': name, 'kind': kind, 'session': kept if session is None else session,
-                  'brief': '' if brief == '-' else str(Path(brief).expanduser()), 'args': shlex.join(argv[5:])}
-    save_agents(job, rows)
+
+    def change(rows):
+        old = rows.get(name, {})
+        kept = old.get('session', '') if old.get('kind') == kind else ''
+        rows[name] = {'name': name, 'kind': kind, 'session': kept if session is None else session,
+                      'brief': '' if brief == '-' else str(Path(brief).expanduser()), 'args': shlex.join(argv[5:])}
+    update_agents(job, change)
     print(f'recorded {name} ({kind}) in {job}/agents.tsv')
 
 
@@ -120,7 +134,7 @@ def snapshot(ws_id, job):
     tabs = herdr('tab', 'list', '--workspace', ws_id)['tabs']
     panes = [p for p in herdr('pane', 'list')['panes'] if p['workspace_id'] == ws_id]
     names = {a['pane_id']: a.get('name') for a in herdr('agent', 'list')['agents']}
-    rows = load_agents(job)
+    rows, seen = load_agents(job), {}
     for t in tabs:
         t['panes'] = [p for p in panes if p['tab_id'] == t['tab_id']]
         if t['panes']:
@@ -134,9 +148,10 @@ def snapshot(ws_id, job):
                 if r['kind'] != p['agent']:
                     r.update(kind=p['agent'], session='', args='')
                 r['session'] = sess or r['session']
+                seen[p['name']] = r
             p['agent_row'] = rows.get(p['name'])                      # exited agents come back from agents.tsv; any other pane is a shell
     tabs = [t for t in tabs if any(p['agent_row'] for p in t['panes'])]   # only tabs holding the job's own agents (agents.tsv)
-    save_agents(job, rows)
+    update_agents(job, lambda fresh: fresh.update(seen))  # rows recorded meanwhile stay
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     sh = job / 'reopen.sh'
     sh.write_text(reopen_sh(ws, owner, tabs, when))

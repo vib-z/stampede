@@ -834,5 +834,40 @@ class CoreReopen(CoreCase):
         self.assertEqual(acks, {str(self.job / 'inbox.log'): ['0123456789ab']})
 
 
+
+def snapshot_module():
+    from importlib.machinery import SourceFileLoader
+    import importlib.util
+    loader = SourceFileLoader('herdr_reopen_snapshot', str(SNAPSHOT))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+class ReviewRoster(CoreCase):
+    """review-codex R3: concurrent starts of different agents never lose a roster row."""
+
+    def test_two_records_that_read_at_once_both_land(self):
+        job, _ = self.core_job()
+        module = snapshot_module()
+        read = module.load_agents
+
+        def slow_read(folder):
+            rows = read(folder)
+            time.sleep(0.3)  # both writers have read before either writes, unless the roster is locked
+            return rows
+        with mock.patch.object(module, 'load_agents', slow_read), contextlib.redirect_stdout(io.StringIO()):
+            writers = [threading.Thread(target=module.record, args=([str(job), agent, 'claude', '-', '--session', 's-' + agent, '--'],))
+                       for agent in ('build-a', 'build-b')]
+            for writer in writers:
+                writer.start()
+            for writer in writers:
+                writer.join()
+        people, lead = fj.roster(job)
+        self.assertEqual((sorted(people), lead), (['build-a', 'build-b', 'lead-demo'], 'lead-demo'))
+        self.assertEqual(fj.agent_rows(job)['build-a']['session'], 's-build-a')
+        self.assertEqual(sorted(p.name for p in job.iterdir() if p.name.startswith('agents.tsv')), ['agents.tsv', 'agents.tsv.lock'])
+
+
 if __name__ == '__main__':
     unittest.main()
