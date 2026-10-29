@@ -1442,6 +1442,13 @@ class ReviewDraft(CoreCase):
         self.terminal('t1', sent=[])
         self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []))
 
+    def test_a_marker_in_scrollback_does_not_hide_a_draft(self):  # live: hc read --lines 8 gave the whole screen
+        scrollback = '  ? for shortcuts\nTry "fix the tests"\n\n' + '\n\n'.join(f'line {n}' for n in range(8))
+        self.terminal('t1', draft='zzz', screen=scrollback + '\n\n\u203a zzz\n')
+        self.assertEqual(self.told()[1:], (2, [], []))
+        self.terminal('t1', draft='', screen=scrollback + '\n\u203a \n\n')
+        self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []))
+
     def test_a_slash_command_is_refused_with_its_keys(self):
         self.terminal('t1', screen='\u203a Ask Codex to do anything')
         out, code, sent, keys = self.told('/quit')

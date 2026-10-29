@@ -52,7 +52,7 @@ stampede start <job> <agent> --kind claude|codex --brief <file> [--cwd <dir>] [-
 ## Talk to an agent
 
 - `stampede tell <job> <agent> "<text>"`. A Claude agent reads its inbox file, as on the TUI. A Codex agent gets `hc send` once its terminal shows this job's labels: at `idle` it types only while still idle (`--if idle`); at `done` it types at once, so a worker that turned `working` in between takes it as a message during its turn. `hc send` refuses a blocked terminal either way. `tell` writes nothing else: it never presses a key, since Core cannot guard one.
-- When text is already typed in a Codex prompt (no empty-prompt marker on its screen), `tell` refuses rather than paste after it or erase it: read it with `hc read <address>`, clear it with `hc keys <address> ctrl+c` when `hc get` shows `idle`, then tell again.
+- When text is already typed in a Codex prompt (no empty-prompt marker in the last 8 non-empty screen lines), `tell` refuses rather than paste after it or erase it: read it with `hc read <address>`, clear it with `hc keys <address> ctrl+c` when `hc get` shows `idle`, then tell again.
 - A one-line slash command is refused too: pasted, Codex takes it as chat. End a worker whose work is accepted by hand, when `hc get <address>` shows `idle`: `hc keys <address> / q u i t enter` for Codex, `hc keys <address> / e x i t enter` for Claude. Either way it exits 0: the lead gets `GONE`, the bot no alarm.
 - `working`, `blocked`, `error`, no status, another job's terminal, or Core not answering: one line, `FAILED <agent> (<why>)`, exit 2. Tell a working agent after its turn.
 - Any other `hc` failure is one line on stderr, `fleet-job <command>: <reason>`, exit 1.

@@ -1159,12 +1159,14 @@ EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get starte
 
 
 def drafted(address):
-    """True when the last screen lines show no empty-prompt marker: text already typed, which Core would paste after.
-    A screen Core cannot read counts as empty."""
+    """True when the last 8 non-empty screen lines show no empty-prompt marker: text already typed, which Core would
+    paste after. Cut here, since hc read may give the whole screen, whose scrollback can hold a marker. A screen Core
+    cannot read counts as empty."""
     try:
-        return not EMPTY_PROMPT.search(hc('read', address, '--lines', '8').get('text', ''))
+        screen = hc('read', address, '--lines', '8').get('text', '')
     except HcError:
         return False
+    return not EMPTY_PROMPT.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:]))
 
 
 def tell_core(job, name, text):
