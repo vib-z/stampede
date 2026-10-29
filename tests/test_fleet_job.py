@@ -1124,6 +1124,10 @@ class FrontDoor(unittest.TestCase):
             fj.approve(self.job, "owner in desktop chat: 'ok - lets go'")
         self.assertIn('has not been shown this plan', str(refused.exception))
         self.quiet(fj.post, self.job, 'PLAN READY', [str(plan)])
+        with self.assertRaises(PermissionError) as refused:   # posted, but the front door has not received it yet
+            fj.approve(self.job, "owner in desktop chat: 'ok - lets go'")
+        self.assertIn('has not received this plan.md yet', str(refused.exception))
+        self.quiet(fj.wait, self.job, 5, 0)
         self.quiet(fj.approve, self.job, "owner in desktop chat: 'approve as written'")
         self.assertIn('approve as written', (self.job / 'approved').read_text())
         plan.write_text('Size: big\n# Plan v2\n')   # changed after the owner saw it

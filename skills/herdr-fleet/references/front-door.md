@@ -14,7 +14,7 @@
 ## Plan review (`--review`)
 
 - Write `plan.md`, post it (`fleet-job post <job> "PLAN READY: <one line>" --file <job>/plan.md`), and end your turn. Open no pane, edit nothing and start nothing on defaults until `fleet-job approve` wakes you.
-- `approve` refuses a plan that was not posted exactly as it stands, so post it again after any change.
+- `approve` refuses a plan that was not posted exactly as it stands, or that the front door has not received through `fleet-job wait` yet, so post it again after any change.
 - "Defaults if unanswered" never covers plan approval: no answer is no approval.
 
 ## Gates

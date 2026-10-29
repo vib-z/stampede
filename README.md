@@ -370,7 +370,7 @@ $ stampede new --file ask.md --pane <pane id> --name seller-copy --front-door --
 lead-seller-copy ~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy
 $ J=~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy
 $ stampede approve $J --by "owner in desktop chat: 'ok - lets go'"
-fleet-job approve: the owner has not been shown this plan: the lead posts it (fleet-job post <job> "PLAN READY" --file plan.md), the front door sends it to the owner, and only their yes to it is approved
+fleet-job approve: the owner has not been shown this plan.md: the lead posts it (fleet-job post <job> "PLAN READY" --file plan.md), the front door sends it to the owner, and only their yes to it is approved
 $ stampede post $J "PLAN READY: one Sonnet build, one review" --file $J/plan.md      # the lead
 POSTED 001 for the front door to relay (~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy/outbox/001.md)
 $ stampede wait $J                                                                   # the front door, in the background
@@ -452,6 +452,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 |---|---|
 | `fleet-job start: the owner asked to see this plan` | a `--review` job: approve the plan as it stands with `stampede approve <job> --by <who>` |
 | `fleet-job approve: the owner has not been shown this plan` | a `--front-door` job: the lead posts `plan.md` (`stampede post <job> "PLAN READY" --file <job>/plan.md`), the front door sends that file to you, and only your yes to it is approved; post again after any change |
+| `fleet-job approve: the front door has not received this plan.md yet` | the lead posted the plan, but the front door has not run `stampede wait` since: run it, send the owner the file it names, and approve only their yes to that file |
 | `BLOCKED_ON_CARD <agent>` from `stampede tell` or `stampede wait` | the agent waits at a question card in its pane and reads nothing else until it is answered; your message is queued. Answer the card in its pane, or have the front door type your answer there. In a `--front-door` job the lead's own cards become posts, so this is rare |
 | no `.herdr-<slug>` folder in the repo any more | job folders now live in `~/code/herdr-jobs/jobs/` (`FLEET_JOBS_ROOT`); `stampede new` prints the path. An old in-repo `.herdr-*` job still works with every command |
 | `fleet-job start: brief ... is missing: ...` or `brief ... does not exist` | write the brief on the [hand-off template](skills/herdr-fleet/references/brief.md), fill every missing or empty section, then start again |
@@ -504,7 +505,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot or front door records your yes in chat, run outside Herdr; refuses inside Herdr, a local job's gate or another commit |
 | `gate-ok <job> <gate> --sha <commit>` | | the lead's check before it acts: prints `APPROVED ...` only for your recorded yes at that commit |
 | `cancel <job> <id>` | | stops an asked question and its phone card (a question sent to a bot has no card: refused) |
-| `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead; in a front-door job only from outside Herdr, and only a plan (`plan.md`, `fleet-plan.md`) the lead posted exactly as it stands |
+| `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead; in a front-door job only from outside Herdr, and only a plan (`plan.md`, `fleet-plan.md`) the lead posted exactly as it stands and `stampede wait` has already handed to the front door |
 | `update` | | in a clean git checkout on `main`: `git fetch`, `git merge --ff-only`, then `./install.sh`; refuses local changes, untracked files, another branch, or an ignored file at a path the update adds; in a Herdr plugin install prints `herdr plugin update stampede --yes` |
 | `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `send-file`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |

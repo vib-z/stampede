@@ -469,11 +469,19 @@ def approve(job, by):
         if inside_herdr():  # the lead could otherwise post its own plan and approve it
             raise PermissionError('in a front-door job approve runs only from the chat outside Herdr, after the owner said yes '
                                   'to the plan: an agent\'s own say-so never counts')
+        box = Path(job) / 'outbox'
+        seen = int((box / '.seen').read_text() or 0) if (box / '.seen').is_file() else 0
         for name in ('plan.md', 'fleet-plan.md'):
             plan = Path(job) / name
-            if plan.is_file() and not any(copy.read_bytes() == plan.read_bytes() for copy in (Path(job) / 'outbox').glob('*/' + name)):
+            if not plan.is_file():
+                continue
+            posted = [int(copy.parent.name) for copy in box.glob('*/' + name) if copy.read_bytes() == plan.read_bytes()]
+            if not posted:
                 raise PermissionError(f'the owner has not been shown this {name}: the lead posts it (fleet-job post <job> "PLAN READY" '
                                       f'--file {name}), the front door sends it to the owner, and only their yes to it is approved')
+            if min(posted) > seen:  # posted, but the front door has not had it: a yes now cannot be a yes to this plan
+                raise PermissionError(f'the front door has not received this {name} yet: run fleet-job wait <job>, send the owner '
+                                      'the file it names, and approve only their yes to that file')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     (Path(job) / 'approved').write_text(f'Approved: {when} by {line(by)}, plan {digest}\n')
     tell(job, 'lead', f'Approved by {line(by)} at {when}. Start the panes the plan names.')
