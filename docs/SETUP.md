@@ -103,7 +103,7 @@ Optional: a job can run on [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or
 - `hc` 0.1.13 or later, and the selected core answering on its socket (`HC_SESSION`, `HC_SOCKET`; asked for `hello` directly, so the check never starts a core).
 - Claude Code 2.1.295 or later, which reports its status (OSC 7501); Codex with `--no-daemon`, if installed. Cursor is a `warn`: stampede runs it on the TUI only.
 
-The rest of the setup is the same: `herdr-trust` for each repo, and the [unattended settings](../skills/herdr-fleet/references/unattended-setup.md). `HC`, `HC_SESSION` and `HC_SOCKET` go in your config like every other key; stampede passes them, with the rest of your settings, to every terminal of a Core job. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events.md](../remote/events.md#a-herdr-core-job)).
+The rest of the setup is the same: `herdr-trust` for each repo, and the [unattended settings](../skills/herdr-fleet/references/unattended-setup.md). `HC`, `HC_SESSION` and `HC_SOCKET` go in your config like every other key; stampede passes them, with the rest of your settings, to every terminal of a Core job; a setting left empty (as `HC_SOCKET=` in config.example) is not passed, and Herdr Core reads an empty `HC_SOCKET` as unset too. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events.md](../remote/events.md#a-herdr-core-job)).
 
 ## Uninstall
 

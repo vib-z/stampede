@@ -696,7 +696,7 @@ def launch_env(job):
     --env: so the caller's PATH and settings, the job's key and the job's own owner, and never the caller's Herdr ids."""
     env = ['/usr/bin/env'] + [part for name in HERDR_IDS for part in ('-u', name)]
     env += ['PATH=' + os.environ.get('PATH', ''), 'STAMPEDE_JOB_KEY=' + core_key(job)]
-    env += [name + '=' + os.environ[name] for name in CONFIG_KEYS if name in os.environ]
+    env += [name + '=' + os.environ[name] for name in CONFIG_KEYS if os.environ.get(name)]  # an empty one means unset
     owner = job_owner(job)
     return env + (['HERDR_EVENTS_OWNER=' + owner] if owner else [])
 
@@ -1233,6 +1233,7 @@ def new_core(ask_file, name, review, fork, cwd):
     session = str(uuid.uuid4())
     record(job, lead, 'claude', brief, args, session)  # the fork stays out: a reopen resumes the lead's own session
     mark_job(key, job)
+    (events_dir() / 'owners' / key).unlink(missing_ok=True)  # a folder used before (same path, same key) had its own
     if owner:
         (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
         (events_dir() / 'owners' / key).write_text('owner=' + owner + '\n')

@@ -1098,5 +1098,31 @@ class ReviewOneLine(CoreCase):
         self.assertTrue(result.stderr.startswith('fleet-job _reopen: hc '), result.stderr)
 
 
+
+class ReviewSmallOnes(CoreCase):
+    """review-claude minors 7 and 8: no empty setting reaches a terminal; a reused folder never keeps an old owner tag."""
+
+    def test_an_empty_setting_stays_out_of_the_launch_environment(self):
+        job, _ = self.core_job()
+        settings = dict(re.findall(r'(?m)^export ([A-Z_]+)=(\S*)', (ROOT / 'config.example').read_text()))
+        self.assertEqual(settings['HC_SOCKET'], '', 'config.example ships HC_SOCKET empty')
+        with mock.patch.dict(os.environ, {'HC_SOCKET': '', 'FLEET_ASK_CMD': '', 'HC_SESSION': 'smoke'}):
+            env = fj.launch_env(job)
+        self.assertIn('HC_SESSION=smoke', env)
+        self.assertFalse([part for part in env if part.startswith(('HC_SOCKET=', 'FLEET_ASK_CMD='))])
+
+    def test_a_reused_job_folder_drops_an_old_owner_tag(self):
+        key = fj.job_key(self.job)
+        (self.events / 'owners').mkdir()
+        (self.events / 'owners' / key).write_text('owner=beta\n')
+        self.assertEqual(self.new_core()[0], 0)
+        self.assertFalse((self.events / 'owners' / key).exists(), 'a local job leaves no tag of the old bot')
+        shutil.rmtree(self.job)
+        (self.events / 'owners' / key).write_text('owner=beta\n')
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
+            self.assertEqual(self.new_core()[0], 0)
+        self.assertEqual((self.events / 'owners' / key).read_text(), 'owner=alpha\n')
+
+
 if __name__ == '__main__':
     unittest.main()
