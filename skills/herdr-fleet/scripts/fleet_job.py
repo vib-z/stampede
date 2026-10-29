@@ -1,6 +1,6 @@
 """fleet-job: a Herdr job's messages, background owner questions, plan approval and per-CLI hooks.
 Ported from stampede (scripts/stampede_hooks.py at 0871ae3) and cut down."""
-import contextlib, fcntl, glob, hashlib, json, os, re, shlex, signal, subprocess, sys, uuid
+import contextlib, fcntl, glob, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -56,6 +56,8 @@ def tell(job, name, text):
     if people[name] == 'claude':
         append(Path(job) / 'inbox' / (name + '.md'), line(text))
         return print('DELIVERED ' + name + ' (inbox file)')
+    if backend(job) == 'core':
+        return tell_core(job, name, text)
     if subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'), name, text],
                       env={**os.environ, 'FLEET_JOB_DIR': str(Path(job).absolute())}).returncode:
         raise SystemExit(2)  # herdr-send printed its one FAILED line (focused, blocked or gone); never a traceback
@@ -177,10 +179,7 @@ def clear_job_marker(workspace, job):
 
 def post_local(job, fields):
     """Ordinary relay, not strict: a local job's finish. Logged when no route has a URL."""
-    event = {'source': 'stampede', 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields}
-    for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID')):
-        if os.environ.get(name):
-            event[key] = os.environ[name]
+    event = {'source': 'stampede', 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields, **caller_ids(job)}
     script = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'
     result = subprocess.run([str(script), json.dumps(event)], capture_output=True, text=True)
     if result.returncode:
@@ -216,10 +215,8 @@ def post_event(job, owner, fields):
     """One event to the bot that started the job, queued by the relay in strict mode: only the bot's own route with a
     URL (never the default route, perhaps another bot's), or a refusal. No `pane`: the flusher keeps only a pane's
     newest event after an outage, and a question or a gate must never be dropped for a later turn end."""
-    event = {'source': 'stampede', 'owner': owner, 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields}
-    for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID')):
-        if os.environ.get(name):
-            event[key] = os.environ[name]
+    event = {'source': 'stampede', 'owner': owner, 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields,
+             **caller_ids(job)}
     result = subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), '--strict', json.dumps(event)],
                             capture_output=True, text=True)
     if result.returncode:
@@ -688,8 +685,9 @@ def launch(agent, kind, pane, args):
     return ready.get('agent', {}).get('agent_status') == 'blocked'
 
 
-def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None):
-    """Start one agent in an existing pane at its shell prompt, record it, and send its brief pointer."""
+def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None):
+    """Start one agent and record it: in an existing pane at its shell prompt, then send its brief pointer (TUI); or in a
+    Herdr Core terminal with its brief pointer as the first prompt (a Core job)."""
     require_approval(job)
     if not NAME.fullmatch(agent):
         raise ValueError('agent names are <role>-<scope>, lowercase')
@@ -701,6 +699,12 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
         if missing:
             raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
                              'fill them in on skills/herdr-fleet/references/brief.md and start again')
+    if backend(job) == 'core':
+        if pane:
+            raise ValueError('this job runs on Herdr Core: start takes --cwd <dir>, never --pane')
+        return start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, lead)
+    if cwd:
+        raise ValueError('--cwd is for a Herdr Core job; on the Herdr TUI the agent starts in its --pane')
     if yolo_in is not None:
         if lead:
             raise PermissionError('yolo is never for the lead')
@@ -720,6 +724,170 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     tell(job, agent, f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.')
 
 
+CURSOR_ON_CORE = 'Cursor reports no OSC 7501 status, so stampede cannot tell when it is ready on Core; run it on the TUI'
+
+
+def cli(kind):
+    """The agent CLI's absolute path: a Core terminal runs it with the core's environment, not the caller's PATH."""
+    path = shutil.which(kind)
+    if not path:
+        raise ValueError(kind + ' is not on PATH')
+    return path
+
+
+def record(job, agent, kind, brief, args, session=''):
+    """How an agent was started, for reopen (agents.tsv); a Claude agent's session id is chosen by stampede on Core."""
+    subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'), 'record', str(job), agent, kind,
+                    str(brief), *(['--session', session] if session else []), '--', *args], check=True, capture_output=True)
+
+
+def core_status(terminal):
+    """A terminal's own OSC 7501 word (idle, working, done, blocked, error), or None when it reports none."""
+    return (terminal.get('status') or {}).get('state')
+
+
+def live_terminal(job, agent):
+    """This job's live terminal for the agent: its bound address, else one the job's and the agent's labels name,
+    which is adopted (bound). None when no live terminal runs it."""
+    key = core_key(job)
+    address = core_entries(job).get(agent, {}).get('address')
+    if address:
+        try:
+            terminal = hc('get', address)
+        except HcError as error:
+            if error.kind != 'not_found':
+                raise
+            terminal = {}
+        labels = terminal.get('labels') or {}
+        if terminal.get('state') == 'live' and labels.get('stampede.job') == key and labels.get('stampede.agent') == agent:
+            return terminal
+    found = [t for t in hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent).get('terminals', [])
+             if t.get('state', 'live') == 'live']
+    if found:
+        bind(job, agent, {'state': 'live', 'address': found[0]['address'], 'name': found[0].get('name') or agent})
+        return found[0]
+    return None
+
+
+def core_run(job, agent, role, program, cwd):
+    """Start one program of this job in its own Core terminal (no parent, no notes), the caller holding the agent's launch
+    lock, and bind it. A failed hc run that spawned all the same (a call that timed out) is adopted by its labels;
+    otherwise the entry is failed and the error raised."""
+    key = core_key(job)
+    bind(job, agent, {'state': 'starting', 'role': role, 'session': os.environ.get('HC_SESSION', ''),
+                      'socket': os.environ.get('HC_SOCKET', '')}, fresh=True)
+    labels = [part for k, v in (('job', key), ('agent', agent), ('role', role)) for part in ('--label', f'stampede.{k}={v}')]
+    name = agent
+    while True:
+        try:
+            terminal = hc('run', '--bg', '--no-parent', '--no-notify', '--name', name, '--cwd', str(cwd), *labels, '--',
+                          *launch_env(job), *program)
+            break
+        except HcError as error:
+            if error.kind == 'name_taken' and name == agent:
+                name = agent[:27] + '-' + key[3:7]  # another job's terminal holds the name; identity is the address
+                continue
+            spawned = hc('ls', *labels[:4]).get('terminals', [])
+            if not spawned:
+                bind(job, agent, {'state': 'failed', 'reason': line(error)})
+                raise
+            terminal = spawned[0]
+            break
+    bind(job, agent, {'state': 'live', 'address': terminal['address'], 'name': terminal.get('name') or name})
+    return terminal['address']
+
+
+def core_outcome(job, agent, address, who, brief):
+    """After a launch, from the agent's own status: 'started' (working, idle or done), 'not ready' (a live terminal that
+    is blocked, at an error or silent after 30 s: it stays this job's agent), or 'failed' (its terminal finished)."""
+    try:
+        hc('wait', address, '--timeout', '30')
+    except HcError:
+        pass
+    terminal = hc('get', address)
+    word = core_status(terminal)
+    if terminal.get('state') != 'live':
+        try:
+            tail = hc('read', address, '--lines', '20').get('text', '')
+        except HcError:
+            tail = ''
+        reason = f'{terminal.get("reason") or "ended"} exit {terminal.get("exit_code")}'
+        bind(job, agent, {'state': 'failed', 'reason': reason})
+        print(f'FAILED {agent} ({reason}): {line(tail)}')
+        return 'failed'
+    if word in ('working', 'idle', 'done'):
+        print(f'STARTED {agent} ({address})')
+        return 'started'
+    resend = f'then fleet-job tell {job} {who} "Read {brief}" if it went idle without its first prompt'
+    if word == 'blocked':
+        kind = (terminal.get('status') or {}).get('kind') or 'blocked'
+        print(f'BLOCKED {agent}: {kind}; read it with hc read {address}, clear the dialog with hc keys {address} <keys>, {resend}')
+    else:
+        print(f'NOT READY {agent}: {word or "no status"}; read it with hc read {address}; it stays this job\'s {who}, '
+              f'so never start a second one; {resend}')
+    return 'not ready'
+
+
+def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, lead):
+    """One live launch per agent: under its launch lock, refuse when a live terminal of this job runs it (adopting one its
+    labels name), else start it with its hooks, its brief pointer as the first prompt, and Codex without its daemon."""
+    if kind == 'cursor':
+        raise ValueError(CURSOR_ON_CORE)
+    job = Path(job).absolute()
+    cwd = Path(cwd or job.parent).expanduser().resolve()
+    if yolo_in is not None and Path(yolo_in).expanduser().resolve() != cwd:
+        raise PermissionError(f'--yolo-in {yolo_in} must be the --cwd the worker starts in ({cwd}): its own worktree')
+    with launching(job, agent):
+        running = live_terminal(job, agent)
+        if running:
+            raise ValueError(f'{agent} is already running at {running["address"]}')
+        args = cli_args(job, agent, kind, model, effort, list(reports), lead=lead, yolo_in=cwd if yolo_in is not None else None)
+        args += ['--no-daemon'] if kind == 'codex' else []  # else Codex runs its commands outside the terminal
+        session = str(uuid.uuid4()) if kind == 'claude' else ''
+        program = [cli(kind)] + args + (['--session-id', session] if session else [])
+        record(job, agent, kind, brief, args, session)
+        pointer = f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
+        address = core_run(job, agent, 'lead' if lead else 'worker', program + [pointer], cwd)
+        return 0 if core_outcome(job, agent, address, 'lead' if lead else agent, brief) == 'started' else 1
+
+
+def caller_ids(job):
+    """Where a job's event comes from: on the TUI, the caller's Herdr workspace and pane; on Core, the job's key and its
+    lead's terminal, never the caller's environment (a TUI pane may run a Core job's command)."""
+    if backend(job) != 'core':
+        return {key: os.environ[name] for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID'))
+                if os.environ.get(name)}
+    key = core_key(job)
+    address = core_entries(job).get(roster(job)[1], {}).get('address')
+    return {'workspace': key, **({'lead_pane': f'hc:{key}/{address}'} if address else {})}
+
+
+def tell_core(job, name, text):
+    """Prompt a Codex agent in its Core terminal by its status: idle types only while idle (atomic); done types at once,
+    so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line."""
+    address = core_entries(job).get(name, {}).get('address')
+    try:
+        terminal = hc('get', address) if address else {}
+    except HcError:
+        terminal = {}
+    labels, word = terminal.get('labels') or {}, core_status(terminal)
+    refused = {'working': 'working: tell it after its turn', 'blocked': f'blocked: hc read {address}', 'error': f'error: hc read {address}'}
+    if labels.get('stampede.job') != core_key(job) or labels.get('stampede.agent') != name:
+        why = "not this job's terminal"
+    elif terminal.get('state') != 'live' or word not in ('idle', 'done', *refused):
+        why = 'not ready'
+    elif word in refused:
+        why = refused[word]
+    else:
+        try:
+            hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text)
+            return print(f'SUBMITTED {name} ({address})')
+        except HcError as error:
+            why = {9: refused['blocked'], 10: refused['working'], 11: 'not ready'}.get(error.code, line(error))
+    print(f'FAILED {name} ({why})')
+    raise SystemExit(2)
+
+
 FILLER = {'a', 'an', 'the', 'on', 'in', 'of', 'to', 'for', 'and', 'please', 'can', 'you', 'we', 'i', 'my', 'our', 'it', 'this', 'that'}
 
 
@@ -736,21 +904,8 @@ def slug(ask):
 SESSION = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 
 
-def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
-    """Front door: make the job, start its lead on Claude with hooks, print the lead's name.
-    pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab.
-    fork: a Claude session id (the chat that planned the job); the lead starts as a fork of it and keeps that conversation."""
-    if not (workspace or pane):
-        raise ValueError('new needs --workspace or --pane, or run it inside Herdr')
-    if fork is not None and not SESSION.fullmatch(fork):
-        raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
-    ask = Path(ask_file).expanduser().read_text()
-    info = herdr('pane', 'get', pane)['pane'] if pane else None
-    # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
-    repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
-    ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
-    owner = starter(ws_id)
-    job = repo / ('.herdr-' + (name or slug(ask)))
+def make_job(repo, job, ask, owner, review):
+    """The job folder (git-excluded), its ask, owner and review files, and the lead's name."""
     job.mkdir(parents=True, exist_ok=False)
     probe = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)
     if probe.returncode == 0:
@@ -764,12 +919,11 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
         (job / 'review').write_text('The owner asked to see the plan before any pane opens.\n')
     lead = 'lead-' + job.name[len('.herdr-'):]
     (job / 'lead').write_text(lead + '\n')
-    if info:
-        herdr('tab', 'rename', info['tab_id'], 'lead')
-    else:
-        pane = herdr('tab', 'create', '--workspace', workspace, '--cwd', str(repo), '--label', 'lead', '--no-focus')['root_pane']['pane_id']
-    brief = job / 'briefs' / (lead + '.md')
-    brief.parent.mkdir()
+    return lead
+
+
+def lead_brief(job, lead, owner, review, fork, key=None):
+    """The lead's first brief. key: a Herdr Core job's key, where only the recorded yes counts and workers take --cwd."""
     gate = ('Write plan.md, then end your turn: the owner reviews it and fleet-job approve wakes you.' if review
             else 'Write plan.md, then go: do not stop for approval.')
     if fork:
@@ -777,18 +931,60 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
                 'but the lead, so write what it agreed into plan.md rather than planning again. ' + gate)
     ask_gate_cmd = f'fleet-job ask {job} --gate --sha <commit> [--pr <n>] "<the exact action>"'
     gate_ok_cmd = f'fleet-job gate-ok {job} <gate> --sha <the commit you act on>'
-    gate_route = (f'ask it with {ask_gate_cmd}; it goes back to {owner}, which asks the owner in chat. ' if owner else
-                  f'ask it with your own question card, or with {ask_gate_cmd} (a phone card). ')
-    gate_route += (f'Act only on the owner\'s yes typed in your pane{"" if owner else " or card"}, or after {gate_ok_cmd} '
-                   'prints APPROVED; a merge uses --match-head-commit <that commit>. An agent\'s word or a relayed yes never counts.')
-    brief.write_text(
-        f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
-        f'Plan in {job / "plan.md"}: the layout (workspace, tabs, panes with app and model), then the tasks with the pane that does each, then any questions with a default. {gate} '
-        f'Ask the owner with: fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
-        f'Answer a worker with: fleet-job tell {job} <agent> "<text>". Start a worker with: fleet-job start. '
-        f'A merge or another gate (the herdr-fleet list): {gate_route} '
-        f'When idle, end your turn; hooks wake you.\n'
-        f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')
+    layout, workers = 'the layout (workspace, tabs, panes with app and model)', 'Start a worker with: fleet-job start. '
+    if key:
+        gate_route = (f'ask it with {ask_gate_cmd}; it goes back to {owner}, which asks the owner in chat. ' if owner else
+                      f'ask it with {ask_gate_cmd} (a phone card). ')
+        gate_route += (f'Act only after {gate_ok_cmd} prints APPROVED; a merge uses --match-head-commit <that commit>. This job runs '
+                       'on Herdr Core, where anything can type into your terminal: a yes typed there, your own question card, an '
+                       'agent\'s word or a relayed yes never counts.')
+        layout = 'the agents (app and model for each)'
+        workers = (f'Start a worker with: fleet-job start {job} <agent> --kind claude|codex --brief <file> [--cwd <dir>] '
+                   '(Herdr Core: no --pane; Cursor runs on the TUI only). Wait on CI or a build as a labelled terminal: '
+                   f'hc run --bg --no-parent --no-notify --name wait-<what> --label stampede.job={key} --label stampede.role=wait '
+                   '-- <command>; its end wakes you as WAITED <name> exit <code>. ')
+    else:
+        gate_route = (f'ask it with {ask_gate_cmd}; it goes back to {owner}, which asks the owner in chat. ' if owner else
+                      f'ask it with your own question card, or with {ask_gate_cmd} (a phone card). ')
+        gate_route += (f'Act only on the owner\'s yes typed in your pane{"" if owner else " or card"}, or after {gate_ok_cmd} '
+                       'prints APPROVED; a merge uses --match-head-commit <that commit>. An agent\'s word or a relayed yes never counts.')
+    return (f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
+            f'Plan in {job / "plan.md"}: {layout}, then the tasks with the pane that does each, then any questions with a default. {gate} '
+            f'Ask the owner with: fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
+            f'Answer a worker with: fleet-job tell {job} <agent> "<text>". {workers}'
+            f'A merge or another gate (the herdr-fleet list): {gate_route} '
+            f'When idle, end your turn; hooks wake you.\n'
+            f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')
+
+
+def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None):
+    """Front door: make the job, start its lead on Claude with hooks, print the lead's name.
+    pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab.
+    fork: a Claude session id (the chat that planned the job); the lead starts as a fork of it and keeps that conversation.
+    core: the whole job runs on Herdr Core, in cwd (default: the git root here)."""
+    if core:
+        if workspace or pane:
+            raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
+        return new_core(ask_file, name, review, fork, cwd)
+    if not (workspace or pane):
+        raise ValueError('new needs --workspace or --pane, or run it inside Herdr')
+    if fork is not None and not SESSION.fullmatch(fork):
+        raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
+    ask = Path(ask_file).expanduser().read_text()
+    info = herdr('pane', 'get', pane)['pane'] if pane else None
+    # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
+    repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
+    ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
+    owner = starter(ws_id)
+    job = repo / ('.herdr-' + (name or slug(ask)))
+    lead = make_job(repo, job, ask, owner, review)
+    if info:
+        herdr('tab', 'rename', info['tab_id'], 'lead')
+    else:
+        pane = herdr('tab', 'create', '--workspace', workspace, '--cwd', str(repo), '--label', 'lead', '--no-focus')['root_pane']['pane_id']
+    brief = job / 'briefs' / (lead + '.md')
+    brief.parent.mkdir()
+    brief.write_text(lead_brief(job, lead, owner, review, fork))
     args = cli_args(job, lead, 'claude', os.environ.get('FLEET_LEAD_MODEL', 'claude-opus-5-5'),
                     os.environ.get('FLEET_LEAD_EFFORT', 'xhigh'), [], lead=True)
     herdr('pane', 'rename', pane, lead)
@@ -803,16 +999,99 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None):
     print(lead + ' ' + str(job))
 
 
+def core_repo(cwd):
+    """A Core job's repo: --cwd, else the git root of the current folder; under FLEET_TRUST_ROOT, as herdr-trust requires."""
+    if cwd is None:
+        top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+        if top.returncode:
+            raise ValueError('new --core needs --cwd <repo>, or run it inside a git repo')
+        cwd = top.stdout.strip()
+    repo = Path(cwd).expanduser().resolve()
+    root = Path(os.environ.get('FLEET_TRUST_ROOT') or '~/code').expanduser().resolve()
+    if not repo.is_dir() or (repo != root and root not in repo.parents):
+        raise ValueError(f'{repo} is not a folder under FLEET_TRUST_ROOT ({root}): run herdr-trust on a repo there first')
+    return repo
+
+
+def new_core(ask_file, name, review, fork, cwd):
+    """A whole job on Herdr Core. The record first (folder, backend, key, owner and its tag, marker, the lead's row), then
+    the follower, then the lead with its brief pointer as the first prompt. Only a confirmed failure (the relay or the lead
+    never ran, or its terminal already finished) takes the start back; a live lead that is not ready stays one job."""
+    if fork is not None and not SESSION.fullmatch(fork):
+        raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
+    repo, claude = core_repo(cwd), cli('claude')
+    ask = Path(ask_file).expanduser().read_text()
+    owner = starter(os.environ.get('HERDR_WORKSPACE_ID'))
+    job = repo / ('.herdr-' + (name or slug(ask)))
+    if job.exists():
+        raise ValueError(f'{job} already exists: a job folder is used once; start another job with --name')
+    lead = make_job(repo, job, ask, owner, review)
+    key = job_key(job)
+    (job / 'backend').write_text('core\n')
+    brief = job / 'briefs' / (lead + '.md')
+    brief.parent.mkdir()
+    brief.write_text(lead_brief(job, lead, owner, review, fork, key))
+    args = cli_args(job, lead, 'claude', os.environ.get('FLEET_LEAD_MODEL', 'claude-opus-5-5'),
+                    os.environ.get('FLEET_LEAD_EFFORT', 'xhigh'), [], lead=True)
+    session = str(uuid.uuid4())
+    record(job, lead, 'claude', brief, args, session)  # the fork stays out: a reopen resumes the lead's own session
+    mark_job(key, job)
+    if owner:
+        (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
+        (events_dir() / 'owners' / key).write_text('owner=' + owner + '\n')
+    relay = 'relay-' + key[3:]
+    try:
+        with launching(job, relay):
+            core_run(job, relay, 'relay', [str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-core'), str(job)], repo)
+        with launching(job, lead):
+            program = [claude] + (['--resume', fork, '--fork-session'] if fork else []) + args + ['--session-id', session]
+            address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo)
+            outcome = core_outcome(job, lead, address, 'lead', brief)
+    except HcError as error:
+        return start_failed(job, key, relay, line(error))
+    if outcome == 'failed':
+        return start_failed(job, key, relay, core_entries(job)[lead].get('reason', 'the lead ended'))
+    if outcome == 'started':
+        print(lead + ' ' + str(job))
+        return 0
+    return 1
+
+
+def start_failed(job, key, relay, reason):
+    """A confirmed failed start: kill and remove the follower, mark what is not failed yet as failed, take back the marker
+    and owner tag, and leave start-failed (the follower exits on it). The folder stays; a retry is a new job."""
+    address = core_entries(job).get(relay, {}).get('address')
+    for verb in ('kill', 'rm'):
+        try:
+            hc(verb, address) if address else None
+        except HcError:
+            pass
+    for agent, entry in core_entries(job).items():
+        if entry.get('state') != 'failed':
+            bind(job, agent, {'state': 'failed', 'reason': reason})
+    clear_job_marker(key, job)
+    if job_owner(job):
+        (events_dir() / 'owners' / key).unlink(missing_ok=True)
+    (job / 'start-failed').write_text(reason + '\n')
+    print(f'FAILED {roster(job)[1]} ({reason}): nothing of {job} runs; the folder stays as a record, and a retry is a new job')
+    return 1
+
+
 def main(argv):
     import argparse
     parser = argparse.ArgumentParser(prog='fleet-job')
     sub = parser.add_subparsers(dest='cmd', required=True)
-    p = sub.add_parser('new'); p.add_argument('--file', required=True); p.add_argument('--workspace', default=os.environ.get('HERDR_WORKSPACE_ID'))
+    p = sub.add_parser('new'); p.add_argument('--file', required=True)
+    p.add_argument('--workspace', help='default: $HERDR_WORKSPACE_ID (Herdr TUI only)')
+    p.add_argument('--core', action='store_true', help='run the whole job on Herdr Core (hc), in --cwd')
+    p.add_argument('--cwd', help='with --core: the repo (default: the git root of the current folder)')
     p.add_argument('--name'); p.add_argument('--review', action='store_true')
     p.add_argument('--pane', help="an existing empty pane for the lead (a fresh workspace's root pane); its tab becomes lead")
     p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
-    p = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind', required=True)
-    p.add_argument('--pane', required=True); p.add_argument('--brief', required=True); p.add_argument('--model'); p.add_argument('--effort')
+    p = start_parser = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind', required=True)
+    p.add_argument('--pane', help='the Herdr TUI pane (required on the TUI)'); p.add_argument('--brief', required=True)
+    p.add_argument('--cwd', help='a Herdr Core job: the folder it starts in (default: the repo)')
+    p.add_argument('--model'); p.add_argument('--effort')
     p.add_argument('--report', action='append', default=[]); p.add_argument('--yolo-in', help='a worker in its own git worktree: no-checks mode')
     p = sub.add_parser('tell'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('text', nargs='+')
     p = sub.add_parser('ask'); p.add_argument('job'); p.add_argument('--option', action='append', default=[]); p.add_argument('question', nargs='+')
@@ -830,6 +1109,10 @@ def main(argv):
     p.add_argument('--gate')
     p.add_argument('question', nargs='+')
     a = parser.parse_args(argv)
+    if a.cmd == 'new' and a.cwd and not a.core:
+        parser.error('--cwd is for new --core')
+    if a.cmd == 'start' and not a.pane and backend(a.job) != 'core':
+        start_parser.error('the following arguments are required: --pane')
     try:
         return run(a)
     except (ValueError, PermissionError) as error:
@@ -841,9 +1124,11 @@ def main(argv):
 
 def run(a):
     if a.cmd == 'new':
-        return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork)
+        if a.core:
+            return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd)
+        return new(a.file, a.workspace or os.environ.get('HERDR_WORKSPACE_ID'), a.name, a.review, a.pane, a.fork)
     if a.cmd == 'start':
-        return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in)
+        return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in, a.cwd)
     if a.cmd == 'tell':
         return tell(a.job, a.agent, ' '.join(a.text))
     if a.cmd == 'ask' and a.gate:

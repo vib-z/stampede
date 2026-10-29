@@ -4,9 +4,10 @@
   herdr-reopen-snapshot <ws> <job dir>
       Read the live workspace (read-only herdr calls) and write <job dir>/REOPEN.md and an executable
       <job dir>/reopen.sh that recreates the job's tabs (those holding its agents in agents.tsv): panes, labels, cwds, agents.
-  herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> -- <agent args...>
+  herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>
       Note how an agent was started (the flags after `herdr agent start ... --`, and its brief) in
       <job dir>/agents.tsv. Herdr knows layout, kinds and session ids, not flags or briefs: record them at every start.
+      --session: the session id stampede chose (a Claude agent on Herdr Core, started with --session-id).
 
 Write the snapshot at launch, after every start or restart, and again before any close. Agents that already exited
 keep their kind and session id from an earlier snapshot (agents.tsv), so exiting before the last refresh is fine.
@@ -56,13 +57,17 @@ def save_agents(job, rows):
 
 
 def record(argv):
+    session = None
+    if argv[4:5] == ['--session'] and len(argv) > 5:
+        session, argv = argv[5], argv[:4] + argv[6:]
     if len(argv) < 5 or argv[4] != '--':
-        sys.exit('usage: herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> -- <agent args...>')
+        sys.exit('usage: herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>')
     job, name, kind, brief = Path(argv[0]).expanduser(), argv[1], argv[2], argv[3]
     job.mkdir(parents=True, exist_ok=True)
     rows = load_agents(job)
     old = rows.get(name, {})
-    rows[name] = {'name': name, 'kind': kind, 'session': old.get('session', '') if old.get('kind') == kind else '',
+    kept = old.get('session', '') if old.get('kind') == kind else ''
+    rows[name] = {'name': name, 'kind': kind, 'session': kept if session is None else session,
                   'brief': '' if brief == '-' else str(Path(brief).expanduser()), 'args': shlex.join(argv[5:])}
     save_agents(job, rows)
     print(f'recorded {name} ({kind}) in {job}/agents.tsv')

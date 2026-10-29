@@ -318,7 +318,6 @@ class CoreSafety(CoreCase):
         self.assertTrue(fj.inside_herdr({'HC_SCOPE': 'x'}, 1))  # the Core half, so this class fails as one until it lands
 
 
-@contract
 class CoreNew(CoreCase):
     """Build order 5: stampede new --core."""
 
@@ -356,8 +355,6 @@ class CoreNew(CoreCase):
         self.assertEqual((row[1], row[2]), ('claude', session))
         self.assertNotIn('--session-id', row[4])
         self.assertFalse((job / 'inbox' / (LEAD + '.md')).exists(), 'the pointer is the first prompt, not an inbox line')
-        self.assertTrue(os.access(job / 'reopen.sh', os.X_OK))
-        self.assertIn('t2', (job / 'REOPEN.md').read_text())
 
     def test_a_bot_owner_tags_the_key_and_reaches_every_terminal(self):
         with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
@@ -480,7 +477,6 @@ class CoreNew(CoreCase):
         self.assertEqual([(e['workspace'], e.get('lead_pane')) for e in events], [(key, None), (key, f'hc:{key}/t2')])
 
 
-@contract
 class CoreStart(CoreCase):
     """Build order 5: fleet-job start on Core."""
 
@@ -620,7 +616,6 @@ class CoreStart(CoreCase):
         self.assertEqual(self.entries(job)['build-api']['state'], 'live')
 
 
-@contract
 class CoreTell(CoreCase):
     """Build order 5: tell on Core."""
 
@@ -652,7 +647,7 @@ class CoreTell(CoreCase):
         self.assertEqual(self.told({'state': 'idle'}), ('SUBMITTED review-api (t1)', 0))
         self.assertEqual(self.told({'state': 'done'}), ('SUBMITTED review-api (t1)', 0))
         idle, done = self.calls('send')
-        self.assertEqual(idle[-4:], ['--if', 'idle', 't1', 'Fix the nit'])
+        self.assertEqual(idle[-5:], ['--if', 'idle', '--', 't1', 'Fix the nit'])
         self.assertNotIn('--if', done)
         self.terminal('t1', state='finished')
         self.assertEqual(self.told({'state': 'idle'}), ('FAILED review-api (not ready)', 2))

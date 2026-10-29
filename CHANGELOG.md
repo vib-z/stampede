@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Herdr Core, in progress.** stampede is learning to run a whole job on Herdr Core (`hc` 0.1.13) next to the Herdr TUI; the TUI path does not change. So far: `HERDR_EVENTS_DIR` moves owner tags, job markers and the default routes folder (default `~/.config/herdr-events`, as before), and the settings `HC`, `HC_SESSION` and `HC_SOCKET` are in [config.example](config.example). `approve-gate` also refuses inside a Herdr Core terminal and under a `herdr-core` or `hc` process, so a bot runs it over plain ssh, never `hc exec`; in a Core job only the recorded yes counts, and no message offers a yes typed into the lead.
+- **Herdr Core, in progress.** stampede is learning to run a whole job on Herdr Core (`hc` 0.1.13) next to the Herdr TUI; the TUI path does not change. So far: `HERDR_EVENTS_DIR` moves owner tags, job markers and the default routes folder (default `~/.config/herdr-events`, as before), and the settings `HC`, `HC_SESSION` and `HC_SOCKET` are in [config.example](config.example). `approve-gate` also refuses inside a Herdr Core terminal and under a `herdr-core` or `hc` process, so a bot runs it over plain ssh, never `hc exec`; in a Core job only the recorded yes counts, and no message offers a yes typed into the lead. `stampede new --core --file <ask.md> [--cwd <repo>]` makes a Core job: its record first, then its follower, then the lead with its brief as the first prompt. `start` on a Core job takes `--cwd` instead of `--pane`, allows one live launch per agent, and reports `STARTED`, `BLOCKED`, `NOT READY` or `FAILED` from the agent's own status; `tell` prompts a Codex worker with `hc send` by its status. Cursor stays on the TUI.
 
 ## 0.1.5 (29 Oct 2026)
 
