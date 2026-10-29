@@ -707,5 +707,27 @@ class ReviewStall(CoreCase):
         self.assertTrue(any('--error' in p and '--title build-api left its terminal' in p for p in phone), phone)
 
 
+
+class ReviewTagEndpoint(Shell):
+    """parity W2: a Core owner tag names its job's core, and the watchdog asks that core, not its own."""
+
+    def test_a_tag_is_kept_while_its_own_core_runs_the_job(self):
+        self.fake('herdr', 'exit 1\n')
+        self.link('herdr-event-post', 'herdr-event-core')
+        socket_file, server = core_socket(self.home)
+        self.addCleanup(server.shutdown)
+        gone = self.home / '.local/state/herdr-events/watchdog/gone'
+        gone.mkdir(parents=True)
+        (self.events / 'owners' / KEY).write_text(f'owner=alpha\nsession=isolated\nsocket={socket_file}\n')
+        (gone / KEY).write_text(str(int(time.time()) - 90000) + '\n')
+        (self.home / 'core/isolated').mkdir(parents=True)
+        (self.home / 'core/isolated/state.json').write_text(json.dumps({'next': 2, 'terminals': {'t1': {
+            'address': 't1', 'state': 'live', 'labels': {'stampede.job': KEY}, 'status': None, 'turn': 0}}}))
+        result = self.run_script('herdr-event-watchdog', HC_SOCKET=str(socket_file))  # the watchdog's own core: no job there
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.events / 'owners' / KEY).exists(), 'its own core still runs the job')
+        self.assertFalse((self.home / 'core/calls').exists(), 'never asked the default core')
+
+
 if __name__ == '__main__':
     unittest.main()

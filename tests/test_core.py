@@ -1230,5 +1230,20 @@ class ReviewSessions(CoreCase):
         self.assertEqual((code, self.last_program()[1:3]), (0, ['--resume', session]))
 
 
+
+class ReviewTagCore(CoreCase):
+    """parity W2: a Core owner tag names the core its job runs on."""
+
+    def test_the_tag_carries_the_jobs_core(self):
+        with mock.patch.dict(os.environ, {'HC_SESSION': 'isolated', 'HERDR_EVENTS_OWNER': 'alpha'}):
+            self.assertEqual(self.new_core()[0], 0)
+        key = fj.job_key(self.job)
+        self.assertEqual((self.events / 'owners' / key).read_text(), 'owner=alpha\nsession=isolated\n')
+        (self.events / 'owners' / key).unlink()
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual((self.events / 'owners' / key).read_text(), 'owner=alpha\nsession=isolated\n')
+
+
 if __name__ == '__main__':
     unittest.main()

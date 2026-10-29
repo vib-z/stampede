@@ -1009,8 +1009,7 @@ def reopen(job, lead_only=False, prompt=False):
     if not finished:
         mark_job(key, job)
         if job_owner(job):
-            (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
-            (events_dir() / 'owners' / key).write_text('owner=' + job_owner(job) + '\n')
+            tag_owner(job, key, job_owner(job))
         relay = 'relay-' + key[3:]
         with launching(job, relay):
             if not live_terminal(job, relay):
@@ -1301,8 +1300,7 @@ def new_core(ask_file, name, review, fork, cwd):
     mark_job(key, job)
     (events_dir() / 'owners' / key).unlink(missing_ok=True)  # a folder used before (same path, same key) had its own
     if owner:
-        (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
-        (events_dir() / 'owners' / key).write_text('owner=' + owner + '\n')
+        tag_owner(job, key, owner)
     snapshot(job)  # reopen.sh exists before anything starts
     relay = 'relay-' + key[3:]
     try:
@@ -1329,6 +1327,13 @@ def new_core(ask_file, name, review, fork, cwd):
         print(lead + ' ' + str(job))
         return 0
     return 1
+
+
+def tag_owner(job, key, owner):
+    """A Core job's owner tag: its bot, and the core it runs on (when not the default), which the watchdog asks."""
+    point = endpoint(job)
+    (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
+    (events_dir() / 'owners' / key).write_text(f'owner={owner}\n' + ''.join(f'{k}={point[k]}\n' for k in ('session', 'socket') if point.get(k)))
 
 
 def start_failed(job, key, relay, reason):

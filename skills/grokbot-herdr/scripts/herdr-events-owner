@@ -17,6 +17,13 @@ case "${2:-}" in
      if [ "$core" = 1 ]; then [ -f "$EV/jobs/$ws" ] || { echo "no open Core job $ws (no marker in $EV/jobs)" >&2; exit 2; }
      else herdr workspace get "$ws" >/dev/null 2>&1 || { echo "no live workspace $ws" >&2; exit 2; }; fi
      printf 'owner=%s\n' "$2" > "$D/$ws"; echo "$ws owner=$2"
+     if [ "$core" = 1 ]; then   # the core the job runs on, for the watchdog
+       point="$(head -1 "$EV/jobs/$ws")/endpoint"
+       for k in session socket; do
+         v=$(jq -r ".$k // empty" "$point" 2>/dev/null || true)
+         if [ -n "$v" ]; then printf '%s=%s\n' "$k" "$v" >> "$D/$ws"; fi
+       done
+     fi
      [ "$core" = 1 ] || herdr workspace report-metadata "$ws" --source bots --token "owner=$2" >/dev/null 2>&1 || echo "note: sidebar label not set" >&2
      [ -r "${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the default route" >&2;;
 esac
