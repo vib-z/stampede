@@ -7,20 +7,24 @@ it as relay-<12 hex of the key> in the job's launch environment; reopen.sh start
   herdr-event-core --alive     exit 0 when the selected core answers hello on its socket, else 1; never starts a core
 
 To the lead, in <job>/inbox.log, for every terminal but the lead's and its own: BLOCKED <agent> <kind>, ERROR <agent> <msg>,
-GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone).
+GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone),
+STALE <agent> no new output for <N>m (working, and its screen unchanged for HERDR_EVENTS_STALE_MINUTES, default 30).
+With FLEET_WATCH_NOTIFY=1 a stall and a terminal's end also go straight to the owner's phone (moshi-hook notify).
 To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, workspace <key>): blocked, error, done and idle
-turn ends, dead (it finished while working or blocked, or failed with no status ever, or was lost) and relay_down,
+turn ends, stale (with minutes_unchanged), dead (it finished while working or blocked, or failed with no status ever, or
+was lost) and relay_down,
 each with an event_id (<key>/<address>|<state>|<episode>, ...|turn|<n>, ...|finished), so the relay never merges two.
 <job>/relay-state.json keeps what it saw and sent, and every bot event the relay did not take (retried every
 RETRY_EVERY seconds, after a reconnect and a restart too, until it does), so a restarted follower resumes and never
 sends one thing twice."""
-import fcntl, json, os, re, socket, subprocess, sys, time
+import fcntl, hashlib, json, os, re, shutil, socket, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GIVE_UP = 600  # seconds of failed reconnects before RELAY DOWN
 RETRY_EVERY = 30  # seconds between tries of the bot events the relay did not take
-clock, sleep = time.monotonic, time.sleep
+STALL_EVERY = 60  # seconds between reads of the working terminals' screens
+clock, sleep, wall = time.monotonic, time.sleep, time.time
 FRESH = {'status': None, 'last': None, 'turn': 0, 'finished': False, 'reported': {}, 'episodes': {}}
 
 
@@ -75,6 +79,25 @@ def hc(*args):
         return result.returncode or 1, {}
 
 
+def stale_after():
+    """Seconds a working terminal's screen may stay unchanged: HERDR_EVENTS_STALE_MINUTES, the TUI watchdog's 30 by default."""
+    try:
+        return max(1, int(os.environ.get('HERDR_EVENTS_STALE_MINUTES') or 30)) * 60
+    except ValueError:
+        return 1800
+
+
+def phone(title, text, error=False):
+    """The owner's phone, straight (moshi-hook notify), only with FLEET_WATCH_NOTIFY=1; best effort, never in the way."""
+    if os.environ.get('FLEET_WATCH_NOTIFY') != '1' or not shutil.which('moshi-hook'):
+        return
+    try:
+        subprocess.run(['moshi-hook', 'notify', '--source', 'herdr-fleet', '--label', 'herdr fleet', *(['--error'] if error else []),
+                        '--title', title, text], capture_output=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
 def append(path, text):
     with open(path, 'a') as out:
         fcntl.flock(out, fcntl.LOCK_EX)
@@ -92,6 +115,7 @@ class Follower:
         state = json.loads(path.read_text()) if path.is_file() else {}
         self.terminals, self.sent, self.floor = state.get('terminals', {}), set(state.get('sent', [])), None
         self.unsent, self.retried = state.get('unsent', {}), None  # identity -> event, for the bot, not yet taken
+        self.checked = None
         self.known()
 
     def closed(self):
@@ -177,8 +201,10 @@ class Follower:
         record = self.terminals[address]
         if record['finished']:
             return
+        word, before = (status or {}).get('state'), (record['status'], record['turn'])
         record['turn'] = max(record['turn'], turn or 0)
-        word = (status or {}).get('state')
+        if (word, record['turn']) != before:
+            record.pop('stall', None)  # a status or turn change is progress
         if word in ('blocked', 'error') and (record['status'] != word or record['turn'] > record['reported'].get(word, -1)):
             record['episodes'][word] = record['episodes'].get(word, 0) + 1
             record['reported'][word] = record['turn']
@@ -195,6 +221,8 @@ class Follower:
 
     def turned(self, address, data):
         record, n, word = self.terminals[address], data.get('turn') or 0, data.get('state')
+        if n != record['turn']:
+            record.pop('stall', None)
         record['turn'] = max(record['turn'], n)
         if word in ('blocked', 'error') and record['status'] == word:
             record['reported'][word] = max(record['reported'].get(word, -1), n)  # the episode already told is this turn's
@@ -211,12 +239,15 @@ class Follower:
         if record['role'] == 'wait':
             return self.notify(f'{address}|finished', address, f'WAITED {agent} exit {shown}')
         dead = record['last'] in ('working', 'blocked') or (record['last'] is None and code != 0)
+        phone(f'{agent} left its terminal', f'{reason}, exit {shown} (Herdr Core job {self.key}).', error=True)
         self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else f'GONE {agent} {reason} exit {shown}',
                     {'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason} if dead else None)
 
     def lost(self, address):
         record = self.terminals[address]
         record['finished'] = True
+        if record['role'] != 'wait':
+            phone(f'{record["agent"]} left its terminal', f'Its record is gone (Herdr Core job {self.key}).', error=True)
         self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else f'LOST {record["agent"]}',
                     None if record['role'] == 'wait' else {'state': 'dead', 'last_state': record['last'], 'reason': 'lost'})
 
@@ -272,7 +303,34 @@ class Follower:
             self.snapshot(row['params'].get('terminals', []))
         elif row.get('method') == 'event' and (self.floor is None or (row['params'].get('seq') or 0) > self.floor):
             self.event(row['params'])
+        self.stalls()
         return not self.closed()
+
+    def stalls(self):
+        """A working terminal whose screen has not changed for stale_after(), with no status or turn change, is told once
+        per stall; new output resets it, and a read Core does not answer is no stall (its clock starts again)."""
+        if self.checked is not None and clock() - self.checked < STALL_EVERY:
+            return
+        self.checked, now, limit = clock(), wall(), stale_after()
+        for address, record in self.terminals.items():
+            if record['finished'] or record['role'] in ('relay', 'wait') or record['status'] != 'working':
+                record.pop('stall', None)
+                continue
+            code, read = hc('read', address, '--lines', '40')
+            if code != 0:
+                record.pop('stall', None)
+                continue
+            digest, stall = hashlib.sha256(read.get('text', '').encode()).hexdigest(), record.get('stall')
+            if not stall or stall['hash'] != digest:
+                record['stall'] = {'hash': digest, 'since': now, 'told': False}
+            elif not stall['told'] and now - stall['since'] >= limit:
+                stall['told'], record['stalls'] = True, record.get('stalls', 0) + 1
+                minutes, agent = int((now - stall['since']) // 60), record['agent']
+                self.notify(f'{address}|stale|{record["stalls"]}', address,
+                            None if record['role'] == 'lead' else f'STALE {agent} no new output for {minutes}m',
+                            {'state': 'stale', 'minutes_unchanged': minutes})
+                phone(f'{agent} may be stuck', f'Working, but its screen has not changed for {minutes}m (Herdr Core job {self.key}).')
+        self.save()
 
     def stream(self):
         """One connection's lines; seq restarts with each core process, so it is compared within one connection only."""

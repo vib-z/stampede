@@ -40,7 +40,7 @@ The relay scripts live in `scripts/` here and are copied to `~/.local/bin` on th
 - Codex sub-agents, the `--approve-for-me` guardian and Codex's chat-title side conversation never report "done"; only the agent's own turn does.
 - After an outage only each pane's newest queued event is delivered; older ones go to `~/.herdr-events/dead/*.superseded`.
 - Owner tags for workspaces gone a day, and malformed tags, are removed by the watchdog.
-- A Herdr Core job (`fleet-job new --core`) has a key `hc-<12 hex>` in place of a workspace id, and its follower `herdr-event-core` posts `source` `hc` (blocked, error, done, idle, dead, relay_down) with `pane` `hc:<key>/<address>`: read that terminal once with `hc read <address>` ([events.md](../../remote/events.md#a-herdr-core-job)).
+- A Herdr Core job (`fleet-job new --core`) has a key `hc-<12 hex>` in place of a workspace id, and its follower `herdr-event-core` posts `source` `hc` (blocked, error, done, idle, stale, dead, relay_down) with `pane` `hc:<key>/<address>`: read that terminal once with `hc read <address>` ([events.md](../../remote/events.md#a-herdr-core-job)).
 
 ## Step 1. Connect
 Every call: `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '<herdr command>'`. If herdr isn't found, prefix `export PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH;`.

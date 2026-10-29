@@ -8,6 +8,7 @@ State is FAKE_HC/state.json; every call is one JSON line in FAKE_HC/calls. A tes
   send_error {address: kind}     `send` to it fails with this error kind
   get_error {address: kind}      `get` of it fails with this error kind
   ls_error  kind                 every `ls` fails with this error kind
+  read_error {address: kind}     `read` of it fails with this error kind
   lookup_error kind              after a `run` fails, every `ls` fails with this kind (a lost answer, then no lookup)
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
@@ -128,6 +129,8 @@ def command(state, argv):
             del state['terminals'][t['address']]
             return print(json.dumps({'removed': t['address']}))
         if cmd == 'read':
+            if state.get('read_error', {}).get(t['address']):
+                fail(state['read_error'][t['address']], 'no answer')
             return print(json.dumps({'text': t.get('screen', 'last screen line'), 'complete': True, 'how': 'screen'}))
         return print(json.dumps({'turn': t['turn'], 'status': word(t)}))
     if cmd == 'send':

@@ -202,7 +202,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 
 **What lives where.** Your Mac, always on, runs Herdr, the lead and the workers. A bot such as Grok Bot runs on its own computer and reaches the Mac over SSH and Tailscale. Or the whole thing runs on one remote computer. Either way, the lead and its workers share one machine; workers on a second machine are [planned](#status-and-roadmap).
 
-**On Herdr Core** the same flow runs in Core terminals instead of panes: the brief pointer is each agent's first prompt, `tell` prompts Codex with `hc send` by its status, and the job's follower, `herdr-event-core`, adds `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST` and `RELAY DOWN` lines to `inbox.log` and posts `source` `hc` events for a bot ([Herdr Core](#herdr-core)).
+**On Herdr Core** the same flow runs in Core terminals instead of panes: the brief pointer is each agent's first prompt, `tell` prompts Codex with `hc send` by its status, and the job's follower, `herdr-event-core`, adds `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines to `inbox.log` and posts `source` `hc` events for a bot ([Herdr Core](#herdr-core)).
 
 <details>
 <summary><b>The job folder</b></summary>
@@ -464,10 +464,11 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `FLEET_TRUST_ROOT` | `~/code` | `herdr-trust` trusts repos only under it; `herdr-doctor` checks worktrees there |
 | `FLEET_WATCH_INTERVAL` | `30` | seconds between `fleet-watch.sh` passes (a bot outside Herdr) |
 | `FLEET_WATCH_PASSES` | `0` | stop the watch after this many passes; 0 runs until stopped |
-| `FLEET_WATCH_NOTIFY` | `1` | `0` turns off the watch's phone push |
+| `FLEET_WATCH_NOTIFY` | `1` | `0` turns off the watch's phone push. A Herdr Core job's follower pushes stalls and ended terminals to the phone (`moshi-hook notify`) only when it is `1`; unset, it does not |
 | `HERDR_EVENTS_MACHINE` | `hostname -s` | the machine label sent with every event |
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
 | `HERDR_EVENTS_ROUTES_DIR` | `$HERDR_EVENTS_DIR/routes` | one file per route, `URL=` and `KEY=` |
+| `HERDR_EVENTS_STALE_MINUTES` | `30` | a Herdr Core job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
 | `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
 | `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
@@ -567,7 +568,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 | `<job>/reopen.sh` (a Core job) | starts only what is not live, each once: for an open job its marker, owner tag and follower, then the lead (session resumed) and each worker (Claude resumed, Codex fresh); `--lead` only the follower and the lead; `--prompt` sends a restarted Codex worker its brief. A Claude session is resumed only when it is known to have run, started fresh when it never ran, and otherwise left alone with an `UNKNOWN` line. A restarted lead must take `REOPENED <lead> <attempt>` through its wake hook in both inbox files, retried every 5 s for 90 s; until both are acknowledged `<job>/reopen-pending` stays, and every later reopen asks again, even with the lead live | 0, 1 a restart `FAILED` (the follower ended at once, say) or was `UNKNOWN`, 2 another caller is starting one of them, 3 the lead did not acknowledge a file (printed, with the line to write by hand) |
 | `herdr-doctor [--relay] [--core]` | read-only health check: `ok`, `warn`, `PROBLEM` lines; `-h` prints usage. `--core` checks Herdr Core in place of the Herdr TUI: `hc` 0.1.13 or later, the selected core answering on its socket (never started), Claude 2.1.295 or later (OSC 7501 status), Codex's `--no-daemon`, and warns that Cursor runs on the TUI only. The core install by default; the event relay too when it is installed, or with `--relay`. For a GitHub-managed plugin, `stampede` or a skill outside the checkout Herdr reports is a `PROBLEM`. A newer stampede release, or no `FLEET_TRUST_ROOT` folder, is a `warn` | 0 ok, 1 a PROBLEM, 2 usage |
 | `herdr-events-owner <ws> [<bot>\|--clear]` | tags a workspace with the bot its events go to; also a Herdr Core job's key `hc-<12 hex>`, while that job is open | 0, or 2 refused |
-| `herdr-event-core <job dir>` | the follower of a Herdr Core job, started by `stampede new --core` as `relay-<12 hex>`: follows the job's terminals, writes `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST` and `RELAY DOWN` lines for the lead and posts `source` `hc` events for the bot ([remote/events.md](remote/events.md#a-herdr-core-job)); `--alive` asks the selected core's socket for `hello`, never starting a core | 0 the job finished or never started, 1 relay down; `--alive`: 0 up, 1 down; 2 usage |
+| `herdr-event-core <job dir>` | the follower of a Herdr Core job, started by `stampede new --core` as `relay-<12 hex>`: follows the job's terminals, writes `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines for the lead and posts `source` `hc` events for the bot ([remote/events.md](remote/events.md#a-herdr-core-job)); `--alive` asks the selected core's socket for `hello`, never starting a core | 0 the job finished or never started, 1 relay down; `--alive`: 0 up, 1 down; 2 usage |
 | `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md). While a job marker is present, a plain turn end in that workspace exits 0 without sending | 0; `herdr-event-post --strict` (a job's questions, gates, and finish when a bot started the job): 3 no route of its own, 4 not queued |
 </details>
 

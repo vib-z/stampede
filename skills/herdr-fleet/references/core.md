@@ -65,6 +65,7 @@ The agents' own hooks carry over: your file hook, a worker's Stop and question c
 | `ERROR <agent> <msg>` | a worker reported an error and stopped |
 | `GONE <agent> <reason> exit <code>` | a worker's terminal ended, a hard kill included |
 | `LOST <agent>` | its terminal's record was gone when the follower looked again |
+| `STALE <agent> no new output for <N>m` | a worker says working, but its screen and status have not changed for `HERDR_EVENTS_STALE_MINUTES` (30): `hc read <address>` |
 | `WAITED <name> exit <code>` | a wait terminal ended |
 | `RELAY DOWN <reason>` | the follower gave up after 10 minutes without Core: once Core is up, `bash <job>/reopen.sh --lead` |
 | `REOPENED <lead> <attempt>` | reopen restarted you: read every line since |

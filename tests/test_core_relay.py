@@ -634,5 +634,78 @@ class ReviewRetry(CoreCase):
         self.hang_then_post(restart=True)
 
 
+
+class ReviewStall(CoreCase):
+    """parity G1 and W8: a working Core terminal whose output stops changing is told once per stall, as the TUI watchdog
+    tells a stale pane; any progress resets it; a failed read is no stall; the phone push is opt-in."""
+
+    def setUp(self):
+        super().setUp()
+        self.job_dir, self.key = self.core_job(workers=[('build-api', 'claude')], owner='alpha')
+        (self.job_dir / 'core.json').write_text(json.dumps({'lead-demo': {'state': 'live', 'address': 't1', 'role': 'lead'},
+                                                            'build-api': {'state': 'live', 'address': 't3', 'role': 'worker'}}))
+        for address, agent in (('t1', 'lead-demo'), ('t3', 'build-api')):
+            self.add_terminal(address, name=agent, screen='compiling', status={'state': 'working'},
+                              labels={'stampede.job': self.key, 'stampede.agent': agent})
+        (self.bin / 'moshi-hook').write_text(f'#!/bin/sh\necho "$*" >> {self.root}/phone\n')
+        (self.bin / 'moshi-hook').chmod(0o755)
+        self.now, self.posts = [0.0], []
+        for name in ('FLEET_WATCH_NOTIFY', 'HERDR_EVENTS_STALE_MINUTES'):  # a developer's own settings stay out
+            os.environ.pop(name, None)
+
+    def run_minutes(self, *steps, notify=None, minutes=None):
+        """steps: (minute, action); each heartbeat at that minute after the action."""
+        core = follower_module()
+        env = {k: v for k, v in (('FLEET_WATCH_NOTIFY', notify), ('HERDR_EVENTS_STALE_MINUTES', minutes)) if v is not None}
+        with mock.patch.object(core.Follower, 'post', lambda follower, event: self.posts.append(event)), \
+                mock.patch.object(core, 'wall', lambda: self.now[0]), mock.patch.object(core, 'STALL_EVERY', 0), \
+                mock.patch.dict(os.environ, env):
+            follower = core.Follower(self.job_dir)
+            records = [{'address': a, 'name': n, 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
+                        'labels': {'stampede.job': self.key, 'stampede.agent': n}} for a, n in (('t1', 'lead-demo'), ('t3', 'build-api'))]
+            follower.line({'channel': None, 'seq': 1, 'terminals': records})
+            for minute, action in steps:
+                self.now[0] = minute * 60
+                if action:
+                    row = action()
+                    if row:
+                        follower.line(row)
+                follower.line({'jsonrpc': '2.0', 'method': 'heartbeat', 'params': {'seq': 1}})
+
+    def inbox(self):
+        path = self.job_dir / 'inbox.log'
+        return path.read_text().splitlines() if path.is_file() else []
+
+    def stale(self):
+        return [(e['agent'], e['minutes_unchanged'], e['event_id']) for e in self.posts if e['state'] == 'stale']
+
+    def test_once_per_stall_and_progress_resets(self):
+        screen = lambda text: (lambda: self.terminal('t3', screen=text))
+        self.run_minutes((29, None), (31, None), (45, None), (46, screen('linking')), (75, None), (77, None))
+        self.assertEqual(self.inbox(), ['STALE build-api no new output for 31m', 'STALE build-api no new output for 31m'])
+        self.assertEqual(self.stale(), [('lead-demo', 31, f'{self.key}/t1|stale|1'), ('build-api', 31, f'{self.key}/t3|stale|1'),
+                                        ('build-api', 31, f'{self.key}/t3|stale|2')])
+        self.assertFalse((self.root / 'phone').exists(), 'no phone push unless FLEET_WATCH_NOTIFY=1')
+
+    def test_a_status_or_turn_change_is_progress(self):
+        self.run_minutes((20, lambda: turn('t3', 1, 'done')), (21, lambda: status('t3', 'working')), (45, None), (52, None))
+        self.assertEqual([agent for agent, _, _ in self.stale()], ['lead-demo', 'build-api'])
+        self.assertEqual(self.inbox(), ['STALE build-api no new output for 32m'])
+
+    def test_a_failed_read_is_no_stall(self):
+        self.shape(read_error={'t3': 'unavailable'})
+        self.run_minutes((31, None), (40, lambda: self.shape(read_error={})), (41, None), (60, None))
+        self.assertEqual(self.inbox(), [])
+        self.assertEqual([agent for agent, _, _ in self.stale()], ['lead-demo'])
+
+    def test_the_threshold_and_the_phone_follow_their_settings(self):
+        self.run_minutes((11, None), (12, lambda: self.terminal('t3', state='finished', status=None) or finished('t3', 0)),
+                         notify='1', minutes='10')
+        self.assertEqual(self.inbox(), ['STALE build-api no new output for 11m', 'GONE build-api exited exit 0'])
+        phone = (self.root / 'phone').read_text().splitlines()
+        self.assertTrue(any('--title build-api may be stuck' in p for p in phone), phone)
+        self.assertTrue(any('--error' in p and '--title build-api left its terminal' in p for p in phone), phone)
+
+
 if __name__ == '__main__':
     unittest.main()
