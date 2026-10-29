@@ -13,6 +13,7 @@ A front door is anything that can run a command on the machine where Herdr runs:
 ## Run
 ```bash
 stampede new --file <ask.md>                          # add --review when the owner asks to see the plan first
+stampede new --core --file <ask.md> --cwd <repo>      # the whole job on Herdr Core instead of the Herdr TUI
 stampede tell <job dir> lead "<the owner's words>"    # a change or an answer, word for word
 stampede approve <job dir> --by "<front door>"        # only in a review job, after the owner's yes to the plan
 stampede approve-gate <job dir> <gate> --sha <commit> --by "owner in <bot> chat"   # a bot, outside Herdr, after the owner's yes to that gate

@@ -10,6 +10,7 @@ The short version is in the [README](../README.md#install). This page adds the d
 - [Unattended agents](#unattended-agents)
 - [Configure](#configure)
 - [The event relay, for a remote bot](#the-event-relay-for-a-remote-bot)
+- [Herdr Core](#herdr-core)
 - [Uninstall](#uninstall)
 - [Setup problems](#setup-problems)
 
@@ -68,7 +69,7 @@ The relay is optional for a lead inside Herdr. Its checks run when a routes dire
 
 With no relay configuration, one line says `ok event relay not installed (optional): herdr-doctor --relay checks it`. Remote bots always run `herdr-doctor --relay`, even before relay setup, so missing hooks, helpers, timers, plugin or routes remain a `PROBLEM`.
 
-Flags: `--relay` forces relay checks; `-h` / `--help` prints usage. Exit 0 means no `PROBLEM`, 1 means at least one `PROBLEM`, 2 means a usage error. Warnings do not change the exit code. The doctor reads state only and never fixes settings or prints route contents.
+Flags: `--relay` forces relay checks; `--core` checks Herdr Core in place of the Herdr TUI ([Herdr Core](#herdr-core)); `-h` / `--help` prints usage. Exit 0 means no `PROBLEM`, 1 means at least one `PROBLEM`, 2 means a usage error. Warnings do not change the exit code. The doctor reads state only and never fixes settings or prints route contents.
 
 ## Unattended agents
 
@@ -95,6 +96,14 @@ This is optional for local use and required for a bot that receives job events. 
 3. The Claude Code and Codex hooks that send turn ends: [remote/events.md, Hooks](../remote/events.md#hooks).
 4. The watchdog and the queue flusher, every few minutes: [remote/watchdogs.md](../remote/watchdogs.md).
 5. `herdr-doctor --relay`: no `PROBLEM` lines; read and report warnings.
+
+## Herdr Core
+
+Optional: a job can run on [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) in place of the Herdr TUI ([README, Herdr Core](../README.md#herdr-core)). Install it with its own installer (`curl -fsSL https://releases.herdr.dev/core/install.sh | sh`, into `~/.local/bin/herdr-core` with `hc` beside it), start its core yourself, then run `herdr-doctor --core`:
+- `hc` 0.1.13 or later, and the selected core answering on its socket (`HC_SESSION`, `HC_SOCKET`; asked for `hello` directly, so the check never starts a core).
+- Claude Code 2.1.295 or later, which reports its status (OSC 7501); Codex with `--no-daemon`, if installed. Cursor is a `warn`: stampede runs it on the TUI only.
+
+The rest of the setup is the same: `herdr-trust` for each repo, and the [unattended settings](../skills/herdr-fleet/references/unattended-setup.md). `HC`, `HC_SESSION` and `HC_SOCKET` go in your config like every other key; stampede passes them, with the rest of your settings, to every terminal of a Core job. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events.md](../remote/events.md#a-herdr-core-job)).
 
 ## Uninstall
 
