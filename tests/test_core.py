@@ -889,5 +889,83 @@ class ReviewBrief(CoreCase):
         self.assertEqual(fj.agent_rows(job)['review-api']['brief'], str(brief))
 
 
+
+class ReviewUnknown(CoreCase):
+    """review-codex R1 and R6: only a confirmed absence or exit takes a start back; an unknown outcome keeps the job."""
+
+    def relay_name(self):
+        return 'relay-' + fj.job_key(self.job)[3:]
+
+    def test_a_lost_run_answer_and_a_failed_lookup_take_nothing_back(self):
+        self.shape(run_error={LEAD: 'unavailable'}, spawn_also=True, ls_error='unavailable')
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
+            code, out = self.new_core()
+        key = fj.job_key(self.job)
+        self.assertEqual(code, 1)
+        self.assertIn(f'UNKNOWN {LEAD}:', out)
+        self.assertIn(str(self.job / 'reopen.sh'), out)
+        self.assertNotIn('FAILED', out)
+        self.assertTrue((self.events / 'jobs' / key).exists())
+        self.assertTrue((self.events / 'owners' / key).exists())
+        self.assertFalse((self.job / 'start-failed').exists())
+        self.assertEqual(self.entries(self.job)[LEAD]['state'], 'starting')
+        self.assertEqual([t['state'] for t in self.state()['terminals'].values()], ['live', 'live'])
+        self.shape(ls_error=None)
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, out = self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.calls('run')), 2, 'adopted by its labels, never a second launch')
+        self.assertEqual((self.entries(self.job)[LEAD]['state'], self.entries(self.job)[LEAD]['address']), ('live', 't2'))
+
+    def test_a_lead_that_never_started_is_started_fresh_with_its_own_session(self):
+        self.shape(run_error={LEAD: 'unavailable'}, ls_error='unavailable')
+        self.assertEqual(self.new_core()[0], 1)
+        session = fj.agent_rows(self.job)[LEAD]['session']
+        self.shape(run_error={}, ls_error=None)
+        with mock.patch.object(fj, 'acknowledged', return_value=0):
+            code, _ = self.quiet(fj.reopen, self.job, lead_only=True)
+        program = self.program(self.calls('run')[-1])
+        self.assertEqual(code, 0)
+        self.assertNotIn('--resume', program)
+        self.assertEqual(program[program.index('--session-id') + 1], session)
+        self.assertTrue(program[-1].startswith(f'You are {LEAD}'))
+
+    def test_a_worker_whose_start_core_cannot_confirm_is_never_launched_twice(self):
+        job, _ = self.core_job()
+        self.shape(run_error={'build-api': 'unavailable'}, spawn_also=True, lookup_error='unavailable')
+        code, out = self.quiet(fj.start, job, 'build-api', 'claude', None, str(self.brief(job, 'build-api')))
+        self.assertEqual(code, 1)
+        self.assertIn('UNKNOWN build-api:', out)
+        self.assertEqual(self.entries(job)['build-api']['state'], 'starting')
+        self.shape(ls_error=None, lookup_error=None)
+        with self.assertRaises(ValueError) as refused:
+            self.quiet(fj.start, job, 'build-api', 'claude', None, str(self.brief(job, 'build-api')))
+        self.assertIn('already running at t1', str(refused.exception))
+        self.assertEqual(len(self.calls('run')), 1)
+
+    def test_a_follower_that_exits_at_start_fails_new_truthfully(self):
+        self.shape(on_run={self.relay_name(): {'state': 'finished', 'status': None, 'exit_code': 1, 'reason': 'exited',
+                                               'screen': 'Traceback: no workspace file'}})
+        code, out = self.new_core()
+        self.assertEqual(code, 1)
+        self.assertIn(f'FAILED {self.relay_name()}', out)
+        self.assertIn('no workspace file', out)
+        self.assertEqual(len(self.calls('run')), 1, 'no lead without its follower')
+        self.assertEqual(self.entries(self.job)[self.relay_name()]['state'], 'failed')
+        self.assertTrue((self.job / 'start-failed').exists())
+        self.assertFalse((self.events / 'jobs' / fj.job_key(self.job)).exists())
+
+    def test_a_follower_that_exits_at_reopen_is_failed_and_said(self):
+        self.new_core()
+        relay = self.relay_name()
+        self.terminal(self.entries(self.job)[relay]['address'], state='finished', reason='host_shutdown')
+        self.shape(on_run={relay: {'state': 'finished', 'status': None, 'exit_code': 1, 'reason': 'exited'}})
+        code, out = self.quiet(fj.reopen, self.job, lead_only=True)
+        self.assertEqual(code, 1)
+        self.assertIn(f'FAILED {relay}', out)
+        self.assertEqual(self.entries(self.job)[relay]['state'], 'failed')
+        self.assertEqual(self.entries(self.job)[LEAD]['state'], 'live')
+
+
 if __name__ == '__main__':
     unittest.main()

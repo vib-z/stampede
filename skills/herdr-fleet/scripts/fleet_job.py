@@ -609,6 +609,19 @@ def hc(*args):
     return json.loads(result.stdout or '{}')
 
 
+class CoreUnknown(RuntimeError):
+    """An hc call failed where its answer decides whether an agent started, so nothing may be taken back."""
+    def __init__(self, agent, message):
+        super().__init__(message)
+        self.agent = agent
+
+
+def unknown(job, error):
+    print(f'UNKNOWN {error.agent}: {line(error)}. Nothing was taken back: once Herdr Core answers, run bash '
+          f'{Path(job).absolute() / "reopen.sh"}, which adopts it by its labels or starts it, never a second copy')
+    return 1
+
+
 def core_entries(job):
     path = Path(job) / 'core.json'
     return json.loads(path.read_text()) if path.is_file() else {}
@@ -783,8 +796,9 @@ def core_run(job, agent, role, program, cwd):
     lock, and bind it. A failed hc run that spawned all the same (a call that timed out) is adopted by its labels;
     otherwise the entry is failed and the error raised."""
     key = core_key(job)
+    before = core_entries(job).get(agent, {})
     bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), 'session': os.environ.get('HC_SESSION', ''),
-                      'socket': os.environ.get('HC_SOCKET', '')}, fresh=True)
+                      'socket': os.environ.get('HC_SOCKET', ''), 'ran': bool(before.get('ran'))}, fresh=True)
     labels = [part for k, v in (('job', key), ('agent', agent), ('role', role)) for part in ('--label', f'stampede.{k}={v}')]
     name = agent
     while True:
@@ -796,26 +810,34 @@ def core_run(job, agent, role, program, cwd):
             if error.kind == 'name_taken' and name == agent:
                 name = agent[:27] + '-' + key[3:7]  # another job's terminal holds the name; identity is the address
                 continue
-            spawned = hc('ls', *labels[:4]).get('terminals', [])
+            try:
+                spawned = hc('ls', *labels[:4]).get('terminals', [])
+            except HcError as lookup:  # the entry stays starting: a later start or reopen reconciles it by its labels
+                raise CoreUnknown(agent, f'hc run answered {line(error)}, and hc ls could not tell whether it started '
+                                         f'({line(lookup)})') from None
             if not spawned:
                 bind(job, agent, {'state': 'failed', 'reason': line(error)})
                 raise
             terminal = spawned[0]
             break
-    bind(job, agent, {'state': 'live', 'address': terminal['address'], 'name': terminal.get('name') or name})
+    bind(job, agent, {'state': 'live', 'address': terminal['address'], 'name': terminal.get('name') or name, 'ran': True})
     return terminal['address']
 
 
-def core_outcome(job, agent, address, who, brief):
+def core_outcome(job, agent, address, who, brief, plain=False):
     """After a launch, from the agent's own status: 'started' (working, idle or done), 'not ready' (a live terminal that
-    is blocked, at an error or silent after 30 s: it stays this job's agent), or 'failed' (its terminal finished)."""
+    is blocked, at an error or silent after 30 s: it stays this job's agent), or 'failed' (its terminal finished).
+    plain: a program with no status (the follower): live after 3 s is 'started'; Core not answering is 'unknown'."""
     try:
-        hc('wait', address, '--timeout', '30')
+        hc('wait', address, '--timeout', '3' if plain else '30')
     except HcError:
         pass
     try:
         terminal = hc('get', address)
-    except HcError as error:  # unconfirmed: the agent may run, so it stays this job's agent
+    except HcError as error:  # unconfirmed: it may run, so it stays this job's
+        if plain:
+            unknown(job, CoreUnknown(agent, f'started as {address}, then hc get failed ({line(error)})'))
+            return 'unknown'
         print(f'NOT READY {agent}: {line(error)}; read it with hc read {address} once Herdr Core answers')
         return 'not ready'
     word = core_status(terminal)
@@ -828,6 +850,8 @@ def core_outcome(job, agent, address, who, brief):
         bind(job, agent, {'state': 'failed', 'reason': reason})
         print(f'FAILED {agent} ({reason}): {line(tail)}')
         return 'failed'
+    if plain:
+        return 'started'
     if word in ('working', 'idle', 'done'):
         print(f'STARTED {agent} ({address})')
         return 'started'
@@ -851,7 +875,10 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
     if yolo_in is not None and Path(yolo_in).expanduser().resolve() != cwd:
         raise PermissionError(f'--yolo-in {yolo_in} must be the --cwd the worker starts in ({cwd}): its own worktree')
     with launching(job, agent):
-        running = live_terminal(job, agent)
+        try:
+            running = live_terminal(job, agent)
+        except HcError as error:
+            raise ValueError(f'Herdr Core did not answer ({line(error)}): cannot tell whether {agent} runs, so nothing started') from None
         if running:
             raise ValueError(f'{agent} is already running at {running["address"]}')
         args = cli_args(job, agent, kind, model, effort, list(reports), lead=lead, yolo_in=cwd if yolo_in is not None else None)
@@ -860,7 +887,11 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
         program = [cli(kind)] + args + (['--session-id', session] if session else [])
         record(job, agent, kind, brief, args, session)
         pointer = f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
-        address = core_run(job, agent, 'lead' if lead else 'worker', program + [pointer], cwd)
+        try:
+            address = core_run(job, agent, 'lead' if lead else 'worker', program + [pointer], cwd)
+        except CoreUnknown as error:
+            snapshot(job)
+            return unknown(job, error)
         snapshot(job)
         return 0 if core_outcome(job, agent, address, 'lead' if lead else agent, brief) == 'started' else 1
 
@@ -892,7 +923,7 @@ def reopen(job, lead_only=False, prompt=False):
     lead of an open job must acknowledge both its inbox files (exit 3 when it does not)."""
     job = Path(job).absolute()
     key, (people, lead), rows = core_key(job), roster(job), agent_rows(job)
-    finished = (job / 'finished').is_file()
+    finished, outcomes = (job / 'finished').is_file(), {}
     if not finished:
         mark_job(key, job)
         if job_owner(job):
@@ -901,33 +932,50 @@ def reopen(job, lead_only=False, prompt=False):
         relay = 'relay-' + key[3:]
         with launching(job, relay):
             if not live_terminal(job, relay):
-                print(f'RESTARTED {relay} ({core_run(job, relay, "relay", [str(FOLLOWER), str(job)], job.parent)})')
-    restarted = [agent for agent in [lead] + ([] if lead_only else [a for a in people if a != lead])
-                 if reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead)]
+                outcomes[relay] = reopen_run(job, relay, 'relay', [str(FOLLOWER), str(job)], job.parent, plain=True)
+    for agent in [lead] + ([] if lead_only else [a for a in people if a != lead]):
+        outcomes[agent] = reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead)
     snapshot(job)
-    if not restarted:
+    if not [agent for agent, outcome in outcomes.items() if outcome != 'live']:
         print(f'LIVE {key}: no agent to restart')
-    return acknowledged(job, lead) if lead in restarted and not finished else 0
+    code = 1 if [outcome for outcome in outcomes.values() if outcome in ('failed', 'unknown')] else 0
+    return (acknowledged(job, lead) or code) if outcomes.get(lead) == 'started' and not finished else code
+
+
+def reopen_run(job, agent, role, program, cwd, plain=False):
+    """One restart and what came of it: 'started', 'failed' (confirmed, said) or 'unknown' (kept, said)."""
+    try:
+        address = core_run(job, agent, role, program, cwd)
+    except CoreUnknown as error:
+        unknown(job, error)
+        return 'unknown'
+    except HcError as error:
+        print(f'FAILED {agent} ({line(error)}): it did not start')
+        return 'failed'
+    print(f'RESTARTED {agent} ({address})')
+    if plain and core_outcome(job, agent, address, agent, None, plain=True) != 'started':
+        return 'failed' if core_entries(job).get(agent, {}).get('state') == 'failed' else 'unknown'
+    return 'started'
 
 
 def reopen_agent(job, agent, row, prompt, lead):
-    """Restart one agent unless a live terminal of the job runs it. True when it was started."""
+    """Restart one agent unless a live terminal of the job runs it: 'live', 'started', 'failed' or 'unknown'."""
     with launching(job, agent):
         if live_terminal(job, agent):
-            return False
+            return 'live'
         kind, args, session = row.get('kind', 'claude'), shlex.split(row.get('args', '')), row.get('session', '')
         pointer = f'You are {agent} in a herdr fleet. Read {row.get("brief")} and do everything it says.'
-        if kind == 'claude' and session:
+        if kind == 'claude' and session and core_entries(job).get(agent, {}).get('ran'):
             program = [cli(kind), '--resume', session] + args
-        elif kind == 'claude':
-            session = str(uuid.uuid4())
-            record(job, agent, kind, row.get('brief') or '-', args, session)
+        elif kind == 'claude':  # it never ran: its own session id, fresh, with its brief
+            if not session:
+                session = str(uuid.uuid4())
+                record(job, agent, kind, row.get('brief') or '-', args, session)
             program = [cli(kind)] + args + ['--session-id', session, pointer]
         else:
             program = [cli(kind)] + args + ([pointer] if prompt else [])
         cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
-        print(f'RESTARTED {agent} ({core_run(job, agent, "lead" if lead else "worker", program, cwd)})')
-        return True
+        return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd)
 
 
 def acknowledged(job, lead):
@@ -1140,14 +1188,23 @@ def new_core(ask_file, name, review, fork, cwd):
     if owner:
         (events_dir() / 'owners').mkdir(parents=True, exist_ok=True)
         (events_dir() / 'owners' / key).write_text('owner=' + owner + '\n')
+    snapshot(job)  # reopen.sh exists before anything starts
     relay = 'relay-' + key[3:]
     try:
         with launching(job, relay):
-            core_run(job, relay, 'relay', [str(FOLLOWER), str(job)], repo)
+            follower = core_outcome(job, relay, core_run(job, relay, 'relay', [str(FOLLOWER), str(job)], repo), relay, None, plain=True)
+        if follower == 'failed':  # confirmed: the job would run with no one reporting its workers' exits
+            return start_failed(job, key, relay, core_entries(job)[relay].get('reason', 'the follower ended'))
+        if follower == 'unknown':
+            snapshot(job)
+            return 1
         with launching(job, lead):
             program = [claude] + (['--resume', fork, '--fork-session'] if fork else []) + args + ['--session-id', session]
             address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo)
             outcome = core_outcome(job, lead, address, 'lead', brief)
+    except CoreUnknown as error:
+        snapshot(job)
+        return unknown(job, error)
     except HcError as error:
         return start_failed(job, key, relay, line(error))
     if outcome == 'failed':

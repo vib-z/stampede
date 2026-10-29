@@ -7,6 +7,8 @@ State is FAKE_HC/state.json; every call is one JSON line in FAKE_HC/calls. A tes
   after_get {address: fields}    fields applied right after the next `get` of that terminal (a race)
   send_error {address: kind}     `send` to it fails with this error kind
   get_error {address: kind}      `get` of it fails with this error kind
+  ls_error  kind                 every `ls` fails with this error kind
+  lookup_error kind              after a `run` fails, every `ls` fails with this kind (a lost answer, then no lookup)
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
 Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1."""
@@ -84,6 +86,8 @@ def command(state, argv):
         error = state.get('run_error', {}).get(name)
         address = 't' + str(state['next'])
         state['next'] += 1
+        if error and state.get('lookup_error'):
+            state['ls_error'] = state['lookup_error']
         if error and not state.get('spawn_also'):
             fail(error, f'cannot start {program[:1]}')
         t = {'address': address, 'name': name, 'cwd': o.get('cwd'), 'argv': program, 'state': 'live', 'turn': 0,
@@ -95,6 +99,8 @@ def command(state, argv):
         time.sleep(state.get('slow', 0))
         return print(json.dumps(t))
     if cmd == 'ls':
+        if state.get('ls_error'):
+            fail(state['ls_error'], 'no answer')
         o, _ = options(args, {'--all', '--json'}, {'--label'})
         found = [view(t) for t in state['terminals'].values() if (o.get('all') or t['state'] == 'live') and labelled(t, o['label'])]
         return print(json.dumps({'terminals': found, 'machines': [], 'hidden_finished': 0}))

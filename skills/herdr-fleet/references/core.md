@@ -18,7 +18,8 @@ stampede new --core --file ask.md --cwd ~/code/my-app [--name <slug>] [--review]
 - It writes the job record first, then starts the job's follower `relay-<12 hex>`, then the lead with its brief pointer as the first prompt. Every terminal has no parent and no notes, and carries the labels `stampede.job=<key>`, `stampede.agent=<name>` and `stampede.role=lead|worker|relay|wait`.
 - `<lead> <job dir>`, exit 0: the lead is working.
 - `BLOCKED <lead>: <kind>` or `NOT READY <lead>: <status>`, exit 1: the lead runs but is not ready. Read it with `hc read <address>`, clear a dialog with `hc keys <address> <keys>`, then `stampede tell <job> lead "Read <brief>"` if it went idle without its first prompt. It stays the job's one lead: never run `new` again for that folder.
-- `FAILED <lead>`, exit 1: nothing of the job runs; the folder stays, with `start-failed`. A retry is a new job.
+- `FAILED <lead>` or `FAILED relay-<12 hex>` (the follower ended at start), exit 1: nothing of the job runs; the folder stays, with `start-failed`. A retry is a new job.
+- `UNKNOWN <agent>: ...`, exit 1: Core lost an answer, so whether it started is unknown. Nothing is taken back (record, marker, follower, the entry `starting`). Once Core answers, `bash <job>/reopen.sh` adopts it by its labels or starts it, never a second copy.
 
 ## The job record
 
@@ -42,7 +43,7 @@ stampede start <job> <agent> --kind claude|codex --brief <file> [--cwd <dir>] [-
 - One live launch per agent: refused while another caller starts it, or while a live terminal of the job runs it (`already running at <address>`).
 - `--cwd` defaults to the repo. `--yolo-in` must be the same folder as `--cwd`, a linked worktree. A relative `--brief` is made absolute, so it resolves from any `--cwd`.
 - Claude gets `--session-id` (recorded for reopen); Codex gets `--no-daemon`. The brief pointer is the first prompt.
-- `STARTED <agent> (<address>)`, exit 0. `BLOCKED` or `NOT READY`, exit 1: it is still the job's agent, so recover it as for the lead and never start a second. `FAILED`, exit 1: its terminal ended.
+- `STARTED <agent> (<address>)`, exit 0. `BLOCKED` or `NOT READY`, exit 1: it is still the job's agent, so recover it as for the lead and never start a second. `UNKNOWN`, exit 1: as for the lead; a later `start` adopts it or says it is running. `FAILED`, exit 1: its terminal ended.
 - A worker has no parent, so it never ends with the lead.
 
 ## Talk to an agent
@@ -87,6 +88,8 @@ hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<ke
 - With no flag: an open job's marker, owner tag and follower; the lead, its session resumed; each worker (Claude resumed, Codex fresh). `--prompt` sends a restarted Codex worker its brief.
 - `--lead`: only the follower and the lead, when either is gone and the workers still run.
 - A restarted lead must take a `REOPENED` line through its own wake hook in both inbox files (written every 5 s for 90 s). Exit 3 names a file it missed, with the line to write once the lead is up. Exit 2: another caller is starting one of them.
+- An agent that never ran (its start was `UNKNOWN` and nothing spawned) starts fresh with its recorded session id and its brief, not resumed.
+- A follower that ends at once is `FAILED relay-<12 hex>`; any `FAILED` or `UNKNOWN` restart makes reopen exit 1.
 - A finished job resumes its agents for inspection only: no follower, no marker.
 
 ## Finish and close
