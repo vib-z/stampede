@@ -813,7 +813,11 @@ def core_outcome(job, agent, address, who, brief):
         hc('wait', address, '--timeout', '30')
     except HcError:
         pass
-    terminal = hc('get', address)
+    try:
+        terminal = hc('get', address)
+    except HcError as error:  # unconfirmed: the agent may run, so it stays this job's agent
+        print(f'NOT READY {agent}: {line(error)}; read it with hc read {address} once Herdr Core answers')
+        return 'not ready'
     word = core_status(terminal)
     if terminal.get('state') != 'live':
         try:
@@ -901,6 +905,8 @@ def reopen(job, lead_only=False, prompt=False):
     restarted = [agent for agent in [lead] + ([] if lead_only else [a for a in people if a != lead])
                  if reopen_agent(job, agent, rows.get(agent, {}), prompt, agent == lead)]
     snapshot(job)
+    if not restarted:
+        print(f'LIVE {key}: no agent to restart')
     return acknowledged(job, lead) if lead in restarted and not finished else 0
 
 

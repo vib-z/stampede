@@ -6,6 +6,7 @@ State is FAKE_HC/state.json; every call is one JSON line in FAKE_HC/calls. A tes
   run_error {name: kind}         `run` fails with this error kind; with spawn_also, the terminal exists all the same
   after_get {address: fields}    fields applied right after the next `get` of that terminal (a race)
   send_error {address: kind}     `send` to it fails with this error kind
+  get_error {address: kind}      `get` of it fails with this error kind
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
 Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1."""
@@ -100,6 +101,8 @@ def command(state, argv):
     if cmd in ('get', 'wait', 'kill', 'rm', 'read', 'keys', 'interrupt'):
         o, rest = options(args, {'--json'}, {'--timeout', '--lines', '--children', '--output'})
         t = find(state, rest[0])
+        if cmd == 'get' and state.get('get_error', {}).get(t['address']):
+            fail(state['get_error'][t['address']], 'no answer')
         if cmd == 'get':
             print(json.dumps(t))
             t.update(state.get('after_get', {}).pop(t['address'], {}))

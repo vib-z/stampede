@@ -537,6 +537,14 @@ class CoreStart(CoreCase):
                 self.assertIn(f'hc read t{n + 1}', out)
         self.assertIn('boom: no auth', out)
 
+    def test_an_outcome_core_cannot_tell_keeps_the_agent(self):
+        job, _ = self.core_job()
+        self.shape(get_error={'t1': 'unavailable'})
+        code, out = self.start(job, 'build-api')
+        self.assertEqual(code, 1)
+        self.assertIn('NOT READY build-api: hc get', out)
+        self.assertEqual(self.entries(job)['build-api']['state'], 'live')
+
     def test_one_live_launch_per_agent(self):
         job, key = self.core_job()
         with fj.launching(job, 'build-api'), self.assertRaises(ValueError) as refused:
@@ -761,8 +769,9 @@ class CoreReopen(CoreCase):
         self.assertTrue((self.events / 'jobs' / self.key).exists())
         self.assertEqual((self.events / 'owners' / self.key).read_text(), 'owner=alpha\n')
         self.assertTrue(all(e['state'] == 'live' for e in self.entries(self.job).values()))
-        again, _ = self.reopen()
+        again, out = self.reopen()
         self.assertEqual((again, len(self.started())), (0, 4), 'a second reopen starts nothing')
+        self.assertEqual(out.strip(), f'LIVE {self.key}: no agent to restart')
 
     def test_prompt_resends_a_codex_brief(self):
         self.prepare()
