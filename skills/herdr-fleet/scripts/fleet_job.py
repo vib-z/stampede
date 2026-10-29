@@ -828,9 +828,11 @@ CORE_KEEPS = 86400  # seconds Herdr Core keeps a finished terminal's record (RET
 
 
 def prove(job, agent, session, proof):
-    """Record whether one Claude session of an agent ran: 'ran', 'never' or 'unknown' (core.json, per session)."""
+    """Record whether one Claude session of an agent ran: 'ran', 'never' or 'unknown' (core.json, per session). 'ran' is
+    for good: a later attempt that did not launch says nothing about the session itself."""
     launches = dict(core_entries(job).get(agent, {}).get('launches', {}))
-    launches[session] = {**launches.get(session, {'at': int(time.time())}), 'proof': proof}
+    launch = launches.get(session, {'at': int(time.time())})
+    launches[session] = {**launch, 'proof': 'ran' if launch.get('proof') == 'ran' else proof}
     bind(job, agent, {'launches': launches})
 
 
@@ -845,15 +847,20 @@ def session_proof(job, agent, session):
     by a terminal of it in hc ls --all, or Claude's session file ('ran'), or, while Core still keeps a finished record
     (24 h), by finding neither ('never'). Anything else stays 'unknown': the caller refuses rather than guess."""
     launch = core_entries(job).get(agent, {}).get('launches', {}).get(session)
-    if launch and launch.get('proof') in ('ran', 'never'):
-        return launch['proof']
+    if launch and launch.get('proof') == 'ran':
+        return 'ran'
+    if claude_session_file(session):  # every source of evidence before never
+        prove(job, agent, session, 'ran')
+        return 'ran'
     try:
         found = hc('ls', '--all', '--label', 'stampede.job=' + core_key(job), '--label', 'stampede.agent=' + agent,
                    '--label', 'stampede.session=' + session).get('terminals', [])
     except HcError:
-        return 'unknown'
-    if found or claude_session_file(session):
+        return 'never' if launch and launch.get('proof') == 'never' else 'unknown'
+    if found:
         proof = 'ran'
+    elif launch and launch.get('proof') == 'never':
+        return 'never'
     elif launch and time.time() - launch.get('at', 0) < CORE_KEEPS:
         proof = 'never'
     else:

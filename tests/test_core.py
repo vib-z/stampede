@@ -1332,5 +1332,50 @@ class ReviewReopenParity(CoreCase):
         self.assertTrue(program[-1].startswith('You are review-api in a herdr fleet. Read '))
 
 
+
+class ReviewSessionKept(CoreCase):
+    """review-codex round 3, R8: a session that ran stays proved, whatever a later attempt does."""
+
+    def failed_resume_then_retry(self, session_file):
+        job, _ = self.core_job()
+        brief = str(self.brief(job, 'build-api'))
+        self.assertEqual(self.quiet(fj.start, job, 'build-api', 'claude', None, brief)[0], 0)
+        session = fj.agent_rows(job)['build-api']['session']
+        self.assertEqual(self.entries(job)['build-api']['launches'][session]['proof'], 'ran')
+        state = self.state()
+        del state['terminals']['t1']  # Core no longer keeps its record (swept after 24 h, or removed)
+        (self.core / 'state.json').write_text(json.dumps(state))
+        if session_file:
+            project = self.root / 'home/.claude/projects/-scratch'
+            project.mkdir(parents=True)
+            (project / (session + '.jsonl')).write_text('{}\n')
+        self.shape(run_error={'build-api': 'spawn_failed'})
+        row = fj.agent_rows(job)['build-api']
+        self.assertEqual(self.quiet(fj.reopen_agent, job, 'build-api', row, False, False)[0], 'failed')
+        self.assertEqual(self.entries(job)['build-api']['launches'][session]['proof'], 'ran', 'a failed attempt is no proof')
+        self.shape(run_error={})
+        self.assertEqual(self.quiet(fj.reopen_agent, job, 'build-api', row, False, False)[0], 'started')
+        program = self.program(self.calls('run')[-1])
+        self.assertEqual(program[1:3], ['--resume', session])
+        self.assertNotIn('--session-id', program)
+
+    def test_with_its_session_file(self):
+        self.failed_resume_then_retry(session_file=True)
+
+    def test_without_its_session_file(self):
+        self.failed_resume_then_retry(session_file=False)
+
+    def test_a_session_file_beats_a_recorded_never(self):
+        job, _ = self.core_job()
+        self.shape(run_error={'build-api': 'spawn_failed'})
+        self.assertEqual(self.quiet(fj.start, job, 'build-api', 'claude', None, str(self.brief(job, 'build-api')))[0], 1)
+        session = fj.agent_rows(job)['build-api']['session']
+        self.assertEqual(self.entries(job)['build-api']['launches'][session]['proof'], 'never')
+        project = self.root / 'home/.claude/projects/-scratch'
+        project.mkdir(parents=True)
+        (project / (session + '.jsonl')).write_text('{}\n')  # evidence that came later: it ran after all
+        self.assertEqual(fj.session_proof(job, 'build-api', session), 'ran')
+
+
 if __name__ == '__main__':
     unittest.main()
