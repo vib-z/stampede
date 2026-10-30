@@ -207,10 +207,11 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 <details>
 <summary><b>The job folder</b></summary>
 
-`stampede new` makes `<repo>/.herdr-<slug>/`, kept out of git through `.git/info/exclude`:
+`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (`FLEET_JOBS_ROOT` moves the root), never inside your repo, so nothing lands in git; the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
 
 ```text
 ask.md        your ask, word for word
+workdir       the repo the agents work in
 lead          the lead's name
 plan.md       the lead's plan
 briefs/       the generated lead brief, then worker briefs on the hand-off template
@@ -235,6 +236,9 @@ finished      the one-line summary written by stampede finish
 gates/        each gate asked (action, PR, commit) and your recorded yes
 agents.tsv    who was started, and how: the reopen record
 approved      the plan's fingerprint, for a --review job
+front-door    present when a chat outside Herdr relays for you (new --front-door)
+outbox/       what the lead posts for that chat to relay: NNN.md and NNN/ files
+outbox.log    one line per post, read by stampede wait
 REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close (a Core job: at every start)
 ```
 </details>
@@ -325,9 +329,9 @@ In a Herdr pane in your repo, ask your Claude chat: *"With stampede: make hello.
 ```console
 $ printf 'Make hello.txt with hi.\nThen have a reviewer on another model confirm it.\n' > ask.md
 $ stampede new --file ask.md
-recorded lead-make-hello-txt-with-hi (claude) in <repo>/.herdr-make-hello-txt-with-hi/agents.tsv
+recorded lead-make-hello-txt-with-hi (claude) in ~/code/herdr-jobs/jobs/2026-10-29-local-make-hello-txt-with-hi/agents.tsv
 DELIVERED lead-make-hello-txt-with-hi (inbox file)
-lead-make-hello-txt-with-hi <repo>/.herdr-make-hello-txt-with-hi
+lead-make-hello-txt-with-hi ~/code/herdr-jobs/jobs/2026-10-29-local-make-hello-txt-with-hi
 ```
 
 Inside Herdr, `--workspace` defaults to the current workspace and the lead gets a new `lead` tab; `--pane <id>` puts it in an empty pane instead, and `--name <slug>` names the job. A front door outside Herdr (a bot, a desktop app) has no current workspace, so it passes `--workspace` or `--pane`: it creates a workspace for the job (`herdr workspace create`) and passes its root pane, as in [skills/stampede](skills/stampede/SKILL.md). The chat tells you `lead-make-hello-txt-with-hi` and stops.
@@ -337,17 +341,18 @@ Inside Herdr, `--workspace` defaults to the current workspace and the lead gets 
 The lead reads `ask.md`, writes `plan.md` and goes on at once. Here it writes `briefs/review-hello.md` on the [hand-off template](skills/herdr-fleet/references/brief.md), then starts one reviewer on another model:
 
 ```console
-$ stampede start .herdr-make-hello-txt-with-hi review-hello --kind claude --pane <pane id> \
-    --brief .herdr-make-hello-txt-with-hi/briefs/review-hello.md \
+$ J=~/code/herdr-jobs/jobs/2026-10-29-local-make-hello-txt-with-hi
+$ stampede start $J review-hello --kind claude --pane <pane id> \
+    --brief $J/briefs/review-hello.md \
     --model <another model> --effort max --report reports/review-hello.md
-recorded review-hello (claude) in .herdr-make-hello-txt-with-hi/agents.tsv
+recorded review-hello (claude) in ~/code/herdr-jobs/jobs/2026-10-29-local-make-hello-txt-with-hi/agents.tsv
 DELIVERED review-hello (inbox file)
 ```
 
 When the reviewer writes `reports/review-hello.md` with `Status: PASS` in its first 10 lines and ends its turn, its hook adds `REPORT reports/review-hello.md` to `inbox.log`, which wakes the lead. A question for you, with the lead still working:
 
 ```console
-$ stampede ask .herdr-make-hello-txt-with-hi "Keep the file in the repo root?" \
+$ stampede ask $J "Keep the file in the repo root?" \
     --option Yes --option No
 ASKED 1fecfa0be4dc (the answer goes to the lead inbox; cancel with: fleet-job cancel <job> 1fecfa0be4dc)
 ```
@@ -360,19 +365,49 @@ Say "share the plan first" and the front door adds `--review`. The lead then wri
 
 ```console
 $ stampede new --file ask.md --name hello-review --review
-recorded lead-hello-review (claude) in <repo>/.herdr-hello-review/agents.tsv
+recorded lead-hello-review (claude) in ~/code/herdr-jobs/jobs/2026-10-29-local-hello-review/agents.tsv
 DELIVERED lead-hello-review (inbox file)
-lead-hello-review <repo>/.herdr-hello-review
-$ stampede start .herdr-hello-review review-hello --kind codex \
+lead-hello-review ~/code/herdr-jobs/jobs/2026-10-29-local-hello-review
+$ J=~/code/herdr-jobs/jobs/2026-10-29-local-hello-review
+$ stampede start $J review-hello --kind codex \
     --pane <pane id> --brief <brief>
 fleet-job start: the owner asked to see this plan: run fleet-job approve after their yes, and again after any change to the plan
-$ stampede approve .herdr-hello-review --by "owner in chat"
+$ stampede approve $J --by "owner in chat"
 DELIVERED lead-hello-review (inbox file)
-$ cat .herdr-hello-review/approved
+$ cat $J/approved
 Approved: 2026-10-21 21:35 by owner in chat, plan 6ef5e2effdb06d6adf70e17da8726c05dd2d057a4a7ba23c4fbe3836eed14ffa
 ```
 
 The `start` refusal exits 2. The approval holds a fingerprint of `plan.md`; any later change locks `start` again until a new approve. A change you ask for goes to the lead with `stampede tell <job> lead "<your words>"`. The steps: [share-plan](skills/share-plan/SKILL.md).
+
+### A front door outside Herdr (the Claude desktop app)
+
+When you talk to a chat outside Herdr, nobody watches the lead's pane, and a card or file the lead shows there reaches no one. The front door then starts the job with `--front-door`: the lead posts everything that is for you (the plan, questions, gates, files, its report) to `<job>/outbox/`, a hook turns its own question cards and SendUserFile into posts, and the front door waits on the outbox in the background and relays each item. Here a review job, with the chat as front door:
+
+```console
+$ stampede new --file ask.md --pane <pane id> --name seller-copy --front-door --review
+lead-seller-copy ~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy
+$ J=~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy
+$ stampede approve $J --by "owner in desktop chat: 'ok - lets go'"
+fleet-job approve: the owner has not been shown this plan.md: the lead posts it (fleet-job post <job> "PLAN READY" --file plan.md), the front door sends it to the owner, and only their yes to it is approved
+$ stampede post $J "PLAN READY: one Sonnet build, one review" --file $J/plan.md      # the lead
+POSTED 001 for the front door to relay (~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy/outbox/001.md)
+$ stampede wait $J                                                                   # the front door, in the background
+# 001 post
+
+PLAN READY: one Sonnet build, one review
+
+Files:
+- ~/code/herdr-jobs/jobs/2026-10-29-local-seller-copy/outbox/001/plan.md
+$ stampede approve $J --by "owner in desktop chat: 'approve as written'"
+DELIVERED lead-seller-copy (inbox file)
+$ stampede ask $J --gate --sha <commit> --pr 12 "mark PR #12 ready for review"        # the lead
+GATE 83307febaa1a posted to the front door as outbox 002; act after fleet-job gate-ok ... prints APPROVED, or on the owner's yes typed in your pane
+$ stampede approve-gate $J 83307febaa1a --sha <commit> --by "owner in desktop chat: 'mark it ready'"
+APPROVED 83307febaa1a at <commit>
+```
+
+The front door shows you the plan file itself, and a yes to its own summary is never an approval. A gate's item carries the exact `approve-gate` line, which the front door runs with your words quoted. If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `BLOCKED_ON_CARD` instead of pretending the message was read. The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead, so the front door is never left waiting on a job that ended. The front door's loop: [skills/stampede](skills/stampede/SKILL.md#relay-a---front-door-job); the lead's side: [front-door.md](skills/herdr-fleet/references/front-door.md).
 
 ## Herdr Core
 
@@ -474,6 +509,7 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 - **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`:
   - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.
   - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
+  - **started by a front door** (`--front-door`): a post in `<job>/outbox/`. The front door shows you the exact action and, on your yes in its chat, runs `stampede approve-gate ... --by "owner in <chat>: '<your words>'"`. An explicit order you already gave there for that exact action counts, quoted; anything vaguer goes back to you.
   - **either way, on the Herdr TUI,** a yes typed in the lead's Herdr pane works.
 - **The lead acts on your yes typed in its pane for that exact action (Herdr TUI only), or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge also passes `--match-head-commit` on that commit, so a push after your yes means asking again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
 - **On Herdr Core only the recorded yes counts.** In a job started with `stampede new --core` the lead acts only after `gate-ok` prints `APPROVED`: a yes typed into the lead, an answer to its own question card, and any message never count, because on Core another program can type into any terminal (`hc send`, `hc keys`). Your tap on a phone card (`FLEET_ASK_CMD`) and a bot's `approve-gate` are recorded and count. `approve-gate` also refuses inside a Herdr Core terminal (`HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` set) and under a `herdr-core` or `hc` process, so `hc exec` cannot run it: a bot runs it over plain ssh. Core's own `blocked` state is never a gate.
@@ -494,6 +530,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `FLEET_LEAD_MODEL` | Claude Opus 5.5 (its id is in config.example) | the lead's Claude model; worker models and effort are chosen per start with `--model` and `--effort`, so lead and workers swap independently |
 | `FLEET_LEAD_EFFORT` | `xhigh` | the lead's effort |
 | `FLEET_ASK_CMD` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | what `stampede ask` runs, for a question or a gate, in a job started locally (a bot-started job asks its bot); the options and question are appended |
+| `FLEET_JOBS_ROOT` | `~/code/herdr-jobs` | job folders go in `<root>/jobs/`, never in a repo |
 | `FLEET_TRUST_ROOT` | `~/code` | `herdr-trust` trusts repos only under it; `herdr-doctor` checks worktrees there |
 | `FLEET_WATCH_INTERVAL` | `30` | seconds between `fleet-watch.sh` passes (a bot outside Herdr) |
 | `FLEET_WATCH_PASSES` | `0` | stop the watch after this many passes; 0 runs until stopped |
@@ -517,6 +554,10 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | what you see | fix |
 |---|---|
 | `fleet-job start: the owner asked to see this plan` | a `--review` job: approve the plan as it stands with `stampede approve <job> --by <who>` |
+| `fleet-job approve: the owner has not been shown this plan` | a `--front-door` job: the lead posts `plan.md` (`stampede post <job> "PLAN READY" --file <job>/plan.md`), the front door sends that file to you, and only your yes to it is approved; post again after any change |
+| `fleet-job approve: the front door has not received this plan.md yet` | the lead posted the plan, but the front door has not run `stampede wait` since: run it, send the owner the file it names, and approve only their yes to that file |
+| `BLOCKED_ON_CARD <agent>` from `stampede tell` or `stampede wait` | the agent waits at a question card in its pane and reads nothing else until it is answered; your message is queued. Answer the card in its pane, or have the front door type your answer there. In a `--front-door` job the lead's own cards become posts, so this is rare |
+| no `.herdr-<slug>` folder in the repo any more | job folders now live in `~/code/herdr-jobs/jobs/` (`FLEET_JOBS_ROOT`); `stampede new` prints the path. An old in-repo `.herdr-*` job still works with every command |
 | `fleet-job start: brief ... is missing: ...` or `brief ... does not exist` | write the brief on the [hand-off template](skills/herdr-fleet/references/brief.md), fill every missing or empty section, then start again |
 | `fleet-job start: fleet-job starts claude, codex or cursor (and hermes or kimi in a Herdr Core job); ...` | stampede starts only those kinds; start another agent by hand and record it with `herdr-reopen-snapshot` |
 | `fleet-job start: hermes runs only as a handed agent of a Herdr Core job ...` (or kimi) | a TUI-only job refuses them: run the job with `stampede new --core` and hand them to a pane with `--pane` |
@@ -575,24 +616,26 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 
 | command | flags | does |
 |---|---|---|
-| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--fork <session id>` (the lead starts as a fork of that Claude chat; a value that is not a UUID exits 2) | makes the job folder, starts the lead with its hooks, marks the workspace so plain turn ends stay on the machine, prints `<lead> <job dir>` |
+| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--fork <session id>` (the lead starts as a fork of that Claude chat; a value that is not a UUID exits 2), `--front-door` (a chat outside Herdr relays for the owner: the lead posts to `<job>/outbox/`; refused in a workspace a bot owns) | makes the job folder, starts the lead with its hooks, marks the workspace so plain turn ends stay on the machine, prints `<lead> <job dir>` |
 | `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root of the current folder; it must sit under `FLEET_TRUST_ROOT`), `--name`, `--review`, `--fork <session id>`; `--pane` or `--workspace` exits 2 | a whole job on Herdr Core: writes the job record first (`backend`, the key `hc-<12 hex>` in `workspace`, the marker, the owner tag, the lead's row), starts the job's follower `relay-<12 hex>`, then the lead in its own terminal with its brief as the first prompt; prints `<lead> <job dir>`. A lead that is blocked, at an error or silent after 30 s stays the job's lead: `BLOCKED` or `NOT READY` with the recovery, exit 1. A start that never ran, or a follower that ended at start, is taken back: `FAILED`, `start-failed` in the folder, exit 1. When Core loses an answer, nothing is taken back: `UNKNOWN <agent>`, exit 1, and `reopen.sh` adopts or starts it later |
 | `finish <job> <summary>` | | one `done` event (`source` stampede, with the summary). A job a bot started uses the same strict route as a question; a local job uses the ordinary relay. Then removes the job marker. A second run does not send again |
 | `start <job> <agent> --kind claude\|codex\|cursor --pane <id> --brief <file>` | `--model`, `--effort`, `--report <path>` (repeatable), `--yolo-in <worktree>` | refuses a missing brief or a missing or empty section (exit 2); otherwise starts a worker with hooks and auto mode, records it and sends its brief pointer |
 | `start <job> <agent> --kind claude\|codex --brief <file>` (a Core job) | `--cwd <dir>` (default: the repo), `--model`, `--effort`, `--report`, `--yolo-in <worktree>` (must equal `--cwd`); `--pane` with these kinds, or `--kind cursor\|hermes\|kimi` without `--pane`, exits 2 | one live launch per agent: refuses while another caller starts it or a live terminal of the job runs it (`already running at <address>`); starts it with no parent and no notes, its brief pointer (made absolute) as the first prompt, Claude with `--session-id`, Codex with `--no-daemon`; `STARTED <agent> (<address>)` exit 0, else `BLOCKED`, `NOT READY` (still the job's agent) or `FAILED`, exit 1 |
 | `start <job> <agent> --kind cursor\|hermes\|kimi --pane <id> --brief <file>` (a Core job) | `--model`, `--effort` (Hermes `--reasoning`; Kimi has none), `--report`, `--yolo-in <worktree>` (the pane's shell must sit in it); `--cwd`, or a pane that is no Herdr pane id, exits 2 | hands it to that Herdr TUI pane at its shell prompt, under the same launch lock and one-live-launch rule as a Core start (`already running in pane <id>`, a pane another launch holds, or Herdr unable to say, exits 2); claims the pane and writes its entry (`backend` `tui`, a new `launch`) before `herdr agent start`; `STARTED <agent> (pane <id>)` exit 0 once Herdr shows it there and took its brief, else `BLOCKED`, `NOT BRIEFED` (it runs; the pointer met a busy, focused or unknown prompt: send the printed `tell`), `UNKNOWN` (entry and mark kept for reopen, no brief) or `FAILED`, exit 1 |
-| `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file; another CLI through `herdr-send`, or on Herdr Core only through `hc send` by status, never a key: `idle` sends only while idle, `done` sends at once; `working`, `blocked`, `error`, no status, another job's terminal, Core not answering, text already typed in the prompt, or a slash command (which needs keys Core cannot guard) is one `FAILED <agent> (<why>)` line with the step to do by hand, exit 2. A handed agent in a Core job: one `herdr agent prompt`, never a key, only while its pane runs this launch, idle or done, not focused, with an empty prompt; else `FAILED`, exit 2 |
-| `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background: a `question` event to the bot that started the job, else your phone; prints `ASKED <id>` |
-| `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option`: a gate is yes or no | a gate: a `gate` event to the bot that started the job, else your phone; prints `GATE <id>` |
-| `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot records your yes in chat, run outside Herdr; refuses inside Herdr or a Herdr Core terminal (or under a `herdr`, `herdr-core` or `hc` process), a local job's gate or another commit |
+| `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file (`DELIVERED`, or `BLOCKED_ON_CARD` and exit 3 when it waits at a question card and will read nothing until that is answered); another CLI through `herdr-send`, or on Herdr Core only through `hc send` by status, never a key: `idle` sends only while idle, `done` sends at once; `working`, `blocked`, `error`, no status, another job's terminal, Core not answering, text already typed in the prompt, or a slash command (which needs keys Core cannot guard) is one `FAILED <agent> (<why>)` line with the step to do by hand, exit 2. A handed agent in a Core job: one `herdr agent prompt`, never a key, only while its pane runs this launch, idle or done, not focused, with an empty prompt; else `FAILED`, exit 2 |
+| `post <job> <text>` | `--file <path>` (repeatable) | the lead's post for a front door: `<job>/outbox/NNN.md`, its files copied into `outbox/NNN/`, a line in `outbox.log`; prints `POSTED NNN` |
+| `wait <job>` | `--timeout <s>` (default 3600) | the front door's wait, run in the background: prints every post it has not shown yet, `BLOCKED_ON_CARD` with the lead's screen, or `LEAD_GONE` when Herdr has no such agent any more, then exits 0; exit 3 when nothing came |
+| `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background: a `question` event to the bot that started the job, a post for a front door, else your phone; prints `ASKED <id>` |
+| `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option`: a gate is yes or no | a gate: a `gate` event to the bot that started the job, a post for a front door, else your phone; prints `GATE <id>` |
+| `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot or front door records your yes in chat, run outside Herdr; refuses inside Herdr or a Herdr Core terminal (or under a `herdr`, `herdr-core` or `hc` process), a local job's gate or another commit |
 | `gate-ok <job> <gate> --sha <commit>` | | the lead's check before it acts: prints `APPROVED ...` only for your recorded yes at that commit |
 | `cancel <job> <id>` | | stops an asked question and its phone card (a question sent to a bot has no card: refused) |
-| `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead |
+| `approve <job> --by <who>` | | records the plan's fingerprint and wakes the lead; in a front-door job only from outside Herdr, and only a plan (`plan.md`, `fleet-plan.md`) the lead posted exactly as it stands and `stampede wait` has already handed to the front door |
 | `update` | | in a clean git checkout on `main`: `git fetch`, `git merge --ff-only`, then `./install.sh`; refuses local changes, untracked files, another branch, or an ignored file at a path the update adds; in a Herdr plugin install prints `herdr plugin update stampede --yes` |
 | `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
-| `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
+| `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `send-file`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 
-**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor (hermes and kimi only in a Herdr Core job, and there cursor, hermes and kimi only with `--pane`), an agent already running or being started on Core, a Codex agent on Core that is not ready for `tell`, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr or Herdr Core, `cancel` of a question that is no phone card), with the reason on stderr; 1 a Core start that did not end with a ready agent (`BLOCKED`, `NOT READY`, `UNKNOWN` or `FAILED <agent> (<reason>)` on stdout), or Herdr Core failed (one `fleet-job <command>: <reason>` line on stderr), or Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
+**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor (hermes and kimi only in a Herdr Core job, and there cursor, hermes and kimi only with `--pane`), an agent already running or being started on Core, a Codex agent on Core that is not ready for `tell`, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr or Herdr Core, `cancel` of a question that is no phone card), with the reason on stderr; 1 a Core start that did not end with a ready agent (`BLOCKED`, `NOT READY`, `UNKNOWN` or `FAILED <agent> (<reason>)` on stdout), or Herdr Core failed (one `fleet-job <command>: <reason>` line on stderr), or Herdr or the file system failed, with a Python traceback. `tell` exits 3 for `BLOCKED_ON_CARD` (the message is queued) and `wait` exits 3 when nothing came. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
 </details>
 
 <details>

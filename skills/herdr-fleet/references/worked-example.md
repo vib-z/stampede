@@ -1,18 +1,17 @@
 # Worked example: a lead, two builders and a reviewer
 
-A feature with a server half and a UI half. The lead is `lead-alerts`, started with its hooks by `fleet-job new --file <ask.md> --name alerts` in the project workspace, which made the job folder `$REPO/.herdr-alerts`. `build-api` is Claude Opus 5.5 at xhigh, `build-ui` is Codex `gpt-6.1-sol` at xhigh, and `review-alerts` is Claude Fable 5.1 at max. Each builder gets its own worktree because both halves touch shared code. Run everything from the lead's pane. IDs come from JSON responses, never from these examples. External callers (over ssh): see "Where are you?" in SKILL.md and put literal ids where this example uses `$HERDR_WORKSPACE_ID`.
+A feature with a server half and a UI half. The lead is `lead-alerts`, started with its hooks by `fleet-job new --file <ask.md> --name alerts` in the project workspace, which made the job folder `~/code/herdr-jobs/jobs/<date>-local-alerts`. `build-api` is Claude Opus 5.5 at xhigh, `build-ui` is Codex `gpt-6.1-sol` at xhigh, and `review-alerts` is Claude Fable 5.1 at max. Each builder gets its own worktree because both halves touch shared code. Run everything from the lead's pane. IDs come from JSON responses, never from these examples. External callers (over ssh): see "Where are you?" in SKILL.md and put literal ids where this example uses `$HERDR_WORKSPACE_ID`.
 
 ## 1. Contract, briefs, register (lead)
 
 ```bash
 REPO=<abs repo dir>
-WT=$REPO/.claude/worktrees
-B=$REPO/.herdr-alerts
+WT=~/code/herdr-jobs/worktrees
+B=~/code/herdr-jobs/jobs/<date>-local-alerts   # the folder fleet-job new printed
 git -C "$REPO" fetch origin main
 git -C "$REPO" worktree add "$WT/alerts" -b claude/alerts origin/main     # the lead's integration worktree
 ln -s "$REPO/node_modules" "$WT/alerts/node_modules"   # never copy .env.local or any env file: the owner adds keys
 mkdir -p "$B/reports"
-echo ".herdr-alerts/" >> "$(git -C "$REPO" rev-parse --git-common-dir)/info/exclude"
 ```
 
 In `$WT/alerts`, the lead writes the contract (`src/lib/alerts/types.ts`, stub files, one validation test) and commits it. Then it writes:
@@ -26,8 +25,8 @@ Build the alert rules API and hourly evaluator, as specified in the contract.
 ## Why
 You build the server half of the alerts feature; a separate worker builds the UI. Your lead committed the shared contract so both halves agree.
 ## Inputs
-Read /abs/path/.herdr-alerts/_common.md first.
-Worktree: /abs/path/.claude/worktrees/alerts-api, branch alerts/api, starting commit <contract commit>.
+Read <abs job folder>/_common.md first.
+Worktree: ~/code/herdr-jobs/worktrees/alerts-api, branch alerts/api, starting commit <contract commit>.
 You own, under that worktree: src/app/api/alerts/**, src/lib/alerts/server.ts, tests/alerts-api.test.ts.
 Read its src/lib/alerts/types.ts contract.
 ## Constraints
@@ -35,9 +34,9 @@ Follow _common.md. Commit only to alerts/api. Do not change the contract; propos
 ## Done when
 - `npx vitest run tests/alerts-api.test.ts` passes and the API and hourly evaluator match the contract.
 ## Report back
-Write /abs/path/.herdr-alerts/reports/build-api.md last, under 60 lines: Status: DONE in the first 10 lines, what changed, files touched, unverified and decisions.
+Write <abs job folder>/reports/build-api.md last, under 60 lines: Status: DONE in the first 10 lines, what changed, files touched, unverified and decisions.
 ## If blocked
-Your lead decides: write /abs/path/.herdr-alerts/questions/build-api.md, say so in your last message and end your turn. Make the reasonable call where you can and record it.
+Your lead decides: write <abs job folder>/questions/build-api.md, say so in your last message and end your turn. Make the reasonable call where you can and record it.
 ```
 
 - `$B/register.md`: a roster table (agent, kind, model and effort, pane, worktree, port, status) and a "next step" line.

@@ -55,6 +55,11 @@ def tell(job, name, text):
         raise ValueError('agent is not in this job: ' + str(name))
     if people[name] == 'claude':
         append(Path(job) / 'inbox' / (name + '.md'), line(text))
+        # a pending card holds the turn: the inbox is read only once the card is answered (a Core agent has no pane to read)
+        if backend(job) != 'core' and agent_card(name):
+            print(f'BLOCKED_ON_CARD {name}: queued in its inbox, but it waits at a question card and reads nothing until '
+                  f'that is answered; read it with: herdr agent read {name} --source visible --lines 40')
+            return 3
         return print('DELIVERED ' + name + ' (inbox file)')
     if backend(job) == 'core':
         return (tell_handed if core_entries(job).get(name, {}).get('backend') == 'tui' else tell_core)(job, name, text)
@@ -135,6 +140,95 @@ def job_owner(job):
     return owner
 
 
+def front_door(job):
+    """True when a chat outside Herdr started the job and stays the owner's only contact (fleet-job new --front-door)."""
+    return (Path(job) / 'front-door').is_file()
+
+
+def outbox_post(job, kind, text, files=(), answer=None):
+    """One item for the front door to relay: <job>/outbox/<n>.md, its files copied into outbox/<n>/, a line in outbox.log."""
+    job = Path(job).absolute()
+    box = job / 'outbox'
+    box.mkdir(exist_ok=True)
+    with (box / '.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        n = f'{len(list(box.glob("[0-9]*.md"))) + 1:03d}'
+        body = [f'# {n} {kind}', '', str(text).strip()]
+        if files:
+            (box / n).mkdir()
+            for f in files:
+                source = Path(f).expanduser().absolute()
+                if not source.is_file():
+                    raise ValueError(f'no file {source} to post')
+                shutil.copy2(source, box / n / source.name)
+            body += ['', 'Files:'] + [f'- {box / n / Path(f).name}' for f in files]
+        if answer:
+            body += ['', 'Answer with: ' + answer]
+        (box / (n + '.md')).write_text('\n'.join(body) + '\n')
+        append(job / 'outbox.log', f'{n} {kind} {line(text)[:200]}')
+    return n
+
+
+def post(job, text, files=()):
+    n = outbox_post(job, 'post', text, files)
+    print(f'POSTED {n} for the front door to relay ({Path(job).absolute() / "outbox" / (n + ".md")})')
+
+
+def lead_card(job):
+    """The lead's screen when it is held at a question card (Claude's 'Enter to select'), else ''."""
+    return agent_card(roster(job)[1])
+
+
+def agent_card(name):
+    try:
+        screen = subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'read', name, '--source', 'visible', '--lines', '40'],
+                                capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return screen if 'Enter to select' in screen else ''
+
+
+def lead_alive(job):
+    """False only when Herdr says the lead's agent is gone (agent_not_found); any other failure counts as alive."""
+    lead = roster(job)[1]
+    try:
+        out = subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'get', lead], capture_output=True, text=True, timeout=10)
+        return 'agent_not_found' not in out.stdout + out.stderr
+    except (OSError, subprocess.SubprocessError):
+        return True
+
+
+def wait(job, timeout=3600, every=5):
+    """The front door's wait, run in the background: returns with every outbox item it has not shown yet, or when the
+    lead sits at a question card. Exit 0 with output, 3 on timeout. Marks what it printed as seen."""
+    job = Path(job).absolute()
+    seen_path, log = job / 'outbox' / '.seen', job / 'outbox.log'
+    deadline, checks = time.monotonic() + timeout, 0
+    while True:
+        seen = int(seen_path.read_text() or 0) if seen_path.is_file() else 0
+        rows = [r for r in (log.read_text().splitlines() if log.is_file() else []) if r[:3].isdigit() and int(r[:3]) > seen]
+        if rows:
+            for row in rows:
+                print((job / 'outbox' / (row[:3] + '.md')).read_text().rstrip() + '\n')
+            seen_path.write_text(rows[-1][:3] + '\n')
+            return 0
+        if checks % 6 == 0:
+            if not lead_alive(job):
+                print(f'LEAD_GONE {roster(job)[1]}: its agent no longer exists in Herdr (crash, closed pane or restart). '
+                      f'Look at the workspace, then restart it or tell the owner.')
+                return 0
+            card = lead_card(job)
+            if card:
+                print(f'BLOCKED_ON_CARD {roster(job)[1]}: it is waiting at a question card in its pane. Its screen:\n'
+                      + '\n'.join(r for r in card.splitlines() if r.strip())[-1500:])
+                return 0
+        if time.monotonic() > deadline:
+            print(f'TIMEOUT nothing new in {job / "outbox"} after {timeout}s; run fleet-job wait again')
+            return 3
+        checks += 1
+        time.sleep(every)
+
+
 def events_dir():
     """Owner tags, job markers and the default routes folder: HERDR_EVENTS_DIR, else ~/.config/herdr-events."""
     return Path(os.environ.get('HERDR_EVENTS_DIR') or Path.home() / '.config/herdr-events').expanduser()
@@ -203,6 +297,8 @@ def finish(job, summary):
         owner = job_owner(job)
         if owner:
             post_event(job, owner, fields)
+        elif front_door(job):  # no bot hears a front-door job's end: the front door's wait does, from the outbox
+            outbox_post(job, 'done', summary)
         else:
             post_local(job, fields)
         stamp.write_text(summary + '\n')
@@ -229,6 +325,13 @@ def ask(job, question, options):
     """A question for the owner: to the bot that started the job, as a question event it answers with tell;
     else FLEET_ASK_CMD in the background."""
     owner = job_owner(job)
+    if not owner and front_door(job):
+        ident = uuid.uuid4().hex[:12]
+        n = outbox_post(job, 'question', line(question) + ''.join('\n- ' + o for o in options),
+                        answer=shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead',
+                                           f'ANSWER {ident} {line(question)}: <their words>']))
+        print(f'ASKED {ident} posted to the front door as outbox {n}; the owner answers there and it comes to your inbox')
+        return ident
     if not owner:
         return ask_background(job, question, options)
     ident = uuid.uuid4().hex[:12]
@@ -247,12 +350,19 @@ def ask_gate(job, action, sha, pr=None):
         raise ValueError('--sha takes the full commit id the gate is about (git rev-parse HEAD)')
     owner = job_owner(job)
     ident = uuid.uuid4().hex[:12]
-    gate = {'gate': ident, 'action': line(action), 'pr': pr, 'sha': sha, 'route': owner or 'local',
+    route = owner or ('front-door' if front_door(job) else 'local')
+    gate = {'gate': ident, 'action': line(action), 'pr': pr, 'sha': sha, 'route': route,
             'asked': datetime.now().strftime('%Y-%m-%d %H:%M')}
     (job / 'gates').mkdir(exist_ok=True)
     (job / 'gates' / (ident + '.json')).write_text(json.dumps(gate) + '\n')
     check = f'fleet-job gate-ok {job} {ident} --sha <the commit you act on>'
     typed = '' if backend(job) == 'core' else ', or on the owner\'s yes typed in your pane'  # on Core, anything can type
+    if route == 'front-door':
+        n = outbox_post(job, 'gate', gate_question(gate) + '\nOne exact action, yes or no. Show the owner this action as written.',
+                        answer=shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha])
+                        + ' --by "owner in <chat>: <their exact words>"   (a no: '
+                        + shlex.join(['fleet-job', 'tell', str(job), 'lead', f'GATE {ident} NO: <their words>']) + ')')
+        return print(f'GATE {ident} posted to the front door as outbox {n}; act after {check} prints APPROVED{typed}')
     if not owner:
         ask_background(job, gate_question(gate), [], gate=ident)
         return print(f'GATE {ident} on the phone; act after {check} prints APPROVED{typed}')
@@ -370,6 +480,23 @@ def approve(job, by):
     digest = plan_digest(job)
     if not digest:
         raise ValueError('no plan.md or fleet-plan.md to approve')
+    if front_door(job):
+        if inside_herdr():  # the lead could otherwise post its own plan and approve it
+            raise PermissionError('in a front-door job approve runs only from the chat outside Herdr, after the owner said yes '
+                                  'to the plan: an agent\'s own say-so never counts')
+        box = Path(job) / 'outbox'
+        seen = int((box / '.seen').read_text() or 0) if (box / '.seen').is_file() else 0
+        for name in ('plan.md', 'fleet-plan.md'):
+            plan = Path(job) / name
+            if not plan.is_file():
+                continue
+            posted = [int(copy.parent.name) for copy in box.glob('*/' + name) if copy.read_bytes() == plan.read_bytes()]
+            if not posted:
+                raise PermissionError(f'the owner has not been shown this {name}: the lead posts it (fleet-job post <job> "PLAN READY" '
+                                      f'--file {name}), the front door sends it to the owner, and only their yes to it is approved')
+            if min(posted) > seen:  # posted, but the front door has not had it: a yes now cannot be a yes to this plan
+                raise PermissionError(f'the front door has not received this {name} yet: run fleet-job wait <job>, send the owner '
+                                      'the file it names, and approve only their yes to that file')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     (Path(job) / 'approved').write_text(f'Approved: {when} by {line(by)}, plan {digest}\n')
     tell(job, 'lead', f'Approved by {line(by)} at {when}. Start the panes the plan names.')
@@ -467,11 +594,28 @@ def claude_stop(job, agent, payload):
     return ''
 
 
+def deny(reason):
+    return json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                                              'permissionDecisionReason': reason}})
+
+
 def ask_lead(job, agent, payload):
-    """A worker's question card becomes a file for the lead; the lead's own card (a merge, a gate) goes ahead."""
-    if agent == roster(job)[1]:
-        return '{}'
+    """A worker's question card becomes a file for the lead. The lead's own card goes ahead, except in a front-door job,
+    where nobody watches its pane: there it becomes an outbox question for the front door to relay."""
     questions = payload.get('tool_input', {}).get('questions', [])
+    if agent == roster(job)[1]:
+        if not front_door(job):
+            return '{}'
+        text = []
+        for question in questions:
+            text += [str(question.get('question', 'Owner input needed'))]
+            text += ['- ' + str(o.get('label', '')) + ': ' + str(o.get('description', '')) for o in question.get('options', [])]
+            text += ['']
+        n = outbox_post(job, 'question', '\n'.join(text) or 'Owner input needed',
+                        answer=shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead', 'ANSWER: <their words>']))
+        return deny(f'The owner talks only to the front-door chat, so this card would reach no one. It was posted there as '
+                    f'outbox {n}; end your turn, the answer arrives in your inbox. Ask a gate with fleet-job ask --gate, '
+                    'one exact action each, and put undecided questions in a post, never on one card with a gate.')
     text = ['# Questions from ' + agent]
     for question in questions:
         text += ['', str(question.get('question', 'Owner input needed'))]
@@ -479,8 +623,18 @@ def ask_lead(job, agent, payload):
     append(Path(job) / 'questions' / (agent + '.md'), '\n'.join(text))
     first = line(questions[0].get('question', '')) if questions else 'needs input'
     append(Path(job) / 'inbox.log', 'QUESTION ' + agent + ': ' + first)
-    return json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
-                       'permissionDecisionReason': 'Question saved for the lead. End your turn; the answer arrives in your inbox.'}})
+    return deny('Question saved for the lead. End your turn; the answer arrives in your inbox.')
+
+
+def send_file(job, agent, payload):
+    """In a front-door job the lead's SendUserFile reaches no one (its pane is a terminal): post the files instead."""
+    if agent != roster(job)[1] or not front_door(job):
+        return '{}'
+    data = payload.get('tool_input', {})
+    files = [f for f in data.get('files', []) if Path(str(f)).expanduser().is_file()]
+    n = outbox_post(job, 'post', data.get('caption') or 'Files for the owner', files)
+    return deny(f'SendUserFile reaches no one from this pane. The files were posted to the front door as outbox {n}, '
+                'which sends them to the owner; next time use fleet-job post <job> "<text>" --file <path>.')
 
 
 def codex_notify(job, agent, payload):
@@ -551,13 +705,14 @@ def cli_args(job, agent, kind, model, effort, reports, lead=False, yolo_in=None)
         hooks = {'SessionStart': [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'watch-paths')}]}],
                  'CwdChanged': [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'watch-paths')}]}],
                  'FileChanged': [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'wake'), 'asyncRewake': True}]}],
-                 'PreToolUse': [{'matcher': 'AskUserQuestion', 'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'ask-lead')}]}]}
+                 'PreToolUse': [{'matcher': 'AskUserQuestion', 'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'ask-lead')}]},
+                                {'matcher': 'SendUserFile', 'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'send-file')}]}]}
         if not lead:  # the lead watches inbox.log, so its own turn ends must not write there
             for event in ('Stop', 'StopFailure'):
                 hooks[event] = [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'claude-stop')}]}]
             hooks['SessionEnd'] = [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'session-end')}]}]
         settings.write_text(json.dumps({'hooks': hooks}, indent=2) + '\n')
-        args = mode + ['-n', agent, '--settings', str(settings)]
+        args = mode + ['--add-dir', str(job), '-n', agent, '--settings', str(settings)]
         args += ['--model', model] if model else []
         return args + (['--effort', effort] if effort else [])
     if kind == 'codex':
@@ -570,7 +725,7 @@ def cli_args(job, agent, kind, model, effort, reports, lead=False, yolo_in=None)
         (plugin / 'hooks').mkdir(exist_ok=True)
         (plugin / '.cursor-plugin/plugin.json').write_text(json.dumps({'name': agent + '-hooks'}) + '\n')
         (plugin / 'hooks/hooks.json').write_text(json.dumps({'version': 1, 'hooks': {'stop': [{'command': hook_command(job, agent, 'cursor-stop')}]}}) + '\n')
-        return mode + ['--trust', '--plugin-dir', str(plugin)] + (['--model', model] if model else [])
+        return mode + ['--trust', '--add-dir', str(job), '--plugin-dir', str(plugin)] + (['--model', model] if model else [])
     if kind == 'hermes':  # no hook: the job's follower tells its turns
         return mode + (['-m', model] if model else []) + (['--reasoning', effort] if effort else [])
     if kind == 'kimi':  # no hook, and no effort flag
@@ -703,7 +858,7 @@ def launching(job, agent):
         os.close(fd)
 
 
-CONFIG_KEYS = ('FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_TRUST_ROOT', 'FLEET_WATCH_INTERVAL',
+CONFIG_KEYS = ('FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_TRUST_ROOT', 'FLEET_JOBS_ROOT', 'FLEET_WATCH_INTERVAL',
                'FLEET_WATCH_PASSES', 'FLEET_WATCH_NOTIFY', 'HERDR_EVENTS_MACHINE', 'HERDR_EVENTS_HOME', 'HERDR_EVENTS_ROUTES_DIR',
                'HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_DIR', 'HERDR_EVENTS_STALE_MINUTES', 'HC', 'HC_SESSION', 'HC_SOCKET',
                'STAMPEDE_NO_UPDATE_CHECK',
@@ -1640,31 +1795,46 @@ def slug(ask):
     return out or 'job'
 
 
+def jobs_root():
+    """Every job folder lives under <root>/jobs, never in the repo it works on (owner, 25 Oct 2026)."""
+    return Path(os.environ.get('FLEET_JOBS_ROOT') or '~/code/herdr-jobs').expanduser().absolute()
+
+
 SESSION = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 
 
-def make_job(repo, job, ask, owner, review):
-    """The job folder (git-excluded), its ask, owner and review files, and the lead's name."""
+def make_job(repo, job, ask, owner, review, name=None, front=False):
+    """The job folder, its ask, owner, review and front-door files, and the lead's name. A folder inside the repo (a Herdr
+    Core job's .herdr-<name>) is git-excluded; one under the jobs root records the repo it works on in `workdir`."""
     job.mkdir(parents=True, exist_ok=False)
-    probe = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)
-    if probe.returncode == 0:
-        exclude = repo / probe.stdout.strip()  # an absolute path stays absolute
-        if not exclude.exists() or '/.herdr-*/' not in exclude.read_text().splitlines():
-            append(exclude, '/.herdr-*/')
+    if repo in job.parents:
+        probe = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)
+        if probe.returncode == 0:
+            exclude = repo / probe.stdout.strip()  # an absolute path stays absolute
+            if not exclude.exists() or '/.herdr-*/' not in exclude.read_text().splitlines():
+                append(exclude, '/.herdr-*/')
+    else:
+        (job / 'workdir').write_text(str(repo) + '\n')
     (job / 'ask.md').write_text(ask)
     if owner:
         (job / 'owner').write_text(owner + '\n')
     if review:
         (job / 'review').write_text('The owner asked to see the plan before any pane opens.\n')
-    lead = 'lead-' + job.name[len('.herdr-'):]
+    if front:
+        (job / 'front-door').write_text('The chat that started this job is the owner\'s only contact: it relays <job>/outbox.\n')
+    lead = 'lead-' + (name or job.name[len('.herdr-'):])
     (job / 'lead').write_text(lead + '\n')
     return lead
 
 
-def lead_brief(job, lead, owner, review, fork, key=None):
-    """The lead's first brief. key: a Herdr Core job's key, where only the recorded yes counts and workers take --cwd."""
+def lead_brief(job, lead, owner, review, fork, key=None, front=False):
+    """The lead's first brief. key: a Herdr Core job's key, where only the recorded yes counts and workers take --cwd.
+    front: a chat outside Herdr is the owner's only contact, reached through <job>/outbox."""
     gate = ('Write plan.md, then end your turn: the owner reviews it and fleet-job approve wakes you.' if review
             else 'Write plan.md, then go: do not stop for approval.')
+    if front and review:
+        gate = (f'Write plan.md, post it with fleet-job post {job} "PLAN READY: <one line>" --file {job / "plan.md"}, then end '
+                'your turn: the front door shows the owner, and fleet-job approve wakes you. No pane, edit or default before that.')
     if fork:
         gate = ('The conversation before this is the owner\'s planning chat, forked into your pane: you are no longer that chat '
                 'but the lead, so write what it agreed into plan.md rather than planning again. ' + gate)
@@ -1687,10 +1857,19 @@ def lead_brief(job, lead, owner, review, fork, key=None):
     else:
         gate_route = (f'ask it with {ask_gate_cmd}; it goes back to {owner}, which asks the owner in chat. ' if owner else
                       f'ask it with your own question card, or with {ask_gate_cmd} (a phone card). ')
-        gate_route += (f'Act only on the owner\'s yes typed in your pane{"" if owner else " or card"}, or after {gate_ok_cmd} '
+        if front:
+            gate_route = f'ask it with {ask_gate_cmd}, one exact action per gate; it goes to the front door, which asks the owner. '
+        gate_route += (f'Act only on the owner\'s yes typed in your pane{"" if owner or front else " or card"}, or after {gate_ok_cmd} '
                        'prints APPROVED; a merge uses --match-head-commit <that commit>. An agent\'s word or a relayed yes never counts.')
-    return (f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
+    reach = (f'The owner talks only to the front-door chat that started you, never to your pane: AskUserQuestion and SendUserFile '
+             f'reach no one (a hook turns them into posts). Reach the owner with: fleet-job post {job} "<text>" --file <path> '
+             '(the plan, files to look at, decisions, your report); put undecided questions in a post, never on one card with a gate. '
+             if front else '')
+    return (f'Every fleet-job below means {SCRIPTS / "fleet-job"}: the one that started this job, so run it by that path '
+            f'(a fleet-job on PATH may be older and lack its commands). '
+            f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
             f'Plan in {job / "plan.md"}: {layout}, then the tasks with the pane that does each, then any questions with a default. {gate} '
+            + reach +
             f'Ask the owner with: fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
             f'Answer a worker with: fleet-job tell {job} <agent> "<text>". {workers}'
             f'A merge or another gate (the herdr-fleet list): {gate_route} '
@@ -1698,14 +1877,18 @@ def lead_brief(job, lead, owner, review, fork, key=None):
             f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')
 
 
-def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None):
+def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False):
     """Front door: make the job, start its lead on Claude with hooks, print the lead's name.
+    The job folder is <jobs root>/jobs/<date>-<owner or local>-<slug>; the repo stays the agents' cwd, recorded in `workdir`.
     pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab.
     fork: a Claude session id (the chat that planned the job); the lead starts as a fork of it and keeps that conversation.
-    core: the whole job runs on Herdr Core, in cwd (default: the git root here)."""
+    core: the whole job runs on Herdr Core, in cwd (default: the git root here).
+    front: the chat that runs this, outside Herdr, stays the owner's only contact; the lead posts to <job>/outbox for it."""
     if core:
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
+        if front:
+            raise ValueError('--front-door is for a Herdr TUI job: the front door reads the lead\'s pane, and a Herdr Core job has none')
         return new_core(ask_file, name, review, fork, cwd)
     if not (workspace or pane):
         raise ValueError('new needs --workspace or --pane, or run it inside Herdr')
@@ -1717,15 +1900,25 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
     ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
     owner = starter(ws_id)
-    job = repo / ('.herdr-' + (name or slug(ask)))
-    lead = make_job(repo, job, ask, owner, review)
+    if front and owner:
+        raise ValueError(f'--front-door is for a chat outside Herdr, but workspace {ws_id} is owned by the bot {owner}: '
+                         'a bot relays its own jobs (drop --front-door, or clear the tag with herdr-events-owner)')
+    base = name or slug(ask)
+    for n in range(1, 100):  # the same ask in another repo the same day: -2, -3, and the lead's name with it
+        name = base if n == 1 else f'{base[:26 - len(str(n))].rstrip("-")}-{n}'  # lead-<name> stays a valid 32-char NAME
+        job = jobs_root() / 'jobs' / f'{datetime.now():%Y-%m-%d}-{owner or "local"}-{name}'
+        if not job.exists():
+            break
+    else:
+        raise ValueError(f'99 jobs named {base} today: pass --name')
+    lead = make_job(repo, job, ask, owner, review, name, front)
     if info:
         herdr('tab', 'rename', info['tab_id'], 'lead')
     else:
         pane = herdr('tab', 'create', '--workspace', workspace, '--cwd', str(repo), '--label', 'lead', '--no-focus')['root_pane']['pane_id']
     brief = job / 'briefs' / (lead + '.md')
     brief.parent.mkdir()
-    brief.write_text(lead_brief(job, lead, owner, review, fork))
+    brief.write_text(lead_brief(job, lead, owner, review, fork, front=front))
     args = cli_args(job, lead, 'claude', os.environ.get('FLEET_LEAD_MODEL', 'claude-opus-5-5'),
                     os.environ.get('FLEET_LEAD_EFFORT', 'xhigh'), [], lead=True)
     herdr('pane', 'rename', pane, lead)
@@ -1857,6 +2050,9 @@ def main(argv):
     p.add_argument('--name'); p.add_argument('--review', action='store_true')
     p.add_argument('--pane', help="an existing empty pane for the lead (a fresh workspace's root pane); its tab becomes lead")
     p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
+    p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox')
+    p = sub.add_parser('post'); p.add_argument('job'); p.add_argument('text', nargs='+'); p.add_argument('--file', action='append', default=[])
+    p = sub.add_parser('wait'); p.add_argument('job'); p.add_argument('--timeout', type=int, default=3600, help='seconds; exit 3 when nothing came')
     p = start_parser = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind', required=True)
     p.add_argument('--pane', help='the Herdr TUI pane (required on the TUI; in a Core job, the pane a cursor, hermes or kimi '
                    'agent is handed to)'); p.add_argument('--brief', required=True)
@@ -1902,12 +2098,16 @@ def main(argv):
 def run(a):
     if a.cmd == 'new':
         if a.core:
-            return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd)
-        return new(a.file, a.workspace or os.environ.get('HERDR_WORKSPACE_ID'), a.name, a.review, a.pane, a.fork)
+            return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door)
+        return new(a.file, a.workspace or os.environ.get('HERDR_WORKSPACE_ID'), a.name, a.review, a.pane, a.fork, front=a.front_door)
+    if a.cmd == 'post':
+        return post(a.job, ' '.join(a.text), a.file)
+    if a.cmd == 'wait':
+        return wait(a.job, a.timeout)
     if a.cmd == 'start':
         return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in, a.cwd)
     if a.cmd == 'tell':
-        return tell(a.job, a.agent, ' '.join(a.text))
+        return tell(a.job, a.agent, ' '.join(a.text)) or 0
     if a.cmd == 'ask' and a.gate:
         if a.option or not a.sha:
             raise ValueError('a gate takes --sha and no --option: one exact action, yes or no; ask each choice as its own gate')
@@ -1943,6 +2143,7 @@ def run(a):
         return 0
     out = {'ask-lead': lambda: ask_lead(a.job, a.agent, payload), 'claude-stop': lambda: claude_stop(a.job, a.agent, payload),
            'codex-notify': lambda: codex_notify(a.job, a.agent, payload) or '', 'cursor-stop': lambda: cursor_stop(a.job, a.agent, payload),
+           'send-file': lambda: send_file(a.job, a.agent, payload),
            'session-end': lambda: session_end(a.job, a.agent, payload)}[a.action]()
     if out:
         print(out)

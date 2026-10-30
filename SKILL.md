@@ -14,4 +14,4 @@ The owner texts a task to a Grok Bot, which reaches the owner's Mac over Tailsca
 
 ## Front door
 
-The front door is its own skill, installed as `stampede`: [skills/stampede/SKILL.md](skills/stampede/SKILL.md). It sizes the job, writes the ask, opens a Herdr workspace for the project when the chat is outside Herdr, and starts the lead with `stampede new` (with `--fork` when the plan was worked out in that chat), then steps back. `stampede` is the same command as `fleet-job`.
+The front door is its own skill, installed as `stampede`: [skills/stampede/SKILL.md](skills/stampede/SKILL.md). It sizes the job, writes the ask, opens a Herdr workspace for the project when the chat is outside Herdr, and starts the lead with `stampede new` (with `--front-door` when the chat is outside Herdr, and `--fork` when the plan was worked out in that chat). In a `--front-door` job it then relays the lead's outbox (plan, questions, gates, files) to the owner and their answers back. `stampede` is the same command as `fleet-job`.

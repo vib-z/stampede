@@ -7,6 +7,8 @@ export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's Claude model
 export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort
 export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this, for a question or a gate, in a job started locally; the question and options are appended
 
+export FLEET_JOBS_ROOT=~/code/herdr-jobs         # every job folder goes in <root>/jobs/<date>-<bot or local>-<slug>, never in a repo
+
 # Trust (herdr-trust, herdr-doctor)
 export FLEET_TRUST_ROOT=~/code                      # herdr-trust trusts repos only under this folder; herdr-doctor checks worktrees here
 

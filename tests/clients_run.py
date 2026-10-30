@@ -7,6 +7,7 @@ Herdr (the pane's ids), outside it (an app's command: no Herdr ids, no Herdr pro
 under a process named sshd). The lead's commands run with the lead's own environment. Nothing touches a real Herdr,
 Herdr Core or agent CLI: the fake Herdr of test_herdr_reopen_snapshot through HERDR and PATH, tests/fake_hc.py through HC.
 """
+from datetime import datetime
 import json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, traceback
 from pathlib import Path
 
@@ -83,7 +84,7 @@ def check_process_tree(under):
 
 class Job:
     """One client driving one job on one backend. CoreCase's fake-core helpers read self.core, so they work here too."""
-    WS, NAME, LEAD = 'w9', 'xc', 'lead-xc'  # the fake Herdr's workspace; new --name xc makes .herdr-xc and its lead
+    WS, NAME, LEAD = 'w9', 'xc', 'lead-xc'  # the fake Herdr's workspace; new --name xc makes the job xc and its lead (Core: <repo>/.herdr-xc; TUI: <jobs root>/jobs/<date>-<bot or local>-xc)
 
     state, terminal, calls, labels, program = CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels, CoreCase.program
 
@@ -99,7 +100,9 @@ class Job:
         self.repo, self.core, self.herdr = self.root / 'code/repo', self.root / 'core', self.root / 'herdr'
         self.home, self.events, self.queue = self.root / 'home', self.root / 'events', self.root / 'queue'
         self.bin = self.home / '.local/bin'
-        self.job = self.repo / ('.herdr-' + self.NAME)
+        self.jobs_root = self.root / 'herdr-jobs'
+        self.job = (self.repo / ('.herdr-' + self.NAME) if backend == 'core' else
+                    self.jobs_root / 'jobs' / f'{datetime.now():%Y-%m-%d}-{self.bot or "local"}-{self.NAME}')
         self.steps, self.error = {}, ''
         for folder in (self.repo, self.core, self.herdr, self.bin, self.events, self.root / 'routes'):
             folder.mkdir(parents=True)
@@ -112,7 +115,7 @@ class Job:
                      'TMPDIR': tempfile.gettempdir(), 'HERDR': str(self.bin / 'herdr'), 'FAKE_DIR': str(self.herdr),
                      'HC': str(FAKE_HC), 'FAKE_HC': str(self.core), 'HERDR_EVENTS_DIR': str(self.events),
                      'HERDR_EVENTS_HOME': str(self.queue), 'HERDR_EVENTS_ROUTES_DIR': str(self.root / 'routes'),
-                     'FLEET_TRUST_ROOT': str(self.root / 'code'), 'FLEET_ASK_CMD': str(self.bin / 'ask'),
+                     'FLEET_TRUST_ROOT': str(self.root / 'code'), 'FLEET_JOBS_ROOT': str(self.jobs_root), 'FLEET_ASK_CMD': str(self.bin / 'ask'),
                      'HERDR_EVENTS_MACHINE': 'test', 'STAMPEDE_NO_UPDATE_CHECK': '1',
                      'FLEET_LEAD_MODEL': LEAD_MODEL, 'FLEET_LEAD_EFFORT': 'low'}  # a front door's cheap lead
         self.fake_herdr()
