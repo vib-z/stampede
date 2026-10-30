@@ -18,18 +18,18 @@ It has two halves. The automated half ([tests/test_clients.py](../tests/test_cli
 
 ## Clients
 
-Automated: the command-contract checks listed under [What the automated suite asserts](#what-the-automated-suite-asserts), against the fakes, 30 Oct 2026; a pass there says nothing of an agent's own work. Live: a run from the real client on one Mac, agents included.
+Automated: the command-contract checks listed under [What the automated suite asserts](#what-the-automated-suite-asserts), against the fakes, 30 Oct 2026; a pass there says nothing of an agent's own work. Live: a live run on one Mac, 30 Oct 2026, from the real client, agents included. PASS is O1 to O8; O1 passes when the client ran the doctor and read it, whatever the machine's own `PROBLEM` lines. PARTIAL marks outcomes that wait on the owner's tap on a phone card, which is no failure.
 
 | client | stands for | where it runs | its jobs belong to | automated | live, TUI | live, Core |
 |---|---|---|---|---|---|---|
-| `herdr-chat` | a Claude chat in a Herdr pane | inside Herdr | the machine (local) | O1 to O8 pass | pending | pending |
-| `claude-code` | Claude desktop or the Claude app, on the machine | outside Herdr | local | O1 to O8 pass | pending | pending |
-| `codex` | Codex desktop or the ChatGPT app, on the machine | outside Herdr | local | O1 to O8 pass | pending | pending |
-| `cursor` | a Cursor chat on the machine | outside Herdr | local | O1 to O8 pass | pending | pending |
-| `hermes` | a Hermes chat on the machine | outside Herdr | local | O1 to O8 pass | pending | pending |
-| `grokbot` | Grok Bot, over SSH from its own computer | over SSH | the bot, by the workspace's owner tag | O1 to O9 pass | pending | pending |
-| `other-bot` | any other bot with a computer of its own | over SSH | the bot, by `HERDR_EVENTS_OWNER` | O1 to O9 pass; TUI O9 partial ([F2](#doing-worse)) | pending | pending |
-| `remote-computer` | Herdr, the CLIs and stampede on one remote box | inside Herdr | local | O1 to O8 pass | pending | pending |
+| `herdr-chat` | a Claude chat in a Herdr pane | inside Herdr | the machine (local) | O1 to O8 pass | PASS | not run (the Claude lane ran Core from `claude-code`) |
+| `claude-code` | Claude desktop or the Claude app, on the machine | outside Herdr | local | O1 to O8 pass | PASS (O3 hit [F3 and F4](#found-by-the-live-runs)) | PARTIAL: O4, O5 and O7 waiting on the owner's tap |
+| `codex` | Codex desktop or the ChatGPT app, on the machine | outside Herdr | local | O1 to O8 pass | PARTIAL: O4, O5 and O7 waiting on the owner's tap | PARTIAL: O4, O5 and O7 waiting on the owner's tap |
+| `cursor` | a Cursor chat on the machine | outside Herdr | local | O1 to O8 pass | not run (headless Cursor rejects every shell call without `--force`, [F9](#found-by-the-live-runs)) | not run (a Cursor usage limit) |
+| `hermes` | a Hermes chat on the machine | outside Herdr | local | O1 to O8 pass | pending (its report is not in yet) | pending (its report is not in yet) |
+| `grokbot` | Grok Bot, over SSH from its own computer | over SSH | the bot, by the workspace's owner tag | O1 to O9 pass | pending (its report is not in yet) | pending (its report is not in yet) |
+| `other-bot` | any other bot with a computer of its own | over SSH | the bot, by `HERDR_EVENTS_OWNER` | O1 to O9 pass; TUI O9 partial ([F2](#doing-worse)) | not run live (same path as `grokbot`) | not run live (same path as `grokbot`) |
+| `remote-computer` | Herdr, the CLIs and stampede on one remote box | inside Herdr | local | O1 to O8 pass | not run live (same path as `herdr-chat`) | not run live (same path as `herdr-chat`) |
 
 O9 is for bots only: a local client hears from its own pane, the lead's card or the phone.
 
@@ -85,7 +85,7 @@ How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per c
 One small job per client and backend, on one Mac, by a maintainer. The `stampede` and helper commands in steps 4 and 5 are the ones the automated suite runs against the fakes; the scratch repo, trust and commit steps, and all the agents do, run only here.
 
 1. **Scratch repo:** `git init` a folder under `FLEET_TRUST_ROOT`, commit a README, run `herdr-trust <repo>`.
-2. **No phone cards:** set `FLEET_ASK_CMD` to a recorder that logs the question and prints the first option, or `yes` for a gate.
+2. **No phone cards:** set `FLEET_ASK_CMD` to a recorder that logs the question and prints the first option, or `yes` for a gate. On Core the front door's environment carries it to the lead; on the TUI export it in the job's root pane before `stampede new` ([F5](#found-by-the-live-runs)). With the phone instead, O4, O5 and O7 wait on the owner's tap: record them as PARTIAL. For a cheaper test lead, set `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` in the front door's environment; `stampede new` reads them itself.
 3. **The ask:** one worker writes `hello-<client>-<backend>.txt`; the lead asks one question with two options, asks a gate for committing the file at `HEAD`, commits only after `gate-ok` prints `APPROVED`, then runs `stampede finish` once.
 4. **Start, from the client** (`--name xc-<client>-<backend>`):
    - inside Herdr: `stampede new --file <ask.md> --name <name>`;
@@ -94,6 +94,14 @@ One small job per client and backend, on one Mac, by a maintainer. The `stampede
    - on Core, any client: `stampede new --core --file <ask.md> --cwd <repo> --name <name>`, a bot with `HERDR_EVENTS_OWNER=<bot>` in front.
 5. **Check each outcome:** `herdr-doctor` (O1); `plan.md` and the worker (O2, O3); the recorder log or the bot's `question` event, then the answer in `<job>/inbox/` (O4); `approve-gate` from the bot over SSH, refused from a Herdr pane, then `gate-ok` (O5); `stampede tell <job> <agent> "<text>"` (O6); `bash <job>/reopen.sh` on the live job, after `herdr-reopen-snapshot <workspace> <job>` on the TUI (O8); the finish line and the marker gone from `~/.config/herdr-events/jobs/` (O7). A bot waits for its webhook between steps (O9).
 6. **Record** PASS, FAIL with proof, or N/A with why, in the [Clients](#clients) table, dated, with personal details removed.
+
+**The front doors that worked live,** 30 Oct 2026. `<prompt>` asks the client to read stampede's `SKILL.md` and start the job in `<ask.md>`; each ran from `<scratch repo>`.
+
+- **`herdr-chat`, TUI,** from a Claude pane: `herdr workspace create --cwd <scratch repo> --label <name> --no-focus`; `herdr pane run <root pane> "export FLEET_ASK_CMD=<recorder>"`; `stampede new --file <ask.md> --pane <root pane> --name <name>`.
+- **`claude-code`:** `env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID claude -p --permission-mode auto "<prompt>"`. On the TUI it ran the three `herdr-chat` commands; on Core, `stampede new --core --file <ask.md> --cwd <scratch repo> --name <name>`.
+- **`codex`:** `env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID codex exec "<prompt>"`, with the user's own Codex config ([F8](#found-by-the-live-runs)). On the TUI it ran `herdr --session default workspace create --cwd <scratch repo> --label <name> --no-focus`, `herdr pane run <root pane> '<the exports>'` and `stampede new --file <ask.md> --pane <root pane> --name <name>`; on Core, `stampede new --core --cwd <scratch repo> --file <ask.md> --name <name>`. A cursor worker on that Core job was refused live as the suite expects.
+- **`cursor`:** not run; `cursor-agent -p "<prompt>"` had every shell call rejected ([F9](#found-by-the-live-runs)).
+- **`hermes`, `grokbot`:** their live runs are not in yet.
 
 Leave the test workspaces open; the owner closes them.
 
