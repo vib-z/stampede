@@ -1,13 +1,13 @@
 """Mixed jobs: a Herdr Core job hands the agents Core cannot run (Cursor, Hermes, Kimi) to Herdr TUI panes. Every Core call
 goes to tests/fake_hc.py and every Herdr call to tests/fake_herdr.py; nothing here starts a program or touches a real
 core or Herdr."""
-import contextlib, io, json, os, subprocess, sys, threading, time, unittest
+import contextlib, io, json, os, shlex, subprocess, sys, threading, time, unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, LEAD, ROOT, SCRIPTS, SHA, fj, git
-from test_core_relay import RELAY, Shell, follower_module
+from test_core_relay import RELAY, Shell, follower_module, status
 
 FAKE_HERDR = ROOT / 'tests/fake_herdr.py'
 PANE = 'w9:p3'
@@ -41,7 +41,7 @@ class MixedCase(CoreCase):
 
     def agent(self, pane=PANE, **fields):
         """Change the agent in a pane, as Herdr would: a turn that ends (working or blocked to idle or done) adds one to
-        its completion_seq. agent=None empties the pane (it exited); gone=True closes the pane."""
+        completion_seq to a Herdr-wide counter. agent=None empties the pane (it exited); gone=True closes the pane."""
         state = self.herdr_state()
         if fields.get('gone'):
             del state['panes'][pane]
@@ -51,7 +51,7 @@ class MixedCase(CoreCase):
             agent = state['panes'][pane]['agent']
             if (agent['agent_status'] in ('working', 'blocked') and fields.get('agent_status') in ('idle', 'done')
                     and 'completion_seq' not in fields):
-                fields['completion_seq'] = agent['completion_seq'] + 1
+                state['seq'] = fields['completion_seq'] = state.get('seq', 1000) + 1  # Herdr-wide, as live
             agent.update(fields)
         self.herdr_shape(**state)
 
@@ -86,9 +86,9 @@ class MixedStart(MixedCase):
             code, out = self.hand(agent, kind, pane)
             self.assertEqual((code, out.strip()), (0, f'STARTED {agent} (pane {pane})'))
             entry = self.entries(self.job_dir)[agent]
-            self.assertEqual({k: entry[k] for k in ('state', 'role', 'backend', 'pane', 'kind', 'terminal', 'completion')},
+            self.assertEqual({k: entry[k] for k in ('state', 'role', 'backend', 'pane', 'kind', 'completion', 'briefed')},
                              {'state': 'live', 'role': 'worker', 'backend': 'tui', 'pane': pane, 'kind': kind,
-                              'terminal': f'term{n + 1}', 'completion': 0})
+                              'completion': None, 'briefed': True})
             self.assertRegex(entry['launch'], r'^[0-9a-f]{12}$')
             self.assertEqual(fj.agent_rows(self.job_dir)[agent]['kind'], kind)
             self.assertEqual((self.events / 'handed' / pane).read_text(), f'{self.job_dir}\n{entry["launch"]}\n')
@@ -140,7 +140,7 @@ class MixedStart(MixedCase):
         with self.assertRaises(ValueError) as refused:  # a Core start of that name
             self.quiet(fj.start, self.job_dir, 'build-ui', 'claude', None, str(self.brief(self.job_dir, 'build-ui')))
         self.assertIn(f'already running in pane {PANE}', str(refused.exception))
-        self.agent(terminal_id='term99')  # its name runs in its pane, but not as this launch
+        self.agent(agent='cursor')  # its name runs in its pane, but not as this launch
         with self.assertRaises(ValueError) as refused:
             self.hand(pane='w9:p4')
         self.assertIn('not as the launch this job recorded', str(refused.exception))
@@ -196,9 +196,16 @@ class MixedStart(MixedCase):
         self.assertIn('already running in pane w9:p4', str(refused.exception))
         self.assertEqual(len(self.herdr_calls('agent start')), 2)
         self.settled()
+        code, out = self.quiet(fj.reopen, self.job_dir)  # R1-8: settled live, but never briefed: no success, and no typing
+        self.assertIn('NOT BRIEFED build-db (pane w9:p4): it runs, but its brief was never confirmed sent', out)
+        self.assertEqual((code, self.entries(self.job_dir)['build-db']['state']), (1, 'live'))
+        self.assertEqual(self.herdr_state()['panes']['w9:p4']['agent']['prompts'], [])
+        tell = shlex.split(out.split('only if it has not got it: ')[1].splitlines()[0])
+        self.assertEqual(tell[:4], ['fleet-job', 'tell', str(self.job_dir), 'build-db'])
+        self.quiet(fj.tell, self.job_dir, 'build-db', tell[4])
         code, out = self.quiet(fj.reopen, self.job_dir)
         self.assertIn('LIVE build-db (pane w9:p4)', out)
-        self.assertEqual((code, self.entries(self.job_dir)['build-db']['state']), (0, 'live'))
+        self.assertEqual(code, 0)
 
     def test_the_core_lead_brief_and_help_teach_the_handed_start(self):
         self.new_core()
@@ -226,8 +233,8 @@ class MixedKinds(MixedCase):
         self.assertEqual(sorted(p.name for p in (self.job_dir / 'hooks').iterdir()), ['a.json', 'b.json'])
 
 
-class MixedFollower(MixedCase):
-    """Design item 3, A1 to A3: the follower looks at handed agents and tells the lead and the bot as for a Core worker."""
+class FollowerCase(MixedCase):
+    """A follower of the job, its bot posts kept, its clocks the test's; one look is one Herdr read, applied."""
 
     def setUp(self):
         super().setUp()
@@ -249,6 +256,13 @@ class MixedFollower(MixedCase):
         path = self.job_dir / 'inbox.log'
         return path.read_text().splitlines() if path.is_file() else []
 
+    def look(self, follower):
+        """One Herdr read on the reader's thread, then applied on this one: a poll starts it, the next applies it."""
+        follower.poll()
+        if getattr(follower, 'reader', None):
+            follower.reader.join(10)
+        follower.poll()
+
     def steps(self, follower, *statuses, pane=PANE):
         for word in statuses:
             if word == 'exit':
@@ -257,38 +271,42 @@ class MixedFollower(MixedCase):
                 self.agent(pane, gone=True)
             else:
                 self.agent(pane, agent_status=word)
-            follower.poll()
+            self.look(follower)
 
     def sent(self):
         return [(e['state'], e.get('turn') or e.get('kind') or e.get('last_state')) for e in self.posts]
+
+
+class MixedFollower(FollowerCase):
+    """Design item 3, A1 to A3: the follower looks at handed agents and tells the lead and the bot as for a Core worker."""
 
     def test_turns_blocks_and_an_exit_of_a_hermes_worker(self):
         self.hand('build-ui', 'hermes')  # working on its brief pointer
         f = self.follower()
         self.steps(f, 'done', 'working', 'blocked', 'working', 'idle', 'exit')
         self.assertEqual(self.inbox(), ['TURN build-ui', 'BLOCKED build-ui dialog', 'TURN build-ui', 'GONE build-ui exited'])
-        self.assertEqual(self.sent(), [('done', 1), ('blocked', 'dialog'), ('idle', 2)])
+        self.assertEqual(self.sent(), [('done', 1001), ('blocked', 'dialog'), ('idle', 1002)])
         launch = self.entries(self.job_dir)['build-ui']['launch']
         event = self.posts[1]
         self.assertEqual((event['source'], event['workspace'], event['pane'], event['agent'], event['owner']),
                          ('hc', self.key, PANE, 'build-ui', 'alpha'))
         self.assertEqual(event['event_id'], f'{self.key}/tui:{PANE}|{launch}|blocked|1')
-        self.assertEqual(self.posts[0]['event_id'], f'{self.key}/tui:{PANE}|{launch}|turn|1')
+        self.assertEqual(self.posts[0]['event_id'], f'{self.key}/tui:{PANE}|{launch}|completion|1001')
         self.assertIn('output_tail', event)
-        f.poll()
+        self.look(f)
         self.assertEqual(len(self.inbox()), 4, 'GONE once')
         self.assertEqual(self.mark(), str(self.job_dir), 'a GONE keeps its mark until finish')
 
     def test_a_turn_between_looks_or_while_the_follower_was_down_is_told_once(self):
         self.hand()
         first = self.follower()
-        first.poll()
+        self.look(first)
         self.agent(agent_status='idle', completion_seq=1)  # worked and finished between two looks
-        first.poll()
-        first.poll()
+        self.look(first)
+        self.look(first)
         self.agent(agent_status='done', completion_seq=2)  # and again while no follower ran
-        self.follower().poll()
-        self.follower().poll()
+        self.look(self.follower())
+        self.look(self.follower())
         self.assertEqual(self.inbox(), ['TURN build-ui', 'TURN build-ui'])
         self.assertEqual(self.sent(), [('idle', 1), ('done', 2)])
 
@@ -299,7 +317,7 @@ class MixedFollower(MixedCase):
         f = self.follower()
         for pane in (PANE, 'w9:p4'):
             self.agent(pane, agent_status='done')
-        f.poll()
+        self.look(f)
         self.assertEqual(self.inbox(), ['TURN build-k'])
         self.assertEqual(sorted((e['agent'], e['state']) for e in self.posts), [('build-c', 'done'), ('build-k', 'done')])
 
@@ -307,7 +325,7 @@ class MixedFollower(MixedCase):
         self.hand()
         f = self.follower()
         self.steps(f, 'working', 'close')
-        f.poll()
+        self.look(f)
         self.assertEqual(self.inbox(), ['GONE build-ui pane closed'])
         self.assertEqual(self.sent(), [('dead', 'working')])
 
@@ -316,7 +334,7 @@ class MixedFollower(MixedCase):
         f = self.follower()
         for minute in (0, 29, 31, 40):
             self.now[0] = minute * 60
-            f.poll()
+            self.look(f)
             f.stalls()
         self.assertEqual(self.inbox(), ['STALE build-ui no new output for 31m'])
         self.assertEqual([(e['state'], e['minutes_unchanged'], e['pane']) for e in self.posts], [('stale', 31, PANE)])
@@ -327,7 +345,7 @@ class MixedFollower(MixedCase):
         self.steps(self.follower(), 'blocked', 'working')  # a restarted follower resumes from relay-state.json
         self.steps(self.follower(), 'done', 'done')
         self.assertEqual(self.inbox(), ['BLOCKED build-ui dialog', 'TURN build-ui'])
-        self.assertEqual(self.sent(), [('blocked', 'dialog'), ('done', 1)])
+        self.assertEqual(self.sent(), [('blocked', 'dialog'), ('done', 1001)])
 
     def test_a_restart_in_its_pane_is_a_new_launch_and_herdr_down_is_no_news(self):
         self.hand()
@@ -337,7 +355,7 @@ class MixedFollower(MixedCase):
         self.herdr_shape(list_error='server_down')
         self.steps(f, 'done')
         self.agent(agent=None)
-        f.poll()
+        self.look(f)
         self.herdr_shape(list_error=None)
         self.agent(agent=None)
         self.assertEqual(self.inbox(), ['TURN build-ui', 'GONE build-ui exited'], 'Herdr down: no TURN, and never GONE')
@@ -348,13 +366,15 @@ class MixedFollower(MixedCase):
     def test_a_same_name_replacement_is_gone_and_a_start_not_yet_live_is_never_gone(self):
         self.hand()
         f = self.follower()
-        f.poll()
-        self.agent(terminal_id='term99')
-        f.poll()
+        self.look(f)
+        self.agent(agent_session={'kind': 'id', 'value': 's1'})
+        self.look(f)
+        self.agent(agent_session={'kind': 'id', 'value': 's2'})  # a new process under its name
+        self.look(f)
         self.assertEqual(self.inbox(), ['GONE build-ui replaced'])
         fj.bind(self.job_dir, 'build-db', {'state': 'starting', 'backend': 'tui', 'pane': 'w9:p8', 'kind': 'kimi',
                                            'launch': 'a' * 12}, fresh=True)
-        f.poll()
+        self.look(f)
         self.assertEqual(len(self.inbox()), 1)
 
     def test_the_follower_and_reopen_never_type_into_a_pane(self):  # owner check 2
@@ -366,12 +386,12 @@ class MixedFollower(MixedCase):
         for minute, word in ((0, 'working'), (1, 'blocked'), (2, 'working'), (40, 'working'), (41, 'done'), (42, 'idle')):
             self.now[0] = minute * 60
             self.agent(agent_status=word)
-            f.poll()
+            self.look(f)
             f.stalls()
         self.settled()
         self.quiet(fj.reopen, self.job_dir)  # LIVE for both
         self.agent(agent=None)
-        f.poll()
+        self.look(f)
         self.quiet(fj.reopen, self.job_dir)  # NOT RUNNING for build-ui
         self.assertEqual(self.inbox()[-1], 'GONE build-ui exited')
         self.assertIn('STALE build-ui no new output for 38m', self.inbox())
@@ -381,7 +401,7 @@ class MixedFollower(MixedCase):
     def test_a_core_only_job_never_calls_herdr(self):
         f = self.follower()
         f.line({'channel': None, 'seq': 1, 'terminals': []})
-        f.poll()
+        self.look(f)
         self.assertEqual(self.herdr_calls(), [])
 
     def test_it_ticks_while_the_core_stream_is_quiet(self):
@@ -389,7 +409,8 @@ class MixedFollower(MixedCase):
         core = follower_module()
         self.shape(streams=[[{'channel': None, 'seq': 1, 'terminals': []}]], hold=[60])
         with mock.patch.object(core.Follower, 'post', lambda follower, event: None), \
-                mock.patch.object(core, 'POLL_EVERY', 0.05), mock.patch.object(core, 'alive', lambda: True):
+                mock.patch.object(core, 'POLL_EVERY', 0.05), mock.patch.object(core, 'TICK', 0.05), \
+                mock.patch.object(core, 'alive', lambda: True):
             follower, result = core.Follower(self.job_dir), []
             thread = threading.Thread(target=lambda: result.append(follower.follow()), daemon=True)
             thread.start()
@@ -482,10 +503,12 @@ class MixedTell(MixedCase):
                             ({'agent_status': 'blocked'}, f'blocked: read it with herdr agent read {PANE}'),
                             ({'agent_status': 'idle', 'focused': True}, 'focused: the owner is in that pane; retry later'),
                             ({'focused': False, 'name': 'someone-else'}, f'pane {PANE} runs someone-else, not build-ui'),
-                            ({'name': 'build-ui', 'terminal_id': 'term99'}, f'pane {PANE} runs build-ui, but not as the launch this job recorded')):
+                            ({'name': 'build-ui', 'agent_session': {'kind': 'id', 'value': 's2'}},
+                             f'pane {PANE} runs build-ui, but not as the launch this job recorded')):
+            fj.bind(self.job_dir, 'build-ui', {'session': 's1'})
             self.agent(**fields)
             self.assertEqual(self.told(), (f'FAILED build-ui ({why})', 2))
-        self.agent(terminal_id='term1')
+        self.agent(agent_session={'kind': 'id', 'value': 's1'})
         self.add_pane(PANE, agent=self.herdr_state()['panes'][PANE]['agent'], screen='❯ half a sentence')
         out, code = self.told()
         self.assertEqual(code, 2)
@@ -639,9 +662,307 @@ class MixedReopen(MixedCase):
         self.herdr_shape(list_error='server_down')
         code, out = self.quiet(fj.reopen, self.job_dir)
         self.assertEqual(code, 1)
-        self.assertIn('UNKNOWN build-ui: Herdr did not answer', out)
+        self.assertIn('UNKNOWN build-ui: Herdr did not show clearly whether pane w9:p3 runs it', out)
         self.assertEqual(self.calls('run'), [], 'never in a Core terminal')
         self.assertIn(f'pane {PANE}', (self.job_dir / 'REOPEN.md').read_text())
+
+
+class Round1Start(MixedCase):
+    """Review round 1: the reopen race (R1-1), identity (R1-2), whole lists (R1-3), pane claims (R1-4), briefing (R1-8)."""
+
+    def racing(self, during):
+        """fj.launching that first runs `during`, once, when reopen comes for build-ui's lock: a start that slips in
+        after reopen looked at the job and before it holds the lock."""
+        real, ran = fj.launching, []
+
+        @contextlib.contextmanager
+        def launching(job, agent):
+            if agent == 'build-ui' and not ran:
+                ran.append(agent)
+                during()
+            with real(job, agent):
+                yield
+        return mock.patch.object(fj, 'launching', launching)
+
+    def core_worker_gone(self):
+        """build-ui as the job's Codex worker on Core, its terminal finished; the lead live, the job finished."""
+        with open(self.job_dir / 'agents.tsv', 'a') as rows:
+            rows.write('build-ui\tcodex\t\t' + str(self.brief(self.job_dir, 'build-ui')) + '\t--approve-for-me\n')
+        self.add_terminal('t5', name='build-ui', state='finished', labels={'stampede.job': self.key, 'stampede.agent': 'build-ui'})
+        fj.bind(self.job_dir, 'build-ui', {'state': 'live', 'address': 't5', 'role': 'worker'}, fresh=True)
+        self.settled()
+
+    def test_r1_1_a_hand_off_after_reopen_looked_is_never_started_on_core(self):
+        self.core_worker_gone()
+        with self.racing(lambda: self.hand('build-ui', 'hermes')):
+            code, out = self.quiet(fj.reopen, self.job_dir)
+        self.assertEqual(self.calls('run'), [], 'no Codex on Core beside the handed Hermes')
+        self.assertIn(f'LIVE build-ui (pane {PANE})', out)
+        self.assertEqual((code, self.entries(self.job_dir)['build-ui']['backend']), (0, 'tui'))
+
+    def test_r1_1_a_core_start_after_reopen_looked_is_not_called_missing(self):
+        self.hand()
+        self.agent(agent=None)
+        self.settled()
+        brief = str(self.brief(self.job_dir, 'build-ui'))
+        with self.racing(lambda: self.quiet(fj.start, self.job_dir, 'build-ui', 'codex', None, brief)):
+            code, out = self.quiet(fj.reopen, self.job_dir)
+        self.assertEqual([self.labels(run)['stampede.agent'] for run in self.calls('run')], ['build-ui'], 'started once, by start')
+        self.assertNotIn('NOT RUNNING', out)
+        self.assertEqual((code, self.entries(self.job_dir)['build-ui'].get('backend')), (0, None))
+
+    def test_r1_2_a_start_herdr_shows_no_identity_for_is_never_started(self):
+        for n, (error, answer) in enumerate((('server_down', None), (None, {}), (None, {'agent': {'pane_id': 'w9:p99', 'name': 'x'}}),
+                                             (None, {'agent': {'pane_id': '?', 'completion_seq': None}}),
+                                             (None, {'agent': {'name': '?', 'completion_seq': 'one'}}))):
+            pane, agent = f'w9:p{4 + n}', f'build-{n}'
+            self.add_pane(pane)
+            if answer and 'agent' in answer:
+                answer['agent'].update({k: v for k, v in (('pane_id', pane), ('name', agent)) if answer['agent'].get(k) == '?'})
+            self.herdr_shape(get_error={pane: error} if error else {}, get_answer={pane: answer} if answer is not None else {})
+            code, out = self.hand(agent, pane=pane)
+            self.assertEqual(code, 1, out)
+            self.assertTrue(out.startswith(f'UNKNOWN {agent}: '), out)
+            self.assertEqual(self.entries(self.job_dir)[agent]['state'], 'starting')
+            self.assertEqual(self.herdr_state()['panes'][pane]['agent']['prompts'], [], 'no brief to an unsettled launch')
+
+    def test_r1_2_an_absent_null_or_malformed_identity_never_matches(self):
+        self.hand()
+        self.settled()
+        fj.bind(self.job_dir, 'build-ui', {'session': 's1', 'completion': 1001})  # what this launch showed
+        for fields in ({'agent_session': {'kind': 'id', 'value': 's2'}}, {'completion_seq': None}, {'name': None}):
+            state = self.herdr_state()
+            agent = state['panes'][PANE]['agent']
+            agent.update({'name': 'build-ui', 'agent_session': {'kind': 'id', 'value': 's1'}, 'completion_seq': 1001,
+                          'agent_status': 'idle', **fields})
+            self.herdr_shape(**state)
+            out, code = MixedTell.told(self)
+            self.assertEqual(code, 2, (fields, out))
+            code, out = self.quiet(fj.reopen, self.job_dir)
+            self.assertIn('UNKNOWN build-ui', out, fields)
+            with self.assertRaises(ValueError):
+                self.quiet(fj.start, self.job_dir, 'build-ui', 'claude', None, str(self.brief(self.job_dir, 'build-ui')))
+        self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'][1:], [], 'nothing typed')
+        self.assertEqual(self.calls('run'), [])
+
+    def test_r1_3_a_malformed_list_is_no_evidence_of_absence(self):
+        self.hand()
+        self.settled()
+        brief = str(self.brief(self.job_dir, 'build-ui'))
+        for answer in ({}, {'agents': 'none'}, {'agents': [{}]}, {'agents': [{'pane_id': PANE, 'name': None, 'agent': 'hermes'}]}):
+            self.herdr_shape(list_answer=answer)
+            with self.assertRaises(ValueError) as refused:
+                self.quiet(fj.start, self.job_dir, 'build-ui', 'claude', None, brief)
+            self.assertIn('Herdr did not answer clearly', str(refused.exception), answer)
+            code, out = self.quiet(fj.reopen, self.job_dir)
+            self.assertIn('UNKNOWN build-ui', out, answer)
+        self.assertEqual(self.calls('run'), [])
+
+    def test_r1_4_a_pane_is_claimed_once(self):
+        self.hand()
+        launch = self.entries(self.job_dir)['build-ui']['launch']
+        self.herdr_shape(start_error={'review-ui': 'pane_not_at_prompt'})
+        with self.assertRaises(ValueError) as refused:
+            self.hand('review-ui', 'kimi')
+        self.assertIn(f'pane {PANE} is handed to build-ui of {self.job_dir}', str(refused.exception))
+        other = self.repo / '.herdr-other'
+        (other / 'briefs').mkdir(parents=True)
+        (other / 'backend').write_text('core\n')
+        (other / 'workspace').write_text(fj.job_key(other) + '\n')
+        (other / 'lead').write_text('lead-other\n')
+        with self.assertRaises(ValueError) as refused:
+            self.hand('build-x', 'cursor', job=other)
+        self.assertIn(f'is handed to build-ui of {self.job_dir}', str(refused.exception))
+        self.assertEqual((self.events / 'handed' / PANE).read_text(), f'{self.job_dir}\n{launch}\n')
+        self.assertEqual(len(self.herdr_calls('agent start')), 1, 'refused before any start')
+        self.assertNotIn('review-ui', self.entries(self.job_dir))
+        self.agent(agent=None)  # build-ui left: its mark is stale, and the pane can be claimed again
+        self.herdr_shape(start_error={})
+        self.assertEqual(self.hand('review-ui', 'kimi')[0], 0)
+        self.assertEqual(self.mark(), str(self.job_dir))
+        results = []
+
+        def claim(agent):
+            try:
+                fj.claim_pane(self.job_dir, agent, 'w9:p7', {'state': 'starting', 'backend': 'tui', 'pane': 'w9:p7',
+                                                             'launch': agent * 4})
+                results.append('claimed')
+            except ValueError:
+                results.append('refused')
+        threads = [threading.Thread(target=claim, args=(name,)) for name in ('aaa', 'bbb')]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(results), ['claimed', 'refused'])
+
+    def test_r1_8_a_live_but_unbriefed_agent_is_no_success(self):
+        self.herdr_shape(on_start={'build-ui': {'focused': True}})  # the owner is in the pane: the pointer waits
+        code, out = self.hand()
+        self.assertTrue(out.startswith('NOT READY build-ui: focused'), out)
+        self.settled()
+        code, out = self.quiet(fj.reopen, self.job_dir)
+        self.assertEqual(code, 1)
+        self.assertIn(f'NOT BRIEFED build-ui (pane {PANE})', out)
+        self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'], [], 'reopen never types')
+        self.agent(focused=False)
+        self.quiet(fj.tell, self.job_dir, 'build-ui', shlex.split(out.split('only if it has not got it: ')[1])[4])
+        self.assertEqual(self.quiet(fj.reopen, self.job_dir), (0, f'LIVE build-ui (pane {PANE})\nLIVE {self.key}: no agent to restart\n'))
+
+
+class Round1Follower(FollowerCase):
+    """Review round 1: no unverified identity or screen (R1-2, R1-5), one completion once (R1-6), Herdr never holds up
+    Core (R1-7), and a malformed list is no news (R1-3)."""
+
+    def test_r1_2_and_r1_3_unclear_answers_change_nothing(self):
+        self.hand()
+        f = self.follower()
+        self.look(f)
+        self.agent(agent_status='done')  # a turn ended, but the next answers do not show it clearly
+        row = {k: v for k, v in self.herdr_state()['panes'][PANE]['agent'].items() if k not in ('args', 'prompts')}
+        for answer in ({}, {'agents': 'none'}, {'agents': [{}]}, {'agents': [{**row, 'pane_id': PANE, 'name': None}]},
+                       {'agents': [{k: v for k, v in {**row, 'pane_id': PANE}.items() if k != 'completion_seq'}]}):
+            self.herdr_shape(list_answer=answer)
+            self.look(f)
+        self.assertEqual((self.inbox(), [e['state'] for e in self.posts]), ([], []))
+        self.herdr_shape(list_answer=None)
+        self.look(f)
+        self.assertEqual(self.inbox(), ['TURN build-ui'])
+
+    def test_r1_5_a_replacements_screen_never_reaches_the_old_owner(self):
+        self.hand()  # alpha's job; its pane is then taken over by another job's agent (owner beta) under the same name
+        f = self.follower()
+        self.agent(agent_status='working', agent_session={'kind': 'id', 'value': 's1'})
+        self.look(f)
+        self.add_pane(PANE, agent={**self.herdr_state()['panes'][PANE]['agent'], 'agent_session': {'kind': 'id', 'value': 's2'}},
+                      screen='OTHER_JOB_PRIVATE_SENTINEL')
+        self.look(f)
+        self.add_pane('w9:p4')
+        self.hand('review-ui', 'kimi', 'w9:p4')
+        self.agent('w9:p4', agent_status='working')
+        self.look(f)
+        self.add_pane('w9:p4', agent={**self.herdr_state()['panes']['w9:p4']['agent'], 'name': 'beta-agent'},
+                      screen='OTHER_JOB_PRIVATE_SENTINEL')
+        self.look(f)
+        self.assertNotIn('OTHER_JOB_PRIVATE_SENTINEL', json.dumps(self.posts))
+        self.assertTrue(all('output_tail' not in e for e in self.posts if e['state'] == 'dead'))
+        self.assertEqual(self.inbox(), ['GONE build-ui replaced', 'GONE review-ui exited'])
+        self.assertEqual([(e['state'], e['owner']) for e in self.posts], [('dead', 'alpha'), ('dead', 'alpha')])
+
+    def test_r1_6_a_restart_at_the_save_boundary_tells_one_completion_once(self):
+        self.herdr_shape(on_start={'build-ui': {'completion_seq': 1000}})  # a counted baseline, as after an earlier turn
+        self.hand()
+        first = self.follower()
+        self.look(first)
+
+        def killed(*args, **kw):
+            raise RuntimeError('the follower died here')
+        first.observe = killed  # it dies after the turn's notification was saved, before the poll's own save
+        self.agent(agent_status='done')
+        with self.assertRaises(RuntimeError):
+            self.look(first)
+        self.look(self.follower())
+        self.assertEqual(self.inbox(), ['TURN build-ui'])
+        self.assertEqual(len(self.posts), 1, 'one completion, one bot event')
+
+    def core_beside(self, stream, hang):
+        """build-api, a Core worker at t3, beside the handed build-ui; Herdr hangs `hang` seconds on every call."""
+        self.hand()
+        self.add_terminal('t3', name='build-api', status={'state': 'working'},
+                          labels={'stampede.job': self.key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'})
+        fj.bind(self.job_dir, 'build-api', {'state': 'live', 'address': 't3', 'role': 'worker'}, fresh=True)
+        self.shape(streams=[stream], hold=[30])
+        self.herdr_shape(hang=hang)
+        core = follower_module()
+        for patch in (mock.patch.object(core.Follower, 'post', lambda follower, event: self.posts.append(event)),
+                      mock.patch.object(core, 'alive', lambda: True)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        follower, result = core.Follower(self.job_dir), []
+        thread = threading.Thread(target=lambda: result.append(follower.follow()), daemon=True)
+        return follower, thread, result
+
+    def finish_follow(self, follower, thread, result):
+        began = time.time()
+        (self.job_dir / 'finished').write_text('x\n')
+        thread.join(timeout=30)
+        took = time.time() - began
+        if getattr(follower, 'reader', None):
+            follower.reader.join(30)  # the hung read ends on its own, later
+        return took, result
+
+    def test_r1_7_a_hung_herdr_never_holds_up_a_busy_core_stream(self):
+        record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
+                  'labels': {'stampede.job': self.key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'}}
+        stream = [{'channel': None, 'seq': 1, 'terminals': [record]}, status('t3', 'blocked', seq=2, kind='permission')]
+        follower, thread, result = self.core_beside(stream, hang=4)
+        began = time.time()
+        thread.start()
+        while 'BLOCKED build-api permission' not in self.inbox():
+            self.assertLess(time.time() - began, 2, 'a Core event waited for Herdr')
+            time.sleep(0.02)
+        took, result = self.finish_follow(follower, thread, result)
+        self.assertEqual(result, [0])
+        self.assertLess(took, 2.5)
+
+    def test_r1_7_a_hung_herdr_never_holds_up_a_quiet_core_stream(self):
+        follower, thread, result = self.core_beside([{'channel': None, 'seq': 1, 'terminals': []}], hang=4)
+        thread.start()
+        deadline = time.time() + 5
+        while not (getattr(follower, 'reader', None) and follower.reader.is_alive()):
+            self.assertLess(time.time(), deadline, 'no Herdr read began')
+            time.sleep(0.02)
+        took, result = self.finish_follow(follower, thread, result)
+        self.assertEqual(result, [0])
+        self.assertLess(took, 2.5, 'the quiet stream kept ticking while Herdr hung')
+
+
+class LiveFacts(FollowerCase):
+    """The live run on Herdr 0.9.5 (LT6 to LT9): Cursor's empty prompt, a null completion_seq on a fresh agent, an agent
+    Herdr does not detect, and a terminal id that belongs to the pane."""
+
+    def test_lt6_cursors_empty_prompt_takes_a_tell_and_an_unknown_one_fails_closed(self):
+        self.hand('build-c', 'cursor')
+        self.agent(agent_status='idle')
+        self.add_pane(PANE, agent=self.herdr_state()['panes'][PANE]['agent'], screen='\u2192 Plan, search, build anything\n')
+        self.assertEqual(self.quiet(fj.tell, self.job_dir, 'build-c', 'Fix the nit')[1], f'SUBMITTED build-c (pane {PANE})\n')
+        self.add_pane('w9:p4', screen='\u276f Plan a feature, then build it st\u2026')  # Hermes, with its rotating placeholder
+        self.hand('build-h', 'hermes', 'w9:p4')
+        self.agent('w9:p4', agent_status='idle')
+        with self.assertRaises(SystemExit):
+            self.quiet(fj.tell, self.job_dir, 'build-h', 'Fix the nit')
+
+    def test_lt7_the_first_turn_from_a_null_baseline_is_told(self):
+        self.hand('build-h', 'hermes')
+        self.add_pane('w9:p4')
+        self.hand('build-c', 'cursor', 'w9:p4')
+        self.assertEqual([self.entries(self.job_dir)[a]['completion'] for a in ('build-h', 'build-c')], [None, None])
+        f = self.follower()
+        for pane in (PANE, 'w9:p4'):
+            self.agent(pane, agent_status='done')  # the brief's turn ends before the follower first looks
+        self.look(f)
+        self.assertEqual(self.inbox(), ['TURN build-h'])
+        self.assertEqual(sorted((e['agent'], e['state']) for e in self.posts), [('build-c', 'done'), ('build-h', 'done')])
+
+    def test_lt8_an_agent_herdr_never_detects_is_failed_with_how_to_end_it(self):
+        self.herdr_shape(start_error={'build-h': 'timeout'})  # its CLI runs in the pane, but Herdr shows no agent there
+        code, out = self.hand('build-h', 'hermes')
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith('FAILED build-h (herdr agent start: '), out)
+        self.assertIn(f'): Herdr did not see hermes start in pane {PANE}, but its CLI '
+                      f'may still run there: read it with herdr pane read {PANE} --source visible --lines 30, and end it there '
+                      'with /exit', out)
+        self.assertEqual((self.entries(self.job_dir)['build-h']['state'], self.mark()), ('failed', None))
+
+    def test_lt9_a_restart_in_the_same_pane_is_told_apart_without_the_terminal_id(self):
+        self.hand()
+        f = self.follower()
+        self.steps(f, 'done')  # its first turn: completion_seq is now a number
+        terminal = self.herdr_state()['panes'][PANE]['agent']['terminal_id']
+        self.add_pane(PANE, agent={**self.herdr_state()['panes'][PANE]['agent'], 'completion_seq': None, 'agent_status': 'idle'})
+        self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['terminal_id'], terminal, 'the pane keeps its terminal id')
+        self.look(f)
+        self.assertEqual(self.inbox(), ['TURN build-ui', 'GONE build-ui replaced'])
 
 
 if __name__ == '__main__':

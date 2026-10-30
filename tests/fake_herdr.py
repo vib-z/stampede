@@ -3,15 +3,21 @@
 takes the one on PATH), and FAKE_HERDR=<a scratch folder>. Never starts a program.
 
 State is FAKE_HERDR/state.json: panes {pane id: {cwd, foreground_cwd, label, screen, agent}}, where an agent is {name,
-agent (its kind), agent_status, focused, terminal_id, completion_seq, args, prompts, keys}; every call is one JSON line in
-FAKE_HERDR/calls. `agent get` shows terminal_id and completion_seq (as Herdr 0.9.5 does); `agent list` leaves them out.
-A test shapes the answers with:
+agent (its kind), agent_status, focused, terminal_id, completion_seq, agent_session, args, prompts, keys}; every call is
+one JSON line in FAKE_HERDR/calls. As Herdr 0.9.5 does (live, 30 Oct 2026): `agent list` rows and `agent get` show the
+same fields; terminal_id belongs to the pane (term_<pane>, the same for every launch there); completion_seq is null on a
+fresh agent and after its first turn a Herdr-wide counter (`seq` in the state); agent_session is null until set. A test
+shapes the answers with:
   on_start    {name: fields}   fields an agent starts with (agent_status, focused, ...)
   start_error {name: code}     `agent start` fails with this code; agent_not_ready leaves the agent up and blocked
   spawns      [name, ...]      with a start_error, the agent starts all the same (an answer lost after the spawn)
   list_error  code             `agent list` fails with this code
+  list_answer result           `agent list` answers this result as it is (a malformed list)
+  get_error   {pane: code}     `agent get` of that pane fails with this code
+  get_answer  {pane: result}   `agent get` of that pane answers this result as it is
+  hang        seconds          every call waits this long first (a hung Herdr)
 A prompt turns the agent working, as Herdr's prompt --wait --until working does. Errors are Herdr's shape, exit 1."""
-import fcntl, json, os, sys
+import fcntl, json, os, sys, time
 from pathlib import Path
 
 HOME = Path(os.environ['FAKE_HERDR'])
@@ -26,11 +32,10 @@ def ok(result):
     print(json.dumps({'result': result}))
 
 
-def view(pane_id, pane, full=False):
+def view(pane_id, pane):
     agent = pane['agent']
     return {'pane_id': pane_id, 'workspace_id': pane_id.split(':')[0], 'tab_id': pane_id.split(':')[0] + ':t1',
-            **{k: agent.get(k) for k in ('name', 'agent', 'agent_status')}, 'focused': agent.get('focused', False),
-            **({k: agent.get(k) for k in ('terminal_id', 'completion_seq')} if full else {})}
+            'focused': False, **{k: v for k, v in agent.items() if k not in ('args', 'prompts', 'keys')}}
 
 
 def find(state, target):
@@ -61,20 +66,25 @@ def command(state, argv):
     if verb == 'agent list':
         if state.get('list_error'):
             fail(state['list_error'])
+        if state.get('list_answer') is not None:
+            return ok(state['list_answer'])
         return ok({'agents': [view(i, p) for i, p in panes.items() if p.get('agent')]})
     if verb == 'agent get':
-        return ok({'agent': view(*find(state, args[0]), full=True)})
+        if state.get('get_error', {}).get(args[0]):
+            fail(state['get_error'][args[0]])
+        if args[0] in state.get('get_answer', {}):
+            return ok(state['get_answer'][args[0]])
+        return ok({'agent': view(*find(state, args[0]))})
     if verb == 'agent start':
         name, kind, pane_id = args[0], args[args.index('--kind') + 1], args[args.index('--pane') + 1]
         if pane_id not in panes:
             fail('pane_not_found')
         error = state.get('start_error', {}).get(name)
         rest = args[args.index('--') + 1:] if '--' in args else []
-        state['terminals'] = state.get('terminals', 0) + 1
         spawned = error in (None, 'agent_not_ready') or name in state.get('spawns', [])
         panes[pane_id]['agent'] = {'name': name, 'agent': kind, 'agent_status': 'blocked' if error == 'agent_not_ready' else 'idle',
-                                   'terminal_id': 'term' + str(state['terminals']), 'completion_seq': 0, 'args': rest,
-                                   'prompts': [], **state.get('on_start', {}).get(name, {})} if spawned else None
+                                   'terminal_id': 'term_' + pane_id, 'completion_seq': None, 'agent_session': None,
+                                   'args': rest, 'prompts': [], **state.get('on_start', {}).get(name, {})} if spawned else None
         if error:
             fail(error)
         return ok({'agent': view(pane_id, panes[pane_id])})
@@ -93,6 +103,8 @@ def command(state, argv):
 
 def main(argv):
     HOME.mkdir(parents=True, exist_ok=True)
+    path = HOME / 'state.json'
+    time.sleep((json.loads(path.read_text()) if path.is_file() else {}).get('hang', 0))
     with (HOME / 'calls').open('a') as calls:
         calls.write(json.dumps(argv) + '\n')
     with (HOME / 'state.lock').open('a') as lock:
