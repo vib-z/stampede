@@ -1,10 +1,10 @@
 """The cross-client suite: stampede driven from every client it claims, with like-for-like outcomes (docs/CLIENTS.md).
 
-CLIENTS is the one list the suite runs over. A front door added to README's table, or a client added here, fails
-ClientsInSync until both docs/CLIENTS.md and this table name it. Outcomes plays one job per client and backend against
-the repo's fakes (tests/clients_run.py) and asserts O1 to O9 for each, as subtests named "<client>/<backend> <outcome>".
-A gap between clients is a finding: a test marked as an expected failure, named after it. Stdlib only; nothing leaves
-the machine.
+CLIENTS is the one list the suite runs over, and WORKERS the one list of worker kinds. A front door added to README's
+table, or a client added here, fails ClientsInSync until both docs/CLIENTS.md and this table name it. Outcomes plays
+one job per client and backend against the repo's fakes (tests/clients_run.py) and asserts each outcome's command
+contract, O1 to O9, as subtests named "<client>/<backend> <outcome>". A gap between clients is a finding: a test
+marked as an expected failure, named after it. Stdlib only; nothing leaves the machine.
 """
 import json, re, shutil, sys, tempfile, unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -81,7 +81,8 @@ class ClientsInSync(unittest.TestCase):
 
 
 class Outcomes(unittest.TestCase):
-    """Every client, on every backend it claims, reaches O1 to O9 (O9 for bots) against the fakes."""
+    """Every client, on every backend it claims, passes the command contract of O1 to O9 (O9 for bots) against the fakes.
+    No agent runs: the agents' own work (plan.md, the worker's file, the commit) is for the live runs (docs/CLIENTS.md)."""
 
     @classmethod
     def setUpClass(cls):

@@ -2,7 +2,7 @@
 
 This suite shows that stampede works when each client it supports drives it, on the Herdr TUI and on Herdr Core. Every client should reach the same outcomes; the features they use may differ. Any client that does worse is flagged here, under [Doing worse](#doing-worse).
 
-It has two halves. The automated half ([tests/test_clients.py](../tests/test_clients.py)) runs in CI on every push: one job per client and backend against the repo's fakes, through the real `stampede` command. The live half is a maintainer running the same small job from each real client ([Live runbook](#live-runbook)).
+It has two halves. The automated half ([tests/test_clients.py](../tests/test_clients.py)) runs in CI on every push: one job per client and backend against the repo's fakes, through the real `stampede` command. It checks each outcome's command contract, what stampede does when that client runs its commands ([What the automated suite asserts](#what-the-automated-suite-asserts)). No agent runs in it, so the agents' own work (`plan.md` written, the worker's file made, the commit) is left to the live half: a maintainer running the same small job from each real client ([Live runbook](#live-runbook)).
 
 ## Outcomes
 
@@ -18,7 +18,7 @@ It has two halves. The automated half ([tests/test_clients.py](../tests/test_cli
 
 ## Clients
 
-Automated: the suite's result against the fakes, 30 Oct 2026. Live: a run from the real client on one Mac.
+Automated: the command-contract checks listed under [What the automated suite asserts](#what-the-automated-suite-asserts), against the fakes, 30 Oct 2026; a pass there says nothing of an agent's own work. Live: a run from the real client on one Mac, agents included.
 
 | client | stands for | where it runs | its jobs belong to | automated | live, TUI | live, Core |
 |---|---|---|---|---|---|---|
@@ -51,7 +51,7 @@ In code, the clients differ in their environment and flags, not in the commands 
 For every client and backend, as a subtest named `<client>/<backend> <outcome>`, for example `cursor/core O3`:
 
 - **O1:** `herdr-doctor` run with the client's environment (`--relay` for a bot, `--core` on Core) prints the same lines and exit code as a run with none: the doctor reads the machine, not the client. On Core it reads the fake `hc` (`ok hc 0.1.13`), never a real core.
-- **O2:** `stampede new` exits 0 and prints `<lead> <job dir>`; the job is marked open; `<job>/owner` names the bot, or is absent for a local client; the lead got its brief pointer (its inbox on the TUI, its first prompt on Core).
+- **O2:** `stampede new` exits 0 and prints `<lead> <job dir>`; the job is marked open; `<job>/owner` names the bot, or is absent for a local client; the lead got its brief pointer (its inbox on the TUI, its first prompt on Core), and that brief tells it to write `plan.md`. No lead runs, so `plan.md` itself is a live check.
 - **O3:** the lead starts one worker of each kind in `WORKERS`, the one worker registry: claude, codex and cursor on the TUI, claude and codex on Core. A kind the backend does not take exits 2 with its reason from `REFUSED` (on Core, cursor: `Cursor reports no OSC 7501 status`), and no terminal starts.
 - **O4:** a bot gets one `question` event on its own route and runs the answer command it carries; a local client's phone card (a recorder in place of Moshi) gets the question and options. Either way the answer lands in the lead's inbox, and nothing goes to the other channel.
 - **O5:** `approve-gate` exits 2 when run inside Herdr, in a Core terminal (`HC_TERMINAL_ID` set), or for another commit. A bot's `approve-gate` over SSH records the yes; a local job's yes is the phone card's, and the client's own `approve-gate` is refused. Then `gate-ok` prints `APPROVED` for that commit and refuses another.
@@ -82,7 +82,7 @@ How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per c
 
 ## Live runbook
 
-One small job per client and backend, on one Mac, by a maintainer. The commands below are the ones the automated suite runs against the fakes.
+One small job per client and backend, on one Mac, by a maintainer. The `stampede` and helper commands in steps 4 and 5 are the ones the automated suite runs against the fakes; the scratch repo, trust and commit steps, and all the agents do, run only here.
 
 1. **Scratch repo:** `git init` a folder under `FLEET_TRUST_ROOT`, commit a README, run `herdr-trust <repo>`.
 2. **No phone cards:** set `FLEET_ASK_CMD` to a recorder that logs the question and prints the first option, or `yes` for a gate.
