@@ -8,7 +8,7 @@ Grok Bot is the setup we recommend, but you don't need it: stampede also runs wh
 
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="CHANGELOG.md"><img alt="Version 0.1.5" src="https://img.shields.io/badge/version-0.1.5-black"></a>
+  <a href="CHANGELOG.md"><img alt="Version 0.1.6" src="https://img.shields.io/badge/version-0.1.6-black"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black"></a>
   <a href="https://github.com/vib-z/stampede/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/vib-z/stampede?style=flat&color=black&label=stars"></a>
   <a href="https://herdr.dev"><img alt="Herdr 0.9.4 or later" src="https://img.shields.io/badge/Herdr-0.9.4%2B-black"></a>
@@ -262,7 +262,7 @@ cd ~/stampede
 ./install.sh --dry-run               # prints each link it would make, changes nothing
 ./install.sh                         # links the skills and the commands
 export PATH="$HOME/.local/bin:$PATH" # add this line to your shell profile too
-stampede --version                   # 0.1.5
+stampede --version                   # 0.1.6
 herdr-trust ~/code/my-app            # once per repo, before agents start there
 ```
 
@@ -646,10 +646,9 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **0.1.5, 29 Oct 2026. Quieter events while a job is open, and a lead forked from the planning chat:** `stampede new` writes `~/.config/herdr-events/jobs/<workspace>`. Plain turn ends in that workspace stay on the machine, and `stampede finish` sends one done and removes the marker. Blocked and permission prompts for one pane are one message for 120 seconds. A Codex turn with no Herdr pane is not sent. Tested with the relay sample payloads and fake Herdr: a mid-job worker Stop was dropped, finish posted once, blocked from two sources posted once, a done in a workspace with no job still posted, a Codex turn with no pane was dropped, and StopFailure still posted. A chat in the desktop app was forked into a lead in a fresh Herdr workspace on a scratch repo: the lead started with the conversation, started a reviewer on another model, and got its pass through the hook. A fresh install linked the new `stampede` skill, and a chat told "use stampede" loaded it first.
 
-**Unreleased, 29 Oct 2026. Herdr Core:** a whole job on Herdr Core (`hc` 0.1.13), next to the Herdr TUI, which is unchanged: `stampede new --core`, `start` and `tell` on Core, the job's follower `herdr-event-core`, Core gates that count only the recorded yes, the relay for a Core key, `reopen.sh` on Core and `herdr-doctor --core`. Tested with a fake `hc` (`tests/fake_hc.py`): the launch lock and races between two starts and a reopen, adopted and reclaimed starts, a lead or worker blocked or silent at start, `tell` by status and by exit code, events replayed through the follower (episodes, reconnects, a death or a wait's end while away, `RELAY DOWN`), and a restarted lead that must acknowledge both inbox files. `herdr-doctor --core` ran against this Mac's running core. Every command in [Herdr Core](#herdr-core) was run against the fake. Not run yet: a live job with a real Claude lead and Codex worker on Core (the test lanes), and CI's smoke run on a real `hc`.
+**0.1.6, 30 Oct 2026. Herdr Core:** a whole job on Herdr Core (`hc` 0.1.13 or later), next to the Herdr TUI, which is unchanged: `stampede new --core`, `start` and `tell` on Core, the job's follower `herdr-event-core`, Core gates that count only the recorded yes, the relay for a Core key, `reopen.sh` on Core and `herdr-doctor --core`. Tested with a fake `hc` (`tests/fake_hc.py`): the launch lock and races between two starts and a reopen, adopted and reclaimed starts, a lead or worker blocked or silent at start, `tell` by status and by exit code, events replayed through the follower (episodes, reconnects, a death or a wait's end while away, `RELAY DOWN`), and a restarted lead that must acknowledge both inbox files. Live on a real core (`hc` 0.1.13 and 0.1.14), with every bot route replaced by a local stand-in: a Claude lead with Claude and Codex workers, end to end. `tell` reached an idle agent and was refused, with nothing typed, while a Codex worker worked. Gates passed only on the recorded yes; a yes typed into the lead, and `approve-gate` inside Core or through `hc exec`, were refused. A killed worker was reported in under 2 seconds. The lead and both workers came back with their conversations. `finish` sent one done, and the follower exited within 3.2 seconds. A bot front door started a Core job over ssh: its question and gate reached only its own route, and the owner's yes was recorded with `approve-gate`. Every TUI capability was mapped to its Core outcome and run on both, 470 rows: no Core failure, and three rows worse by design (Cursor stays on the TUI, the manual Hermes and Kimi recipes, and Core cannot see a client typing in an attached terminal). CI installs `hc` and runs a Core smoke test.
 
 **Next:**
-- A live job on Herdr Core: a real Claude lead and Codex worker, `tell` both ways, a gate, a lead-only reopen.
 - On Herdr Core, planned: workers on a second machine (`hc run --on`), a bot front door over `hc`, the job shown in the Herdr app (its `herdr.space` and `herdr.tab` labels), and Cursor workers once Cursor reports OSC 7501 status.
 - One live job from Grok Bot.
 - Starting workers on the other agents Herdr detects, not only Claude, Codex and Cursor.
