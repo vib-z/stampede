@@ -370,11 +370,10 @@ class Outcomes(unittest.TestCase):
     def test_f5_a_tui_lead_asks_through_the_front_doors_command(self):
         """F5: a TUI lead runs with its pane's environment, so of the front door's settings only FLEET_LEAD_MODEL and
         FLEET_LEAD_EFFORT (which new reads itself) reach it: its cards go to Moshi, not to the front door's
-        FLEET_ASK_CMD. On Core, launch_env carries every setting. Fixed when the lead's start hands the setting to the
-        pane, or when the lead asks through it without it."""
+        FLEET_ASK_CMD. On Core, launch_env carries every setting. Fixed when a lead with its pane's environment asks
+        through the front door's FLEET_ASK_CMD, and nothing reaches Moshi."""
         job = self.card_from_a_tui_pane()
-        if any('FLEET_ASK_CMD' in call for call in job.herdr_calls() if call.startswith('agent start ' + Job.LEAD)):
-            return
+        self.assertEqual(job.moshi(), '', 'the card went to Moshi')
         self.assertIn(QUESTION, job.asked(), 'the front door\'s FLEET_ASK_CMD asked it')
 
     @unittest.expectedFailure
