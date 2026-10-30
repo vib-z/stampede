@@ -240,8 +240,10 @@ class Outcomes(unittest.TestCase):
                 address = job.address(job.worker)
                 self.ok(job, 'tell worker', f'SUBMITTED {job.worker} ({address})')
                 self.refused(job, 'tell working worker', f'FAILED {job.worker} (working: tell it after its turn)')
-                self.assertEqual(job.state()['terminals'][address]['sent'], ['Check the path'])
-                self.assertIn('--if', [c for c in job.calls('send')][0])
+                self.ok(job, 'tell done worker', f'SUBMITTED {job.worker} ({address})')
+                self.assertEqual(job.state()['terminals'][address]['sent'], ['Check the path', 'And the docs'])
+                idle, done = job.calls('send')  # the idle send is guarded; a done worker takes it at once
+                self.assertEqual((idle[-5:-2], '--if' in done), (['--if', 'idle', '--'], False))
             else:
                 self.ok(job, 'tell worker', 'SUBMITTED ' + job.worker)
                 self.assertTrue(any(c.startswith(f'agent prompt {job.worker} Check the path') for c in job.herdr_calls()))

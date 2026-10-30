@@ -11,7 +11,7 @@ It has two halves. The automated half ([tests/test_clients.py](../tests/test_cli
 - **O3 workers**: the lead starts each worker kind the backend allows (claude, codex, and cursor on the TUI only). On Core, a cursor worker is refused with the documented message.
 - **O4 question**: a question from the lead reaches the client's channel (a bot's route, or `FLEET_ASK_CMD`), and the answer gets back to the lead.
 - **O5 gate**: a gate reaches the client. The lead acts only on a yes, recorded or typed, for that commit. `approve-gate` is refused inside Herdr or Core, and for another commit.
-- **O6 tell**: the client tells an agent something. On Core, the message goes in only while the agent is idle.
+- **O6 tell**: the client tells an agent something. A Claude agent, the lead included, gets it in its inbox file at any time. Another CLI is prompted: on Core, an idle agent through `hc send --if idle` (so it goes in only while it is still idle), an agent whose turn is done at once, and a working one is refused.
 - **O7 finish**: one finish event reaches the client, and the job marker is cleared.
 - **O8 reopen-safe**: `reopen.sh` on a live job starts nothing. On the TUI it refuses while the workspace is open.
 - **O9 no-poll**: a bot waits for events and does not poll.
@@ -55,7 +55,7 @@ For every client and backend, as a subtest named `<client>/<backend> <outcome>`,
 - **O3:** the lead starts one worker of each kind in `WORKERS`, the one worker registry: claude, codex and cursor on the TUI, claude and codex on Core. A kind the backend does not take exits 2 with its reason from `REFUSED` (on Core, cursor: `Cursor reports no OSC 7501 status`), and no terminal starts.
 - **O4:** a bot gets one `question` event on its own route and runs the answer command it carries; a local client's phone card (a recorder in place of Moshi) gets the question and options. Either way the answer lands in the lead's inbox, and nothing goes to the other channel.
 - **O5:** `approve-gate` exits 2 when run inside Herdr, in a Core terminal (`HC_TERMINAL_ID` set), or for another commit. A bot's `approve-gate` over SSH records the yes; a local job's yes is the phone card's, and the client's own `approve-gate` is refused. Then `gate-ok` prints `APPROVED` for that commit and refuses another.
-- **O6:** `stampede tell <job> lead` lands in the lead's inbox; a codex worker gets `SUBMITTED`. On Core the send uses `hc send --if idle`, and a working worker gets `FAILED ... (working: tell it after its turn)` with nothing sent.
+- **O6:** `stampede tell <job> lead` lands in the lead's inbox (a Claude agent's inbox file, with no status check); an idle codex worker gets `SUBMITTED` (on the TUI through `herdr-send`). On Core that send is `hc send --if idle`; a working worker gets `FAILED ... (working: tell it after its turn)` with nothing sent; a worker whose turn is `done` gets `SUBMITTED`, sent without `--if`.
 - **O7:** two `stampede finish` calls give one `done` event on the bot's route (a local job: one line logged by the relay, nothing queued), the `finished` stamp, and no marker.
 - **O8:** on the TUI, after `herdr-reopen-snapshot`, `reopen.sh` refuses (exit 2) while the workspace is open and makes no workspace, tab or agent; on Core it prints `LIVE <key>: no agent to restart` and starts no terminal.
 - **O9 (bots):** a plain turn end of the open job is not queued; the `question`, `gate` and `done` events each carry the command the bot runs next; the lead's `blocked` reaches the bot's route.

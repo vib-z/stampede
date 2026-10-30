@@ -266,12 +266,15 @@ class Job:
         self.lead('gate-ok', 'gate-ok', self.job, ident, '--sha', SHA)
 
     def tell(self):
-        """O6: the client tells the lead and a worker that is not Claude; on Core again while that worker is working."""
+        """O6: the client tells the lead (a Claude agent: its inbox) and an idle worker that is not Claude; on Core that
+        worker again while it is working (refused) and once its turn is done (sent at once)."""
         self.front('tell lead', 'tell', self.job, 'lead', 'Use the repo root')
         self.front('tell worker', 'tell', self.job, self.worker, 'Check the path')
         if self.backend == 'core':
-            self.terminal(self.address(self.worker), status={'state': 'working'})
-            self.front('tell working worker', 'tell', self.job, self.worker, 'And the error path')
+            for state, step, text in (('working', 'tell working worker', 'And the error path'),
+                                      ('done', 'tell done worker', 'And the docs')):
+                self.terminal(self.address(self.worker), status={'state': state})
+                self.front(step, 'tell', self.job, self.worker, text)
             self.terminal(self.address(self.worker), status={'state': 'idle'})
 
     def reopen(self):
