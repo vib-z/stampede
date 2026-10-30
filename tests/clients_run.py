@@ -7,7 +7,7 @@ Herdr (the pane's ids), outside it (an app's command: no Herdr ids, no Herdr pro
 under a process named sshd). The lead's commands run with the lead's own environment. Nothing touches a real Herdr,
 Herdr Core or agent CLI: the fake Herdr of test_herdr_reopen_snapshot through HERDR and PATH, tests/fake_hc.py through HC.
 """
-import json, re, shlex, subprocess, sys, tempfile, time, traceback
+import json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,23 +27,50 @@ ASK = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$(dirname "$0")/asked"\nwhile [ $# -
       'for _ in $(seq 600); do [ -e "$(dirname "$0")/yes" ] && { echo yes; exit 0; }; sleep 0.1; done\nexit 1\n'
 
 
-def detached(argv, env, host):
+def detached(argv, env, host, under):
     """Run argv under a process named host whose parent is pid 1, as a command from an app or an ssh session runs:
-    no Herdr pane or Herdr Core process above it, wherever the suite itself runs. Returns (code, stdout, stderr)."""
-    box = Path(tempfile.mkdtemp(prefix='xc-'))
+    no Herdr pane or Herdr Core process above it, wherever the suite itself runs. Its files live in a folder under
+    `under`. Exit 125 when it cannot show its parent is pid 1 (ps denied, say); on a timeout it and its children are
+    stopped. Returns (code, stdout, stderr)."""
+    box = Path(tempfile.mkdtemp(prefix='run-', dir=under))
     (box / host).symlink_to('/bin/bash')
-    script = ('for _ in $(seq 250); do [ "$(ps -o ppid= -p $$ | tr -d " ")" = 1 ] && break; sleep 0.02; done; '
+    script = ('for _ in $(seq 250); do p=$(ps -o ppid= -p $$ 2>&1) || break; [ "${p// /}" = 1 ] && break; sleep 0.02; done; '
+              'if [ "${p// /}" != 1 ]; then echo "not detached: the parent of $$ is not pid 1 (ps: ${p:-no answer})" >"$0.err"; '
+              'echo 125 >"$0.tmp"; mv "$0.tmp" "$0.code"; exit; fi; '
               '"$@" >"$0.out" 2>"$0.err" </dev/null; echo $? >"$0.tmp"; mv "$0.tmp" "$0.code"')
-    subprocess.run(['/bin/bash', '-c', '"$0" -c "$1" "${@:2}" >/dev/null 2>&1 &', str(box / host), script, str(box / 'run'),
-                    *argv], env=env, check=True)
-    deadline = time.time() + 60
-    while not (box / 'run.code').exists():
-        if time.time() > deadline:
-            return 124, '', f'{host}: {argv} did not end in 60 s'
-        time.sleep(0.02)
-    result = int((box / 'run.code').read_text()), (box / 'run.out').read_text(), (box / 'run.err').read_text()
-    subprocess.run(['rm', '-rf', str(box)])
-    return result
+    try:
+        pid = int(subprocess.run(['/bin/bash', '-c', '"$0" -c "$1" "${@:2}" >/dev/null 2>&1 & echo $!', str(box / host), script,
+                                  str(box / 'run'), *argv], env=env, capture_output=True, text=True, check=True).stdout)
+        deadline = time.time() + 60
+        while not (box / 'run.code').exists():
+            if time.time() > deadline:
+                reap(pid)
+                return 124, '', f'{host}: {argv} did not end in 60 s, so it was stopped'
+            time.sleep(0.02)
+        return int((box / 'run.code').read_text()), (box / 'run.out').read_text(), (box / 'run.err').read_text()
+    finally:
+        shutil.rmtree(box, ignore_errors=True)
+
+
+def reap(pid):
+    """Stop a process and everything under it."""
+    for child in subprocess.run(['pgrep', '-P', str(pid)], capture_output=True, text=True).stdout.split():
+        reap(int(child))
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def check_process_tree(under):
+    """The suite needs the process table: approve-gate decides by a command's ancestors, and a client outside Herdr runs
+    detached from the suite's own. Raise at once, with the reason, where that cannot work (a sandbox that denies ps)."""
+    ps = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True)
+    if ps.returncode:
+        raise RuntimeError('the cross-client suite needs ps, which failed here: ' + (ps.stderr or ps.stdout).strip())
+    code, _, err = detached(['true'], {'PATH': '/usr/bin:/bin'}, 'client', under)
+    if code:
+        raise RuntimeError('the cross-client suite cannot run a command detached from its own process tree: ' + err.strip())
 
 
 class Job:
@@ -119,7 +146,7 @@ class Job:
     # running commands
     def run(self, step, argv, env, host=None):
         if host:
-            result = detached([str(a) for a in argv], env, host)
+            result = detached([str(a) for a in argv], env, host, self.root)
         else:
             done = subprocess.run([str(a) for a in argv], env=env, capture_output=True, text=True, timeout=60)
             result = done.returncode, done.stdout, done.stderr

@@ -35,7 +35,7 @@ OUTCOMES = {
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
 }
 
-from clients_run import ANSWER, GATE, OTHER_SHA, QUESTION, SHA, SUMMARY, Job  # noqa: E402  (after CLIENTS: it imports fleet_job)
+from clients_run import ANSWER, GATE, OTHER_SHA, QUESTION, SHA, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
 from test_core import FAKE_HC  # noqa: E402
 import test_doctor  # noqa: E402
 
@@ -86,7 +86,10 @@ class Outcomes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.root = Path(tempfile.mkdtemp()).resolve()
+        cls.addClassCleanup(shutil.rmtree, cls.root, True)
+        check_process_tree(cls.root)  # fails the class at once, with why, where ps is denied
         cls.doctor = test_doctor.Doctor('test_clean_core_is_read_only_and_never_calls_launchctl')
+        cls.addClassCleanup(cls.doctor.doCleanups)
         cls.doctor.setUp()  # an installed scratch HOME with a fake herdr, launchctl and df
         cls.doctor.fake('claude', 'echo "2.1.312 (Claude Code)"')  # never a real agent CLI
         cls.doctor.fake('codex', 'echo "--no-daemon"')
@@ -95,11 +98,6 @@ class Outcomes(unittest.TestCase):
             cls.health = dict(zip([(j.client, j.backend) for j in cls.jobs], pool.map(cls.health_check, cls.jobs)))
             cls.reference = dict(zip(('tui', 'tui-bot', 'core'), pool.map(lambda f: cls.run_doctor(f, {}), ('tui', 'tui-bot', 'core'))))
             list(pool.map(Job.play, cls.jobs))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.doctor.doCleanups()
-        shutil.rmtree(cls.root, ignore_errors=True)
 
     @classmethod
     def doctor_flags(cls, job):
