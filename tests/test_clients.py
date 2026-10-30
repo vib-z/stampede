@@ -412,10 +412,16 @@ class Outcomes(unittest.TestCase):
         end of an open job: it reaches the bot as one more event after done."""
         job = self.fresh('f11', 'core', where='ssh')
         self.assertEqual(job.lead('finish', 'finish', job.job, SUMMARY)[0], 0)
-        before = len(job.queued())
-        job.run('lead stop', (BOT_SCRIPTS / 'herdr-event-post', 'source=claude', 'state=Stop',
-                              f'pane=hc:{job.key}/{job.address(Job.LEAD)}'), job.base)
-        self.assertEqual(len(job.queued()), before, 'the bot heard the finishing turn after its done')
+
+        def stop(step, address):  # a Claude Stop from a terminal of the job, as its hook posts it; how many it queued
+            before = len(job.queued())
+            code, out, err = job.run(step, (BOT_SCRIPTS / 'herdr-event-post', 'source=claude', 'state=Stop',
+                                            f'pane=hc:{job.key}/{address}'), job.base)
+            self.assertEqual(code, 0, out + err)
+            return len(job.queued()) - before
+        finishing = stop('the finishing turn', job.address(Job.LEAD))
+        self.assertEqual(stop('a later turn', 't9'), 1, 'control: a Stop in the closed job still reaches the bot')
+        self.assertEqual(finishing, 0, 'the bot heard the finishing turn after its done')
 
 
 if __name__ == '__main__':
