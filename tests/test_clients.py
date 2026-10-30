@@ -205,6 +205,7 @@ class Outcomes(unittest.TestCase):
                 self.assertIn(f'--option {ANSWER} --option no -- {QUESTION}', job.asked())
                 self.assertIn(f'ANSWER {QUESTION}: {ANSWER}', job.inbox())
                 self.assertEqual(self.events(job, 'question'), [])
+            self.assertEqual(job.moshi(), '', 'no card went to the real phone command')
         self.outcome('O4', check)
 
     def test_o5_gate(self):

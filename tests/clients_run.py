@@ -27,6 +27,10 @@ ASK = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$(dirname "$0")/asked"\nwhile [ $# -
       'for _ in $(seq 600); do [ -e "$(dirname "$0")/yes" ] && { echo yes; exit 0; }; sleep 0.1; done\nexit 1\n'
 
 
+# Moshi's own command, first on PATH, so a card meant for FLEET_ASK_CMD never reaches a real phone: it logs and fails
+MOSHI = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$(dirname "$0")/moshi"\nexit 3\n'
+
+
 def detached(argv, env, host, under):
     """Run argv under a process named host whose parent is pid 1, as a command from an app or an ssh session runs:
     no Herdr pane or Herdr Core process above it, wherever the suite itself runs. Its files live in a folder under
@@ -65,7 +69,10 @@ def reap(pid):
 def check_process_tree(under):
     """The suite needs the process table: approve-gate decides by a command's ancestors, and a client outside Herdr runs
     detached from the suite's own. Raise at once, with the reason, where that cannot work (a sandbox that denies ps)."""
-    ps = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True)
+    try:
+        ps = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True)
+    except OSError as error:  # a sandbox may deny running ps at all
+        raise RuntimeError(f'the cross-client suite needs ps, which cannot run here: {error}') from None
     if ps.returncode:
         raise RuntimeError('the cross-client suite needs ps, which failed here: ' + (ps.stderr or ps.stdout).strip())
     code, _, err = detached(['true'], {'PATH': '/usr/bin:/bin'}, 'client', under)
@@ -93,7 +100,7 @@ class Job:
         self.steps, self.error = {}, ''
         for folder in (self.repo, self.core, self.herdr, self.bin, self.events, self.root / 'routes'):
             folder.mkdir(parents=True)
-        for name, body in [('herdr', FAKE_HERDR), ('ask', ASK)] + [(k, '#!/bin/sh\nexit 0\n') for k in {'claude', *self.kinds}]:
+        for name, body in [('herdr', FAKE_HERDR), ('ask', ASK), ('moshi-hook', MOSHI)] + [(k, '#!/bin/sh\nexit 0\n') for k in {'claude', *self.kinds}]:
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
         if self.bot:
@@ -185,6 +192,10 @@ class Job:
     def herdr_calls(self):
         path = self.herdr / 'calls'
         return path.read_text().splitlines() if path.is_file() else []
+
+    def moshi(self):
+        path = self.bin / 'moshi'
+        return path.read_text() if path.is_file() else ''
 
     def asked(self):
         path = self.bin / 'asked'
