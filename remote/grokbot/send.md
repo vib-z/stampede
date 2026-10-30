@@ -8,7 +8,7 @@ Every message to an agent goes through one helper that makes sure it landed.
 - On a failure, read the screen once before any resend.
 - Never send an interrupt to an idle Codex: on an empty prompt it quits.
 - Prompt only agents in the bot's own workspace, never the focused pane.
-- Never type a gate's yes into a pane; the owner's answer to a gate goes only through `stampede approve-gate` ([events.md](../events.md)).
+- Never type a gate's yes into a pane; the owner's answer to a gate goes only through `stampede approve-gate` ([events.md](../events.md)), run over plain ssh, never through `hc exec` (it refuses inside Herdr and Herdr Core).
 
 ## Run
 ```bash
@@ -27,5 +27,7 @@ herdr-send <agent> "/exit"                               # Claude and Hermes; Co
 | `FAILED <agent> focused: the owner is in that pane; retry later` | the owner has that pane selected; no key or prompt was sent; exit 1 |
 | `FAILED <agent> (blocked at a dialog; read the screen)` | the agent waits at a dialog; exit 1 |
 | `FAILED <agent> (status before: ..., now: ...)` | the prompt did not start a turn; read the screen; exit 1 |
+
+On Herdr Core there is no `herdr-send`: inside a job use `stampede tell` (it prompts Codex with `hc send` by its status, and a Cursor, Hermes or Kimi worker the job handed to a Herdr pane with one guarded `herdr agent prompt`), and read with `hc read <address>` ([core.md](../../skills/herdr-fleet/references/core.md)).
 
 `SUBMITTED` means the agent admitted the message, not that it has acted on it; wait for its report. Usage errors exit 2. How each CLI behaves: [agents-and-models.md](../../skills/herdr-fleet/references/agents-and-models.md).

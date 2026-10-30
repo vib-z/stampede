@@ -13,6 +13,7 @@ The design is in [docs/superpowers/specs/2026-10-21-stampede-lean-design.md](doc
   - Every command in it was run, against a scratch job folder with a fake Herdr when it would otherwise touch real panes.
   - Anything not built yet goes under the roadmap, marked as planned.
 - **Roadmap and status:** update them at every milestone: what works, what was tested, what is next.
+- **The cross-client suite:** any change to behaviour, a front door, a client or a worker kind updates, in that same commit, the suite (`tests/test_clients.py`, `tests/clients_run.py`) and [docs/CLIENTS.md](docs/CLIENTS.md) (its matrix, what differs, and the live runbook). A front door or a client is a row in `CLIENTS` and in that doc; a worker kind is an entry in `WORKERS` under each backend that takes it, with its refusal in `REFUSED` for one that does not, and in `HANDED` when a Core job hands it to a Herdr TUI pane. A client that does worse gets a finding there and a test marked as an expected failure.
 - **Standard:** short, true and complete. A stranger can understand, install, use, configure, troubleshoot and extend stampede from the README and its docs alone, with no questions to anyone.
 
 ### What the README and docs must cover

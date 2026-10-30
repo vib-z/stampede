@@ -1,13 +1,15 @@
 #!/bin/bash
 # herdr-doctor: read-only core health check, plus the optional event relay when installed or --relay.
+# --core: for Herdr Core jobs, hc, the selected core, Claude's and Codex's status support, instead of the Herdr TUI.
 # One line per check:
 #   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
-# Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing; never prints route files or settings values.
-usage(){ echo 'usage: herdr-doctor [--relay] [-h|--help]'; }
-relay=0
+# Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing, never starts a core; never prints route files or settings values.
+usage(){ echo 'usage: herdr-doctor [--relay] [--core] [-h|--help]'; }
+relay=0; core=0
 for option in "$@"; do
   case "$option" in
     --relay) relay=1;;
+    --core) core=1;;
     -h|--help) usage; exit 0;;
     *) usage >&2; exit 2;;
   esac
@@ -18,9 +20,30 @@ ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }
 problem(){ echo "PROBLEM $*"; bad=1; }
 
-for t in herdr jq git python3; do
+tools="herdr jq git python3"; [ "$core" = 1 ] && tools="jq git python3"
+for t in $tools; do
   if command -v "$t" >/dev/null; then ok "$t on PATH"; else problem "$t not on PATH: install it"; fi
 done
+
+# Herdr Core: the CLI, the selected core (asked on its socket, never started), and agents that report OSC 7501 status
+newer(){ python3 -c 'import sys; v=[tuple(int(n) for n in x.split(".")[:3]) for x in sys.argv[1:]]; sys.exit(v[0] < v[1])' "$1" "$2" 2>/dev/null; }
+if [ "$core" = 1 ]; then
+  hcv=$("${HC:-hc}" --version 2>/dev/null | awk '{print $2}')
+  if [ -z "$hcv" ]; then problem "hc not on PATH: install Herdr Core 0.1.13 or later (curl -fsSL https://releases.herdr.dev/core/install.sh | sh), or set HC"
+  elif ! newer "$hcv" 0.1.13; then problem "hc $hcv is older than 0.1.13: hc update"
+  else ok "hc $hcv"; fi
+  follower=$(python3 -c 'import os,sys; print(os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "herdr-event-core"))' "${BASH_SOURCE[0]}")
+  if "$follower" --alive; then ok "Herdr Core answers (HC_SESSION ${HC_SESSION:-default})"
+  else problem "Herdr Core not running for HC_SESSION ${HC_SESSION:-default}: the owner starts it (hc server start); this check never does"; fi
+  cv=$(claude --version 2>/dev/null | awk '{print $1}')
+  if [ -z "$cv" ]; then problem "claude not on PATH: every lead runs on Claude Code"
+  elif newer "$cv" 2.1.295; then ok "claude $cv reports its status (OSC 7501)"
+  else problem "claude $cv reports no status on Herdr Core (OSC 7501 came in 2.1.295): update Claude Code"; fi
+  if ! command -v codex >/dev/null; then ok "codex not installed (optional)"
+  elif codex --help 2>/dev/null | grep -q -- '--no-daemon'; then ok "codex runs with --no-daemon"
+  else problem "codex has no --no-daemon: update Codex before starting Codex workers on Herdr Core"; fi
+  if command -v cursor-agent >/dev/null; then warn "cursor-agent runs on the TUI only for stampede: it reports no OSC 7501 status on Herdr Core"; fi
+fi
 
 # stampede must report this checkout's VERSION, including when this helper is a symlink
 if ! command -v stampede >/dev/null; then problem "stampede not on PATH: run install.sh and add ~/.local/bin to PATH"
@@ -56,6 +79,7 @@ if [ -n "$managed" ] && command -v python3 >/dev/null; then
 fi
 
 # herdr client and server
+if [ "$core" = 0 ]; then
 st=$(herdr status 2>&1); status_result=$?
 cv=$(awk '/^client:/{c=1} c && /version:/{print $2; exit}' <<<"$st")
 sv=$(awk '/^server:/{s=1} s && /version:/{print $2; exit}' <<<"$st")
@@ -63,9 +87,11 @@ if [ "$status_result" != 0 ] || ! grep -q 'status: running' <<<"$st"; then probl
 elif [ -z "$cv" ] || [ -z "$sv" ] || [ "$cv" != "$sv" ]; then problem "herdr client $cv, server $sv: the owner restarts the server after an upgrade"
 elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart needed: the owner restarts the server when idle"
 else ok "herdr client and server $cv"; fi
+fi
 
 # relay configuration is the signal, not the helper scripts installed for every user
-R="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"
+EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"
+R="${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}"
 # Codex's notify array, from its line to the closing bracket (it may span lines)
 codex_notify=$(awk '/^notify *=/{f=1} f{print} f && /]/{exit}' "$HOME/.codex/config.toml" 2>/dev/null)
 if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.plist" ] \
@@ -73,8 +99,9 @@ if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.pl
   || grep -q 'herdr-event-claude-hook' "$HOME/.claude/settings.json" 2>/dev/null \
   || grep -q 'herdr-event-codex-notify' <<<"$codex_notify"; then relay=1; fi
 
-# a clone plus install.sh does not enable the event plugin
-if herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled'; then ok "event plugin enabled"
+# a clone plus install.sh does not enable the event plugin (the Herdr TUI's; a Core job has its follower instead)
+if [ "$core" = 1 ]; then :
+elif herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled'; then ok "event plugin enabled"
 elif [ "$relay" = 1 ]; then problem "event plugin not enabled: herdr plugin link <stampede checkout>, or herdr plugin install vib-z/stampede"
 else warn "event plugin not enabled (optional): needed only for a remote bot's event relay"; fi
 
@@ -123,12 +150,14 @@ else
 fi
 
 # owner tags
-O="$HOME/.config/herdr-events/owners"
+O="$EV/owners"
 live=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null)
 n=0
 for f in "$O"/*; do
   [ -f "$f" ] || continue; ws=$(basename "$f"); n=$((n+1))
-  if ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then warn "malformed owner tag file in $O (not a workspace id): delete it"
+  if [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]]; then
+    [ -f "$EV/jobs/$ws" ] || warn "owner tag $ws ($(sed -n 's/^owner=//p' "$f")) for a finished Core job: herdr-events-owner $ws --clear"
+  elif ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then warn "malformed owner tag file in $O (not a workspace id): delete it"
   elif [ -n "$live" ] && ! grep -qx "$ws" <<<"$live"; then warn "owner tag $ws ($(sed -n 's/^owner=//p' "$f")) for a closed workspace: herdr-events-owner $ws --clear"; fi
 done
 ok "$n owner tags checked"

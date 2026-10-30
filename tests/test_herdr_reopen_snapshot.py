@@ -8,7 +8,8 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'skills/grokbot-herdr/scripts/herdr-reopen-snapshot'
 
-# Logs every call. Reads come from state.json; creates hand out new ids numbered by the call count.
+# Logs every call. Reads come from state.json, an answer for the call's target first ('agent get w9:p4'); creates hand
+# out new ids numbered by the call count.
 FAKE_HERDR = r'''#!/usr/bin/env python3
 import json, os, sys
 d, a = os.environ['FAKE_DIR'], sys.argv[1:]
@@ -28,7 +29,7 @@ elif key == 'tab create':
 elif key == 'pane split':
     r = {'pane': {'pane_id': f'w9:p{n}'}}
 else:
-    r = s.get(key, {})
+    r = s.get(' '.join(a[:3]), s.get(key, {}))
 print(json.dumps({'result': r}))
 '''
 LOGGER = '#!/bin/bash\necho "$(basename "$0") $*" >> "$FAKE_DIR/calls"\n'

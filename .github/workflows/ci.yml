@@ -29,6 +29,17 @@ jobs:
           exit 1
       - name: herdr-doctor, core checks
         run: PATH="$HOME/.local/bin:$PATH" herdr-doctor
+      - name: Herdr Core 0.1.13, pinned by checksum
+        run: |
+          mkdir -p "$RUNNER_TEMP/hc"
+          curl -fsSL https://releases.herdr.dev/core/0.1.13/herdr-core-macos-aarch64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
+          echo "fc1ffba3820b93b0e2faa5394a64b9ff5528f135611b6034469d81c0fa1c37aa  $RUNNER_TEMP/hc.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/hc.tar.gz" -C "$RUNNER_TEMP/hc"
+          ln -s herdr-core "$RUNNER_TEMP/hc/hc"
+          echo "$RUNNER_TEMP/hc" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/hc/hc" --version
+      - name: Herdr Core smoke run, in a scratch session
+        run: PATH="$HOME/.local/bin:$PATH" python3 tests/core_smoke.py
       - name: stop the Herdr server
         if: always()
         run: herdr server stop || true

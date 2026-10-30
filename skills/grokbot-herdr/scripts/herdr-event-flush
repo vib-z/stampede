@@ -6,7 +6,7 @@
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 H="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"
 Q="$H/queue"; DEAD="$H/dead"; HELD="$H/held"; LOCK="$H/flush.lock"
-ROUTES="${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}"
+ROUTES="${HERDR_EVENTS_ROUTES_DIR:-${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}/routes}"
 LOG="${HERDR_EVENTS_FLUSH_LOG:-$H/flush.log}"
 MAXAGE=86400
 mkdir -p "$Q" "$DEAD" "$HELD"

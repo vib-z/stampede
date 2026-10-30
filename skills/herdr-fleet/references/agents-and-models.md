@@ -16,6 +16,8 @@ The [routing table](../SKILL.md#pick-the-agent-and-model) gives defaults. Choose
 | Claude | `--permission-mode auto` | `--permission-mode plan` | `--dangerously-skip-permissions` |
 | Codex | `--approve-for-me` | shift+tab once after start | `--yolo` |
 | Cursor | `--auto-review --trust` (asks about anything unsure: a worker on its own branch, not a lead) | `--plan` | `--yolo`, `--force` |
+| Hermes | its default (asks before a dangerous command) | | `--yolo` |
+| Kimi | `-y` (routine edits and commands run; risky actions, questions and plans ask) | `--plan` | `--auto` (never asks) |
 
 Yolo, case by case: a worker in its own git worktree may run without checks (`fleet-job start --yolo-in <worktree>`); never the lead, and its brief still forbids pushing to a shared branch, merging, spending and publishing, since a worktree walls off files, not the network or your logins.
 
@@ -91,13 +93,13 @@ Codex gotchas (details in [failure-modes.md](failure-modes.md)):
 
 | Kind | Start (after `herdr agent start <name> --kind <kind> --pane "$P" --timeout 90000 --`) | Status and exit | Notes |
 |---|---|---|---|
-| `hermes` (0.21.5) | `--yolo --reasoning <level>`; the model comes from `~/.hermes/config.yaml`, `-m` overrides it | idle, working, done; session id after the first turn. `/exit` | `--yolo` is the approved unattended flag (it skips dangerous-command prompts). A caller's safety check may ask for approval the first time; that approval is sanctioned. Smoke-tested without `--yolo` (still wrote files in its cwd). No `STALL?` cover (its sessions live in `~/.hermes/state.db`). Hooks: herdr v5, Moshi current. |
-| `kimi` (2.1.1) | `-y` (approved unattended flag; a caller's safety check may ask for approval the first time) | Trust dialog reported `idle`; Enter trusts. Stayed `working` after an error turn. `/exit` | Optional. Prerequisite (owner): `kimi login`; the smoke test hit "stored token rejected, re-login required". Hooks: herdr v7, Moshi current. |
+| `hermes` (0.21.5; flags checked on 0.22.5, 30 Oct 2026) | `--reasoning <level>` (`none` to `ultra`); the model comes from `~/.hermes/config.yaml`, `-m` overrides it; `--yolo` only with `--yolo-in` | idle, working, done; session id after the first turn. `/exit` | In a Herdr Core job: `stampede start --kind hermes --pane` ([core.md](core.md#hand-an-agent-to-a-tui-pane)) adds these flags, and the follower writes its `TURN`; but Herdr 0.9.5 did not detect Hermes 0.22.5 (30 Oct 2026), so that start ends `FAILED` there, with Hermes perhaps still running in the pane (end it with `/exit`). `--yolo` is the approved unattended flag (it skips dangerous-command prompts). A caller's safety check may ask for approval the first time; that approval is sanctioned. Smoke-tested without `--yolo` (still wrote files in its cwd). No `STALL?` cover (its sessions live in `~/.hermes/state.db`). Hooks: herdr v5, Moshi current. |
+| `kimi` (2.1.1; flags checked on 2.2.0, 30 Oct 2026) | `-y`: since 2.2 "Ask When Needed" (routine edits and commands run; risky actions ask); `-m <model>`; no effort flag | Trust dialog reported `idle`; Enter trusts. Stayed `working` after an error turn. `/exit` | Optional. In a Herdr Core job: `stampede start --kind kimi --pane` adds `-y`, and the follower writes its `TURN`. 2.2's `--auto` never asks: not an approved flag. Prerequisite (owner): `kimi login`; the smoke test hit "stored token rejected, re-login required". Hooks: herdr v7, Moshi current. |
 | `gemini` (0.62.0) | `--approval-mode auto_edit` | Trust dialog, then a sign-in picker, both reported `idle`. ctrl+c, esc and ctrl+d do not leave the picker, and `/quit` sent there is Enter on "Sign in with Google"; only closing the pane ended it | Optional. Prerequisite (owner): Google sign-in. Self-updates on start through npm. No `gemini` entry in `herdr integration status`; Moshi hooks current. |
 | `cursor` (`cursor-agent` 2026.10.01) | `--model <model>` (and `--force` to run commands without asking, if the installed `cursor-agent --help` lists it; not yet verified, the help itself needs the keychain) | Expected idle, working, done like the others; exit with `/quit` or ctrl+d (not yet verified live). While the login keychain is locked the CLI exits at once, so `agent start` waits out its timeout and returns `timeout` | Supported fleet kind. Prerequisite (owner): unlock the macOS login keychain (`security unlock-keychain` in the owner's own session). Verify flags with `cursor-agent --help` on first use and update this row. Hooks: herdr v1, Moshi current. |
 | `grok` | not installed (`~/.grok` holds hooks only) | | Not usable as a herdr agent on this Mac. |
 
-Every CLI prints its resume command on exit (`claude --resume <id>`, `codex resume <id>`, `hermes --resume <id>`, `kimi -r <id>`); the register should hold the id before then.
+Every CLI prints its resume command on exit (`claude --resume <id>`, `codex resume <id>`, `hermes --resume <id>`, `kimi -S <id>` since Kimi 2.2); the register should hold the id before then.
 
 ## Writing start commands in zsh
 

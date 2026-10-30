@@ -22,6 +22,7 @@ stampede new --file <ask.md> --pane "$P" --name <job> --front-door   # add --for
 - Already in a Herdr pane in that project's workspace (`$HERDR_WORKSPACE_ID` is set): run `stampede new --file <ask.md>` without `--front-door`; the owner watches the lead's pane and answers its cards.
 - `--fork "$CLAUDE_CODE_SESSION_ID"`: only when the owner worked the plan out with you in this chat. The lead starts with this conversation.
 - `--review`: only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).
+- `--core`: only when the owner asks for Herdr Core. Then no workspace, no `--pane` and no `--front-door` (a Core job has no pane to relay from; it is refused): `stampede new --core --file <ask.md> --cwd "$R" --name <job>` after `herdr-trust "$R"`. A `BLOCKED` or `NOT READY` line names the lead's terminal: read it with `hc read <address>` ([core.md](../herdr-fleet/references/core.md)).
 
 5. It prints `<lead> <job dir>`. On `BLOCKED ...`, read the lead's pane (`herdr agent read <lead> --source visible --lines 30`), clear the startup dialog, then send the `stampede tell` line it printed. Tell the owner the lead's name and the workspace label.
 
@@ -46,4 +47,4 @@ Start it again after each return until the job is finished. Each item is `<job d
 
 **The lead's pane is not the owner.** In `herdr agent read`, the grey text in its input line is Claude's own prompt suggestion, not the owner typing, and `.focused` can read true while nobody types. Go by the outbox, `plan.md` and `reports/`.
 
-**Gates** (merge, push to main, deploy, send, spend, close) are always the owner's own yes: in this chat (recorded with `approve-gate` as above), in the lead's pane, or on their phone; never your decision.
+**Gates** (merge, push to main, deploy, send, spend, close) are always the owner's own yes: in this chat (recorded with `approve-gate` as above), in the lead's pane, or on their phone (on Herdr Core only the recorded yes, never a typed one); never your decision.

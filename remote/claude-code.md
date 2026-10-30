@@ -40,3 +40,4 @@ stampede new --file <ask.md> --pane "$P" --front-door --fork "$CLAUDE_CODE_SESSI
 - The fork carries the chat's whole context into the lead, so fork a focused planning chat, not a long one.
 - `reopen.sh` resumes the lead's own session, never the planning chat.
 - **The desktop chat stays your contact** (`--front-door`): you never need to watch the lead's pane. The lead posts its plan, questions, gates, screenshots and report to `<job>/outbox/`; the chat waits on it with `stampede wait <job>` in the background, sends you each item and passes your answers back. Its loop: [skills/stampede](../skills/stampede/SKILL.md#relay-a---front-door-job).
+- **On Herdr Core:** no workspace; the chat runs `stampede new --core --file <ask.md> --cwd <repo> --fork "$CLAUDE_CODE_SESSION_ID"` ([core.md](../skills/herdr-fleet/references/core.md)).
