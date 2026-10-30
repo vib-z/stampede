@@ -35,7 +35,7 @@ def detached(argv, env, host, under):
     box = Path(tempfile.mkdtemp(prefix='run-', dir=under))
     (box / host).symlink_to('/bin/bash')
     script = ('for _ in $(seq 250); do p=$(ps -o ppid= -p $$ 2>&1) || break; [ "${p// /}" = 1 ] && break; sleep 0.02; done; '
-              'if [ "${p// /}" != 1 ]; then echo "not detached: the parent of $$ is not pid 1 (ps: ${p:-no answer})" >"$0.err"; '
+              'if [ "${p// /}" != 1 ]; then : >"$0.out"; echo "not detached: the parent of $$ is not pid 1 (ps: ${p:-no answer})" >"$0.err"; '
               'echo 125 >"$0.tmp"; mv "$0.tmp" "$0.code"; exit; fi; '
               '"$@" >"$0.out" 2>"$0.err" </dev/null; echo $? >"$0.tmp"; mv "$0.tmp" "$0.code"')
     try:
