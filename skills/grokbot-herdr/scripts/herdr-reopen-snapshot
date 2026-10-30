@@ -30,7 +30,7 @@ from pathlib import Path
 
 HERDR = os.environ.get('HERDR', 'herdr')
 COLS = ('name', 'kind', 'session', 'brief', 'args')   # agents.tsv, tab separated; args is shell-quoted
-RESUME = {'claude': '--resume', 'hermes': '--resume', 'codex': 'resume', 'kimi': '-r'}   # agents-and-models.md
+RESUME = {'claude': '--resume', 'hermes': '--resume', 'codex': 'resume', 'kimi': '-S'}   # agents-and-models.md
 TOL = 2   # cells of slack between neighbouring pane rects (borders)
 
 
@@ -99,7 +99,7 @@ def model_effort(kind, args):
         nxt = a[i + 1] if i + 1 < len(a) else ''
         if x in ('--model', '-m'):
             model = nxt
-        elif x == '--effort':
+        elif x in ('--effort', '--reasoning'):  # Hermes calls its effort --reasoning
             effort = nxt
         elif x in ('-c', '--config') and nxt.startswith('model_reasoning_effort='):
             effort = nxt.split('=', 1)[1].strip('"\'')
@@ -209,7 +209,7 @@ def reopen_sh(ws, owner, tabs, when):
         'start() {   # start <name> <kind> <pane> <session id> <brief> [agent args...]',
         '  local n=$1 k=$2 p=$3 s=$4 b=$5 r=(); shift 5',
         '  if [ "$FRESH" = 0 ] && [ -n "$s" ]; then',
-        '    case "$k" in claude|hermes) r=(--resume "$s");; codex) r=(resume "$s");; kimi) r=(-r "$s");; esac',
+        '    case "$k" in claude|hermes) r=(--resume "$s");; codex) r=(resume "$s");; kimi) r=(-S "$s");; esac',
         '  fi',
         '  "$H" agent start "$n" --kind "$k" --pane "$p" --timeout 90000 -- ${r[@]+"${r[@]}"} "$@" >/dev/null \\',
         '    || echo "WARN $n: agent start did not confirm; read its pane" >&2',
@@ -303,13 +303,16 @@ def snapshot_core(key, job):
            f'After a reboot, a lost holder or any part gone: `bash {job}/reopen.sh` starts only what is not live: the follower, '
            'the lead (its session resumed) and each worker (Claude resumed by its session id; Codex resumed by the session its notify recorded, else fresh; `--prompt` sends '
            'a Codex worker its brief again). `--lead` starts only the follower and the lead; `--fresh` starts each on a new session with its brief. A live agent is never started twice.', '',
+           'A handed agent (a Herdr TUI pane, `pane <id>` below) never starts in a Core terminal: reopen prints `LIVE <agent> (pane <id>)`, '
+           'or `NOT RUNNING` with the exact `fleet-job start ... --pane` that runs it again, and exits 1.', '',
            f'The job runs on Herdr Core {on}; every command for it targets that core, and a shell set to another is refused.', '',
            '| agent | role | CLI | model | effort | session | terminal | state | brief |', '|---|---|---|---|---|---|---|---|---|']
     for name, entry in entries.items():
         a = rows.get(name, {})
         model, effort = model_effort(a['kind'], a['args']) if a.get('args') else ('', '')
         out.append(f'| {name} | {entry.get("role", "-")} | {a.get("kind") or "-"} | {model or "-"} | {effort or "-"} | '
-                   f'{a.get("session") or "-"} | {entry.get("address") or "-"} | {entry.get("state", "-")} | {a.get("brief") or "-"} |')
+                   f'{a.get("session") or "-"} | {entry.get("address") or ("pane " + entry["pane"] if entry.get("pane") else "-")} | '
+                   f'{entry.get("state", "-")} | {a.get("brief") or "-"} |')
     (job / 'REOPEN.md').write_text('\n'.join(out) + '\n')
     print(f'wrote {job}/REOPEN.md and {sh}: {len(entries)} terminals of {key}')
 

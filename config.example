@@ -20,7 +20,7 @@ export HERDR_EVENTS_MACHINE=$(hostname -s)          # label sent with every even
 export HERDR_EVENTS_HOME=~/.herdr-events            # the queue and dead letters
 export HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes   # one file per route, holding URL= and KEY=
 export HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log        # the flusher's log
-export HERDR_EVENTS_DIR=~/.config/herdr-events     # owner tags (owners/), job markers (jobs/), and routes/ when HERDR_EVENTS_ROUTES_DIR is unset
+export HERDR_EVENTS_DIR=~/.config/herdr-events     # owner tags (owners/), job markers (jobs/), handed panes (handed/), and routes/ when HERDR_EVENTS_ROUTES_DIR is unset
 export HERDR_EVENTS_STALE_MINUTES=30                # a Herdr Core job's follower: minutes a working terminal's screen may stay unchanged before stale
 # HERDR_EVENTS_OWNER=<bot-slug> is set per command, for a one-off command in a pane; never here. At fleet-job new it names
 # the bot that started the job (else the workspace's owner tag), and that job's gates go back to that bot.

@@ -27,9 +27,15 @@ CLIENTS = {
     'other-bot': {'readme': 'any other bot', 'where': 'ssh', 'backends': ('tui', 'core'), 'bot': 'other-bot', 'owner_from': 'env'},
     'remote-computer': {'readme': 'a whole remote computer', 'where': 'inside', 'backends': ('tui', 'core')},
 }
-WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex')}  # the one worker registry: what start takes
+# the one worker registry: what start takes on each backend. A Core job runs claude and codex in Core terminals and hands
+# the HANDED kinds, which report no OSC 7501 status, to Herdr TUI panes (start --pane); without --pane Core refuses them
+# with UNHANDED. tests/test_mixed.py covers a handed agent's life after its start (the follower, tell, reopen, marks).
+WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex', 'cursor', 'hermes', 'kimi')}
+HANDED = ('cursor', 'hermes', 'kimi')
 KINDS = tuple(dict.fromkeys(kind for kinds in WORKERS.values() for kind in kinds))  # O3 starts each on every backend
-REFUSED = {'cursor': 'Cursor reports no OSC 7501 status'}  # why a backend that does not take a kind refuses it
+REFUSED = {kind: kind + ' runs only as a handed agent of a Herdr Core job' for kind in ('hermes', 'kimi')}  # why a
+# backend that does not take a kind refuses it
+UNHANDED = 'reports no OSC 7501 status, so Herdr Core cannot run it: hand it to a Herdr TUI pane'
 OUTCOMES = {
     'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question', 'O5': 'gate',
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
@@ -95,7 +101,7 @@ class Outcomes(unittest.TestCase):
         cls.doctor.setUp()  # an installed scratch HOME with a fake herdr, launchctl and df
         cls.doctor.fake('claude', 'echo "2.1.312 (Claude Code)"')  # never a real agent CLI
         cls.doctor.fake('codex', 'echo "--no-daemon"')
-        cls.jobs = [Job(name, row, backend, cls.root, WORKERS) for name, row in CLIENTS.items() for backend in row['backends']]
+        cls.jobs = [Job(name, row, backend, cls.root, WORKERS, HANDED) for name, row in CLIENTS.items() for backend in row['backends']]
         with ThreadPoolExecutor(8) as pool:  # each job has its own folders, fakes and environment
             cls.health = dict(zip([(j.client, j.backend) for j in cls.jobs], pool.map(cls.health_check, cls.jobs)))
             cls.reference = dict(zip(('tui', 'tui-bot', 'core'), pool.map(lambda f: cls.run_doctor(f, {}), ('tui', 'tui-bot', 'core'))))
@@ -185,6 +191,12 @@ class Outcomes(unittest.TestCase):
                 if kind not in WORKERS[job.backend]:
                     self.refused(job, 'start ' + kind, REFUSED[kind])
                     self.assertNotIn(agent, runs)
+                    self.assertFalse(any(c.startswith(f'agent start {agent} ') for c in job.herdr_calls()))
+                elif job.backend == 'core' and kind in HANDED:
+                    self.refused(job, 'start ' + kind + ' on core', kind.capitalize() + ' ' + UNHANDED)
+                    self.ok(job, 'start ' + kind, f'STARTED {agent} (pane {job.WS}:p')
+                    self.assertNotIn(agent, runs, 'a handed kind never runs in a Core terminal')
+                    self.assertTrue(any(c.startswith(f'agent start {agent} --kind {kind}') for c in job.herdr_calls()))
                 elif job.backend == 'core':
                     self.ok(job, 'start ' + kind, f'STARTED {agent} (t')
                     self.assertEqual(Path(job.program(runs[agent])[0]).name, kind)
@@ -273,8 +285,12 @@ class Outcomes(unittest.TestCase):
         def check(job):
             runs, herdr = job.before_reopen
             if job.backend == 'core':
-                self.ok(job, 'reopen', f'LIVE {job.key}: no agent to restart')
+                out = self.ok(job, 'reopen', f'LIVE {job.key}: no agent to restart')
                 self.assertEqual(len(job.calls('run')), runs, 'nothing started')
+                for kind in HANDED:
+                    self.assertIn(f'LIVE build-{kind} (pane {job.WS}:p', out)
+                started = [c for c in job.herdr_calls()[herdr:] if c.startswith(('agent start', 'agent prompt', 'agent send-keys'))]
+                self.assertEqual(started, [], 'reopen never starts or types into a handed agent')
             else:
                 self.ok(job, 'snapshot')
                 self.refused(job, 'reopen', 'a workspace labelled xc is already open')
@@ -307,7 +323,7 @@ class Outcomes(unittest.TestCase):
         Core start leaves it out; run as written, the job is local: its questions and gates go to the phone and its
         finish to the default route, and the bot never hears them."""
         bot = next(name for name, row in CLIENTS.items() if row.get('bot'))
-        job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1', WORKERS)
+        job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1', WORKERS, HANDED)
         (job.root / 'ask.md').write_text('Write hello.txt\n')
         env = {k: v for k, v in job.client_env().items() if k != 'HERDR_EVENTS_OWNER'}  # the guide's command as written
         code, out, err = job.run('new', (ROOT / 'scripts/stampede', 'new', '--core', '--file', job.root / 'ask.md', '--cwd',
@@ -336,7 +352,7 @@ class Outcomes(unittest.TestCase):
     def fresh(self, name, backend, where='outside'):
         """A new job of its own for a finding, started by the first client that runs where it says."""
         client = next(c for c, row in CLIENTS.items() if row['where'] == where)
-        job = Job(client, CLIENTS[client], backend, self.root / name, WORKERS)
+        job = Job(client, CLIENTS[client], backend, self.root / name, WORKERS, HANDED)
         job.start()
         self.assertEqual(job.steps['new'][0], 0, job.steps['new'])
         return job
@@ -385,16 +401,19 @@ class Outcomes(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_f7_a_kind_a_backend_does_not_take_is_refused_before_its_brief(self):
-        """F7: start checks the brief before the kind, so a cursor start on Core with an incomplete brief names the
-        missing sections, not why Core takes no Cursor. Either way nothing starts."""
-        job = self.fresh('f7', 'core')
-        brief = job.job / 'briefs/probe.md'
-        brief.write_text('## Goal\nProbe.\n')
-        for kind in set(KINDS) - set(WORKERS['core']):
-            code, out, err = job.run('start ' + kind, (STAMPEDE, 'start', job.job, 'probe-' + kind, '--kind', kind, '--brief', brief),
-                                     job.lead_env())
-            self.assertEqual(code, 2, out + err)
-            self.assertIn(REFUSED[kind], err)
+        """F7: start checks the brief before the kind, so with an incomplete brief a hermes or kimi start on the TUI, or a
+        cursor start on Core without --pane, names the missing sections, not why that backend takes no such start. Either
+        way nothing starts."""
+        for backend in ('tui', 'core'):
+            job = self.fresh('f7-' + backend, backend)
+            brief = job.job / 'briefs/probe.md'
+            brief.write_text('## Goal\nProbe.\n')
+            for kind in sorted(set(KINDS) - set(WORKERS[backend]) if backend == 'tui' else HANDED):
+                where = ('--pane', f'{job.WS}:p9') if backend == 'tui' else ()
+                code, out, err = job.run('start ' + kind, (STAMPEDE, 'start', job.job, 'probe-' + kind, '--kind', kind,
+                                                           '--brief', brief, *where), job.lead_env())
+                self.assertEqual(code, 2, out + err)
+                self.assertIn(REFUSED[kind] if backend == 'tui' else UNHANDED, err)
 
 
     @unittest.expectedFailure
