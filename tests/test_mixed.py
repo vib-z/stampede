@@ -166,6 +166,18 @@ class MixedStart(MixedCase):
         self.assertIn('FAILED build-db (herdr agent start', out)
         self.assertEqual((self.entries(self.job_dir)['build-db']['state'], self.mark('w9:p4')), ('failed', None))
 
+    def test_the_start_pointer_never_goes_into_a_busy_agent(self):  # owner check 2
+        self.herdr_shape(on_start={'build-ui': {'agent_status': 'working'}}, start_error={'build-db': 'agent_not_ready'})
+        code, out = self.hand()
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith('NOT READY build-ui: working: tell it after its turn'), out)
+        self.add_pane('w9:p4')
+        code, out = self.hand('build-db', pane='w9:p4')
+        self.assertEqual(code, 1)
+        self.assertIn('BLOCKED build-db', out)
+        self.assertEqual((self.herdr_calls('agent prompt'), self.herdr_calls('agent send-keys')), ([], []))
+        self.assertEqual([self.entries(self.job_dir)[a]['state'] for a in ('build-ui', 'build-db')], ['live', 'live'])
+
     def test_a_lost_answer_is_adopted_or_kept_unknown_and_never_launched_twice(self):
         self.herdr_shape(start_error={'build-ui': 'timeout', 'build-db': 'timeout'}, spawns=['build-ui', 'build-db'])
         self.assertEqual(self.hand(), (0, f'STARTED build-ui (pane {PANE})\n'), 'it started all the same: adopted')
@@ -345,6 +357,27 @@ class MixedFollower(MixedCase):
         f.poll()
         self.assertEqual(len(self.inbox()), 1)
 
+    def test_the_follower_and_reopen_never_type_into_a_pane(self):  # owner check 2
+        self.hand()
+        self.add_pane('w9:p4')
+        self.hand('build-k', 'kimi', 'w9:p4')
+        typed = len(self.herdr_calls('agent prompt'))  # the two start pointers
+        f = self.follower()
+        for minute, word in ((0, 'working'), (1, 'blocked'), (2, 'working'), (40, 'working'), (41, 'done'), (42, 'idle')):
+            self.now[0] = minute * 60
+            self.agent(agent_status=word)
+            f.poll()
+            f.stalls()
+        self.settled()
+        self.quiet(fj.reopen, self.job_dir)  # LIVE for both
+        self.agent(agent=None)
+        f.poll()
+        self.quiet(fj.reopen, self.job_dir)  # NOT RUNNING for build-ui
+        self.assertEqual(self.inbox()[-1], 'GONE build-ui exited')
+        self.assertIn('STALE build-ui no new output for 38m', self.inbox())
+        self.assertEqual((len(self.herdr_calls('agent prompt')), self.herdr_calls('agent send-keys')), (typed, []))
+        self.assertEqual(self.calls('send') + self.calls('keys'), [])
+
     def test_a_core_only_job_never_calls_herdr(self):
         f = self.follower()
         f.line({'channel': None, 'seq': 1, 'terminals': []})
@@ -473,6 +506,16 @@ class MixedTell(MixedCase):
         self.assertEqual((self.calls('send'), self.herdr_calls('agent send-keys')), ([], []), 'never hc send, never a key')
 
 
+    def test_a_claude_worker_of_a_mixed_job_reads_only_its_inbox(self):  # owner check 2
+        self.hand()
+        with open(self.job_dir / 'agents.tsv', 'a') as rows:
+            rows.write('build-api\tclaude\t\t\t\n')
+        before = (len(self.herdr_calls()), len(self.calls()))
+        self.assertEqual(self.quiet(fj.tell, self.job_dir, 'build-api', 'hello')[1], 'DELIVERED build-api (inbox file)\n')
+        self.assertEqual((self.job_dir / 'inbox/build-api.md').read_text(), 'hello\n')
+        self.assertEqual((len(self.herdr_calls()), len(self.calls())), before)
+
+
 class MixedGates(MixedCase):
     """Design item 6: a Core job with a handed agent still counts only the recorded yes, and a handed pane cannot record it."""
 
@@ -496,6 +539,81 @@ class MixedGates(MixedCase):
         with mock.patch.object(fj, 'inside_herdr', return_value=False):
             self.quiet(fj.approve_gate, self.job_dir, '0123456789ab', SHA, 'owner in alpha chat')
         self.assertIn('APPROVED 0123456789ab', self.quiet(fj.gate_ok, self.job_dir, '0123456789ab', SHA)[1])
+
+
+class MixedFingerprints(MixedCase):
+    """Owner check 3: on a mixed job a gate is bound to its id and exact commit, a gate changed while asked is not
+    recorded, and the plan digest refuses a handed start after the plan changed until approved again."""
+
+    def setUp(self):
+        super().setUp()
+        self.hand()
+
+    def gate(self, action, owner=True):
+        if owner:
+            (self.job_dir / 'owner').write_text('alpha\n')
+        with mock.patch.object(fj, 'ask_background'):
+            self.quiet(fj.ask_gate, self.job_dir, action, SHA, 3)
+        return max((self.job_dir / 'gates').glob('*.json'), key=lambda p: p.stat().st_mtime_ns).stem
+
+    def approve(self, ident, sha):
+        with mock.patch.object(fj, 'inside_herdr', return_value=False):
+            return self.quiet(fj.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat')
+
+    def test_gate_ok_with_another_commit_refuses(self):
+        ident = self.gate('Merge PR #3 into main')
+        with self.assertRaises(PermissionError):
+            self.approve(ident, 'b' * 40)  # a yes for another commit is never recorded
+        self.assertFalse((self.job_dir / 'gates' / (ident + '.approved')).exists())
+        self.approve(ident, SHA)
+        self.assertIn('APPROVED ' + ident, self.quiet(fj.gate_ok, self.job_dir, ident, SHA)[1])
+        with self.assertRaises(PermissionError) as refused:
+            fj.gate_ok(self.job_dir, ident, 'c' * 40)  # a push after the yes withdraws it
+        self.assertIn('a push after the yes withdraws it', str(refused.exception))
+
+    def test_a_yes_for_one_gate_never_passes_another(self):
+        first = self.gate('Merge PR #3 into main')
+        time.sleep(0.01)
+        second = self.gate('Deploy to production')
+        self.approve(first, SHA)
+        with self.assertRaises(PermissionError):
+            fj.gate_ok(self.job_dir, second, SHA)
+        (self.job_dir / 'gates' / (second + '.approved')).write_text((self.job_dir / 'gates' / (first + '.approved')).read_text())
+        with self.assertRaises(PermissionError) as refused:
+            fj.gate_ok(self.job_dir, second, SHA)
+        self.assertIn(f'is for gate {first}', str(refused.exception))
+
+    def test_a_gate_changed_while_asked_is_not_recorded(self):
+        ident = self.gate('Merge PR #3 into main', owner=False)  # a local job: the phone card records the yes
+        record = self.job_dir / 'gates' / (ident + '.json')
+        swap = json.dumps({**fj.load_gate(self.job_dir, ident), 'action': 'Deploy to production'})
+        ask = self.root / 'swap-ask'
+        ask.write_text(f"#!/bin/bash\nprintf '%s' '{swap}' > '{record}'\necho yes\n")
+        ask.chmod(0o755)
+        with mock.patch.object(fj, 'ASK_CMD', str(ask)):
+            fj.ask_now(self.job_dir, '', [], None, ident)
+        self.assertFalse((self.job_dir / 'gates' / (ident + '.approved')).exists())
+        self.assertIn('GATE NOT RECORDED', (self.job_dir / 'inbox/lead-demo.md').read_text())
+        with self.assertRaises(PermissionError):
+            fj.gate_ok(self.job_dir, ident, SHA)
+
+    def test_a_handed_start_waits_for_approval_of_the_plan_as_it_stands(self):
+        (self.job_dir / 'review').write_text('The owner asked to see the plan before any pane opens.\n')
+        (self.job_dir / 'plan.md').write_text('# Plan v1\n')
+        self.add_pane('w9:p4')
+        with self.assertRaises(PermissionError):
+            self.hand('build-k', 'kimi', 'w9:p4')
+        fj.approve(self.job_dir, 'owner')
+        self.assertEqual(self.hand('build-k', 'kimi', 'w9:p4')[0], 0)
+        self.add_pane('w9:p5')
+        for name in ('plan.md', 'fleet-plan.md'):
+            (self.job_dir / name).write_text('# changed after the yes\n')
+            with self.assertRaises(PermissionError) as refused:
+                self.hand('build-c', 'cursor', 'w9:p5')
+            self.assertIn('again after any change to the plan', str(refused.exception))
+            fj.approve(self.job_dir, 'owner')
+        self.assertEqual(self.hand('build-c', 'cursor', 'w9:p5')[0], 0)
+        self.assertEqual(len(self.herdr_calls('agent start')), 3, 'no Herdr start while the plan waited')
 
 
 class MixedReopen(MixedCase):
