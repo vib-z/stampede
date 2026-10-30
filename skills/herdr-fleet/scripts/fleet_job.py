@@ -1049,6 +1049,11 @@ def pointer(agent, brief):
     return f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
 
 
+def briefing(job, agent, brief):
+    """The exact tell that sends a handed agent its brief pointer, for the lead to run by hand."""
+    return shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), agent, pointer(agent, brief)])
+
+
 def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, lead):
     """An agent Herdr Core cannot run, handed to a Herdr TUI pane at its shell prompt inside a Core job: the TUI start,
     under the same launch lock and one-live-launch rule as a Core start. The pane is claimed (its mark) and the entry
@@ -1087,7 +1092,7 @@ def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in,
 
         def failed(error, note=''):
             bind(job, agent, {'state': 'failed', 'reason': line(error)})
-            unmark_handed(job, pane, ident)
+            release_pane(job, agent)
             snapshot(job)
             print(f'FAILED {agent} ({line(error)}){note}')
             return 1
@@ -1118,10 +1123,10 @@ def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in,
     if blocked:
         print(f'BLOCKED {agent}: clear the startup dialog in pane {pane}, then fleet-job tell {job} {agent} "Read {brief}"')
         return 1
-    why = prompt_handed(job, agent, pointer(agent, brief), fresh=True)
+    why = prompt_handed(job, agent, pointer(agent, brief))
     if why:
-        print(f'NOT READY {agent}: {why}; it stays this job\'s {agent}, so never start a second one: once it is idle, '
-              f'fleet-job tell {job} {agent} "Read {brief}"')
+        print(f'NOT BRIEFED {agent} (pane {pane}): {why}. It runs as this job\'s {agent}, so never start a second one: '
+              f'read its screen, and only once its prompt is empty and idle: {briefing(job, agent, brief)}')
         return 1
     print(f'STARTED {agent} (pane {pane})')
     return 0
@@ -1168,12 +1173,32 @@ def herdr_agents():
     return {row['pane_id']: row for row in rows}
 
 
+def known(job, agent):
+    """A handed agent's entry with what the job's follower learned about this launch (its record tui:<pane>|<launch> in
+    relay-state.json, which it replaces whole): the agent session and completion_seq it saw, and 'ended', the reason,
+    when it saw the launch end or be replaced. Without a readable record, the entry as it is."""
+    entry = dict(core_entries(job).get(agent, {}))
+    path = Path(job) / 'relay-state.json'
+    try:
+        records = json.loads(path.read_text()).get('terminals', {}) if path.is_file() else {}
+    except (OSError, ValueError, AttributeError):
+        records = {}
+    seen = records.get(f'tui:{entry.get("pane")}|{entry.get("launch")}') if entry.get('backend') == 'tui' else None
+    if isinstance(seen, dict):
+        entry['session'] = entry.get('session') or seen.get('session')
+        entry['completion'] = seen['completion'] if isinstance(seen.get('completion'), int) else entry.get('completion')
+        if seen.get('finished'):
+            entry['ended'] = seen.get('ended') or 'ended'
+    return entry
+
+
 def handed_state(job, agent):
     """Whether this job's handed agent runs: ('live', row) when its recorded pane runs its name and kind, as its live
     launch (its agent session, once both are known, the same) or its unsettled one; ('other', row) when that pane runs its
     name otherwise (ambiguous); ('missing', None) when a whole list shows no agent of its name there; ('none', None) for an
-    agent never handed (no Herdr call). Anything Herdr does not show clearly is a ValueError, never missing."""
-    entry = core_entries(job).get(agent, {})
+    agent never handed (no Herdr call). What the follower learned counts too: a launch it saw end, or one whose session or
+    completion differs from Herdr's now, is not this launch. Anything Herdr does not show clearly is a ValueError."""
+    entry = known(job, agent)
     if entry.get('backend') != 'tui':
         return 'none', None
     pane = entry.get('pane')
@@ -1184,7 +1209,7 @@ def handed_state(job, agent):
         raise ValueError(f'pane {pane} runs an agent Herdr shows no name for')
     if row['name'] != agent:
         return 'missing', None
-    if row.get('agent') != entry.get('kind') or entry.get('state') not in ('live', 'starting'):
+    if row.get('agent') != entry.get('kind') or entry.get('state') not in ('live', 'starting') or entry.get('ended'):
         return 'other', row
     if entry.get('state') == 'live' and replaced(entry, row):
         return 'other', row
@@ -1227,10 +1252,24 @@ def claim_pane(job, agent, pane, fields):
             holder = pane_holder(job, agent, path)
             if holder:
                 raise ValueError(f'pane {pane} is handed to {holder}: pick another pane; nothing started')
+            fields = {**fields, 'took': path.read_text()}  # a stale mark: put back if this start fails
             path.unlink()
         with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), 'w') as mark:
             mark.write(f'{Path(job).absolute()}\n{fields["launch"]}\n')
         bind(job, agent, fields, fresh=True)
+
+
+def release_pane(job, agent):
+    """A start that failed gives its pane back: its own mark goes, and a stale mark it took over comes back as it was,
+    so late events about that ended launch stay home until its job's finish."""
+    entry = core_entries(job).get(agent, {})
+    with marks() as folder:
+        path = folder / entry['pane']
+        if path.is_file() and path.read_text().splitlines()[:2] == [str(Path(job).absolute()), entry.get('launch')]:
+            if entry.get('took'):
+                path.write_text(entry['took'])
+            else:
+                path.unlink()
 
 
 def pane_holder(job, agent, path):
@@ -1257,24 +1296,26 @@ def pane_holder(job, agent, path):
         return held + ' (Herdr did not answer clearly)'
 
 
-def unmark_handed(job, pane=None, launch=None):
-    """Remove this job's marks (finish), or one pane's while it still names this launch (a start that failed)."""
+def unmark_handed(job):
+    """Remove this job's marks (finish)."""
     with marks() as folder:
-        for path in folder.glob(pane or '*'):
+        for path in folder.glob('*'):
             rows = path.read_text().splitlines() if path.is_file() and path.name != '.lock' else []
-            if rows[:1] == [str(Path(job).absolute())] and (launch is None or rows[1:2] == [launch]):
+            if rows[:1] == [str(Path(job).absolute())]:
                 path.unlink()
 
 
-def prompt_handed(job, name, text, fresh=False):
+def prompt_handed(job, name, text):
     """Prompt a handed agent with one herdr agent prompt, never a key: only while its recorded pane runs this live launch
-    (its name and the terminal id recorded at its start), idle or done, the owner not in it and nothing typed in its
-    prompt (fresh: a start's own pointer, into an empty prompt). None once Herdr took the prompt, else why not; anything
-    Herdr does not show clearly refuses. A delivered prompt naming the agent's brief marks it briefed.
+    (its name, and the session and completion this job or its follower saw; not one the follower saw end), idle or done,
+    the owner not in it and its prompt shown empty (a start's own pointer too). None once Herdr took the prompt, else
+    why not; anything Herdr does not show clearly refuses. A delivered prompt naming the agent's brief marks it briefed.
     ponytail: Herdr has no prompt --if idle, so an agent that turns working between the check and the prompt takes it as
     a message during its turn; upgrade: a status-guarded Herdr prompt."""
-    entry = core_entries(job).get(name, {})
+    entry = known(job, name)
     pane = entry.get('pane')
+    if entry.get('ended'):
+        return f'its follower saw this launch end ({entry["ended"]}); bash {Path(job).absolute() / "reopen.sh"} says what runs'
     try:
         shown = herdr_shown(pane)
     except ValueError as error:
@@ -1292,15 +1333,14 @@ def prompt_handed(job, name, text, fresh=False):
         return {'working': 'working: tell it after its turn', 'blocked': f'blocked: read it with herdr agent read {pane}'}[word]
     if word not in ('idle', 'done'):
         return 'not ready'
-    if not fresh:
-        try:
-            screen = subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'read', pane, '--source', 'visible', '--lines', '8'],
-                                    capture_output=True, text=True, timeout=60)
-        except (subprocess.TimeoutExpired, OSError):
-            screen = None
-        if screen is None or screen.returncode or typed(screen.stdout, EMPTY_HANDED):
-            return (f'text may be typed in its prompt: read it with herdr agent read {pane} --source visible --lines 8, '
-                    'clear it there only when it is idle, then tell again')
+    try:
+        screen = subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'read', pane, '--source', 'visible', '--lines', '8'],
+                                capture_output=True, text=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError):
+        screen = None
+    if screen is None or screen.returncode or typed(screen.stdout, EMPTY_HANDED):
+        return (f'text may be typed in its prompt, or its empty prompt is not one stampede knows: read it with herdr agent '
+                f'read {pane} --source visible --lines 8, clear it there only when it is idle, then tell again')
     try:
         herdr('agent', 'prompt', pane, text, '--wait', '--until', 'working', '--until', 'blocked', '--timeout', '15000')
     except (HerdrError, ValueError) as error:
@@ -1346,13 +1386,13 @@ def reopen_handed(job, agent):
         print(f'LIVE {agent} (pane {pane})')
         return 'live'
     if state == 'live':
-        tell = shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), agent, pointer(agent, entry.get('brief'))])
         print(f'NOT BRIEFED {agent} (pane {pane}): it runs, but its brief was never confirmed sent: read its screen with '
-              f'herdr agent read {pane} --source visible --lines 30, and only if it has not got it: {tell}')
+              f'herdr agent read {pane} --source visible --lines 30, and only if it has not got it: '
+              f'{briefing(job, agent, entry.get("brief"))}')
         return 'unbriefed'
     if entry.get('state') == 'starting':  # an unsettled launch a whole list shows is not in its pane: it never ran, or ended
         bind(job, agent, {'state': 'failed', 'reason': 'not in its pane at reopen'})
-        unmark_handed(job, pane, entry.get('launch'))
+        release_pane(job, agent)
     print(f'NOT RUNNING {agent} (pane {pane}): start it again in a pane at its shell prompt: {entry["start"]}')
     return 'missing'
 
@@ -1542,9 +1582,10 @@ def typed(screen, empty=EMPTY_PROMPT):
     return not empty.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:]))
 
 
-# A handed agent's empty prompt: Cursor's placeholder too (Herdr 0.9.5, 30 Oct 2026). Hermes shows a rotating
-# placeholder after its prompt and Kimi is unchecked, so a tell to either fails closed until their markers are known.
-EMPTY_HANDED = re.compile(EMPTY_PROMPT.pattern + r'|Plan, search, build anything', re.IGNORECASE | re.MULTILINE)
+# A handed agent's empty prompt: Cursor's placeholder too (Herdr 0.9.5, 30 Oct 2026), wrapped over lines in a narrow
+# pane, with nothing after it. Hermes shows a rotating placeholder after its prompt and Kimi is unchecked, so a prompt to
+# either fails closed until their markers are known.
+EMPTY_HANDED = re.compile(EMPTY_PROMPT.pattern + r'|Plan,\s+search,\s+build\s+anything[ \t]*$', re.IGNORECASE | re.MULTILINE)
 
 
 def tell_core(job, name, text):

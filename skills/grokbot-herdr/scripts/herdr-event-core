@@ -94,22 +94,25 @@ def hc(*args):
 
 
 def herdr(*args, until, text=False):
-    """(0, result) of one herdr command (its plain output with text), or (1, None) when it fails, takes longer than
-    HERDR_TIMEOUT or the deadline until allows, is missing, or answers no JSON object. Only the reader's thread calls it."""
+    """(0, result) of one herdr command (its plain output with text); (1, None) when Herdr answered an error; (2, None)
+    when it gave no answer: it took longer than HERDR_TIMEOUT or the deadline until allows, is missing, or answered no
+    JSON object. Only the reader's thread calls it."""
     wait = min(HERDR_TIMEOUT, until - clock())
     if wait <= 0:
-        return 1, None
+        return 2, None
     try:
         result = subprocess.run([os.environ.get('HERDR') or 'herdr', *args], capture_output=True, text=True, timeout=wait)
     except (subprocess.TimeoutExpired, OSError):
-        return 1, None
+        return 2, None
     if text:
         return (0, result.stdout) if result.returncode == 0 else (1, None)
     try:
         data = json.loads(result.stdout or result.stderr or '{}')
     except ValueError:
-        return 1, None
-    return (1, None) if result.returncode or not isinstance(data, dict) or 'error' in data else (0, data.get('result'))
+        return 2, None
+    if not isinstance(data, dict):
+        return 2, None
+    return (1, None) if result.returncode or 'error' in data else (0, data.get('result'))
 
 
 def session_of(row):
@@ -289,6 +292,8 @@ class Follower:
             return
         record['finished'] = True
         code, reason, agent = data.get('exit_code'), data.get('reason') or 'exited', record['agent']
+        if record.get('pane'):
+            record['ended'] = reason  # tell and reopen read it: this launch is over
         shown = '-' if code is None else code
         if record['role'] == 'wait':
             return self.notify(f'{address}|finished', address, f'WAITED {agent} exit {shown}')
@@ -406,9 +411,10 @@ class Follower:
     def read(self, looks):
         """The reader: Herdr's view of the handed agents, within POLL_DEADLINE, touching no state. Per address {'gone':
         reason} when a whole, well-formed list shows no agent of its name in its pane, or another process under it;
-        else {'row': its list row, 'screen': text}, the screen read only then. Anything unclear is left out."""
+        {'row': its list row, 'screen': text}, the screen kept only when herdr agent get, asked after the read, still
+        shows the same agent (pane, name, session, completion_seq); {'unclear': True} for anything Herdr did not show."""
         until = clock() + POLL_DEADLINE
-        found, (code, listed) = {}, herdr('agent', 'list', until=until)
+        found, (code, listed) = {address: {'unclear': True} for address, _ in looks}, herdr('agent', 'list', until=until)
         rows = listed.get('agents') if code == 0 and isinstance(listed, dict) else None
         if not isinstance(rows, list) or not all(isinstance(row, dict) and isinstance(row.get('pane_id'), str) and row['pane_id']
                                                  for row in rows):
@@ -420,24 +426,34 @@ class Follower:
                 continue  # an agent with no name shown: unclear
             if row is None or row['name'] != record['agent']:
                 code, _ = herdr('pane', 'get', pane, until=until)
-                found[address] = {'gone': 'exited' if code == 0 else 'pane closed'}
+                found[address] = {'gone': {0: 'exited', 1: 'pane closed'}.get(code, 'gone')}
             elif replaced(record, row):
                 found[address] = {'gone': 'replaced'}
             else:
+                found[address] = {'row': row}
                 code, text = herdr('pane', 'read', pane, '--source', 'recent', '--lines', '40', until=until, text=True)
-                found[address] = {'row': row, **({'screen': text} if code == 0 else {})}
+                after = herdr('agent', 'get', pane, until=until) if code == 0 else (1, None)
+                after = after[1].get('agent') if after[0] == 0 and isinstance(after[1], dict) else None
+                if isinstance(after, dict) and all(after.get(k, '-') == row.get(k, '-') for k in ('pane_id', 'name', 'completion_seq')) \
+                        and session_of(after) == session_of(row):
+                    found[address]['screen'] = text  # the same agent before and after the read
         return found
 
     def apply(self, found):
         """What the reader found, on the main thread: GONE (another process under its name included, checked again
         against what is known now), a turn end when completion_seq rose, from a null baseline too (its id names the
         value, saved with the notification, so a restart tells one completion once; a missing one is no news), blocked,
-        and the screen for stalls and events. A record a later launch replaced, or already finished, is left alone."""
+        and the screen for stalls and events. A look with no screen, or an unclear one, drops the cached screen and the
+        stall clock: only fresh reads make a stall. A record a later launch replaced, or already finished, is left alone."""
         for address, look in found.items():
             record = self.terminals.get(address)
             if not record or record['finished']:
                 continue
             self.screens.pop(address, None)
+            if 'screen' not in look:
+                record.pop('stall', None)
+            if look.get('unclear'):
+                continue
             if 'gone' in look or replaced(record, look['row']):
                 self.finish(address, {'reason': look.get('gone', 'replaced')})
                 continue

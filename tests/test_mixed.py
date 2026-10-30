@@ -170,7 +170,7 @@ class MixedStart(MixedCase):
         self.herdr_shape(on_start={'build-ui': {'agent_status': 'working'}}, start_error={'build-db': 'agent_not_ready'})
         code, out = self.hand()
         self.assertEqual(code, 1)
-        self.assertTrue(out.startswith('NOT READY build-ui: working: tell it after its turn'), out)
+        self.assertTrue(out.startswith(f'NOT BRIEFED build-ui (pane {PANE}): working: tell it after its turn'), out)
         self.add_pane('w9:p4')
         code, out = self.hand('build-db', pane='w9:p4')
         self.assertEqual(code, 1)
@@ -799,7 +799,7 @@ class Round1Start(MixedCase):
     def test_r1_8_a_live_but_unbriefed_agent_is_no_success(self):
         self.herdr_shape(on_start={'build-ui': {'focused': True}})  # the owner is in the pane: the pointer waits
         code, out = self.hand()
-        self.assertTrue(out.startswith('NOT READY build-ui: focused'), out)
+        self.assertTrue(out.startswith(f'NOT BRIEFED build-ui (pane {PANE}): focused'), out)
         self.settled()
         code, out = self.quiet(fj.reopen, self.job_dir)
         self.assertEqual(code, 1)
@@ -963,6 +963,114 @@ class LiveFacts(FollowerCase):
         self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['terminal_id'], terminal, 'the pane keeps its terminal id')
         self.look(f)
         self.assertEqual(self.inbox(), ['TURN build-ui', 'GONE build-ui replaced'])
+
+
+class Round2(FollowerCase):
+    """Review round 2 (R2-1 to R2-4) and the live re-run (LT13, LT14)."""
+
+    def told(self, agent='build-ui', text='Fix the nit'):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                fj.tell(self.job_dir, agent, text)
+                code = 0
+            except SystemExit as stop:
+                code = stop.code
+        return out.getvalue().strip(), code
+
+    def test_r2_1_what_the_follower_learned_guards_tell_and_reopen(self):
+        self.hand()  # no binding seeded: core.json keeps the null session and completion of a fresh start
+        self.settled()
+        f = self.follower()
+        self.agent(agent_session={'kind': 'id', 'value': 's1'})
+        self.steps(f, 'done')  # its first turn: the follower learns s1 and the completion
+        entry = self.entries(self.job_dir)['build-ui']
+        self.assertEqual((entry.get('session'), entry['completion']), (None, None))
+        agent = self.herdr_state()['panes'][PANE]['agent']
+        self.add_pane(PANE, agent={**agent, 'agent_session': {'kind': 'id', 'value': 's2'}, 'completion_seq': None,
+                                   'agent_status': 'idle'})  # a same-name replacement, before the follower looks
+        for after_gone in (False, True):
+            out, code = self.told()
+            self.assertEqual(code, 2, out)
+            code, out = self.quiet(fj.reopen, self.job_dir)
+            self.assertEqual(code, 1)
+            self.assertIn('UNKNOWN build-ui', out)
+            self.assertNotIn('LIVE build-ui', out)
+            self.look(f)
+        self.assertEqual(self.inbox(), ['TURN build-ui', 'GONE build-ui replaced'])
+        self.assertIn('its follower saw this launch end (replaced)', self.told()[0])
+        self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'][1:], [], 'nothing typed into the replacement')
+
+    def test_r2_2_the_start_pointer_waits_for_an_empty_prompt(self):
+        real = fj.herdr
+
+        def call(*args, **kw):  # the owner types into the pane as the agent comes up
+            result = real(*args, **kw)
+            if args[:2] == ('agent', 'start'):
+                self.add_pane(PANE, agent=self.herdr_state()['panes'][PANE]['agent'], screen='❯ OWNER UNSENT DRAFT')
+            return result
+        with mock.patch.object(fj, 'herdr', call):
+            code, out = self.hand()
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith(f'NOT BRIEFED build-ui (pane {PANE}): text may be typed in its prompt'), out)
+        self.assertEqual(self.herdr_calls('agent prompt'), [])
+        entry = self.entries(self.job_dir)['build-ui']
+        self.assertEqual((entry['state'], entry['briefed']), ('live', False))
+        tell = shlex.split(out.split('only once its prompt is empty and idle: ')[1])
+        self.assertEqual(tell, ['fleet-job', 'tell', str(self.job_dir), 'build-ui',
+                                f'You are build-ui in a herdr fleet. Read {self.job_dir / "briefs/build-ui.md"} and do everything it says.'])
+        self.add_pane('w9:p4', screen='kimi> ')  # an empty prompt stampede does not know: it cannot be briefed
+        code, out = self.hand('build-k', 'kimi', 'w9:p4')
+        self.assertTrue(out.startswith('NOT BRIEFED build-k (pane w9:p4)'), out)
+        self.assertEqual(self.herdr_calls('agent prompt'), [])
+
+    def test_r2_3_a_replacement_during_the_screen_read_never_reaches_the_bot(self):
+        self.hand()
+        f = self.follower()
+        self.agent(agent_session={'kind': 'id', 'value': 's1'}, agent_status='working')
+        self.look(f)
+        self.agent(agent_status='blocked')
+        self.herdr_shape(on_read={PANE: {'agent': {'agent_session': {'kind': 'id', 'value': 's2'}},
+                                         'screen': 'OTHER_JOB_PRIVATE_SENTINEL'}})
+        self.look(f)  # listed as s1, blocked; replaced by s2 during the screen read
+        self.look(f)
+        self.assertEqual(self.inbox(), ['BLOCKED build-ui dialog', 'GONE build-ui replaced'])
+        self.assertNotIn('OTHER_JOB_PRIVATE_SENTINEL', json.dumps(self.posts))
+        self.assertEqual([(e['state'], 'output_tail' in e) for e in self.posts], [('blocked', False), ('dead', False)])
+
+    def test_r2_4_an_outage_is_no_stall(self):
+        self.hand()  # working on its brief
+        f = self.follower()
+        for minute, listed in ((0, True), (31, False), (32, True), (62, True)):
+            self.now[0] = minute * 60
+            self.herdr_shape(list_error=None if listed else 'server_down')
+            self.look(f)
+            f.stalls()
+            if minute == 31:
+                self.assertEqual(self.inbox(), [], 'no fresh read during the outage: no STALE')
+        self.assertEqual(self.inbox(), ['STALE build-ui no new output for 30m'])
+
+    def test_lt13_cursors_wrapped_placeholder_is_an_empty_prompt(self):
+        self.hand('build-c', 'cursor')
+        self.agent(agent_status='idle')
+        agent = self.herdr_state()['panes'][PANE]['agent']
+        self.add_pane(PANE, agent=agent, screen='→ Plan, search, build\nanything\n')  # a 34-column pane
+        self.assertEqual(self.told('build-c'), (f'SUBMITTED build-c (pane {PANE})', 0))
+        self.agent(agent_status='idle')
+        for draft in ('→ Plan, search, build anything and my own words', '→ Plan, search, build\nanything else'):
+            self.add_pane(PANE, agent=self.herdr_state()['panes'][PANE]['agent'], screen=draft)
+            out, code = self.told('build-c')
+            self.assertEqual(code, 2, draft)
+            self.assertIn('text may be typed in its prompt', out)
+
+    def test_lt14_a_failed_start_puts_back_the_stale_mark_it_took(self):
+        self.hand()
+        stale = (self.events / 'handed' / PANE).read_text()
+        self.agent(agent=None)  # build-ui ended; its mark stays until finish
+        self.herdr_shape(start_error={'review-ui': 'pane_not_at_prompt'})
+        code, out = self.hand('review-ui', 'kimi')
+        self.assertTrue(out.startswith('FAILED review-ui'), out)
+        self.assertEqual((self.events / 'handed' / PANE).read_text(), stale)
 
 
 if __name__ == '__main__':

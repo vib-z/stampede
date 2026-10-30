@@ -16,6 +16,8 @@ shapes the answers with:
   get_error   {pane: code}     `agent get` of that pane fails with this code
   get_answer  {pane: result}   `agent get` of that pane answers this result as it is
   hang        seconds          every call waits this long first (a hung Herdr)
+  on_read     {pane: change}   the next `pane read` of that pane first applies change ({agent: fields, screen: text}):
+                               a replacement during the read
 A prompt turns the agent working, as Herdr's prompt --wait --until working does. Errors are Herdr's shape, exit 1."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -62,6 +64,10 @@ def command(state, argv):
         return ok({})
     if verb in ('pane read', 'agent read'):
         pane = panes.get(args[0]) or find(state, args[0])[1]
+        change = state.get('on_read', {}).pop(args[0], None) if verb == 'pane read' else None
+        if change:
+            pane['agent'].update(change.get('agent', {}))
+            pane['screen'] = change.get('screen', pane.get('screen'))
         return print(pane.get('screen', '❯ '))
     if verb == 'agent list':
         if state.get('list_error'):
