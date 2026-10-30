@@ -129,6 +129,10 @@ Plan approval is not a gate: it lets the lead work inside the job's own folder a
 - **Cancel stops the whole ask.** Cancelling a question stops its waiter and its `moshi-hook` child, so no answered card stays on the phone.
 - **One workspace per job**, so one job's reopen snapshot cannot overwrite another's.
 
+## Herdr Core (29 Oct 2026)
+
+A job can also run on Herdr Core (`hc`), the owner's call per job (`stampede new --core`). The flow above holds: the job folder, the plan, briefs, the agents' hooks, the inbox and gates. What Core changes: agents are Core terminals bound by address in `core.json`, with one launch per agent; the brief is each agent's first prompt; a follower per job, `herdr-event-core`, reports every worker's block, error and exit; only the recorded yes passes a gate; and `reopen.sh` starts only what is gone. The lead's playbook: [core.md](../../../skills/herdr-fleet/references/core.md).
+
 ## Not in this round
 
 - Reporting to Herdr that Codex's "Implement this plan?" and Cursor's "Ready to build?" dialogs read as `idle` and `done`, not `blocked`. Posting it needs the owner's yes.

@@ -2,18 +2,28 @@
 # herdr-events-owner <workspace-id> <bot-slug>   tag a workspace's owner (also shown as $owner in Herdr's sidebar)
 # herdr-events-owner <workspace-id> --clear      remove the tag
 # herdr-events-owner <workspace-id>              show owner
-# The id is the literal workspace_id (e.g. w1K), never the JSON of .result.workspace.
+# The id is the literal workspace_id (e.g. w1K), never the JSON of .result.workspace, or a Herdr Core job's key
+# (hc-<12 hex>, in <job>/workspace): that tag is set only while the job is open (its marker in jobs/), never via herdr.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
-set -e; D="$HOME/.config/herdr-events/owners"; mkdir -p "$D"
+set -e; EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; D="$EV/owners"; mkdir -p "$D"
 ws="$1"; [ -n "$ws" ] || { echo "usage: herdr-events-owner <workspace-id> [bot-slug|--clear]" >&2; exit 2; }
-[[ "$ws" =~ ^w[0-9A-Za-z]+$ ]] || { echo "bad workspace id (want e.g. w1K, the .workspace_id field)" >&2; exit 2; }
+core=0; [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]] && core=1
+[ "$core" = 1 ] || [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]] || { echo "bad workspace id (want e.g. w1K, the .workspace_id field, or a Core key hc-<12 hex>)" >&2; exit 2; }
 case "${2:-}" in
   "") cat "$D/$ws" 2>/dev/null || echo "owner=(none, default route)";;
-  --clear) rm -f "$D/$ws"; herdr workspace report-metadata "$ws" --source bots --clear-token owner >/dev/null 2>&1 || true
+  --clear) rm -f "$D/$ws"; [ "$core" = 1 ] || herdr workspace report-metadata "$ws" --source bots --clear-token owner >/dev/null 2>&1 || true
      echo "cleared $ws";;
   *) [[ "$2" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] || { echo "bad slug" >&2; exit 2; }
-     herdr workspace get "$ws" >/dev/null 2>&1 || { echo "no live workspace $ws" >&2; exit 2; }
+     if [ "$core" = 1 ]; then [ -f "$EV/jobs/$ws" ] || { echo "no open Core job $ws (no marker in $EV/jobs)" >&2; exit 2; }
+     else herdr workspace get "$ws" >/dev/null 2>&1 || { echo "no live workspace $ws" >&2; exit 2; }; fi
      printf 'owner=%s\n' "$2" > "$D/$ws"; echo "$ws owner=$2"
-     herdr workspace report-metadata "$ws" --source bots --token "owner=$2" >/dev/null 2>&1 || echo "note: sidebar label not set" >&2
-     [ -r "${HERDR_EVENTS_ROUTES_DIR:-$HOME/.config/herdr-events/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the default route" >&2;;
+     if [ "$core" = 1 ]; then   # the core the job runs on, for the watchdog
+       point="$(head -1 "$EV/jobs/$ws")/endpoint"
+       for k in session socket; do
+         v=$(jq -r ".$k // empty" "$point" 2>/dev/null || true)
+         if [ -n "$v" ]; then printf '%s=%s\n' "$k" "$v" >> "$D/$ws"; fi
+       done
+     fi
+     [ "$core" = 1 ] || herdr workspace report-metadata "$ws" --source bots --token "owner=$2" >/dev/null 2>&1 || echo "note: sidebar label not set" >&2
+     [ -r "${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the default route" >&2;;
 esac

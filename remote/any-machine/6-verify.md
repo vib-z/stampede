@@ -22,4 +22,6 @@ herdr-event-post source=test state=done pane=<pane id>                          
 This machine is ready for stampede: Herdr <version>, agents <list>, health check clean. Ask me for a job.
 ```
 
+On Herdr Core instead of the Herdr TUI: `herdr-doctor --core` in place of the first two lines ([core.md](../../skills/herdr-fleet/references/core.md)).
+
 Anything failed: the fix is in [README, Troubleshoot](../../README.md#troubleshoot) and [docs/SETUP.md](../../docs/SETUP.md#setup-problems). Setup B is done; the job flow is the same as on any machine ([README](../../README.md#how-it-works)).

@@ -23,4 +23,5 @@ herdr-event-post source=test state=done pane=<pane id>    # on the machine: the 
 | any bot with a computer | its own | SSH | its webhook, if it takes the JSON as sent | follow [grokbot/](grokbot/README.md) |
 
 - **The webhook body:** `herdr-event-post` sends the event JSON as is, with `Authorization: Bearer <KEY>`. A webhook that needs another shape (extra headers, the event wrapped in a text field) is planned.
+- **On Herdr Core:** the health check is `herdr-doctor --core`, the start `stampede new --core --file <ask.md> --cwd <repo>`, and events carry `pane` `hc:<key>/<address>` ([core.md](../skills/herdr-fleet/references/core.md)).
 - **Events and routes:** [events.md](events.md). The rules every front door follows: [README.md](README.md).

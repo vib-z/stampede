@@ -22,7 +22,8 @@ stampede new --file <ask.md> --pane "$P" --name <job>   # add --fork / --review 
 - Already in a Herdr pane in that project's workspace (`$HERDR_WORKSPACE_ID` is set): skip the workspace and run `stampede new --file <ask.md>`; the lead gets a `lead` tab there.
 - `--fork "$CLAUDE_CODE_SESSION_ID"`: only when the owner worked the plan out with you in this chat. The lead starts with this conversation.
 - `--review`: only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).
+- `--core`: only when the owner asks for Herdr Core. Then no workspace and no `--pane`: `stampede new --core --file <ask.md> --cwd "$R" --name <job>` after `herdr-trust "$R"`. A `BLOCKED` or `NOT READY` line names the lead's terminal: read it with `hc read <address>` ([core.md](../herdr-fleet/references/core.md)).
 
 5. It prints `<lead> <job dir>`. On `BLOCKED ...`, read the lead's pane (`herdr agent read <lead> --source visible --lines 30`), clear the startup dialog, then send the `stampede tell` line it printed. Tell the owner the lead's name and the workspace label. Never run the job yourself.
 
-**Afterwards:** `stampede tell <job dir> lead "<text>"` passes on an answer or a change; status comes from `<job dir>/plan.md` and `<job dir>/reports/`. Gates (merge, push to main, deploy, send, spend, close) are the owner's own yes in the lead's pane or phone card, never relayed by you.
+**Afterwards:** `stampede tell <job dir> lead "<text>"` passes on an answer or a change; status comes from `<job dir>/plan.md` and `<job dir>/reports/`. Gates (merge, push to main, deploy, send, spend, close) are the owner's own yes in the lead's pane or phone card (on Herdr Core only the recorded yes, never a typed one), never relayed by you.

@@ -4,8 +4,13 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 json="${@: -1}"
 PREV="$HOME/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
 [ -x "$PREV" ] && "$PREV" turn-ended "$json" >/dev/null 2>&1 &
-# A turn with no Herdr pane (the Codex desktop app, or any notify outside Herdr) is not a fleet event.
-if [ -z "${HERDR_PANE_ID:-}" ]; then
+pane=${HERDR_PANE_ID:-}; ws=${HERDR_WORKSPACE_ID:-}
+# A Herdr Core terminal stampede started has no Herdr ids: its job's key and its terminal name it instead.
+if [ -z "$pane" ] && [ -n "${HC_TERMINAL_ID:-}" ] && [[ "${STAMPEDE_JOB_KEY:-}" =~ ^hc-[0-9a-f]{12}$ ]]; then
+  pane="hc:$STAMPEDE_JOB_KEY/$HC_TERMINAL_ID"; ws=$STAMPEDE_JOB_KEY
+fi
+# A turn with no Herdr pane or stampede Core terminal (the Codex desktop app, any other notify) is not a fleet event.
+if [ -z "$pane" ]; then
   mkdir -p "$(dirname "$HOME/Library/Logs/herdr-events.log")"
   printf '%s skip: codex turn with no herdr pane\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>"$HOME/Library/Logs/herdr-events.log"
   wait
@@ -22,11 +27,11 @@ if [ -n "$tid" ]; then
   if [ -z "$f" ]; then why="side conversation (no rollout)"
   elif head -1 "$f" | jq -e '.payload.parent_thread_id // .payload.source.subagent' >/dev/null 2>&1; then why="sub-agent"; fi
   if [ -n "$why" ]; then
-    printf '%s skip: codex %s thread=%s pane=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$why" "$tid" "${HERDR_PANE_ID:--}" >>"$HOME/Library/Logs/herdr-events.log"
+    printf '%s skip: codex %s thread=%s pane=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$why" "$tid" "${pane:--}" >>"$HOME/Library/Logs/herdr-events.log"
     wait; exit 0
   fi
 fi
-jq -c --arg pane "${HERDR_PANE_ID:-}" --arg ws "${HERDR_WORKSPACE_ID:-}" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:"codex", state:(.type//"unknown"),
+jq -c --arg pane "$pane" --arg ws "$ws" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:"codex", state:(.type//"unknown"),
   thread_id:(.["thread-id"]//null), turn_id:(.["turn-id"]//null), cwd:(.cwd//null),
   pane:(if $pane=="" then null else $pane end), workspace:(if $ws=="" then null else $ws end), owner:(if $ow=="" then null else $ow end),
   last_assistant_message:((.["last-assistant-message"]//"")|.[0:2000])} | with_entries(select(.value!=null))' <<<"$json" | herdr-event-post

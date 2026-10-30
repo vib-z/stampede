@@ -5,6 +5,27 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 S="$HOME/.local/state/herdr-events/watchdog"; mkdir -p "$S"
 LOG="$HOME/Library/Logs/herdr-events.log"
 STALE=$((30*60)); now=$(date +%s)
+# A Herdr Core job's owner tag (hc-<12 hex>) needs no Herdr TUI: it stays while the job is open (its marker) or its
+# own core (the tag's session= and socket=) runs one of its terminals, and goes a day after that core confirmed
+# neither. Core not answering keeps it (never an hc command that would start a core).
+EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; O="$EV/owners"; G="$S/gone"; mkdir -p "$G"
+for f in "$O"/hc-*; do
+  [ -f "$f" ] || continue; ws=$(basename "$f"); ow=$(sed -n 's/^owner=//p' "$f" | head -1)
+  [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]] || continue   # malformed: removed below with the TUI's tags
+  if [ -f "$EV/jobs/$ws" ]; then rm -f "$G/$ws"; continue; fi
+  pin=()   # a tag that names its job's core pins both; one that names none is on this watchdog's own core
+  if grep -qE '^(session|socket)=' "$f"; then
+    pin=("HC_SESSION=$(sed -n 's/^session=//p' "$f" | head -1)" "HC_SOCKET=$(sed -n 's/^socket=//p' "$f" | head -1)")
+  fi
+  env ${pin[@]+"${pin[@]}"} herdr-event-core --alive >/dev/null 2>&1 || continue
+  running=$(env ${pin[@]+"${pin[@]}"} "${HC:-hc}" ls --json --label "stampede.job=$ws" 2>/dev/null) || continue
+  n=$(jq -r '.terminals | length' <<<"$running" 2>/dev/null) || continue
+  if [ "$n" != 0 ]; then rm -f "$G/$ws"; continue; fi
+  if [ ! -f "$G/$ws" ]; then echo "$now" > "$G/$ws"
+  elif [ $((now-$(cat "$G/$ws"))) -ge 86400 ]; then
+    rm -f "$f" "$G/$ws"; echo "$(date '+%FT%T%z') watchdog: removed stale owner tag $ws (owner=$ow, Core job finished 24h)" >>"$LOG"
+  fi
+done
 list=$(herdr agent list 2>/dev/null) || { echo "$(date '+%FT%T%z') watchdog: herdr agent list failed" >>"$LOG"; exit 0; }
 jq -c '.result.agents[]' <<<"$list" > "$S/cur.jsonl"
 : > "$S/seen.new"
@@ -37,11 +58,11 @@ if [ -f "$S/seen" ]; then
 fi
 mv "$S/seen.new" "$S/seen"
 # owner tags: delete a malformed one at once, and one whose workspace has been gone a day. Skipped if herdr fails.
-O="$HOME/.config/herdr-events/owners"; G="$S/gone"; mkdir -p "$G"
 if wsl=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[].workspace_id' 2>/dev/null) && [ -n "$wsl" ]; then
   for f in "$O"/*; do
     [ -f "$f" ] || continue; ws=$(basename "$f"); ow=$(sed -n 's/^owner=//p' "$f" | head -1)
-    if ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then rm -f "$f"; echo "$(date '+%FT%T%z') watchdog: removed malformed owner tag (owner=$ow)" >>"$LOG"
+    if [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]]; then continue   # a Core job's tag: done above
+    elif ! [[ "$ws" =~ ^w[0-9A-Za-z]+$ ]]; then rm -f "$f"; echo "$(date '+%FT%T%z') watchdog: removed malformed owner tag (owner=$ow)" >>"$LOG"
     elif grep -qx "$ws" <<<"$wsl"; then rm -f "$G/$ws"
     elif [ ! -f "$G/$ws" ]; then echo "$now" > "$G/$ws"
     elif [ $((now-$(cat "$G/$ws"))) -ge 86400 ]; then

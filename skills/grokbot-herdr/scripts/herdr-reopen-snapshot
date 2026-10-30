@@ -4,17 +4,24 @@
   herdr-reopen-snapshot <ws> <job dir>
       Read the live workspace (read-only herdr calls) and write <job dir>/REOPEN.md and an executable
       <job dir>/reopen.sh that recreates the job's tabs (those holding its agents in agents.tsv): panes, labels, cwds, agents.
-  herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> -- <agent args...>
+  herdr-reopen-snapshot <hc-key> <job dir>
+      A Herdr Core job (its key is in <job dir>/workspace): write REOPEN.md and reopen.sh from agents.tsv and core.json,
+      with no hc call. reopen.sh runs `fleet-job _reopen`, which starts only what is not live. stampede writes it at
+      every Core start.
+  herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>
       Note how an agent was started (the flags after `herdr agent start ... --`, and its brief) in
       <job dir>/agents.tsv. Herdr knows layout, kinds and session ids, not flags or briefs: record them at every start.
+      --session: the session id stampede chose (a Claude agent on Herdr Core, started with --session-id).
 
 Write the snapshot at launch, after every start or restart, and again before any close. Agents that already exited
 keep their kind and session id from an earlier snapshot (agents.tsv), so exiting before the last refresh is fine.
 Panes are matched to agents by name (the fleet convention: a pane is labelled with its agent's name).
 HERDR overrides the herdr binary (tests). This script never changes Herdr.
 """
+import fcntl
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -52,19 +59,36 @@ def load_agents(job):
 def save_agents(job, rows):
     lines = ['# herdr-reopen-snapshot: ' + '\t'.join(COLS)]
     lines += ['\t'.join(r.get(c, '') for c in COLS) for r in rows.values()]
-    (job / 'agents.tsv').write_text('\n'.join(lines) + '\n')
+    temporary = job / ('.agents.tsv.' + str(os.getpid()))
+    temporary.write_text('\n'.join(lines) + '\n')
+    os.replace(temporary, job / 'agents.tsv')
+
+
+def update_agents(job, change):
+    """Read agents.tsv, change its rows and replace it, all under agents.tsv.lock (never across a herdr or hc call),
+    so two starts at once never lose each other's row."""
+    with open(job / 'agents.tsv.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = load_agents(job)
+        change(rows)
+        save_agents(job, rows)
 
 
 def record(argv):
+    session = None
+    if argv[4:5] == ['--session'] and len(argv) > 5:
+        session, argv = argv[5], argv[:4] + argv[6:]
     if len(argv) < 5 or argv[4] != '--':
-        sys.exit('usage: herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> -- <agent args...>')
+        sys.exit('usage: herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>')
     job, name, kind, brief = Path(argv[0]).expanduser(), argv[1], argv[2], argv[3]
     job.mkdir(parents=True, exist_ok=True)
-    rows = load_agents(job)
-    old = rows.get(name, {})
-    rows[name] = {'name': name, 'kind': kind, 'session': old.get('session', '') if old.get('kind') == kind else '',
-                  'brief': '' if brief == '-' else str(Path(brief).expanduser()), 'args': shlex.join(argv[5:])}
-    save_agents(job, rows)
+
+    def change(rows):
+        old = rows.get(name, {})
+        kept = old.get('session', '') if old.get('kind') == kind else ''
+        rows[name] = {'name': name, 'kind': kind, 'session': kept if session is None else session,
+                      'brief': '' if brief == '-' else str(Path(brief).expanduser()), 'args': shlex.join(argv[5:])}
+    update_agents(job, change)
     print(f'recorded {name} ({kind}) in {job}/agents.tsv')
 
 
@@ -104,13 +128,13 @@ def snapshot(ws_id, job):
     if not ws:
         sys.exit(f'no live workspace {ws_id} (herdr workspace list)')
     owner = (ws.get('tokens') or {}).get('owner', '')
-    tag = Path.home() / '.config/herdr-events/owners' / ws_id
+    tag = Path(os.environ.get('HERDR_EVENTS_DIR') or Path.home() / '.config/herdr-events') / 'owners' / ws_id
     if not owner and tag.exists():
         owner = next((l[6:] for l in tag.read_text().splitlines() if l.startswith('owner=')), '')
     tabs = herdr('tab', 'list', '--workspace', ws_id)['tabs']
     panes = [p for p in herdr('pane', 'list')['panes'] if p['workspace_id'] == ws_id]
     names = {a['pane_id']: a.get('name') for a in herdr('agent', 'list')['agents']}
-    rows = load_agents(job)
+    rows, seen = load_agents(job), {}
     for t in tabs:
         t['panes'] = [p for p in panes if p['tab_id'] == t['tab_id']]
         if t['panes']:
@@ -124,9 +148,10 @@ def snapshot(ws_id, job):
                 if r['kind'] != p['agent']:
                     r.update(kind=p['agent'], session='', args='')
                 r['session'] = sess or r['session']
+                seen[p['name']] = r
             p['agent_row'] = rows.get(p['name'])                      # exited agents come back from agents.tsv; any other pane is a shell
     tabs = [t for t in tabs if any(p['agent_row'] for p in t['panes'])]   # only tabs holding the job's own agents (agents.tsv)
-    save_agents(job, rows)
+    update_agents(job, lambda fresh: fresh.update(seen))  # rows recorded meanwhile stay
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     sh = job / 'reopen.sh'
     sh.write_text(reopen_sh(ws, owner, tabs, when))
@@ -248,12 +273,55 @@ def reopen_md(ws, owner, tabs, when, job):
     return '\n'.join(out) + '\n'
 
 
+def snapshot_core(key, job):
+    """A Herdr Core job's reopen record. Core keeps no layout: reopen.sh hands over to fleet-job, which restarts only what
+    is gone, through the same launch lock, labels and launch environment as every start."""
+    if not (job / 'workspace').is_file() or (job / 'workspace').read_text().strip() != key:
+        sys.exit(f'{job} is not the Herdr Core job {key} (its workspace file)')
+    rows = load_agents(job)
+    entries = json.loads((job / 'core.json').read_text()) if (job / 'core.json').is_file() else {}
+    core = json.loads((job / 'endpoint').read_text()) if (job / 'endpoint').is_file() else {}
+    on = f'HC_SESSION={core.get("session") or "(default)"}' + (f', HC_SOCKET={core["socket"]}' if core.get('socket') else '')
+    fleet = Path(__file__).resolve().parents[2] / 'herdr-fleet/scripts/fleet-job'
+    when = datetime.now().strftime('%Y-%m-%d %H:%M')
+    sh = job / 'reopen.sh'
+    sh.write_text('\n'.join([
+        '#!/bin/bash',
+        f'# reopen.sh: restart what is missing of Herdr Core job {key} (herdr-reopen-snapshot {key}, {when}).',
+        '# Usage: reopen.sh [--lead] [--prompt] [--fresh]',
+        '#   default: the follower, the lead (its session resumed) and each worker that is not live, once each; live ones',
+        '#   keep running. --lead: only the follower and the lead. --prompt: a restarted Codex worker gets its brief again.',
+        '#   --fresh: each agent it starts begins a new session with its recorded flags and its brief (nothing resumed).',
+        '# Exit 0; 1 a restart failed or is unknown; 2 another caller is starting one, a folder is gone (checked first,',
+        '# each named, nothing started), or this shell names another core;',
+        f'# 3 the restarted lead did not acknowledge its inbox files. It always works on the job\'s own core: {on}.',
+        f'F={q(fleet)}; [ -x "$F" ] || F=fleet-job',
+        f'exec "$F" _reopen {q(job)} "$@"', '']))
+    sh.chmod(0o755)
+    out = [f'# Reopen record: Herdr Core job {key}', '',
+           f'Snapshot {when} of `{job}` by `herdr-reopen-snapshot {key} {job}`; stampede refreshes it at every start.', '',
+           f'After a reboot, a lost holder or any part gone: `bash {job}/reopen.sh` starts only what is not live: the follower, '
+           'the lead (its session resumed) and each worker (Claude resumed by its session id; Codex resumed by the session its notify recorded, else fresh; `--prompt` sends '
+           'a Codex worker its brief again). `--lead` starts only the follower and the lead; `--fresh` starts each on a new session with its brief. A live agent is never started twice.', '',
+           f'The job runs on Herdr Core {on}; every command for it targets that core, and a shell set to another is refused.', '',
+           '| agent | role | CLI | model | effort | session | terminal | state | brief |', '|---|---|---|---|---|---|---|---|---|']
+    for name, entry in entries.items():
+        a = rows.get(name, {})
+        model, effort = model_effort(a['kind'], a['args']) if a.get('args') else ('', '')
+        out.append(f'| {name} | {entry.get("role", "-")} | {a.get("kind") or "-"} | {model or "-"} | {effort or "-"} | '
+                   f'{a.get("session") or "-"} | {entry.get("address") or "-"} | {entry.get("state", "-")} | {a.get("brief") or "-"} |')
+    (job / 'REOPEN.md').write_text('\n'.join(out) + '\n')
+    print(f'wrote {job}/REOPEN.md and {sh}: {len(entries)} terminals of {key}')
+
+
 def main(argv):
     if argv[:1] == ['record']:
         return record(argv[1:])
     if len(argv) != 2 or argv[0].startswith('-'):
         sys.exit(__doc__.strip())
     job = Path(argv[1]).expanduser().resolve()
+    if re.fullmatch(r'hc-[0-9a-f]{12}', argv[0]):
+        return snapshot_core(argv[0], Path(argv[1]).expanduser().absolute())
     job.mkdir(parents=True, exist_ok=True)
     snapshot(argv[0], job)
 

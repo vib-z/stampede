@@ -24,4 +24,5 @@ herdr agent send-keys <agent> esc               # Codex "Update available": skip
 - **Install:** [herdr.dev/docs](https://herdr.dev/docs/) for Herdr. stampede's own setup: [docs/SETUP.md](../../docs/SETUP.md).
 - **Literal ids:** keep `.result.workspace.workspace_id`, `.result.tab.tab_id` and `.result.root_pane.pane_id` from the create. Use the first tab; do not leave it empty.
 - **Never** set `HERDR_ENV` yourself, and never use `herdr --remote` from the bot.
+- **On Herdr Core:** `herdr-doctor --core` for the check, no workspace, and `stampede new --core --file <ask.md> --cwd <project dir>` to start; read an agent with `hc read <address>` ([core.md](../../skills/herdr-fleet/references/core.md)).
 - **Commands:** [CLI reference](https://herdr.dev/docs/cli-reference/), [agent automation](https://herdr.dev/docs/agent-automation/). Where they differ, the installed `herdr <command> --help` wins.

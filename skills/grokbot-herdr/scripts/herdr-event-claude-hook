@@ -2,7 +2,12 @@
 # Claude Code hook (Stop/StopFailure/Notification) -> herdr-event-post
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 in=$(cat)
-jq -c --arg pane "${HERDR_PANE_ID:-}" --arg ws "${HERDR_WORKSPACE_ID:-}" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:"claude", state:(.hook_event_name//"unknown"),
+pane=${HERDR_PANE_ID:-}; ws=${HERDR_WORKSPACE_ID:-}
+# A Herdr Core terminal stampede started has no Herdr ids: its job's key and its terminal name it instead.
+if [ -z "$pane" ] && [ -n "${HC_TERMINAL_ID:-}" ] && [[ "${STAMPEDE_JOB_KEY:-}" =~ ^hc-[0-9a-f]{12}$ ]]; then
+  pane="hc:$STAMPEDE_JOB_KEY/$HC_TERMINAL_ID"; ws=$STAMPEDE_JOB_KEY
+fi
+jq -c --arg pane "$pane" --arg ws "$ws" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:"claude", state:(.hook_event_name//"unknown"),
   hook_event_name, session_id, cwd, pane:(if $pane=="" then null else $pane end), workspace:(if $ws=="" then null else $ws end), owner:(if $ow=="" then null else $ow end),
   notification_type, message, error:(.error//null),
   last_assistant_message:((.last_assistant_message//"")|.[0:2000])} | with_entries(select(.value!=null))' <<<"$in" | herdr-event-post

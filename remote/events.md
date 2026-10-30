@@ -18,6 +18,7 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 | codex | agent-turn-complete | `herdr-event-codex-notify`, the Codex `notify` command |
 | herdr-watchdog | stale, dead | `herdr-event-watchdog` ([watchdogs.md](watchdogs.md)) |
 | stampede | question, gate, done | `stampede ask`, `stampede ask --gate`, and `stampede finish` |
+| hc | blocked, error, done, idle, stale, dead, relay_down | `herdr-event-core`, the follower of a Herdr Core job ([below](#a-herdr-core-job)) |
 
 ```bash
 mkdir -p ~/.config/herdr-events/routes
@@ -30,7 +31,7 @@ herdr-event-flush                                    # send what is queued, olde
 
 - **Payload:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`; from Herdr also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines); from Claude and Codex `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (first 2000 characters).
 - **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`): ask the owner in chat, then run it with their words.
-- **A gate:** `job`, `agent` (the lead), `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and the two answers as commands: `approve` (`stampede approve-gate <job> <gate> --sha <sha> --by "owner in <bot> chat"`) and `deny` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat with the action, PR and commit; run `approve` over SSH only on their yes to that gate, else `deny` with their words. Never type a yes into a pane.
+- **A gate:** `job`, `agent` (the lead), `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and the two answers as commands: `approve` (`stampede approve-gate <job> <gate> --sha <sha> --by "owner in <bot> chat"`) and `deny` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat with the action, PR and commit; run `approve` over plain SSH (never `hc exec`) only on their yes to that gate, else `deny` with their words. Never type a yes into a pane.
 - **Delivery:** an HTTP POST of the JSON to `URL`, with `Authorization: Bearer <KEY>` when `KEY` is set. URL and KEY are never logged. Queue and dead letters: `HERDR_EVENTS_HOME` (default `~/.herdr-events`). Log: `~/Library/Logs/herdr-events.log`.
 
 ## While a job is open
@@ -45,6 +46,14 @@ herdr-event-flush                                    # send what is queued, olde
 These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question` or `gate`. `finish` sends one event, `source` stampede, `state` done, plus `summary`. In a job a bot started, that uses the same strict route as a question (exit 3 with no route of its own, exit 4 if it is not queued). In a job started locally, it uses the ordinary relay and still clears the marker. A second `finish` does not send again.
 
 A Codex turn with no Herdr pane (`HERDR_PANE_ID` empty), including the Codex desktop app, is not sent. After the marker is gone, that workspace behaves as before.
+
+## A Herdr Core job
+
+A job started with `stampede new --core` has no Herdr workspace: its key, `hc-<12 hex>` (in `<job>/workspace`), stands in for the workspace id in its marker (`jobs/<key>`), its owner tag (`owners/<key>`) and every event's `workspace`. A Core terminal is named `hc:<key>/<address>` in `pane`. An explicit `workspace` must be well formed (`hc-` and 12 lowercase hex, or letters, digits, `_` and `-` only): `herdr-event-post --strict` refuses another (exit 6), and an ordinary event drops it, so it never picks an owner tag. Plain turn ends (`hc` done and idle) stay on the machine while its marker is there, as for a workspace.
+
+- **The follower:** `herdr-event-core <job>` runs as the job's `relay-<12 hex>` terminal. It follows `hc events --label stampede.job=<key>` and posts, with `agent` and `output_tail`: `blocked` (with `kind` and `msg`) and `error`, once per new episode; `done` and `idle` turn ends; `stale` (with `minutes_unchanged`) once per stall, when a working terminal's screen and status have not changed for `HERDR_EVENTS_STALE_MINUTES` (30, as the TUI watchdog); `dead` when a terminal finishes while working or blocked, or fails with no status ever, or its record is gone (`reason` lost), but never for its own exit 0 (a graceful `/exit`: the lead still gets `GONE`); and `relay_down` when Core stays unreachable for 10 minutes. It skips its own terminal and the job's wait terminals. Each event carries an `event_id` (`<key>/<address>|<state>|<episode>`), and `herdr-event-post` adds it to its de-dupe key: two blocked or error episodes on one terminal are two messages, the same one sent twice is one. A permission prompt that the agent's own Claude hook also reports is one message for that episode, whichever arrives first. `herdr-event-post` records any event for a Core pane (`hc:`), the agents' own hooks' included, as sent only once it is queued, so a failed queue write suppresses no later copy; a follower event exits 5 when it cannot be queued. An event it did not take (it hung, failed or could not queue it) is kept in `<job>/relay-state.json` and sent again every 30 s, after a reconnect or a restart too, until it is queued (or meant to stay on the machine).
+- **The relay hooks** inside a Core terminal stampede started (`STAMPEDE_JOB_KEY` and `HC_TERMINAL_ID` set, no `HERDR_PANE_ID`) send `pane` `hc:<key>/<address>` and `workspace` `<key>`, so a Codex turn there is no longer dropped. In any other Core terminal they behave as before.
+- **Owner tags:** `herdr-events-owner <key> <bot>` works only while the job is open; it never calls `herdr`. The tag also names the job's core when it is not the default (`session=`, `socket=` lines), and the watchdog asks that core. The watchdog, with or without the Herdr TUI, keeps a key's tag while the job is open or its core still runs one of its terminals, keeps it when Core cannot be reached, and removes it a day after Core confirmed neither.
 
 ## Hooks
 
