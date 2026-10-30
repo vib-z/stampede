@@ -18,16 +18,16 @@ It has two halves. The automated half ([tests/test_clients.py](../tests/test_cli
 
 ## Clients
 
-Automated: the command-contract checks listed under [What the automated suite asserts](#what-the-automated-suite-asserts), against the fakes, 30 Oct 2026; a pass there says nothing of an agent's own work. Live: a live run on one Mac, 30 Oct 2026, from the real client, agents included. PASS is O1 to O8; O1 passes when the client ran the doctor and read it, whatever the machine's own `PROBLEM` lines. PARTIAL marks outcomes that wait on the owner's tap on a phone card, which is no failure.
+Automated: the command-contract checks listed under [What the automated suite asserts](#what-the-automated-suite-asserts), against the fakes, 30 Oct 2026; a pass there says nothing of an agent's own work. Live: a live run on one Mac, 30 Oct 2026, from the real client, agents included. PASS is O1 to O8 (and O9 for a bot), with O3 only for the worker kinds the cell names: each live job started one worker, and the automated suite is what starts every kind for every client. O1 passes when the client ran the doctor and read it, whatever the machine's own `PROBLEM` lines. PARTIAL marks outcomes that wait on the owner's tap on a phone card, which is no failure.
 
 | client | stands for | where it runs | its jobs belong to | automated | live, TUI | live, Core |
 |---|---|---|---|---|---|---|
-| `herdr-chat` | a Claude chat in a Herdr pane | inside Herdr | the machine (local) | O1 to O8 pass | PASS | not run (the Claude lane ran Core from `claude-code`) |
-| `claude-code` | Claude desktop or the Claude app, on the machine | outside Herdr | local | O1 to O8 pass | PASS (O3 hit [F3 and F4](#found-by-the-live-runs)) | PARTIAL: O4, O5 and O7 waiting on the owner's tap |
-| `codex` | Codex desktop or the ChatGPT app, on the machine | outside Herdr | local | O1 to O8 pass | PARTIAL: O4, O5 and O7 waiting on the owner's tap | PARTIAL: O4, O5 and O7 waiting on the owner's tap |
+| `herdr-chat` | a Claude chat in a Herdr pane | inside Herdr | the machine (local) | O1 to O8 pass | PASS, codex worker | not run (the Claude lane ran Core from `claude-code`) |
+| `claude-code` | Claude desktop or the Claude app, on the machine | outside Herdr | local | O1 to O8 pass | PASS, codex worker (O3 hit [F3 and F4](#found-by-the-live-runs)) | PARTIAL, codex worker: O4, O5 and O7 waiting on the owner's tap |
+| `codex` | Codex desktop or the ChatGPT app, on the machine | outside Herdr | local | O1 to O8 pass | PARTIAL, claude worker: O4, O5 and O7 waiting on the owner's tap | PARTIAL, claude worker, a cursor worker refused: O4, O5 and O7 waiting on the owner's tap |
 | `cursor` | a Cursor chat on the machine | outside Herdr | local | O1 to O8 pass | not run (headless Cursor rejects every shell call without `--force`, [F9](#found-by-the-live-runs)) | not run (a Cursor usage limit) |
-| `hermes` | a Hermes chat on the machine | outside Herdr | local | O1 to O8 pass | PARTIAL: O4, O5 and O7 waiting on the owner's tap | PARTIAL: O4, O5 and O7 waiting on the owner's tap |
-| `grokbot` | Grok Bot, over SSH from its own computer | over SSH | the bot, by the workspace's owner tag | O1 to O9 pass | PASS (O1 to O9) | PASS (O1 to O9) |
+| `hermes` | a Hermes chat on the machine | outside Herdr | local | O1 to O8 pass | PARTIAL, claude worker: O4, O5 and O7 waiting on the owner's tap | PARTIAL, codex worker: O4, O5 and O7 waiting on the owner's tap |
+| `grokbot` | Grok Bot, over SSH from its own computer | over SSH | the bot, by the workspace's owner tag | O1 to O9 pass | PASS (O1 to O9), codex worker | PASS (O1 to O9), claude worker |
 | `other-bot` | any other bot with a computer of its own | over SSH | the bot, by `HERDR_EVENTS_OWNER` | O1 to O9 pass; TUI O9 partial ([F2](#doing-worse)) | not run live (same path as `grokbot`) | not run live (same path as `grokbot`) |
 | `remote-computer` | Herdr, the CLIs and stampede on one remote box | inside Herdr | local | O1 to O8 pass | not run live (same path as `herdr-chat`) | not run live (same path as `herdr-chat`) |
 
