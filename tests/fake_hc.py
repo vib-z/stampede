@@ -14,6 +14,7 @@ A terminal's `draft` is what sits typed in its input: `keys` add to it (`ctrl+c`
   lookup_error kind              after a `run` fails, every `ls` fails with this kind (a lost answer, then no lookup)
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
+  hold      [seconds, ...]       `events`: connection n then stays open and quiet this long (the state lock released)
 Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1.
 Each HC_SESSION other than the default is a core of its own: its state and calls live in FAKE_HC/<session>/."""
 import fcntl, json, os, sys, time
@@ -22,6 +23,7 @@ from pathlib import Path
 SESSION = (os.environ.get('HC_SESSION') or '').strip()
 HOME = Path(os.environ['FAKE_HC']) / ('' if SESSION in ('', 'default') else SESSION)
 CODES = {'usage': 2, 'not_found': 3, 'blocked': 9, 'status_mismatch': 10, 'finished': 11}
+HOLD = [0]  # seconds an `events` connection stays quiet before it ends
 
 
 def fail(kind, message):
@@ -163,6 +165,7 @@ def command(state, argv):
         streams = state.get('streams', [])
         for row in streams[n] if n < len(streams) else []:
             print(json.dumps(row), flush=True)
+        HOLD[0] = state.get('hold', [])[n] if n < len(state.get('hold', [])) else 0
         return
     fail('usage', 'the fake hc has no ' + cmd)
 
@@ -179,6 +182,7 @@ def main(argv):
             command(state, [a for a in argv if a != '--json'] if argv[:1] != ['run'] else argv)
         finally:
             path.write_text(json.dumps(state, indent=1))
+    time.sleep(HOLD[0])
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@
 #    it is queued, so a failed queue write suppresses no later copy. One with an event_id (the follower) exits 5 when
 #    the queue write fails, so the follower tries it again; 0 means queued, or meant to stay on the machine.
 # Routes: $HERDR_EVENTS_ROUTES_DIR (default $HERDR_EVENTS_DIR/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
-# HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/ and the default routes/.
+# HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/, handed/ and the default routes/.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 LOG="$HOME/Library/Logs/herdr-events.log"
 STATE_DIR="$HOME/.local/state/herdr-events"
@@ -52,6 +52,11 @@ if [ -z "$ws" ]; then  # cwd match against herdr agents
 fi
 read -r pane state ntype < <(jq -r '[.pane//.session_id//"-", .state//"-", .notification_type//"-"] | @tsv' <<<"$payload")
 esource=$(jq -r '.source // empty' <<<"$payload")
+# A Herdr TUI pane a Herdr Core job handed an agent to (marked $D/handed/<pane> until the job's finish): its follower
+# reports it, as source hc, so every other event about that pane (Herdr's plugin, the watchdog, a hook) stays here.
+if [ "$esource" != hc ] && [[ "$pane" =~ ^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$ ]] && [ -f "$D/handed/$pane" ]; then
+  log "handed-skip (its Herdr Core job's follower reports it): $summary"; exit 0
+fi
 # An open job marks $D/jobs/<workspace>. While that file is there, a plain turn end
 # stays on the machine: the lead sends one done with fleet-job finish. Blocked, permission, StopFailure,
 # stale, dead, questions, gates and finish still post. No marker: unchanged.

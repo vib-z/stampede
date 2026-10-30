@@ -1,6 +1,7 @@
 #!/bin/bash
 # Run by launchd every 5 min. Flags agents stuck in working with no output change
 # for 30+ min (stale) and agent panes that vanished without a done/idle state (dead).
+# A pane a Herdr Core job handed an agent to ($EV/handed/<pane>) is its job's follower's: never tracked here.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 S="$HOME/.local/state/herdr-events/watchdog"; mkdir -p "$S"
 LOG="$HOME/Library/Logs/herdr-events.log"
@@ -32,6 +33,7 @@ jq -c '.result.agents[]' <<<"$list" > "$S/cur.jsonl"
 while read -r a; do
   pane=$(jq -r .pane_id <<<"$a"); st=$(jq -r .agent_status <<<"$a"); kind=$(jq -r .agent <<<"$a")
   ws=$(jq -r .workspace_id <<<"$a"); tab=$(jq -r .tab_id <<<"$a"); f="$S/$(tr ':' '_' <<<"$pane")"
+  if [ -f "$EV/handed/$pane" ]; then rm -f "$f"; continue; fi   # a Herdr Core job's handed pane: its follower watches it
   printf '%s\t%s\t%s\t%s\t%s\n' "$pane" "$st" "$kind" "$ws" "$tab" >>"$S/seen.new"
   if [ "$st" = working ]; then
     h=$(herdr pane read "$pane" --source recent --lines 40 2>/dev/null | md5 -q)
@@ -49,6 +51,7 @@ done < "$S/cur.jsonl"
 if [ -f "$S/seen" ]; then
   while IFS=$'\t' read -r pane st kind ws tab; do
     grep -q "^$pane	" "$S/seen.new" && continue
+    [ -f "$EV/handed/$pane" ] && continue   # seen before its hand-over: the follower has it now
     case "$st" in working|blocked)
       jq -nc --arg p "$pane" --arg k "$kind" --arg w "$ws" --arg t "$tab" --arg s "$st" \
         '{source:"herdr-watchdog",state:"dead",pane:$p,agent:$k,workspace:$w,tab:$t,last_state:$s}' | herdr-event-post;;

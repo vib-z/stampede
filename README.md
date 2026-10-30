@@ -88,7 +88,7 @@ herdr-doctor                           # exit 0, with Herdr running
 
 **Limits.**
 - macOS only. No Linux run has been tried.
-- The lead is Claude (any Claude model, set by `FLEET_LEAD_MODEL`). Workers can be Claude, Codex or Cursor (on Herdr Core, Claude or Codex).
+- The lead is Claude (any Claude model, set by `FLEET_LEAD_MODEL`). Workers can be Claude, Codex or Cursor (on Herdr Core, Claude or Codex in Core terminals, and Cursor, Hermes or Kimi handed to Herdr TUI panes).
 - Version 0.1.x, and early: commands and files may still change.
 - For big jobs. A small job runs as one agent session in a single tagged Herdr pane ([FAQ](#troubleshoot)).
 
@@ -114,7 +114,7 @@ stampede is multi-agent orchestration for Claude Code and Codex in Herdr: four s
 
 ## Works with
 
-**Agents.** The lead runs on Claude Code. Workers run on Claude Code, Codex or Cursor, each started by `stampede start --kind claude|codex|cursor` with its own hooks and auto mode.
+**Agents.** The lead runs on Claude Code. Workers run on Claude Code, Codex or Cursor, each started by `stampede start --kind claude|codex|cursor` with its own hooks and auto mode. A [Herdr Core](#herdr-core) job also takes Hermes and Kimi workers, handed to Herdr TUI panes.
 
 <table>
   <tr>
@@ -173,7 +173,7 @@ stampede is multi-agent orchestration for Claude Code and Codex in Herdr: four s
 
 **Herdr Core** (`hc` 0.1.13 or later), Herdr's terminal runtime, can run a whole job in place of the Herdr TUI: [Herdr Core](#herdr-core).
 
-Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 24, from Gemini and Kimi to OpenCode and Copilot). That is Herdr's support, not stampede's yet: `stampede start` refuses any other kind, and starting workers on them is [planned](#status-and-roadmap). The marks belong to their owners and imply no endorsement ([sources](docs/images/logos/SOURCES.md)).
+Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 24, from Gemini and Kimi to OpenCode and Copilot). Beyond Claude, Codex, Cursor, and Hermes and Kimi in a Core job, that is Herdr's support, not stampede's yet: `stampede start` refuses any other kind, and starting workers on them is [planned](#status-and-roadmap). The marks belong to their owners and imply no endorsement ([sources](docs/images/logos/SOURCES.md)).
 
 ## Works well with
 
@@ -202,7 +202,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 
 **What lives where.** Your Mac, always on, runs Herdr, the lead and the workers. A bot such as Grok Bot runs on its own computer and reaches the Mac over SSH and Tailscale. Or the whole thing runs on one remote computer. Either way, the lead and its workers share one machine; workers on a second machine are [planned](#status-and-roadmap).
 
-**On Herdr Core** the same flow runs in Core terminals instead of panes: the brief pointer is each agent's first prompt, `tell` prompts Codex with `hc send` by its status, and the job's follower, `herdr-event-core`, adds `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines to `inbox.log` and posts `source` `hc` events for a bot ([Herdr Core](#herdr-core)).
+**On Herdr Core** the same flow runs in Core terminals instead of panes: the brief pointer is each agent's first prompt, `tell` prompts Codex with `hc send` by its status, Cursor, Hermes and Kimi workers run in Herdr TUI panes the job hands them to, and the job's follower, `herdr-event-core`, adds `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines to `inbox.log` and posts `source` `hc` events for a bot ([Herdr Core](#herdr-core)).
 
 <details>
 <summary><b>The job folder</b></summary>
@@ -250,6 +250,8 @@ REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close (a Core j
 | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.306 (2.1.295 or later on Herdr Core, for its status) | the lead, and workers |
 | [Codex CLI](https://developers.openai.com/codex/cli) | 0.163.0 (0.165.0 checked for `--no-daemon` on Herdr Core) | workers, optional |
 | [Cursor Agent](https://cursor.com/docs/cli/installation) | 2026.10.19 | workers, optional |
+| [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.22.5 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
+| [Kimi Code](https://moonshotai.github.io/kimi-code/) | 2.2.0 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
 | Python 3, git, jq, curl | Python 3.9 (the tests need 3.11), git 2.56, jq 1.7 | the scripts |
 | [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.33 | questions on your phone, optional |
 | [Tailscale](https://tailscale.com/kb/1017/install) | 1.104.1 | a bot on another computer, optional |
@@ -376,7 +378,7 @@ The `start` refusal exits 2. The approval holds a fingerprint of `plan.md`; any 
 
 [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) is Herdr's terminal runtime: programs in persistent terminals that report their own status (OSC 7501), with labels and an event stream, and no workspaces, tabs or panes. `stampede new --core` runs a whole job there instead of on the Herdr TUI. One job is all Core or all TUI; every TUI job and command works as before. Install this version (`install.sh`, or `stampede update`) before a Core job: the lead runs the installed `fleet-job`, and the CLIs' relay hooks run from `~/.local/bin`. An older copy can end a job without the stamp its follower waits for, and post plain turn ends to the default route.
 
-What changes on Core, in short: each agent is its own terminal with no parent, so a worker never ends with the lead; its brief goes in with its start; its start, prompt and wake come from its own status, not its screen; one follower per job, `herdr-event-core`, reports every worker's block, error and exit to the lead (a hard kill included) and to a bot; a job outlives every window and comes back with `reopen.sh`; and only a recorded yes passes a gate. Cursor stays on the TUI (it reports no status). The lead's playbook: [references/core.md](skills/herdr-fleet/references/core.md).
+What changes on Core, in short: each agent is its own terminal with no parent, so a worker never ends with the lead; its brief goes in with its start; its start, prompt and wake come from its own status, not its screen; one follower per job, `herdr-event-core`, reports every worker's block, error and exit to the lead (a hard kill included) and to a bot; a job outlives every window and comes back with `reopen.sh`; and only a recorded yes passes a gate. Cursor, Hermes and Kimi report no status, so a Core job hands them to Herdr TUI panes ([below](#hand-an-agent-to-a-tui-pane)). The lead's playbook: [references/core.md](skills/herdr-fleet/references/core.md).
 
 Check the machine once (this ran against a Mac's running core), then start the job from the repo (the job commands here ran against the test suite's fake `hc`, which answers as a real core does):
 
@@ -419,6 +421,33 @@ LIVE hc-a941d115ee38: no agent to restart
 
 A lead that needs CI runs the wait as a labelled terminal, `hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<key> --label stampede.role=wait -- gh pr checks <pr> --watch`, and wakes on `WAITED wait-ci-<pr> exit <code>`. `stampede finish` ends the job as on the TUI, and the follower exits with it.
 
+### Hand an agent to a TUI pane
+
+Core runs Claude and Codex. A Core job hands Cursor, Hermes or Kimi to a Herdr TUI pane at its shell prompt, with `--pane` in place of `--cwd`; the job, its follower, its inbox and its gates stay on Core (`<pane>` below stands for the pane id; this ran against the fake `hc` and the tests' fake `herdr`):
+
+```console
+$ stampede start .herdr-add-health-endpoint-with review-docs --kind hermes --pane "$P" \
+    --brief .herdr-add-health-endpoint-with/briefs/review-docs.md --report reports/review-docs.md
+STARTED review-docs (pane <pane>)
+$ stampede tell .herdr-add-health-endpoint-with review-docs "Check the README too"
+FAILED review-docs (working: tell it after its turn)
+$ stampede tell .herdr-add-health-endpoint-with review-docs "Check the README too"
+SUBMITTED review-docs (pane <pane>)
+$ stampede start .herdr-add-health-endpoint-with review-docs --kind hermes --pane "$P" --brief <brief>
+fleet-job start: review-docs is already running in pane <pane>
+$ stampede start .herdr-add-health-endpoint-with review-api --kind claude --pane "$P" --brief <brief>
+fleet-job start: Herdr Core runs claude: start it with --cwd <dir>, never --pane
+```
+
+The follower looks at a handed agent every 5 seconds, even when Core is quiet, and tells the lead as for a Core worker: `TURN review-docs` for Hermes and Kimi when Herdr's count of finished turns rises (Cursor's own stop hook writes its `TURN`), `BLOCKED review-docs dialog`, `STALE` and `GONE review-docs exited`; its bot events carry the pane id. While the job is open, the pane's mark in `$HERDR_EVENTS_DIR/handed/` keeps every other event about it home, and the TUI watchdog skips it. `tell` prompts it once with `herdr agent prompt`, never a key, only while it is idle or done, unfocused, with an empty prompt and still the launch the job started. A reopen never starts it on Core: it says `LIVE review-docs (pane <pane>)`, or gives the exact start and exits 1:
+
+```console
+$ bash .herdr-add-health-endpoint-with/reopen.sh
+NOT RUNNING review-docs (pane <pane>): start it again in a pane at its shell prompt: fleet-job start <repo>/.herdr-add-health-endpoint-with review-docs --kind hermes --pane <pane> --brief <repo>/.herdr-add-health-endpoint-with/briefs/review-docs.md --report reports/review-docs.md
+```
+
+Hermes and Kimi run only this way: a TUI-only job refuses them. Details: [core.md, Hand an agent to a TUI pane](skills/herdr-fleet/references/core.md#hand-an-agent-to-a-tui-pane).
+
 ## Front doors
 
 Every front door writes the ask and runs `stampede new`; none plans or runs the job itself.
@@ -446,7 +475,7 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
   - **either way, on the Herdr TUI,** a yes typed in the lead's Herdr pane works.
 - **The lead acts on your yes typed in its pane for that exact action (Herdr TUI only), or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge also passes `--match-head-commit` on that commit, so a push after your yes means asking again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
 - **On Herdr Core only the recorded yes counts.** In a job started with `stampede new --core` the lead acts only after `gate-ok` prints `APPROVED`: a yes typed into the lead, an answer to its own question card, and any message never count, because on Core another program can type into any terminal (`hc send`, `hc keys`). Your tap on a phone card (`FLEET_ASK_CMD`) and a bot's `approve-gate` are recorded and count. `approve-gate` also refuses inside a Herdr Core terminal (`HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` set) and under a `herdr-core` or `hc` process, so `hc exec` cannot run it: a bot runs it over plain ssh. Core's own `blocked` state is never a gate.
-- **Auto mode, never no-checks mode, by default:** Claude `--permission-mode auto`, Codex `--approve-for-me`, Cursor `--auto-review`. `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode only when its pane's shell sits in its own linked git worktree, and never the lead.
+- **Auto mode, never no-checks mode, by default:** Claude `--permission-mode auto`, Codex `--approve-for-me`, Cursor `--auto-review`, Hermes its default (a dangerous command asks), Kimi `-y` (a risky action asks). `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode only when its pane's shell sits in its own linked git worktree, and never the lead.
 - **Plan approval** (only when you asked to see the plan) lets the lead work inside the job's own folder and branch; it is not a gate and covers no merge or spend.
 - **Nothing closes by itself.** The last step is always the question whether to close; no answer is a no.
 - **Never touched:** panes, tabs and workspaces the lead did not create; the pane you have focused; credentials and `.env` files.
@@ -471,7 +500,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
 | `HERDR_EVENTS_ROUTES_DIR` | `$HERDR_EVENTS_DIR/routes` | one file per route, `URL=` and `KEY=` |
 | `HERDR_EVENTS_STALE_MINUTES` | `30` | a Herdr Core job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
-| `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
+| `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), handed panes' marks (`handed/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
 | `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
 | `HC` | `hc` | the Herdr Core binary, 0.1.13 or later |
@@ -487,7 +516,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 |---|---|
 | `fleet-job start: the owner asked to see this plan` | a `--review` job: approve the plan as it stands with `stampede approve <job> --by <who>` |
 | `fleet-job start: brief ... is missing: ...` or `brief ... does not exist` | write the brief on the [hand-off template](skills/herdr-fleet/references/brief.md), fill every missing or empty section, then start again |
-| `fleet-job start: fleet-job starts claude, codex or cursor; ...` | stampede starts only those three kinds; start another agent by hand and record it with `herdr-reopen-snapshot` |
+| `fleet-job start: fleet-job starts claude, codex or cursor (and hermes or kimi in a Herdr Core job); ...` | stampede starts only those kinds; start another agent by hand and record it with `herdr-reopen-snapshot` |
+| `fleet-job start: hermes runs only as a handed agent of a Herdr Core job ...` (or kimi) | a TUI-only job refuses them: run the job with `stampede new --core` and hand them to a pane with `--pane` |
 | `BLOCKED <agent>: clear the startup dialog` | read the screen (`herdr agent read <agent> --source visible --lines 30`), clear the dialog, then send the printed `fleet-job tell` line |
 | `refused: ... is outside ~/code` from `herdr-trust` | the repo is outside `FLEET_TRUST_ROOT`; move it or change the key |
 | `fleet-job start: pane ...'s shell is in ..., not ...` | `--yolo-in` needs the pane's shell in that worktree; use auto mode or `cd` the pane first |
@@ -503,7 +533,9 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `terminals of an earlier job at this path still run` from `stampede new --core` | a job made at this path before (same `--name`, so the same key) still has live terminals: kill them (`hc ls --all --label stampede.job=<key>`) or pick another `--name` |
 | `UNKNOWN <agent>: ... Nothing was taken back` | Herdr Core lost an answer during the start: once it answers, run the printed `reopen.sh`, which adopts the agent or starts it, never twice |
 | `fleet-job start: <agent> is already running at <address>` or `... is being started by another caller (pid <n>)` | a Core job runs one terminal per agent: tell it instead, or wait for the other start |
-| `fleet-job start: Cursor reports no OSC 7501 status ...` | Cursor workers run on the Herdr TUI only; start a Claude or Codex worker on Core |
+| `fleet-job start: Cursor reports no OSC 7501 status ...` (or Hermes, Kimi) | Core cannot run it: hand it to a Herdr TUI pane at its shell prompt with `--pane <pane id>` ([Hand an agent to a TUI pane](#hand-an-agent-to-a-tui-pane)) |
+| `fleet-job start: <agent> is already running in pane <pane>`, or `... not as the launch this job recorded` | that pane runs the agent: tell it instead; for a replacement the job did not start, read it with `herdr agent get <pane>`, then end it or use another name |
+| `NOT RUNNING <agent> (pane <pane>): ...` from a Core job's `reopen.sh` (exit 1) | a handed agent is never restarted on Core: run the printed `fleet-job start`, in that pane or another one at its shell prompt |
 | `RELAY DOWN <reason>` in a Core job's `inbox.log` | the follower lost Herdr Core for 10 minutes and exited: once Core is up, `bash <job>/reopen.sh --lead` |
 | `NOT ACKNOWLEDGED <file>` from a Core job's `reopen.sh` (exit 3) | the restarted lead has not read that file yet: once it is up, run the printed `echo` line |
 | the lead's pane shows Claude's sign-in or first-run screen, though `stampede new` printed `DELIVERED` | sign in to Claude Code once in a plain terminal (`claude`) before your first ask. Then finish the screen in the lead's pane and send `stampede tell <job> lead "Read <job>/briefs/<lead>.md"` |
@@ -525,7 +557,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 - *Do I need stampede for this?* Only for a big job: hours long, more than one agent family, anything that leaves the machine (merge, push, send, spend, publish, deploy), or work that must survive a restart. A small job needs no stampede job: run it as one agent session with its built-in subagents, still inside Herdr in a single tagged pane of its own, so its finish arrives as an event. That is also the answer to "why not subagents": for small jobs, use them. The rule: [Size the job first](skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
 - *Why two names?* `stampede` is the public name of `fleet-job`, its first name; both run the same command.
 - *Can Codex or Cursor lead?* Not yet; the lead is Claude ([roadmap](#status-and-roadmap)).
-- *Can workers run on Gemini, Kimi or the other agents Herdr knows?* Not through `stampede start` yet ([roadmap](#status-and-roadmap)).
+- *Can workers run on Gemini, Kimi or the other agents Herdr knows?* Hermes and Kimi, handed to Herdr TUI panes in a Herdr Core job ([Herdr Core](#hand-an-agent-to-a-tui-pane)); the rest not through `stampede start` yet ([roadmap](#status-and-roadmap)).
 - *Can a job run without the Herdr TUI?* Yes, on Herdr Core: `stampede new --core` ([Herdr Core](#herdr-core)).
 
 ## Reference
@@ -541,8 +573,9 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root of the current folder; it must sit under `FLEET_TRUST_ROOT`), `--name`, `--review`, `--fork <session id>`; `--pane` or `--workspace` exits 2 | a whole job on Herdr Core: writes the job record first (`backend`, the key `hc-<12 hex>` in `workspace`, the marker, the owner tag, the lead's row), starts the job's follower `relay-<12 hex>`, then the lead in its own terminal with its brief as the first prompt; prints `<lead> <job dir>`. A lead that is blocked, at an error or silent after 30 s stays the job's lead: `BLOCKED` or `NOT READY` with the recovery, exit 1. A start that never ran, or a follower that ended at start, is taken back: `FAILED`, `start-failed` in the folder, exit 1. When Core loses an answer, nothing is taken back: `UNKNOWN <agent>`, exit 1, and `reopen.sh` adopts or starts it later |
 | `finish <job> <summary>` | | one `done` event (`source` stampede, with the summary). A job a bot started uses the same strict route as a question; a local job uses the ordinary relay. Then removes the job marker. A second run does not send again |
 | `start <job> <agent> --kind claude\|codex\|cursor --pane <id> --brief <file>` | `--model`, `--effort`, `--report <path>` (repeatable), `--yolo-in <worktree>` | refuses a missing brief or a missing or empty section (exit 2); otherwise starts a worker with hooks and auto mode, records it and sends its brief pointer |
-| `start <job> <agent> --kind claude\|codex --brief <file>` (a Core job) | `--cwd <dir>` (default: the repo), `--model`, `--effort`, `--report`, `--yolo-in <worktree>` (must equal `--cwd`); `--pane` or `--kind cursor` exits 2 | one live launch per agent: refuses while another caller starts it or a live terminal of the job runs it (`already running at <address>`); starts it with no parent and no notes, its brief pointer (made absolute) as the first prompt, Claude with `--session-id`, Codex with `--no-daemon`; `STARTED <agent> (<address>)` exit 0, else `BLOCKED`, `NOT READY` (still the job's agent) or `FAILED`, exit 1 |
-| `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file; another CLI through `herdr-send`, or on Herdr Core only through `hc send` by status, never a key: `idle` sends only while idle, `done` sends at once; `working`, `blocked`, `error`, no status, another job's terminal, Core not answering, text already typed in the prompt, or a slash command (which needs keys Core cannot guard) is one `FAILED <agent> (<why>)` line with the step to do by hand, exit 2 |
+| `start <job> <agent> --kind claude\|codex --brief <file>` (a Core job) | `--cwd <dir>` (default: the repo), `--model`, `--effort`, `--report`, `--yolo-in <worktree>` (must equal `--cwd`); `--pane` with these kinds, or `--kind cursor\|hermes\|kimi` without `--pane`, exits 2 | one live launch per agent: refuses while another caller starts it or a live terminal of the job runs it (`already running at <address>`); starts it with no parent and no notes, its brief pointer (made absolute) as the first prompt, Claude with `--session-id`, Codex with `--no-daemon`; `STARTED <agent> (<address>)` exit 0, else `BLOCKED`, `NOT READY` (still the job's agent) or `FAILED`, exit 1 |
+| `start <job> <agent> --kind cursor\|hermes\|kimi --pane <id> --brief <file>` (a Core job) | `--model`, `--effort` (Hermes `--reasoning`; Kimi has none), `--report`, `--yolo-in <worktree>` (the pane's shell must sit in it); `--cwd`, or a pane that is no Herdr pane id, exits 2 | hands it to that Herdr TUI pane at its shell prompt, under the same launch lock and one-live-launch rule as a Core start (`already running in pane <id>`, or Herdr unable to say, exits 2); writes its entry (`backend` `tui`, a new `launch`) and the pane's mark before `herdr agent start`; `STARTED <agent> (pane <id>)` exit 0, else `BLOCKED`, `NOT READY`, `UNKNOWN` (entry and mark kept for reopen) or `FAILED`, exit 1 |
+| `tell <job> <agent> <text>` | `lead` names the lead | a Claude agent's inbox file; another CLI through `herdr-send`, or on Herdr Core only through `hc send` by status, never a key: `idle` sends only while idle, `done` sends at once; `working`, `blocked`, `error`, no status, another job's terminal, Core not answering, text already typed in the prompt, or a slash command (which needs keys Core cannot guard) is one `FAILED <agent> (<why>)` line with the step to do by hand, exit 2. A handed agent in a Core job: one `herdr agent prompt`, never a key, only while its pane runs this launch, idle or done, not focused, with an empty prompt; else `FAILED`, exit 2 |
 | `ask <job> <question>` | `--option <a>` (repeatable) | asks you in the background: a `question` event to the bot that started the job, else your phone; prints `ASKED <id>` |
 | `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option`: a gate is yes or no | a gate: a `gate` event to the bot that started the job, else your phone; prints `GATE <id>` |
 | `approve-gate <job> <gate> --sha <commit> --by <who>` | | the starting bot records your yes in chat, run outside Herdr; refuses inside Herdr or a Herdr Core terminal (or under a `herdr`, `herdr-core` or `hc` process), a local job's gate or another commit |
@@ -553,7 +586,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `update --check` | | one line: a newer release (exit 1) or the latest release (exit 0); nothing when offline, failed or turned off (exit 0) |
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 
-**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor (on Herdr Core, Cursor too), an agent already running or being started on Core, a Codex agent on Core that is not ready for `tell`, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr or Herdr Core, `cancel` of a question that is no phone card), with the reason on stderr; 1 a Core start that did not end with a ready agent (`BLOCKED`, `NOT READY`, `UNKNOWN` or `FAILED <agent> (<reason>)` on stdout), or Herdr Core failed (one `fleet-job <command>: <reason>` line on stderr), or Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
+**Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor (hermes and kimi only in a Herdr Core job, and there cursor, hermes and kimi only with `--pane`), an agent already running or being started on Core, a Codex agent on Core that is not ready for `tell`, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr or Herdr Core, `cancel` of a question that is no phone card), with the reason on stderr; 1 a Core start that did not end with a ready agent (`BLOCKED`, `NOT READY`, `UNKNOWN` or `FAILED <agent> (<reason>)` on stdout), or Herdr Core failed (one `fleet-job <command>: <reason>` line on stderr), or Herdr or the file system failed, with a Python traceback. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
 </details>
 
 <details>
@@ -571,8 +604,8 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 | `<job>/reopen.sh` (a Core job) | starts only what is not live, each once: for an open job its marker, owner tag and follower, then the lead (session resumed) and each worker (Claude resumed; Codex resumed by the session its notify recorded, with `--no-daemon`, else fresh); `--lead` only the follower and the lead; `--prompt` sends a restarted Codex worker its brief; `--fresh` starts each on a new session with its recorded flags and brief, nothing resumed. A Claude session is resumed only when it is known to have run (for good, whatever a later attempt does), started fresh when it never ran, and otherwise left alone with an `UNKNOWN` line. A restarted lead must take `REOPENED <lead> <attempt>` through its wake hook in both inbox files, retried every 5 s for 90 s; until both are acknowledged `<job>/reopen-pending` stays, and every later reopen asks again, even with the lead live | 0, 1 a restart was not `STARTED` (each is reported as `start` reports it: `BLOCKED` or `NOT READY` with its recovery, `FAILED`, `UNKNOWN`), 2 another caller is starting one of them, a folder is gone (each named, nothing started) or this shell names another core, 3 the lead did not acknowledge a file (printed, with the line to write by hand) |
 | `herdr-doctor [--relay] [--core]` | read-only health check: `ok`, `warn`, `PROBLEM` lines; `-h` prints usage. `--core` checks Herdr Core in place of the Herdr TUI: `hc` 0.1.13 or later, the selected core answering on its socket (never started), Claude 2.1.295 or later (OSC 7501 status), Codex's `--no-daemon`, and warns that Cursor runs on the TUI only. The core install by default; the event relay too when it is installed, or with `--relay`. For a GitHub-managed plugin, `stampede` or a skill outside the checkout Herdr reports is a `PROBLEM`. A newer stampede release, or no `FLEET_TRUST_ROOT` folder, is a `warn` | 0 ok, 1 a PROBLEM, 2 usage |
 | `herdr-events-owner <ws> [<bot>\|--clear]` | tags a workspace with the bot its events go to; also a Herdr Core job's key `hc-<12 hex>`, while that job is open | 0, or 2 refused |
-| `herdr-event-core <job dir>` | the follower of a Herdr Core job, started by `stampede new --core` as `relay-<12 hex>`: follows the job's terminals, writes `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines for the lead and posts `source` `hc` events for the bot ([remote/events.md](remote/events.md#a-herdr-core-job)); `--alive` asks the selected core's socket for `hello`, never starting a core; `--socket` prints that socket's path | 0 the job finished or never started, 1 relay down; `--alive`: 0 up, 1 down; 2 usage |
-| `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md). While a job marker is present, a plain turn end in that workspace exits 0 without sending | 0; `herdr-event-post --strict` (a job's questions, gates, and finish when a bot started the job): 3 no route of its own, 4 not queued, 6 a malformed `workspace` (a Core key not `hc-<12 hex>`, or any value with characters outside letters, digits, `_` and `-`; an ordinary event drops it instead and is routed as having none); an event from a Core job's follower (with `event_id`): 5 not queued, so the follower tries again; any event for a Core pane counts as sent only once queued |
+| `herdr-event-core <job dir>` | the follower of a Herdr Core job, started by `stampede new --core` as `relay-<12 hex>`: follows the job's terminals, writes `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines for the lead and posts `source` `hc` events for the bot ([remote/events.md](remote/events.md#a-herdr-core-job)); looks at the job's handed agents every 5 s with `herdr agent list` and `get`, a quiet stream included, and writes their `TURN` (Hermes, Kimi); `--alive` asks the selected core's socket for `hello`, never starting a core; `--socket` prints that socket's path | 0 the job finished or never started, 1 relay down; `--alive`: 0 up, 1 down; 2 usage |
+| `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md). While a job marker is present, a plain turn end in that workspace exits 0 without sending; while a handed pane's mark is present, every event about that pane but its follower's (`source` `hc`) exits 0 without sending, and the watchdog skips the pane | 0; `herdr-event-post --strict` (a job's questions, gates, and finish when a bot started the job): 3 no route of its own, 4 not queued, 6 a malformed `workspace` (a Core key not `hc-<12 hex>`, or any value with characters outside letters, digits, `_` and `-`; an ordinary event drops it instead and is routed as having none); an event from a Core job's follower (with `event_id`): 5 not queued, so the follower tries again; any event for a Core pane counts as sent only once queued |
 </details>
 
 <details>
@@ -596,7 +629,7 @@ assets/                 the poster, the teaser and the demo GIF
 site/                   the hero site: index.html, assets/
 site/brand/             the identity assets and the brand guide
 tests/                  python3 -m unittest discover tests; fake_hc.py (a fake Herdr Core),
-                        core_smoke.py (CI, a real one)
+                        fake_herdr.py (a fake Herdr TUI, for mixed jobs), core_smoke.py (CI, a real one)
                         test_clients.py and clients_run.py: the cross-client suite (docs/CLIENTS.md)
 ```
 </details>
@@ -621,11 +654,11 @@ tests/                  python3 -m unittest discover tests; fake_hc.py (a fake H
 
 How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The rules every change follows: [AGENTS.md](AGENTS.md).
 
-- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr or Herdr Core: a fake `herdr` through `HERDR`, and [tests/fake_hc.py](tests/fake_hc.py) through `HC`). [CI](.github/workflows/ci.yml) runs them on macOS on every push and pull request, then a real install and `herdr-doctor` against Homebrew Herdr, then [tests/core_smoke.py](tests/core_smoke.py) on Herdr Core 0.1.13 (downloaded and checked against its pinned checksum) in a scratch `HC_SESSION`, never a machine's own core. The Herdr Core tests ([test_core.py](tests/test_core.py), [test_core_relay.py](tests/test_core_relay.py)) state the Core contract; a test marked as an expected failure is a part not built yet.
+- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr or Herdr Core: a fake `herdr` through `HERDR`, and [tests/fake_hc.py](tests/fake_hc.py) through `HC`). [CI](.github/workflows/ci.yml) runs them on macOS on every push and pull request, then a real install and `herdr-doctor` against Homebrew Herdr, then [tests/core_smoke.py](tests/core_smoke.py) on Herdr Core 0.1.13 (downloaded and checked against its pinned checksum) in a scratch `HC_SESSION`, never a machine's own core. The Herdr Core tests ([test_core.py](tests/test_core.py), [test_core_relay.py](tests/test_core_relay.py), and [test_mixed.py](tests/test_mixed.py) with [tests/fake_herdr.py](tests/fake_herdr.py) for handed agents) state the Core contract; a test marked as an expected failure is a part not built yet.
 - **The cross-client suite:** `python3 -m unittest tests.test_clients` (about 25 s) plays one job per client (a Herdr chat, Claude, Codex, Cursor, Hermes, a bot over SSH) and backend against the fakes and checks each outcome's command contract, O1 to O9, for each; the agents' own work is left to the live runs. A client is one row in `CLIENTS` in [tests/test_clients.py](tests/test_clients.py) plus one in [docs/CLIENTS.md](docs/CLIENTS.md), which also holds the live runbook and the clients that do worse; a worker kind is one entry in `WORKERS` there, which every client's job then starts.
 - **The four skills are copies** of the maintainer's own skills, scrubbed of anything personal. A pull request that changes `skills/` is welcome; the maintainer carries it to the source first, then copies it back here.
 - **A front door:** a guide in `remote/` that writes the ask and runs `stampede new`, linked from [Front doors](#front-doors).
-- **An agent CLI:** its auto and no-checks flags in `AUTO` and `YOLO`, and its hooks in `cli_args`, in [fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), with a test in `tests/test_fleet_job.py`. On Herdr Core it must also report OSC 7501 status; its Core flags go in `start_core`, with a test in `tests/test_core.py`.
+- **An agent CLI:** its auto and no-checks flags in `AUTO` and `YOLO`, and its hooks in `cli_args`, in [fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), with a test in `tests/test_fleet_job.py`. On Herdr Core it must also report OSC 7501 status; its Core flags go in `start_core`, with a test in `tests/test_core.py`. A CLI Herdr detects but Core cannot run goes in `HANDED` (handed to a TUI pane), and in `TURNS` in `herdr-event-core` when it has no turn hook of its own, with a test in `tests/test_mixed.py`.
 
 ## Status and roadmap
 
@@ -653,11 +686,13 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **Unreleased, 30 Oct 2026. The cross-client suite:** [docs/CLIENTS.md](docs/CLIENTS.md). Every client in `CLIENTS` (a Herdr chat, Claude, Codex, Cursor, Hermes, Grok Bot, any other bot, a whole remote computer) drives one job on the Herdr TUI and one on Herdr Core through the real `stampede` command, with its own environment and process tree (inside Herdr, outside it, or over SSH under `sshd`), against the fakes; each passes the command-contract checks of O1 to O8, and the bots O9. No agent runs in them: `plan.md`, the worker's file and the commit are for the live runs. Two gaps for bots (F1, F2) and six found by the live runs (F4 to F7, F10, F11) are expected failures. Live, on one Mac, 30 Oct 2026, each job with one worker: a Herdr chat and Claude pass O1 to O8 on the TUI; Claude on Core, and Codex and Hermes on both backends, pass all but O4, O5 and O7, which wait on the owner's tap; a test bot over SSH with webhook events (the Grok Bot path; a real Grok Bot was not run) passes O1 to O9 on both; Cursor was not run. Live O3 covers only the worker kinds those jobs started ([docs/CLIENTS.md](docs/CLIENTS.md#clients)); the automated suite starts every kind. The live runs found thirteen more gaps (F3 to F15).
 
+**Unreleased, 30 Oct 2026. Mixed jobs:** a Herdr Core job hands Cursor, Hermes and Kimi workers to Herdr TUI panes (`stampede start --pane`), with the follower reporting them as Core workers, `tell` guarded by identity, status, focus and an empty prompt, gates unchanged and `reopen.sh` printing `LIVE` or the exact start. Tested with the fake `hc` and a fake `herdr` (`tests/fake_herdr.py`, `tests/test_mixed.py`): each kind's start, refusals, one live launch across both backends, a startup dialog, a lost answer adopted or kept `UNKNOWN`, turns between looks and across a follower restart, a same-name replacement, stalls, a quiet Core stream, the relay and watchdog keeping a handed pane's other events home, `tell` refusals, `approve-gate` refused from the pane, and reopen. Every command in [Hand an agent to a TUI pane](#hand-an-agent-to-a-tui-pane) was run against the fakes. Not run yet: a live mixed job (the test lane).
+
 **Next:**
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
-- On Herdr Core, planned: workers on a second machine (`hc run --on`), a bot front door over `hc`, the job shown in the Herdr app (its `herdr.space` and `herdr.tab` labels), and Cursor workers once Cursor reports OSC 7501 status.
+- On Herdr Core, planned: workers on a second machine (`hc run --on`), a bot front door over `hc`, the job shown in the Herdr app (its `herdr.space` and `herdr.tab` labels), and Hermes and Kimi workers on a TUI-only job.
 - One live job from Grok Bot.
-- Starting workers on the other agents Herdr detects, not only Claude, Codex and Cursor.
+- Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.
 - Workers on a second machine over Tailscale.
 - Codex or Cursor as the lead.
 - ChatGPT Dots as a front door, once it can be woken by a webhook.

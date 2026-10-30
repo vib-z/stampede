@@ -15,10 +15,14 @@ To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, worksp
 turn ends, stale (with minutes_unchanged), dead (it finished while working or blocked, or with no status ever, unless
 it exited 0 by itself; or was lost) and relay_down,
 each with an event_id (<key>/<address>|<state>|<episode>, ...|turn|<n>, ...|finished), so the relay never merges two.
+A handed agent (an agent Core cannot run, in a Herdr TUI pane: core.json backend tui) is looked at every POLL_EVERY
+seconds, a quiet stream included, with herdr agent list and get: the same lines and events, its address tui:<pane>|<launch>
+and its event pane the TUI pane; a turn end is its completion_seq rising (TURN <agent> for Hermes and Kimi, which have no
+turn hook), BLOCKED <agent> dialog, and GONE <agent> <reason> once it is no longer in its pane. Herdr not answering is no news.
 <job>/relay-state.json keeps what it saw and sent, and every bot event the relay did not take (retried every
 RETRY_EVERY seconds, after a reconnect and a restart too, until it does), so a restarted follower resumes and never
 sends one thing twice."""
-import fcntl, hashlib, json, os, re, shutil, socket, subprocess, sys, time
+import fcntl, hashlib, json, os, queue, re, shutil, socket, subprocess, sys, threading, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -26,6 +30,9 @@ GIVE_UP = 600  # seconds of failed reconnects before RELAY DOWN
 RETRY_EVERY = 30  # seconds between tries of the bot events the relay did not take
 STALL_EVERY = 60  # seconds between reads of the working terminals' screens
 POST_TIMEOUT = 60  # seconds herdr-event-post may take before the event counts as not taken
+POLL_EVERY = 5  # seconds between looks at the handed agents, and the tick of a quiet stream
+HERDR_TIMEOUT = 30  # seconds a herdr call may take before its answer counts as unknown
+TURNS = ('hermes', 'kimi')  # handed kinds with no turn hook of their own: the follower writes their TURN line
 clock, sleep, wall = time.monotonic, time.sleep, time.time
 FRESH = {'status': None, 'last': None, 'turn': 0, 'finished': False, 'reported': {}, 'episodes': {}}
 
@@ -81,6 +88,16 @@ def hc(*args):
         return result.returncode or 1, {}
 
 
+def herdr(*args):
+    """(0, result) of one herdr command, or (1, {}) when it fails, hangs, is missing or answers no JSON."""
+    try:
+        result = subprocess.run([os.environ.get('HERDR') or 'herdr', *args], capture_output=True, text=True, timeout=HERDR_TIMEOUT)
+        data = json.loads(result.stdout or result.stderr or '{}')
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return 1, {}
+    return (1, {}) if result.returncode or not isinstance(data, dict) or 'error' in data else (0, data.get('result') or {})
+
+
 def stale_after():
     """Seconds a working terminal's screen may stay unchanged: HERDR_EVENTS_STALE_MINUTES, the TUI watchdog's 30 by default."""
     try:
@@ -117,7 +134,7 @@ class Follower:
         state = json.loads(path.read_text()) if path.is_file() else {}
         self.terminals, self.sent, self.floor = state.get('terminals', {}), set(state.get('sent', [])), None
         self.unsent, self.retried = state.get('unsent', {}), None  # identity -> event, for the bot, not yet taken
-        self.checked = None
+        self.checked = self.polled = None
         self.known()
 
     def closed(self):
@@ -157,13 +174,26 @@ class Follower:
         record = self.terminals.get(address, {})
         event = {'source': 'hc', 'workspace': self.key, 'job': str(self.job), 'agent': record.get('agent', self.relay), **fields}
         if address:
-            event['pane'] = f'hc:{self.key}/{address}'
+            event['pane'] = record.get('pane') or f'hc:{self.key}/{address}'
         if self.owner:
             event['owner'] = self.owner
         if address and fields['state'] != 'relay_down':
-            code, read = hc('read', address, '--lines', '40')
-            event['output_tail'] = read.get('text', '') if code == 0 else ''
+            code, text = self.screen(address)
+            event['output_tail'] = text if code == 0 else ''
         return {k: v for k, v in event.items() if v is not None}
+
+    def screen(self, address):
+        """(exit code, text) of a terminal's last 40 lines: hc read, or herdr pane read for a handed agent's pane."""
+        pane = self.terminals.get(address, {}).get('pane')
+        if not pane:
+            code, read = hc('read', address, '--lines', '40')
+            return code, read.get('text', '')
+        try:
+            result = subprocess.run([os.environ.get('HERDR') or 'herdr', 'pane', 'read', pane, '--source', 'recent', '--lines', '40'],
+                                    capture_output=True, text=True, timeout=HERDR_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError):
+            return 1, ''
+        return result.returncode, result.stdout
 
     def post(self, event):
         """False when the relay did not take the event: it hung for 60 s, failed, or is not there."""
@@ -222,7 +252,7 @@ class Follower:
                                                      else f'ERROR {record["agent"]} {msg}')
         self.notify(f'{address}|{word}|{episode}', address, lead, {'state': word, 'kind': status.get('kind'), 'msg': status.get('msg')})
 
-    def turned(self, address, data):
+    def turned(self, address, data, lead=None):
         record, n, word = self.terminals[address], data.get('turn') or 0, data.get('state')
         if n != record['turn']:
             record.pop('stall', None)
@@ -230,7 +260,7 @@ class Follower:
         if word in ('blocked', 'error') and record['status'] == word:
             record['reported'][word] = max(record['reported'].get(word, -1), n)  # the episode already told is this turn's
         if word in ('done', 'idle'):
-            self.notify(f'{address}|turn|{n}', address, post={'state': word, 'turn': n})
+            self.notify(f'{address}|turn|{n}', address, lead, {'state': word, 'turn': n})
 
     def finish(self, address, data):
         record = self.terminals[address]
@@ -244,7 +274,8 @@ class Follower:
         clean = reason == 'exited' and code == 0  # its own exit 0 (a graceful /exit, say): told to the lead, no alarm
         dead = not clean and (record['last'] in ('working', 'blocked') or record['last'] is None)
         phone(f'{agent} left its terminal', f'{reason}, exit {shown} (Herdr Core job {self.key}).', error=True)
-        self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else f'GONE {agent} {reason} exit {shown}',
+        gone = f'GONE {agent} {reason}' + ('' if record.get('pane') else f' exit {shown}')  # Herdr shows a handed one's exit no code
+        self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else gone,
                     {'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason} if dead else None)
 
     def lost(self, address):
@@ -268,7 +299,7 @@ class Follower:
             else:
                 self.observe(terminal['address'], terminal.get('status'), terminal.get('turn'))
         for address, record in list(self.terminals.items()):
-            if address in shown or record['finished'] or record['role'] == 'relay':
+            if address in shown or record['finished'] or record['role'] == 'relay' or record.get('pane'):
                 continue
             code, terminal = hc('get', address)
             if code == 3:
@@ -308,7 +339,64 @@ class Follower:
         elif row.get('method') == 'event' and (self.floor is None or (row['params'].get('seq') or 0) > self.floor):
             self.event(row['params'])
         self.stalls()
+        self.poll()
         return not self.closed()
+
+    def handed(self):
+        """Track each handed agent core.json holds live by its launch, tui:<pane>|<launch>, so a restart of the same name
+        in the same pane is a new record; one a later launch replaced ends without a word. A start that is not yet live
+        is never tracked, so never GONE. Returns the open ones."""
+        path = self.job / 'core.json'
+        entries = json.loads(path.read_text()) if path.is_file() else {}
+        current = set()
+        for agent, entry in entries.items():
+            if entry.get('backend') == 'tui' and entry.get('state') == 'live':
+                address = f'tui:{entry.get("pane")}|{entry.get("launch")}'
+                current.add(address)
+                record = self.track(address, agent, 'worker')
+                if 'pane' not in record:
+                    record.update(pane=entry.get('pane'), kind=entry.get('kind'), terminal=entry.get('terminal'),
+                                  completion=entry.get('completion'))
+        for address, record in self.terminals.items():
+            if record.get('pane') and address not in current:
+                record['finished'] = True
+        return [address for address, record in self.terminals.items() if record.get('pane') and not record['finished']]
+
+    def poll(self):
+        """Every POLL_EVERY seconds, the open handed agents from one herdr agent list, and herdr agent get for each one
+        still in its pane: the lines and bot events a Core worker gets, by the same identities. A turn end is its
+        completion_seq rising since the last look (kept, so a turn between looks or while the follower was down is told
+        once). An agent no longer in its pane, by a list Herdr answered, is GONE; anything unclear is no news."""
+        if self.polled is not None and clock() - self.polled < POLL_EVERY:
+            return
+        self.polled = clock()
+        handed = self.handed()
+        code, listed = herdr('agent', 'list') if handed else (1, {})
+        if code != 0 or not isinstance(listed.get('agents'), list):
+            return self.save() if handed else None
+        agents = {agent.get('pane_id'): agent for agent in listed['agents'] if isinstance(agent, dict)}
+        for address in handed:
+            record = self.terminals[address]
+            if (agents.get(record['pane']) or {}).get('name') != record['agent']:
+                code, _ = herdr('pane', 'get', record['pane'])
+                self.finish(address, {'reason': 'exited' if code == 0 else 'pane closed'})
+                continue
+            code, shown = herdr('agent', 'get', record['pane'])
+            shown = shown.get('agent') if code == 0 else None
+            if not isinstance(shown, dict):
+                continue
+            if record.get('terminal') and shown.get('terminal_id') not in (None, record['terminal']):
+                self.finish(address, {'reason': 'replaced'})  # its name runs in its pane, but as another launch
+                continue
+            word = shown.get('agent_status') if shown.get('agent_status') in ('idle', 'working', 'blocked', 'done') else None
+            seq = shown.get('completion_seq')
+            if isinstance(seq, int) and record.get('completion') is not None and seq > record['completion']:
+                lead = f'TURN {record["agent"]}' if record.get('kind') in TURNS else None
+                self.turned(address, {'turn': record['turn'] + 1, 'state': word if word in ('idle', 'done') else 'done'}, lead)
+            if isinstance(seq, int):
+                record['completion'] = seq
+            self.observe(address, {'state': word, 'kind': 'dialog'} if word else None)
+        self.save()
 
     def stalls(self):
         """A working terminal whose screen has not changed for stale_after(), with no status or turn change, is told once
@@ -320,11 +408,11 @@ class Follower:
             if record['finished'] or record['role'] in ('relay', 'wait') or record['status'] != 'working':
                 record.pop('stall', None)
                 continue
-            code, read = hc('read', address, '--lines', '40')
+            code, text = self.screen(address)
             if code != 0:
                 record.pop('stall', None)
                 continue
-            digest, stall = hashlib.sha256(read.get('text', '').encode()).hexdigest(), record.get('stall')
+            digest, stall = hashlib.sha256(text.encode()).hexdigest(), record.get('stall')
             if not stall or stall['hash'] != digest:
                 record['stall'] = {'hash': digest, 'since': now, 'told': False}
             elif not stall['told'] and now - stall['since'] >= limit:
@@ -337,11 +425,27 @@ class Follower:
         self.save()
 
     def stream(self):
-        """One connection's lines; seq restarts with each core process, so it is compared within one connection only."""
+        """One connection's lines, and {} for each POLL_EVERY seconds it is quiet: a tick, so handed agents, stalls and
+        retries are looked at when Core says nothing. seq restarts with each core process, so it is compared within one
+        connection only."""
         process = subprocess.Popen([os.environ.get('HC') or 'hc', 'events', '--json', '--label', 'stampede.job=' + self.key],
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        try:
+        rows = queue.Queue()
+
+        def pump():
             for row in process.stdout:
+                rows.put(row)
+            rows.put(None)
+        threading.Thread(target=pump, daemon=True).start()
+        try:
+            while True:
+                try:
+                    row = rows.get(timeout=POLL_EVERY)
+                except queue.Empty:
+                    yield {}
+                    continue
+                if row is None:
+                    return
                 try:
                     yield json.loads(row)
                 except ValueError:
@@ -361,12 +465,13 @@ class Follower:
         that, RELAY DOWN to the lead and the bot (1)."""
         down_since, delay = None, 1
         while not self.closed():
-            self.retry()  # the relay needs no core
+            self.retry()  # the relay and Herdr need no core
+            self.poll()
             reason = 'core not reachable'
             if alive():
                 reason, reached = 'stream ended', False
                 for row in self.stream():
-                    reached = True
+                    reached = reached or bool(row)
                     if not self.line(row):
                         return 0
                 if reached:
