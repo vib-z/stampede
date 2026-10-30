@@ -1,6 +1,6 @@
 id = "stampede"
 name = "stampede"
-version = "0.1.5"
+version = "0.1.6"
 min_herdr_version = "0.9.4"
 description = "Text a task to your Grok Bot and it reaches your Mac over Tailscale, where a Claude Code lead does the job in Herdr and adds Codex or Cursor panes only when parallel work helps. Nothing is merged, pushed, sent or spent until you say yes, and it works without a bot too."
 platforms = ["macos"]
