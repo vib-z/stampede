@@ -19,6 +19,7 @@ from test_herdr_reopen_snapshot import FAKE_HERDR, pane, rect
 STAMPEDE = ROOT / 'scripts/stampede'
 BOT_SCRIPTS = ROOT / 'skills/grokbot-herdr/scripts'
 OTHER_SHA = 'b' * 40
+LEAD_MODEL = 'test-lead-model'  # FLEET_LEAD_MODEL, as a front door sets it
 QUESTION, ANSWER, GATE, SUMMARY = 'Keep hello in the repo root?', 'yes, the root', 'Merge PR #3 into main', 'hello written'
 # a recorder in place of Moshi (FLEET_ASK_CMD): logs each card; answers a question with its first option, and a gate
 # (no options) with yes only once the test makes the file `yes` beside it, the owner's tap; no yes in 60 s is a no
@@ -110,7 +111,8 @@ class Job:
                      'HC': str(FAKE_HC), 'FAKE_HC': str(self.core), 'HERDR_EVENTS_DIR': str(self.events),
                      'HERDR_EVENTS_HOME': str(self.queue), 'HERDR_EVENTS_ROUTES_DIR': str(self.root / 'routes'),
                      'FLEET_TRUST_ROOT': str(self.root / 'code'), 'FLEET_ASK_CMD': str(self.bin / 'ask'),
-                     'HERDR_EVENTS_MACHINE': 'test', 'STAMPEDE_NO_UPDATE_CHECK': '1'}
+                     'HERDR_EVENTS_MACHINE': 'test', 'STAMPEDE_NO_UPDATE_CHECK': '1',
+                     'FLEET_LEAD_MODEL': LEAD_MODEL, 'FLEET_LEAD_EFFORT': 'low'}  # a front door's cheap lead
         self.fake_herdr()
 
     def fake_herdr(self):

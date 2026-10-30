@@ -35,7 +35,7 @@ OUTCOMES = {
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
 }
 
-from clients_run import ANSWER, BOT_SCRIPTS, GATE, OTHER_SHA, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
+from clients_run import ANSWER, BOT_SCRIPTS, GATE, LEAD_MODEL, OTHER_SHA, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
 from test_core import FAKE_HC  # noqa: E402
 from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 import test_doctor  # noqa: E402
@@ -170,9 +170,11 @@ class Outcomes(unittest.TestCase):
             if job.backend == 'core':
                 (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
                 self.assertTrue(lead[-1].startswith(pointer), 'the brief pointer is the first prompt')
+                lead = ' '.join(lead)
             else:
-                self.assertTrue(any(c.startswith(f'agent start {Job.LEAD} --kind claude') for c in job.herdr_calls()))
+                (lead,) = [c for c in job.herdr_calls() if c.startswith(f'agent start {Job.LEAD} --kind claude')]
                 self.assertIn(pointer, job.inbox())
+            self.assertIn(f'--model {LEAD_MODEL} --effort low', lead, 'the front door\'s FLEET_LEAD_MODEL and EFFORT')
         self.outcome('O2', check)
 
     def test_o3_workers(self):
