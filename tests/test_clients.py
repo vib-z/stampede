@@ -27,7 +27,9 @@ CLIENTS = {
     'other-bot': {'readme': 'any other bot', 'where': 'ssh', 'backends': ('tui', 'core'), 'bot': 'other-bot', 'owner_from': 'env'},
     'remote-computer': {'readme': 'a whole remote computer', 'where': 'inside', 'backends': ('tui', 'core')},
 }
-WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex')}  # the kinds stampede start takes
+WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex')}  # the one worker registry: what start takes
+KINDS = tuple(dict.fromkeys(kind for kinds in WORKERS.values() for kind in kinds))  # O3 starts each on every backend
+REFUSED = {'cursor': 'Cursor reports no OSC 7501 status'}  # why a backend that does not take a kind refuses it
 OUTCOMES = {
     'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question', 'O5': 'gate',
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
@@ -72,6 +74,11 @@ class ClientsInSync(unittest.TestCase):
             if row.get('bot'):
                 self.assertIn(row['owner_from'], ('tag', 'env'), name)
 
+    def test_every_kind_a_backend_does_not_take_says_why(self):
+        for backend, kinds in WORKERS.items():
+            for kind in set(KINDS) - set(kinds):
+                self.assertIn(kind, REFUSED, f'{backend} does not take {kind}: REFUSED needs the reason start gives')
+
 
 class Outcomes(unittest.TestCase):
     """Every client, on every backend it claims, reaches O1 to O9 (O9 for bots) against the fakes."""
@@ -83,7 +90,7 @@ class Outcomes(unittest.TestCase):
         cls.doctor.setUp()  # an installed scratch HOME with a fake herdr, launchctl and df
         cls.doctor.fake('claude', 'echo "2.1.312 (Claude Code)"')  # never a real agent CLI
         cls.doctor.fake('codex', 'echo "--no-daemon"')
-        cls.jobs = [Job(name, row, backend, cls.root) for name, row in CLIENTS.items() for backend in row['backends']]
+        cls.jobs = [Job(name, row, backend, cls.root, WORKERS) for name, row in CLIENTS.items() for backend in row['backends']]
         with ThreadPoolExecutor(8) as pool:  # each job has its own folders, fakes and environment
             cls.health = dict(zip([(j.client, j.backend) for j in cls.jobs], pool.map(cls.health_check, cls.jobs)))
             cls.reference = dict(zip(('tui', 'tui-bot', 'core'), pool.map(lambda f: cls.run_doctor(f, {}), ('tui', 'tui-bot', 'core'))))
@@ -171,10 +178,10 @@ class Outcomes(unittest.TestCase):
     def test_o3_workers(self):
         def check(job):
             runs = {job.labels(r).get('stampede.agent'): r for r in job.calls('run')}
-            for kind in ('claude', 'codex', 'cursor'):
+            for kind in KINDS:
                 agent = 'build-' + kind
                 if kind not in WORKERS[job.backend]:
-                    self.refused(job, 'start ' + kind, 'Cursor reports no OSC 7501 status')
+                    self.refused(job, 'start ' + kind, REFUSED[kind])
                     self.assertNotIn(agent, runs)
                 elif job.backend == 'core':
                     self.ok(job, 'start ' + kind, f'STARTED {agent} (t')
@@ -232,14 +239,14 @@ class Outcomes(unittest.TestCase):
             self.ok(job, 'tell lead', f'DELIVERED {Job.LEAD} (inbox file)')
             self.assertIn('Use the repo root', job.inbox())
             if job.backend == 'core':
-                address = job.address('build-codex')
-                self.ok(job, 'tell worker', f'SUBMITTED build-codex ({address})')
-                self.refused(job, 'tell working worker', 'FAILED build-codex (working: tell it after its turn)')
+                address = job.address(job.worker)
+                self.ok(job, 'tell worker', f'SUBMITTED {job.worker} ({address})')
+                self.refused(job, 'tell working worker', f'FAILED {job.worker} (working: tell it after its turn)')
                 self.assertEqual(job.state()['terminals'][address]['sent'], ['Check the path'])
                 self.assertIn('--if', [c for c in job.calls('send')][0])
             else:
-                self.ok(job, 'tell worker', 'SUBMITTED build-codex')
-                self.assertTrue(any(c.startswith('agent prompt build-codex Check the path') for c in job.herdr_calls()))
+                self.ok(job, 'tell worker', 'SUBMITTED ' + job.worker)
+                self.assertTrue(any(c.startswith(f'agent prompt {job.worker} Check the path') for c in job.herdr_calls()))
         self.outcome('O6', check)
 
     def test_o7_finish(self):
@@ -295,7 +302,7 @@ class Outcomes(unittest.TestCase):
         Core start leaves it out; run as written, the job is local: its questions and gates go to the phone and its
         finish to the default route, and the bot never hears them."""
         bot = next(name for name, row in CLIENTS.items() if row.get('bot'))
-        job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1')
+        job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1', WORKERS)
         (job.root / 'ask.md').write_text('Write hello.txt\n')
         env = {k: v for k, v in job.client_env().items() if k != 'HERDR_EVENTS_OWNER'}  # the guide's command as written
         code, out, err = job.run('new', (ROOT / 'scripts/stampede', 'new', '--core', '--file', job.root / 'ask.md', '--cwd',

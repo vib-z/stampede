@@ -52,8 +52,12 @@ class Job:
 
     state, terminal, calls, labels, program = CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels, CoreCase.program
 
-    def __init__(self, client, row, backend, root):
+    def __init__(self, client, row, backend, root, workers):
+        """row: the client's CLIENTS row; workers: WORKERS, the kinds each backend takes. The lead starts every kind of
+        every backend, so a kind this backend does not take is refused; it tells the first kind here that is not Claude."""
         self.client, self.row, self.backend, self.bot = client, row, backend, row.get('bot')
+        self.kinds, self.takes = tuple(dict.fromkeys(k for kinds in workers.values() for k in kinds)), workers[backend]
+        self.worker = 'build-' + next(k for k in self.takes if k != 'claude')  # prompted, where a Claude agent reads its inbox
         self.root = root / f'{client}-{backend}'
         self.repo, self.core, self.herdr = self.root / 'code/repo', self.root / 'core', self.root / 'herdr'
         self.home, self.events, self.queue = self.root / 'home', self.root / 'events', self.root / 'queue'
@@ -62,8 +66,7 @@ class Job:
         self.steps, self.error = {}, ''
         for folder in (self.repo, self.core, self.herdr, self.bin, self.events, self.root / 'routes'):
             folder.mkdir(parents=True)
-        for name, body in (('herdr', FAKE_HERDR), ('claude', '#!/bin/sh\nexit 0\n'), ('codex', '#!/bin/sh\nexit 0\n'),
-                           ('ask', ASK)):
+        for name, body in [('herdr', FAKE_HERDR), ('ask', ASK)] + [(k, '#!/bin/sh\nexit 0\n') for k in {'claude', *self.kinds}]:
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
         if self.bot:
@@ -80,7 +83,7 @@ class Job:
         """The fake Herdr's answers: one workspace w9 whose panes hold the lead and the workers, idle at an empty prompt."""
         repo, ws = str(self.repo), self.WS
         panes = [{**pane(f'{ws}:p{n}', f'{ws}:t{1 + (n > 1)}', name, repo, kind, 's-' + name), 'workspace_id': ws}
-                 for n, (name, kind) in enumerate([(self.LEAD, 'claude')] + [('build-' + k, k) for k in ('claude', 'codex', 'cursor')], 1)]
+                 for n, (name, kind) in enumerate([(self.LEAD, 'claude')] + [('build-' + k, k) for k in self.kinds], 1)]
         (self.herdr / 'state.json').write_text(json.dumps({
             'pane get': {'pane': {**panes[0], 'foreground_cwd': repo}}, 'pane list': {'panes': panes},
             'agent wait': {'agent': {'agent_status': 'idle'}}, 'agent get': {'agent': {'agent_status': 'idle'}},
@@ -89,7 +92,7 @@ class Job:
             'workspace list': {'workspaces': [{'workspace_id': ws, 'label': self.NAME}]},
             'tabs': {ws: [{'tab_id': f'{ws}:t1', 'label': 'lead'}, {'tab_id': f'{ws}:t2', 'label': 'build'}]},
             'layout': {f'{ws}:p1': [rect(f'{ws}:p1', 0, 0, 200, 40)],
-                       f'{ws}:p2': [rect(f'{ws}:p{n}', 0, 13 * (n - 2), 200, 12) for n in (2, 3, 4)]}}))
+                       f'{ws}:p2': [rect(f'{ws}:p{n}', 0, 13 * (n - 2), 200, 12) for n in range(2, 2 + len(self.kinds))]}}))
 
     # environments
     def client_env(self, where=None):
@@ -192,8 +195,9 @@ class Job:
         self.front('new', 'new', '--file', ask, '--pane', root_pane, '--name', self.NAME)
 
     def workers(self):
-        """O3: the lead starts one worker of each kind; on Core a cursor worker too, which is refused."""
-        for n, kind in enumerate(('claude', 'codex', 'cursor'), 2):
+        """O3: the lead starts one worker of every kind, each in its pane on the TUI; a kind this backend does not take is
+        refused."""
+        for n, kind in enumerate(self.kinds, 2):
             brief = valid_brief(self.job, 'build-' + kind)
             where = ('--pane', f'{self.WS}:p{n}') if self.backend == 'tui' else ()
             self.lead('start ' + kind, 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief, *where)
@@ -235,13 +239,13 @@ class Job:
         self.lead('gate-ok', 'gate-ok', self.job, ident, '--sha', SHA)
 
     def tell(self):
-        """O6: the client tells the lead and the codex worker; on Core only while that worker is idle."""
+        """O6: the client tells the lead and a worker that is not Claude; on Core again while that worker is working."""
         self.front('tell lead', 'tell', self.job, 'lead', 'Use the repo root')
-        self.front('tell worker', 'tell', self.job, 'build-codex', 'Check the path')
+        self.front('tell worker', 'tell', self.job, self.worker, 'Check the path')
         if self.backend == 'core':
-            self.terminal(self.address('build-codex'), status={'state': 'working'})
-            self.front('tell working worker', 'tell', self.job, 'build-codex', 'And the error path')
-            self.terminal(self.address('build-codex'), status={'state': 'idle'})
+            self.terminal(self.address(self.worker), status={'state': 'working'})
+            self.front('tell working worker', 'tell', self.job, self.worker, 'And the error path')
+            self.terminal(self.address(self.worker), status={'state': 'idle'})
 
     def reopen(self):
         """O8: reopen.sh on the live job; on the TUI the lead first writes the reopen record."""

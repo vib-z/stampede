@@ -52,7 +52,7 @@ For every client and backend, as a subtest named `<client>/<backend> <outcome>`,
 
 - **O1:** `herdr-doctor` run with the client's environment (`--relay` for a bot, `--core` on Core) prints the same lines and exit code as a run with none: the doctor reads the machine, not the client. On Core it reads the fake `hc` (`ok hc 0.1.13`), never a real core.
 - **O2:** `stampede new` exits 0 and prints `<lead> <job dir>`; the job is marked open; `<job>/owner` names the bot, or is absent for a local client; the lead got its brief pointer (its inbox on the TUI, its first prompt on Core).
-- **O3:** the lead starts a claude, a codex and (TUI only) a cursor worker; on Core, `--kind cursor` exits 2 with `Cursor reports no OSC 7501 status`, and no terminal starts.
+- **O3:** the lead starts one worker of each kind in `WORKERS`, the one worker registry: claude, codex and cursor on the TUI, claude and codex on Core. A kind the backend does not take exits 2 with its reason from `REFUSED` (on Core, cursor: `Cursor reports no OSC 7501 status`), and no terminal starts.
 - **O4:** a bot gets one `question` event on its own route and runs the answer command it carries; a local client's phone card (a recorder in place of Moshi) gets the question and options. Either way the answer lands in the lead's inbox, and nothing goes to the other channel.
 - **O5:** `approve-gate` exits 2 when run inside Herdr, in a Core terminal (`HC_TERMINAL_ID` set), or for another commit. A bot's `approve-gate` over SSH records the yes; a local job's yes is the phone card's, and the client's own `approve-gate` is refused. Then `gate-ok` prints `APPROVED` for that commit and refuses another.
 - **O6:** `stampede tell <job> lead` lands in the lead's inbox; a codex worker gets `SUBMITTED`. On Core the send uses `hc send --if idle`, and a working worker gets `FAILED ... (working: tell it after its turn)` with nothing sent.
@@ -77,6 +77,8 @@ How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per c
 3. A live run from the real client ([Live runbook](#live-runbook)), and its row's live cells.
 
 `ClientsInSync` fails until README's front doors, `CLIENTS` and this table agree. A client that behaves differently in code (a new environment, flag or channel) needs that difference in `tests/clients_run.py`, and the matching line in [What differs](#what-differs-between-clients).
+
+**A worker kind** is not a client: add it to `WORKERS` under each backend that takes it, and for a backend that does not, the refusal `stampede start` gives in `REFUSED`. Every client's job then starts it on every backend (O3); `test_every_kind_a_backend_does_not_take_says_why` fails until `REFUSED` names it.
 
 ## Live runbook
 
