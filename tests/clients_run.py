@@ -87,10 +87,12 @@ class Job:
 
     state, terminal, calls, labels, program = CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels, CoreCase.program
 
-    def __init__(self, client, row, backend, root, workers):
-        """row: the client's CLIENTS row; workers: WORKERS, the kinds each backend takes. The lead starts every kind of
-        every backend, so a kind this backend does not take is refused; it tells the first kind here that is not Claude."""
+    def __init__(self, client, row, backend, root, workers, handed=()):
+        """row: the client's CLIENTS row; workers: WORKERS, the kinds each backend takes; handed: HANDED, the kinds a Core
+        job hands to a Herdr TUI pane (--pane) rather than run in a Core terminal. The lead starts every kind of every
+        backend, so a kind this backend does not take is refused; it tells the first kind here that is not Claude."""
         self.client, self.row, self.backend, self.bot = client, row, backend, row.get('bot')
+        self.handed = handed if backend == 'core' else ()
         self.kinds, self.takes = tuple(dict.fromkeys(k for kinds in workers.values() for k in kinds)), workers[backend]
         self.worker = 'build-' + next(k for k in self.takes if k != 'claude')  # prompted, where a Claude agent reads its inbox
         self.root = root / f'{client}-{backend}'
@@ -116,7 +118,8 @@ class Job:
         self.fake_herdr()
 
     def fake_herdr(self):
-        """The fake Herdr's answers: one workspace w9 whose panes hold the lead and the workers, idle at an empty prompt."""
+        """The fake Herdr's answers: one workspace w9 whose panes hold the lead and the workers, idle at an empty prompt;
+        each pane a Core job hands a worker to shows that worker as freshly started (named, no finished turn yet)."""
         repo, ws = str(self.repo), self.WS
         panes = [{**pane(f'{ws}:p{n}', f'{ws}:t{1 + (n > 1)}', name, repo, kind, 's-' + name), 'workspace_id': ws}
                  for n, (name, kind) in enumerate([(self.LEAD, 'claude')] + [('build-' + k, k) for k in self.kinds], 1)]
@@ -124,7 +127,10 @@ class Job:
             'pane get': {'pane': {**panes[0], 'foreground_cwd': repo}}, 'pane list': {'panes': panes},
             'agent wait': {'agent': {'agent_status': 'idle'}}, 'agent get': {'agent': {'agent_status': 'idle'}},
             'agent read': '› Ask Codex to do anything', 'agent prompt': {'type': 'agent_prompted'},
-            'agent list': {'agents': [{'pane_id': p['pane_id'], 'name': p['label']} for p in panes]},
+            'agent list': {'agents': [{'pane_id': p['pane_id'], 'name': p['label'], 'agent': p['agent']} for p in panes]},
+            **{'agent get ' + p['pane_id']: {'agent': {'pane_id': p['pane_id'], 'name': p['label'], 'agent': p['agent'],
+                                                       'agent_status': 'idle', 'focused': False, 'completion_seq': None}}
+               for p in panes if p['agent'] in self.handed},
             'workspace list': {'workspaces': [{'workspace_id': ws, 'label': self.NAME}]},
             'tabs': {ws: [{'tab_id': f'{ws}:t1', 'label': 'lead'}, {'tab_id': f'{ws}:t2', 'label': 'build'}]},
             'layout': {f'{ws}:p1': [rect(f'{ws}:p1', 0, 0, 200, 40)],
@@ -236,10 +242,12 @@ class Job:
 
     def workers(self):
         """O3: the lead starts one worker of every kind, each in its pane on the TUI; a kind this backend does not take is
-        refused."""
+        refused. On Core a handed kind is first started without --pane (refused), then handed to its pane."""
         for n, kind in enumerate(self.kinds, 2):
             brief = valid_brief(self.job, 'build-' + kind)
-            where = ('--pane', f'{self.WS}:p{n}') if self.backend == 'tui' else ()
+            where = ('--pane', f'{self.WS}:p{n}') if self.backend == 'tui' or kind in self.handed else ()
+            if kind in self.handed:
+                self.lead('start ' + kind + ' on core', 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief)
             self.lead('start ' + kind, 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief, *where)
 
     def question(self):
