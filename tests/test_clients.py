@@ -6,7 +6,7 @@ one job per client and backend against the repo's fakes (tests/clients_run.py) a
 contract, O1 to O9, as subtests named "<client>/<backend> <outcome>". A gap between clients is a finding: a test
 marked as an expected failure, named after it. Stdlib only; nothing leaves the machine.
 """
-import json, re, shutil, sys, tempfile, unittest
+import re, shutil, sys, tempfile, unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -35,8 +35,9 @@ OUTCOMES = {
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
 }
 
-from clients_run import ANSWER, GATE, OTHER_SHA, QUESTION, SHA, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
+from clients_run import ANSWER, GATE, OTHER_SHA, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
 from test_core import FAKE_HC  # noqa: E402
+from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 import test_doctor  # noqa: E402
 
 SAY_SO = "an agent's own say-so never counts"
@@ -327,6 +328,72 @@ class Outcomes(unittest.TestCase):
                                  else '', 'owner=' + job.bot, 'new tags the workspace with the job\'s bot')
                 blocked = [q for q in job.queued() if q['payload'].get('state') == 'blocked']
                 self.assertEqual([q['route'] for q in blocked], [job.bot])
+
+
+    # findings of the live runs (docs/CLIENTS.md, "Found by the live runs") that the fakes can show
+    def fresh(self, name, backend):
+        """A new job of its own for a finding, started by the first client that runs outside Herdr."""
+        client = next(c for c, row in CLIENTS.items() if row['where'] == 'outside')
+        job = Job(client, CLIENTS[client], backend, self.root / name, WORKERS)
+        job.start()
+        self.assertEqual(job.steps['new'][0], 0, job.steps['new'])
+        return job
+
+    def card_from_a_tui_pane(self):
+        """A local TUI job's lead asks with its pane's environment, which holds no FLEET_ASK_CMD of the front door's.
+        One job, for F5 and F6."""
+        if getattr(type(self), 'card_job', None):
+            return type(self).card_job
+        type(self).card_job = job = self.fresh('card', 'tui')
+        pane = {k: v for k, v in job.lead_env().items() if k != 'FLEET_ASK_CMD'}
+        code, out, err = job.run('ask from the pane', (STAMPEDE, 'ask', job.job, QUESTION, '--option', ANSWER), pane)
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(job.until(lambda: job.asked() or job.moshi()), 'no card at all')
+        return job
+
+    @unittest.expectedFailure
+    def test_f4_a_herdr_refusal_at_start_is_one_line(self):
+        """F4: on the TUI, a Herdr refusal at start, such as a worker name a pane of another job already holds (Herdr's
+        agent names are global), ends in a Python traceback: main() catches HcError, not HerdrError. On Core, one line."""
+        job = self.fresh('f4', 'tui')
+        herdr, _ = fake_herdr(job.repo, start_error='agent_name_taken')
+        self.addCleanup(shutil.rmtree, Path(herdr).parent, True)
+        argv = (STAMPEDE, 'start', job.job, 'build-taken', '--kind', 'codex', '--pane', 'w9:p9', '--brief', valid_brief(job.job, 'build-taken'))
+        code, out, err = job.run('start a taken name', argv, {**job.lead_env(), 'HERDR': herdr})
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertTrue(err.startswith('fleet-job start: herdr agent start'), err)
+
+    @unittest.expectedFailure
+    def test_f5_a_tui_lead_asks_through_the_front_doors_command(self):
+        """F5: a TUI lead runs with its pane's environment, so of the front door's settings only FLEET_LEAD_MODEL and
+        FLEET_LEAD_EFFORT (which new reads itself) reach it: its cards go to Moshi, not to the front door's
+        FLEET_ASK_CMD. On Core, launch_env carries every setting. Fixed when the lead's start hands the setting to the
+        pane, or when the lead asks through it without it."""
+        job = self.card_from_a_tui_pane()
+        if any('FLEET_ASK_CMD' in call for call in job.herdr_calls() if call.startswith('agent start ' + Job.LEAD)):
+            return
+        self.assertIn(QUESTION, job.asked(), 'the front door\'s FLEET_ASK_CMD asked it')
+
+    @unittest.expectedFailure
+    def test_f6_a_phone_card_names_its_job(self):
+        """F6: a card on the phone carries the question and --source herdr-fleet, but no job, so with several jobs open
+        the owner tells their cards apart by the question alone."""
+        job = self.card_from_a_tui_pane()
+        self.assertRegex(job.asked() or job.moshi(), rf'\b{Job.NAME}\b', 'the card names its job')
+
+    @unittest.expectedFailure
+    def test_f7_a_kind_a_backend_does_not_take_is_refused_before_its_brief(self):
+        """F7: start checks the brief before the kind, so a cursor start on Core with an incomplete brief names the
+        missing sections, not why Core takes no Cursor. Either way nothing starts."""
+        job = self.fresh('f7', 'core')
+        brief = job.job / 'briefs/probe.md'
+        brief.write_text('## Goal\nProbe.\n')
+        for kind in set(KINDS) - set(WORKERS['core']):
+            code, out, err = job.run('start ' + kind, (STAMPEDE, 'start', job.job, 'probe-' + kind, '--kind', kind, '--brief', brief),
+                                     job.lead_env())
+            self.assertEqual(code, 2, out + err)
+            self.assertIn(REFUSED[kind], err)
 
 
 if __name__ == '__main__':

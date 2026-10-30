@@ -63,12 +63,12 @@ For every client and backend, as a subtest named `<client>/<backend> <outcome>`,
 ## Run it
 
 ```bash
-python3 -m unittest tests.test_clients        # about 15 s; part of python3 -m unittest discover tests
+python3 -m unittest tests.test_clients        # about 25 s; part of python3 -m unittest discover tests
 ```
 
-Expected: `OK (skipped=12, expected failures=2)`. The 12 skips are O9 for the six local clients on two backends; the 2 expected failures are the findings below. A failure names the client, backend and outcome, as in `FAIL: test_o5_gate (...) [grokbot/core O5]`.
+Expected: `OK (skipped=12, expected failures=6)`. The 12 skips are O9 for the six local clients on two backends; the 6 expected failures are findings F1, F2 and F4 to F7 below, each a test named after it. A failure names the client, backend and outcome, as in `FAIL: test_o5_gate (...) [grokbot/core O5]`.
 
-How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per client and backend, 8 at a time, each in a scratch folder with its own `HOME`, a fake Herdr (`HERDR`, and first on `PATH`), the fake Herdr Core [tests/fake_hc.py](../tests/fake_hc.py) (`HC`), fake `claude` and `codex`, a route for a bot that is never flushed, and a recorder as `FLEET_ASK_CMD`. A client outside Herdr runs its commands with pid 1 as their parent's parent, so no Herdr process sits above them wherever the suite runs; a bot's run under a process named `sshd`. Nothing reaches a real Herdr, Herdr Core, agent CLI or the network.
+How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per client and backend, 8 at a time, each in a scratch folder with its own `HOME`, a fake Herdr (`HERDR`, and first on `PATH`), the fake Herdr Core [tests/fake_hc.py](../tests/fake_hc.py) (`HC`), a fake CLI for each worker kind, a route for a bot that is never flushed, a recorder as `FLEET_ASK_CMD`, and a fake `moshi-hook` first on `PATH`, so no card reaches a phone. A client outside Herdr runs its commands with pid 1 as their parent's parent, so no Herdr process sits above them wherever the suite runs; a bot's run under a process named `sshd`. Nothing reaches a real Herdr, Herdr Core, agent CLI or the network.
 
 ## Add a client
 
@@ -102,3 +102,16 @@ Leave the test workspaces open; the owner closes them.
 - **F1, a bot on Core, from its own guide.** Over SSH a bot has no workspace on Core, so only `HERDR_EVENTS_OWNER` makes a job its own. [remote/grokbot/herdr.md](../remote/grokbot/herdr.md) and [remote/other.md](../remote/other.md) give the Core start without it: run as written, the job is local, its questions and gates go to the phone, its finish to the default route, and the bot never hears them. Fix: put `HERDR_EVENTS_OWNER=<bot>` in front of those commands (the skills' source first). Test: `test_f1_a_bots_core_start_names_its_owner`.
 - **F2, a bot that names itself by `HERDR_EVENTS_OWNER` on the TUI.** `stampede new` records it in `<job>/owner`, so questions, gates and finish reach it, but it does not tag the workspace, so the panes' own `blocked`, permission, `stale` and `dead` events go to the default route. On Core, `new` tags the job's key, so the follower's events do reach it. Fix: `new` on the TUI tags the workspace as `new --core` tags the key, or the guides say to tag first. Test: `test_f2_an_owner_set_by_env_hears_its_panes`.
 - **Hermes has no front-door guide.** It is in `CLIENTS` and passes like the other local clients, but README's front doors and `remote/` do not name it.
+
+### Found by the live runs
+
+A live run on one Mac, 30 Oct 2026 ([Clients](#clients)). Each finding is listed once, with the clients it hits.
+
+- **F3, a Codex worker held at a dialog reads as done (any client, TUI).** Codex's hooks review dialog shows as `done` in Herdr, not `blocked`, so `stampede start` takes the worker as ready and no hook wakes the lead: one job stalled 10 minutes until someone read the pane. No test: the fakes can only say what Herdr says.
+- **F4, a Herdr refusal at start is a traceback (any client, TUI).** When `herdr agent start` refuses, for example a worker name that a pane of another job already holds (Herdr's agent names are global), `stampede start` ends in a Python traceback: `main()` catches Herdr Core's error, not Herdr's. On Core the same is one line. Test: `test_f4_a_herdr_refusal_at_start_is_one_line`.
+- **F5, a TUI lead takes its settings from its pane (front doors outside Herdr, TUI).** The lead runs with the environment of the pane Herdr opened, so of the front door's settings only `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` reach it; `FLEET_ASK_CMD` and the rest must be exported in that pane first ([Live runbook](#live-runbook)). On Core, every setting goes with the lead. Test: `test_f5_a_tui_lead_asks_through_the_front_doors_command`.
+- **F6, phone cards carry no job (every local client).** A card has the question and `--source herdr-fleet`, but not the job's name; with four jobs open at once, the owner told cards apart by their question alone. Test: `test_f6_a_phone_card_names_its_job`.
+- **F7, the brief is checked before the kind (any client, Core).** `stampede start --kind cursor` on Core with an incomplete brief names the missing sections, not why Core takes no Cursor. Neither starts anything. Test: `test_f7_a_kind_a_backend_does_not_take_is_refused_before_its_brief`.
+- **F8, Codex inside the fleet's own sandbox cannot reach Herdr (`codex`).** Run with `--approve-for-me`, every `herdr`, `hc` and `stampede` call failed with "Operation not permitted". With the user's own Codex config it worked, but that config grants full host access with no approvals. No test: it needs a real Codex.
+- **F9, headless Cursor needs `--force` (`cursor`).** `cursor-agent -p` rejects every shell call unless it gets `--force` (or `--yolo`), and [remote/other.md](../remote/other.md) does not say so, so a print-mode Cursor chat cannot run `stampede new`. Whether a front door should run with `--force` is the owner's call. No test: it needs a real Cursor.
+- **Codex and Cursor front doors cannot be woken (`codex`, `cursor`).** `codex exec` hands the job over and exits, so answers and gates rely on the phone alone, as [remote/codex.md](../remote/codex.md) says, and the finish event has no session to reach.
