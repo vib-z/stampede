@@ -20,9 +20,11 @@ STAMPEDE = ROOT / 'scripts/stampede'
 BOT_SCRIPTS = ROOT / 'skills/grokbot-herdr/scripts'
 OTHER_SHA = 'b' * 40
 QUESTION, ANSWER, GATE, SUMMARY = 'Keep hello in the repo root?', 'yes, the root', 'Merge PR #3 into main', 'hello written'
-# a recorder in place of Moshi (FLEET_ASK_CMD): logs each card; answers a question with its first option, a gate with yes
+# a recorder in place of Moshi (FLEET_ASK_CMD): logs each card; answers a question with its first option, and a gate
+# (no options) with yes only once the test makes the file `yes` beside it, the owner's tap; no yes in 60 s is a no
 ASK = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$(dirname "$0")/asked"\nwhile [ $# -gt 0 ]; do\n' \
-      '  [ "$1" = --option ] && { echo "$2"; exit 0; }; shift\ndone\necho yes\n'
+      '  [ "$1" = --option ] && { echo "$2"; exit 0; }; shift\ndone\n' \
+      'for _ in $(seq 600); do [ -e "$(dirname "$0")/yes" ] && { echo yes; exit 0; }; sleep 0.1; done\nexit 1\n'
 
 
 def detached(argv, env, host):
@@ -207,16 +209,28 @@ class Job:
             self.until(lambda: ANSWER in self.inbox())
 
     def gate(self):
-        """O5: the lead asks a gate; only a recorded yes for that commit opens it; approve-gate refuses where it must."""
+        """O5: the lead asks a gate. Before the owner's yes, and after each approve-gate that must be refused, gate-ok
+        refuses and no yes is recorded (`closed`); then the real yes, the bot's approve-gate over ssh or the tap on the
+        phone card, opens it for that commit only."""
         out = self.lead('gate', 'ask', self.job, '--gate', '--sha', SHA, '--pr', '3', GATE)[1]
         self.ident = ident = (re.findall(r'^GATE ([0-9a-f]{12}) ', out, re.M) or ['000000000000'])[0]
         approve = ('approve-gate', self.job, ident, '--by', f'owner in {self.bot or "local"} chat', '--sha')
-        self.front('approve other commit', *approve, OTHER_SHA)
-        self.front('approve inside Herdr', *approve, SHA, where='inside')
-        self.front('approve in a Core terminal', *approve, SHA, where='core')
-        self.front('approve', *approve, SHA)  # a bot's yes; a local job's is the owner's tap on the phone card
-        if not self.bot:
-            self.until(lambda: (self.job / 'gates' / (ident + '.approved')).is_file())
+        record = self.job / 'gates' / (ident + '.approved')
+        self.closed = {}  # what ran -> (gate-ok's exit code right after it, whether a yes was recorded)
+
+        def closed(after):
+            self.closed[after] = self.lead('gate-ok after ' + after, 'gate-ok', self.job, ident, '--sha', SHA)[0], record.exists()
+        closed('the ask')
+        refused = [('approve other commit', OTHER_SHA, None), ('approve inside Herdr', SHA, 'inside'),
+                   ('approve in a Core terminal', SHA, 'core')] + ([] if self.bot else [('approve', SHA, None)])
+        for name, sha, where in refused:  # a local job's own approve-gate is refused too: its yes is the phone's
+            self.front(name, *approve, sha, where=where)
+            closed(name)
+        if self.bot:
+            self.front('approve', *approve, SHA)
+        else:
+            (self.bin / 'yes').touch()
+            self.until(record.is_file)
         self.lead('gate-ok other commit', 'gate-ok', self.job, ident, '--sha', OTHER_SHA)
         self.lead('gate-ok', 'gate-ok', self.job, ident, '--sha', SHA)
 

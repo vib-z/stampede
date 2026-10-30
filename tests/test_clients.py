@@ -197,6 +197,11 @@ class Outcomes(unittest.TestCase):
     def test_o5_gate(self):
         def check(job):
             self.ok(job, 'gate', 'GATE ' + job.ident)
+            refused = ['approve other commit', 'approve inside Herdr', 'approve in a Core terminal'] + ([] if job.bot else ['approve'])
+            self.assertEqual(list(job.closed), ['the ask'] + refused)
+            for after, (code, recorded) in job.closed.items():  # no yes yet: the gate stays shut
+                self.assertEqual((code, recorded), (2, False), f'the gate opened after {after}')
+                self.refused(job, 'gate-ok after ' + after, 'has no recorded yes')
             self.refused(job, 'approve inside Herdr', SAY_SO)
             self.refused(job, 'approve in a Core terminal', SAY_SO)
             self.refused(job, 'approve other commit')
