@@ -35,7 +35,7 @@ OUTCOMES = {
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
 }
 
-from clients_run import ANSWER, GATE, OTHER_SHA, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
+from clients_run import ANSWER, BOT_SCRIPTS, GATE, OTHER_SHA, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
 from test_core import FAKE_HC  # noqa: E402
 from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 import test_doctor  # noqa: E402
@@ -331,9 +331,9 @@ class Outcomes(unittest.TestCase):
 
 
     # findings of the live runs (docs/CLIENTS.md, "Found by the live runs") that the fakes can show
-    def fresh(self, name, backend):
-        """A new job of its own for a finding, started by the first client that runs outside Herdr."""
-        client = next(c for c, row in CLIENTS.items() if row['where'] == 'outside')
+    def fresh(self, name, backend, where='outside'):
+        """A new job of its own for a finding, started by the first client that runs where it says."""
+        client = next(c for c, row in CLIENTS.items() if row['where'] == where)
         job = Job(client, CLIENTS[client], backend, self.root / name, WORKERS)
         job.start()
         self.assertEqual(job.steps['new'][0], 0, job.steps['new'])
@@ -394,6 +394,27 @@ class Outcomes(unittest.TestCase):
                                      job.lead_env())
             self.assertEqual(code, 2, out + err)
             self.assertIn(REFUSED[kind], err)
+
+
+    @unittest.expectedFailure
+    def test_f10_a_bot_fills_the_answer_by_its_placeholder(self):
+        """F10: a question's `answer` and a gate's `deny` hold `<the owner's words>` shell-quoted, so the plain replace
+        a bot makes (remote/events.md shows the placeholder as is) misses it, and the lead gets the placeholder."""
+        for job in self.jobs:
+            for event in [q['payload'] for q in job.queued() if q['payload'].get('state') in ('question', 'gate')]:
+                command = event.get('answer') or event['deny']
+                self.assertNotEqual(command.replace("<the owner's words>", ANSWER), command, f'{job.client}/{job.backend}')
+
+    @unittest.expectedFailure
+    def test_f11_the_finishing_turn_wakes_no_bot(self):
+        """F11: finish removes the job's marker before the lead's turn ends, so that turn's own Stop is no longer a turn
+        end of an open job: it reaches the bot as one more event after done."""
+        job = self.fresh('f11', 'core', where='ssh')
+        self.assertEqual(job.lead('finish', 'finish', job.job, SUMMARY)[0], 0)
+        before = len(job.queued())
+        job.run('lead stop', (BOT_SCRIPTS / 'herdr-event-post', 'source=claude', 'state=Stop',
+                              f'pane=hc:{job.key}/{job.address(Job.LEAD)}'), job.base)
+        self.assertEqual(len(job.queued()), before, 'the bot heard the finishing turn after its done')
 
 
 if __name__ == '__main__':
