@@ -66,6 +66,8 @@ class ClientsInSync(unittest.TestCase):
         for name, row in CLIENTS.items():
             self.assertIn(row['where'], ('inside', 'outside', 'ssh'), name)
             self.assertTrue(set(row['backends']) <= set(WORKERS), name)
+            self.assertTrue(row['backends'], f'{name}: no backend, so no job would test it')
+            self.assertEqual(len(set(row['backends'])), len(row['backends']), f'{name}: a backend twice')
             self.assertEqual(row['where'] == 'ssh', bool(row.get('bot')), f'{name}: a client over ssh is a bot, and only it')
             if row.get('bot'):
                 self.assertIn(row['owner_from'], ('tag', 'env'), name)
@@ -109,6 +111,11 @@ class Outcomes(unittest.TestCase):
     def health_check(cls, job):
         ids = {k: v for k, v in job.client_env().items() if k.startswith('HERDR_') and k not in job.base}
         return cls.run_doctor(cls.doctor_flags(job), ids)
+
+    def test_every_declared_pair_played_to_the_end(self):
+        declared = sorted((name, backend) for name, row in CLIENTS.items() for backend in row['backends'])
+        played = sorted((job.client, job.backend) for job in self.jobs if not job.error and 'finish again' in job.steps)
+        self.assertEqual(played, declared)
 
     # each outcome, for every client and backend
     def outcome(self, oid, check):
