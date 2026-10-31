@@ -740,7 +740,6 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 **Next:**
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
 - On Herdr Core, planned: workers on a second machine (`hc run --on`), a bot front door over `hc`, the job shown in the Herdr app (its `herdr.space` and `herdr.tab` labels), Hermes and Kimi workers on a TUI-only job, and Kimi's and Hermes's empty prompts, so a handed one is briefed and told without a hand.
-- One live job from Grok Bot.
 - Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.
 - Workers on a second machine over Tailscale.
 - Codex or Cursor as the lead.
