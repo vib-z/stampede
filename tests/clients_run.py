@@ -276,6 +276,10 @@ class Job:
         def closed(after):
             self.closed[after] = self.lead('gate-ok after ' + after, 'gate-ok', self.job, ident, '--sha', SHA)[0], record.exists()
         closed('the ask')
+        if self.backend == 'core':
+            for text in ('yes', 'approve', 'go ahead'):
+                self.front('typed ' + text, 'tell', self.job, 'lead', text)
+                closed('typed ' + text)
         refused = [('approve other commit', OTHER_SHA, None), ('approve inside Herdr', SHA, 'inside'),
                    ('approve in a Core terminal', SHA, 'core')] + ([] if self.bot else [('approve', SHA, None)])
         for name, sha, where in refused:  # a local job's own approve-gate is refused too: its yes is the phone's

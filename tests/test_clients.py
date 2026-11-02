@@ -226,8 +226,17 @@ class Outcomes(unittest.TestCase):
     def test_o5_gate(self):
         def check(job):
             self.ok(job, 'gate', 'GATE ' + job.ident)
+            notice = 'A typed yes does not count on Core; answer in the chat or on the phone that started this job.'
+            brief = (job.job / 'briefs' / (Job.LEAD + '.md')).read_text()
+            typed = ['typed ' + text for text in ('yes', 'approve', 'go ahead')] if job.backend == 'core' else []
+            if job.backend == 'core':
+                self.assertIn(f'reply with one short line: "{notice}"', brief)
+                for step in typed:
+                    self.ok(job, step, 'DELIVERED')
+            else:
+                self.assertNotIn(notice, brief)
             refused = ['approve other commit', 'approve inside Herdr', 'approve in a Core terminal'] + ([] if job.bot else ['approve'])
-            self.assertEqual(list(job.closed), ['the ask'] + refused)
+            self.assertEqual(list(job.closed), ['the ask'] + typed + refused)
             for after, (code, recorded) in job.closed.items():  # no yes yet: the gate stays shut
                 self.assertEqual((code, recorded), (2, False), f'the gate opened after {after}')
                 self.refused(job, 'gate-ok after ' + after, 'has no recorded yes')
