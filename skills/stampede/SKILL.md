@@ -49,4 +49,4 @@ Start it again after each return until the job is finished. Each item is `<job d
 
 **The lead's pane is not the owner.** In `herdr agent read`, the grey text in its input line is Claude's own prompt suggestion, not the owner typing, and `.focused` can read true while nobody types. Go by the outbox, `plan.md` and `reports/`.
 
-**Gates** (merge, push to main, deploy, send, spend, close) are always the owner's own yes: in this chat (recorded with `approve-gate` as above), in the lead's pane, or on their phone (on Herdr Core only the recorded yes, never a typed one); never your decision.
+**Gates** (merge, push to main, deploy, send, spend, close) are always the owner's own yes: in this chat (recorded with `approve-gate` as above), in a Claude lead's pane, or on their phone (for a Codex lead and on Herdr Core only the recorded yes, never a typed one); never your decision.

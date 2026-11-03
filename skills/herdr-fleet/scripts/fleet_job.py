@@ -81,10 +81,17 @@ HERDR_SEND = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'
 
 
 def herdr_send(job, name, text):
-    """Type one prompt into an agent's pane with herdr-send: (submitted, its one line)."""
-    sent = subprocess.run([str(HERDR_SEND), name, text], env={**os.environ, 'FLEET_JOB_DIR': str(Path(job).absolute())},
-                          stdout=subprocess.PIPE, text=True)
-    return sent.returncode == 0, sent.stdout.strip()
+    """Type one prompt into an agent's pane with herdr-send: (submitted, its one line). A send that has not finished in
+    DELIVER_SEND seconds is stopped with its children and counts as not submitted."""
+    with subprocess.Popen([str(HERDR_SEND), name, text], env={**os.environ, 'FLEET_JOB_DIR': str(Path(job).absolute())},
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, start_new_session=True) as sent:
+        try:
+            said = sent.communicate(timeout=DELIVER_SEND)[0]
+        except subprocess.TimeoutExpired:
+            os.killpg(sent.pid, signal.SIGKILL)
+            sent.communicate()
+            return False, f'FAILED {name}: herdr-send did not finish in {DELIVER_SEND} s'
+    return sent.returncode == 0, said.strip()
 
 
 def type_pointer(job, agent, who, brief, pointer):
@@ -114,6 +121,7 @@ def deliver_soon(job):
 
 
 DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 1500  # seconds between looks, seconds one deliverer waits, characters per prompt
+DELIVER_CALL, DELIVER_SEND = 15, 120  # seconds a Herdr look and a herdr-send may take before the deliverer stops waiting
 
 
 def deliver(job):
@@ -150,18 +158,32 @@ def deliver(job):
 
 
 def screen_of(agent):
-    return subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'read', agent, '--source', 'visible', '--lines', '30'],
-                          capture_output=True, text=True).stdout
+    """The agent's visible screen; a ValueError when Herdr does not answer in DELIVER_CALL seconds."""
+    try:
+        return subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'read', agent, '--source', 'visible', '--lines', '30'],
+                              capture_output=True, text=True, timeout=DELIVER_CALL).stdout
+    except subprocess.TimeoutExpired:
+        raise ValueError(f'herdr agent read did not answer in {DELIVER_CALL} s') from None
+
+
+def composer_empty(screen):
+    """True when a Codex screen's prompt holds no draft: below its last prompt line (», ›, ❯ or >) Codex shows its
+    '? for shortcuts' footer, which it hides while anything is typed (checked live with Codex on GPT-6 Astra, 3 Nov 2026).
+    Text in the prompt line is never read, since a placeholder and a real draft look alike; any other screen is a draft."""
+    rows = [row for row in screen.splitlines() if row.strip()][-8:]
+    prompts = [i for i, row in enumerate(rows) if re.match(r' *[»›❯>]( |$)', row)]
+    return bool(prompts) and any(row.strip().startswith('? for shortcuts') for row in rows[prompts[-1] + 1:])
 
 
 def ready(agent):
     """True when Herdr shows the agent idle or done, nobody focused on its pane and nothing typed in its prompt (herdr-send
-    would clear a draft the owner left there). A ValueError when Herdr does not answer at all; False when it has no such agent."""
+    would clear a draft the owner left there). A ValueError when Herdr does not answer in DELIVER_CALL seconds; False when
+    it has no such agent."""
     try:
-        shown = herdr('agent', 'get', agent).get('agent', {})
+        shown = herdr('agent', 'get', agent, timeout=DELIVER_CALL).get('agent', {})
     except HerdrError:
         return False
-    return shown.get('agent_status') in ('idle', 'done') and not shown.get('focused') and not typed(screen_of(agent))
+    return shown.get('agent_status') in ('idle', 'done') and not shown.get('focused') and composer_empty(screen_of(agent))
 
 
 def unread(job, agent):
@@ -906,13 +928,13 @@ def lead_model(kind, model=None, effort=None):
 
 def lead_brief_for(job, lead, kind, brief):
     """A lead restarted on the other CLI (a usage-limit fallback) gets its generated brief rewritten for that CLI, so a
-    Codex lead never reads that a yes typed in its pane counts. Only the brief fleet-job new wrote, only on a Herdr TUI job."""
-    job = Path(job).absolute()
-    was = agent_rows(job).get(lead, {}).get('kind')
-    if backend(job) == 'core' or was in (None, kind) or Path(brief).absolute() != job / 'briefs' / (lead + '.md') \
-            or not Path(brief).is_file():
+    Codex lead never reads that a yes typed in its pane counts. Decided by the brief's own text, not the roster, so a
+    retry after a failed switch is put right too. Only the brief fleet-job new wrote, only on a Herdr TUI job."""
+    job, path = Path(job).absolute(), Path(brief).absolute()
+    if backend(job) == 'core' or path != job / 'briefs' / (lead + '.md') or not path.is_file():
         return
-    Path(brief).write_text(lead_brief(job, lead, job_owner(job), (job / 'review').is_file(), None, front=front_door(job), kind=kind))
+    if ('fleet-job types each new line of' in path.read_text()) != (kind == 'codex'):
+        path.write_text(lead_brief(job, lead, job_owner(job), (job / 'review').is_file(), None, front=front_door(job), kind=kind))
 
 
 def lead_folders(job):
@@ -1073,13 +1095,13 @@ class HerdrError(RuntimeError):
         self.code = code
 
 
-def herdr(*args):
-    """One Herdr command's result; HerdrError when it answers an error. A Herdr that is missing or answers no JSON is a
-    ValueError: nothing can be told from it."""
+def herdr(*args, timeout=None):
+    """One Herdr command's result; HerdrError when it answers an error. A Herdr that is missing, answers no JSON, or does
+    not answer within timeout seconds is a ValueError: nothing can be told from it."""
     try:
-        result = subprocess.run([os.environ.get('HERDR', 'herdr'), *args], capture_output=True, text=True)
+        result = subprocess.run([os.environ.get('HERDR', 'herdr'), *args], capture_output=True, text=True, timeout=timeout)
         data = json.loads(result.stdout or result.stderr or '{}')
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         raise ValueError('herdr ' + ' '.join(args[:2]) + ' did not answer (' + line(error) + ')') from None
     if not isinstance(data, dict):
         raise ValueError('herdr ' + ' '.join(args[:2]) + ' answered no JSON object')
@@ -1114,7 +1136,6 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
         raise ValueError('the lead runs on claude or codex, and on claude in a Herdr Core job')
     if lead:  # a restarted lead keeps the lead model and effort of its CLI unless told otherwise
         model, effort = lead_model(kind, model, effort)
-        lead_brief_for(job, agent, kind, brief)
     if not lead:
         if not Path(brief).is_file():
             raise ValueError(f'brief {brief} does not exist')
@@ -1132,6 +1153,8 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
         raise ValueError(f'{kind} runs only as a handed agent of a Herdr Core job (start --pane in a job made with new --core), '
                          'whose follower tells its turns; on a Herdr TUI job start it by hand')
     yolo_in = pane_yolo(pane, yolo_in, lead)
+    if lead:  # only once every check passed, so a refused start never changes it
+        lead_brief_for(job, agent, kind, brief)
     args = cli_args(job, agent, kind, model, effort, list(reports), lead=lead, yolo_in=yolo_in)
     herdr('pane', 'rename', pane, agent)
     blocked = launch(agent, kind, pane, args)

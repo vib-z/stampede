@@ -1350,6 +1350,30 @@ class LeadChoice(unittest.TestCase):
                 fj.start(core if agent_kind == 'codex' else job, 'lead-demo', agent_kind, None, '-')
             self.assertIn('the lead runs on claude or codex, and on claude in a Herdr Core job', str(refused.exception))
 
+    def test_a_refused_or_failed_switch_never_leaves_a_lead_the_other_clis_brief(self):
+        import contextlib, io
+        from unittest import mock
+        job = job_with([('lead-demo', 'codex')])
+        brief = job / 'briefs/lead-demo.md'
+        brief.parent.mkdir()
+        brief.write_text(fj.lead_brief(job.absolute(), 'lead-demo', '', False, None, kind='codex'))
+        codex_text = brief.read_text()
+        with self.assertRaises(ValueError):   # refused after the kind checks: --cwd is for a Core job
+            fj.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief), cwd='/tmp')
+        self.assertEqual(brief.read_text(), codex_text)
+        herdr, _ = fake_herdr(job.parent, start_error='agent_start_failed')
+        with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp()}), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(fj.HerdrError):
+            fj.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief))   # the switch to Claude fails at launch
+        self.assertIn('typed in your pane', brief.read_text())          # rewritten for the Claude it tried
+        self.assertEqual(fj.lead_kind(job), 'codex')                    # but the roster still says Codex
+        herdr, _ = fake_herdr(job.parent)
+        with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp()}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            fj.start(job, 'lead-demo', 'codex', 'w9:p1', str(brief))   # the retry on Codex puts it right
+        self.assertNotIn('typed in your pane', brief.read_text())
+        self.assertIn('Act only after fleet-job gate-ok', brief.read_text())
+
     def test_tell_writes_its_inbox_file_and_wakes_the_deliverer(self):
         import contextlib, io
         out = io.StringIO()
@@ -1473,16 +1497,46 @@ class Deliver(unittest.TestCase):
 
     def test_ready_means_idle_or_done_unfocused_and_no_draft(self):
         from unittest import mock
-        empty = '› Ask Codex to do anything\n  ? for shortcuts\n'
+        footer = '\n  GPT-6-Astra ultra · ~/repo · Main [default]\n  ? for shortcuts            ⚠ 2 warnings · f2 to view\n'
+        empty = '» Ask Codex to do anything\n' + footer     # as Codex showed it live, 3 Nov 2026
+        draft = '» Explain how to get started\n\n  GPT-6-Astra ultra · ~/repo · Main [default]\n          ⚠ 2 warnings · f2 to view\n'
         for shown, screen, want in (({'agent_status': 'idle'}, empty, True), ({'agent_status': 'done'}, empty, True),
+                                    ({'agent_status': 'done'}, '› \n' + footer, True),
                                     ({'agent_status': 'idle', 'focused': True}, empty, False),
                                     ({'agent_status': 'working'}, empty, False),
-                                    ({'agent_status': 'idle'}, '  Worked for 7s\n› half a reply from the owner\n  GPT-6-Astra ultra\n', False)):
+                                    ({'agent_status': 'idle'}, draft, False),                    # a placeholder phrase in a draft
+                                    ({'agent_status': 'idle'}, '  Worked for 7s\n› half a reply from the owner\n  GPT-6-Astra ultra\n', False),
+                                    ({'agent_status': 'idle'}, '• To get started, ? for shortcuts\n' + draft, False),  # in earlier output
+                                    ({'agent_status': 'idle'}, '? for shortcuts\n' + draft, False),    # a footer above the prompt
+                                    ({'agent_status': 'idle'}, '', False)):                         # nothing readable
             with self.subTest(shown=shown, screen=screen), mock.patch.object(fj, 'herdr', return_value={'agent': shown}), \
                     mock.patch.object(fj, 'screen_of', return_value=screen):
                 self.assertEqual(REAL_READY('lead-demo'), want)
         with mock.patch.object(fj, 'herdr', side_effect=fj.HerdrError('gone', 'agent_not_found')):
             self.assertFalse(REAL_READY('lead-demo'))
+
+    def test_a_stalled_herdr_or_herdr_send_never_holds_the_lock(self):
+        from unittest import mock
+        folder = Path(tempfile.mkdtemp())
+        stall = folder / 'stall'
+        stall.write_text('#!/bin/bash\necho $$ >> "$(dirname "$0")/pids"\nsleep 30\n')
+        stall.chmod(0o755)
+        with mock.patch.object(fj, 'ready', REAL_READY), mock.patch.object(fj, 'DELIVER_CALL', 0.3), \
+                mock.patch.dict(os.environ, {'HERDR': str(stall)}):
+            started = time.monotonic()
+            self.assertEqual(self.deliver(), 4)          # agent get hangs: the deliverer lets go at once
+            self.assertLess(time.monotonic() - started, 5)
+        self.send.assert_not_called()
+        self.assertEqual(len(fj.unread(self.job, 'lead-demo')), 2)   # nothing marked read
+        with mock.patch.object(fj, 'HERDR_SEND', stall), mock.patch.object(fj, 'DELIVER_SEND', 0.3):
+            started = time.monotonic()
+            self.assertEqual(REAL_SEND(self.job, 'lead-demo', 'hi'), (False, 'FAILED lead-demo: herdr-send did not finish in 0.3 s'))
+            self.assertLess(time.monotonic() - started, 5)
+        for pid in (folder / 'pids').read_text().split():   # every stalled child was stopped
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid), 0)
+        self.assertEqual(self.deliver(), 0)               # and the next deliverer is not shut out
+        self.send.assert_called_once()
 
     def test_herdr_out_of_reach_lets_go_of_the_lock_at_once(self):
         self.ready.side_effect = ValueError('herdr agent get did not answer (Operation not permitted)')
@@ -1498,4 +1552,4 @@ class Deliver(unittest.TestCase):
         self.assertNotRegex(self.send.call_args.args[2], r'[\x00-\x1f\x7f-\x9f]')
 
 
-REAL_READY = fj.ready  # Deliver's setUp mocks fj.ready
+REAL_READY, REAL_SEND = fj.ready, fj.herdr_send  # Deliver's setUp mocks both
