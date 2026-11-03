@@ -17,6 +17,7 @@ is_ask(){ jq -e '.payload.source == "stampede" and (.payload.state == "gate" or 
 tell_lead(){
   local job; job=$(jq -r '.payload.job // ""' "$1" 2>/dev/null); [ -f "$job/lead" ] || return 0
   printf 'UNDELIVERED %s %s\n' "$(jq -r '"\(.payload.state) \(.payload.gate // .payload.ask) for \(.payload.owner)"' "$1")" "$2" >>"$job/inbox.log"
+  fleet-job _wake "$job" >/dev/null 2>&1 || true   # a Codex lead has no file hook: fleet-job types the line once it is idle
 }
 shopt -s nullglob
 files=("$Q"/*.json); [ ${#files[@]} -eq 0 ] && exit 0
@@ -42,7 +43,7 @@ while :; do
     name=$(basename "$f")
     age=$(( $(date +%s) - $(stat -f %m "$f") ))
     if [ "$age" -gt "$MAXAGE" ]; then
-      is_ask "$f" && tell_lead "$f" "after 24 h, moved to $DEAD: the bot never heard it; ask again, or ask the owner in your pane"
+      is_ask "$f" && tell_lead "$f" "after 24 h, moved to $DEAD: the bot never heard it; ask again, or (a Claude lead) ask the owner in your pane"
       mv "$f" "$DEAD/"; rm -f "$HELD/$name"; log "dead (>24h): $name"; continue; fi
     route=$(jq -r '.route // "default"' "$f" 2>/dev/null)
     if [ -z "$route" ] || ! jq -e .payload "$f" >/dev/null 2>&1; then mv "$f" "$DEAD/"; log "dead (bad file): $name"; continue; fi
@@ -50,7 +51,7 @@ while :; do
     [ -r "$ROUTES/$route" ] && . "$ROUTES/$route"
     if [ -z "$URL" ]; then  # a stampede question or gate waits for its route to come back (24 h, then dead/)
       if is_ask "$f"; then
-        [ -e "$HELD/$name" ] || { tell_lead "$f" "held: route $route has no URL; it goes out once the route has one (herdr-doctor --relay), for 24 h, or ask the owner in your pane"; : >"$HELD/$name"; }
+        [ -e "$HELD/$name" ] || { tell_lead "$f" "held: route $route has no URL; it goes out once the route has one (herdr-doctor --relay), for 24 h, or (a Claude lead) ask the owner in your pane"; : >"$HELD/$name"; }
         log "held (route $route has no URL): $name"; continue; fi
       rm -f "$f"; log "dropped (route $route has no URL): $name"; continue; fi
     hdr=(); [ -n "$KEY" ] && hdr=(-H "Authorization: Bearer $KEY")

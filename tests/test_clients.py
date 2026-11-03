@@ -32,6 +32,9 @@ CLIENTS = {
 # with UNHANDED. tests/test_mixed.py covers a handed agent's life after its start (the follower, tell, reopen, marks).
 WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex', 'cursor', 'hermes', 'kimi')}
 HANDED = ('cursor', 'hermes', 'kimi')
+# the leads new takes on each backend (--lead; none given is claude): a Core job refuses a Codex lead before making anything
+LEADS = {'tui': ('claude', 'codex'), 'core': ('claude',)}
+LEAD_REFUSED = 'a Herdr Core job runs a Claude lead only'
 KINDS = tuple(dict.fromkeys(kind for kinds in WORKERS.values() for kind in kinds))  # O3 starts each on every backend
 REFUSED = {kind: kind + ' runs only as a handed agent of a Herdr Core job' for kind in ('hermes', 'kimi')}  # why a
 # backend that does not take a kind refuses it
@@ -102,10 +105,13 @@ class Outcomes(unittest.TestCase):
         cls.doctor.fake('claude', 'echo "2.1.312 (Claude Code)"')  # never a real agent CLI
         cls.doctor.fake('codex', 'echo "--no-daemon"')
         cls.jobs = [Job(name, row, backend, cls.root, WORKERS, HANDED) for name, row in CLIENTS.items() for backend in row['backends']]
+        cls.leads = [Job(name, row, backend, cls.root, WORKERS, HANDED, lead=kind) for name, row in CLIENTS.items()
+                     for backend in row['backends'] for kind in ('claude', 'codex')]  # a refused kind must be refused
         with ThreadPoolExecutor(8) as pool:  # each job has its own folders, fakes and environment
             cls.health = dict(zip([(j.client, j.backend) for j in cls.jobs], pool.map(cls.health_check, cls.jobs)))
             cls.reference = dict(zip(('tui', 'tui-bot', 'core'), pool.map(lambda f: cls.run_doctor(f, {}), ('tui', 'tui-bot', 'core'))))
             list(pool.map(Job.play, cls.jobs))
+            list(pool.map(Job.opening, cls.leads))
 
     @classmethod
     def doctor_flags(cls, job):
@@ -182,6 +188,35 @@ class Outcomes(unittest.TestCase):
                 self.assertIn(pointer, job.inbox())
             self.assertIn(f'--model {LEAD_MODEL} --effort low', lead, 'the front door\'s FLEET_LEAD_MODEL and EFFORT')
         self.outcome('O2', check)
+
+    def test_o2_start_each_lead(self):
+        """O2 with --lead: claude starts the same lead as no flag; codex starts a hooked Codex lead on its own defaults (the
+        front door's FLEET_LEAD_MODEL is a Claude model, so it stays with Claude) and types its brief pointer at once; a
+        backend that does not take a lead refuses it before anything is made."""
+        for job in self.leads:
+            with self.subTest(f'{job.client}/{job.backend} O2 --lead {job.lead_kind}'):
+                if job.lead_kind not in LEADS[job.backend]:
+                    self.refused(job, 'new', LEAD_REFUSED)
+                    self.assertFalse(job.job.exists(), 'nothing is made')
+                    continue
+                out = self.ok(job, 'new')
+                self.assertEqual(out.strip().splitlines()[-1], f'{Job.LEAD} {job.job}')
+                pointer = f'You are {Job.LEAD}. Read {job.job / "briefs" / (Job.LEAD + ".md")}'
+                if job.lead_kind == 'claude' and job.backend == 'core':
+                    (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
+                    self.assertIn(f'--model {LEAD_MODEL} --effort low', ' '.join(lead))
+                    continue
+                (lead,) = [c for c in job.herdr_calls() if c.startswith(f'agent start {Job.LEAD} --kind {job.lead_kind} ')]
+                if job.lead_kind == 'claude':
+                    self.assertIn(f'--model {LEAD_MODEL} --effort low', lead)
+                    self.assertIn(pointer, job.inbox())
+                    continue
+                self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra"', lead, 'a Claude FLEET_LEAD_MODEL stays with Claude')
+                self.assertIn('-c sandbox_workspace_write.network_access=true', lead)
+                self.assertIn('codex-notify', lead)
+                self.assertTrue(any(c.startswith(f'agent prompt {Job.LEAD} {pointer}') for c in job.herdr_calls()), 'typed at once')
+                self.assertEqual(job.inbox(), '', 'never left in its inbox')
+                self.assertIn('fleet-job types each new line of', (job.job / 'briefs' / (Job.LEAD + '.md')).read_text())
 
     def test_o3_workers(self):
         def check(job):
