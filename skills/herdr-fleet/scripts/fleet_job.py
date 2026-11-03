@@ -929,12 +929,15 @@ def lead_model(kind, model=None, effort=None):
 def lead_brief_for(job, lead, kind, brief):
     """A lead restarted on the other CLI (a usage-limit fallback) gets its generated brief rewritten for that CLI, so a
     Codex lead never reads that a yes typed in its pane counts. Decided by the brief's own text, not the roster, so a
-    retry after a failed switch is put right too. Only the brief fleet-job new wrote, only on a Herdr TUI job."""
+    retry after a failed switch is put right too. Only the brief fleet-job new wrote, only on a Herdr TUI job. Returns the
+    text it replaced, for start to put back when the launch fails; None when it left the brief alone."""
     job, path = Path(job).absolute(), Path(brief).absolute()
     if backend(job) == 'core' or path != job / 'briefs' / (lead + '.md') or not path.is_file():
         return
-    if ('fleet-job types each new line of' in path.read_text()) != (kind == 'codex'):
+    previous = path.read_text()
+    if ('fleet-job types each new line of' in previous) != (kind == 'codex'):
         path.write_text(lead_brief(job, lead, job_owner(job), (job / 'review').is_file(), None, front=front_door(job), kind=kind))
+        return previous
 
 
 def lead_folders(job):
@@ -1153,11 +1156,15 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
         raise ValueError(f'{kind} runs only as a handed agent of a Herdr Core job (start --pane in a job made with new --core), '
                          'whose follower tells its turns; on a Herdr TUI job start it by hand')
     yolo_in = pane_yolo(pane, yolo_in, lead)
-    if lead:  # only once every check passed, so a refused start never changes it
-        lead_brief_for(job, agent, kind, brief)
-    args = cli_args(job, agent, kind, model, effort, list(reports), lead=lead, yolo_in=yolo_in)
-    herdr('pane', 'rename', pane, agent)
-    blocked = launch(agent, kind, pane, args)
+    previous = lead_brief_for(job, agent, kind, brief) if lead else None  # only once every check passed
+    try:
+        args = cli_args(job, agent, kind, model, effort, list(reports), lead=lead, yolo_in=yolo_in)
+        herdr('pane', 'rename', pane, agent)
+        blocked = launch(agent, kind, pane, args)
+    except BaseException:
+        if previous is not None:  # the switch never happened: the brief goes back to the CLI agents.tsv and reopen.sh name
+            Path(brief).write_text(previous)
+        raise
     snapshot = str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot')
     subprocess.run([snapshot, 'record', str(job), agent, kind, str(brief), '--', *args], check=True)
     if blocked:

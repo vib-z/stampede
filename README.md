@@ -65,7 +65,7 @@ Either way:
 - **One ask, one lead.** A Claude Code lead plans the job and does it.
 - **Workers only when it's worth it.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
 - **Hooks, not polling.** Workers report to the lead through hooks, and you can watch every pane in Herdr.
-- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job, and a yes typed in a Herdr pane works too (on Herdr Core only the recorded yes counts). The lead keeps working while it waits.
+- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job, and a yes typed in a Claude lead's Herdr pane works too (for a Codex lead and on Herdr Core only the recorded yes counts). The lead keeps working while it waits.
 
 ## Quick start
 

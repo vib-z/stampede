@@ -1365,8 +1365,9 @@ class LeadChoice(unittest.TestCase):
         with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp()}), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(fj.HerdrError):
             fj.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief))   # the switch to Claude fails at launch
-        self.assertIn('typed in your pane', brief.read_text())          # rewritten for the Claude it tried
-        self.assertEqual(fj.lead_kind(job), 'codex')                    # but the roster still says Codex
+        self.assertEqual(fj.lead_kind(job), 'codex')                    # the roster, and so reopen.sh, still say Codex
+        self.assertEqual(brief.read_text(), codex_text)                 # and so does the brief again
+        brief.write_text(fj.lead_brief(job.absolute(), 'lead-demo', '', False, None))   # a Claude brief left by an older copy
         herdr, _ = fake_herdr(job.parent)
         with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp()}), \
                 contextlib.redirect_stdout(io.StringIO()):
