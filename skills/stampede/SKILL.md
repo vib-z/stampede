@@ -1,6 +1,6 @@
 ---
 name: stampede
-description: The front door for stampede, from any project chat (Claude desktop or a Herdr pane). Use when the owner says "use stampede", "with stampede", "stampede this", "hand this to a lead in herdr" or "fork this chat into a lead", and while such a job runs, to relay its plan, questions, gates and files between the owner and the lead. Sizes the job, writes the ask, opens a Herdr workspace for the project and starts a hooked Claude lead with `stampede new`, forked from this chat when the plan was worked out here. The lead's own playbook is herdr-fleet.
+description: The front door for stampede, from any project chat (Claude desktop or a Herdr pane). Use when the owner says "use stampede", "with stampede", "stampede this", "hand this to a lead in herdr" or "fork this chat into a lead", and while such a job runs, to relay its plan, questions, gates and files between the owner and the lead. Sizes the job, writes the ask, opens a Herdr workspace for the project and starts a hooked lead with `stampede new`, on Claude unless the owner picks Codex, forked from this chat when the plan was worked out here and the lead is Claude. The lead's own playbook is herdr-fleet.
 ---
 
 # stampede (front door)
@@ -10,21 +10,23 @@ You are the front door, not the lead: hand the job over, then relay between the 
 1. **Size it** ([herdr-fleet, "Size the job first"](../herdr-fleet/SKILL.md#size-the-job-first-small-or-big)). Small: do it here, or in one tagged Herdr pane; no stampede job. Big: go on.
 2. **Project folder:** the git root of this chat's folder (`git rev-parse --show-toplevel`), unless the owner names another repo. It must sit under `FLEET_TRUST_ROOT` (default `~/code`). The job folder itself goes under `FLEET_JOBS_ROOT` (default `~/code/herdr-jobs`), never in the repo.
 3. **Write the ask** to a file outside the repo (`mktemp`): the owner's words and, when the plan was worked out in this chat, the agreed plan plus every fact the lead must not miss. The ask file is the source of truth; a forked chat's saved transcript can miss some replies.
-4. **Start the lead.** A chat outside Herdr (the Claude desktop app, a terminal) has no current workspace, so `stampede new` needs `--pane` (below) or `--workspace <id>`, and `--front-door`, because the owner talks to you, not to the lead's pane:
+4. **Pick the lead with the owner's words** ([herdr-fleet, The lead](../herdr-fleet/SKILL.md#the-lead)): Claude by default; Codex or Astra in the request means `--lead codex` (`gpt-6-astra`).
+5. **Start the lead.** A chat outside Herdr (the Claude desktop app, a terminal) has no current workspace, so `stampede new` needs `--pane` (below) or `--workspace <id>`, and `--front-door`, because the owner talks to you, not to the lead's pane:
 
 ```bash
 R=<project folder>
 herdr-trust "$R"                      # pre-trusts it for Claude and Codex; safe to repeat
 P=$(herdr workspace create --cwd "$R" --label <job> --no-focus | jq -r .result.root_pane.pane_id)
-stampede new --file <ask.md> --pane "$P" --name <job> --front-door   # add --fork / --review as below
+stampede new --file <ask.md> --pane "$P" --name <job> --front-door   # add --lead codex / --fork / --review as below
 ```
 
 - Already in a Herdr pane in that project's workspace (`$HERDR_WORKSPACE_ID` is set): run `stampede new --file <ask.md>` without `--front-door`; the owner watches the lead's pane and answers its cards.
-- `--fork "$CLAUDE_CODE_SESSION_ID"`: only when the owner worked the plan out with you in this chat. The lead starts with this conversation.
+- `--lead codex`: only when the owner asks for a Codex (Astra) lead. It is refused with `--fork` and with `--core`, whose lead is always Claude.
+- `--fork "$CLAUDE_CODE_SESSION_ID"`: only when the owner worked the plan out with you in this chat and the lead is Claude. The lead starts with this conversation; a Codex lead starts from the ask file.
 - `--review`: only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).
 - `--core`: only when the owner asks for Herdr Core. Then no workspace, no `--pane` and no `--front-door` (a Core job has no pane to relay from; it is refused): `stampede new --core --file <ask.md> --cwd "$R" --name <job>` after `herdr-trust "$R"`. A `BLOCKED` or `NOT READY` line names the lead's terminal: read it with `hc read <address>` ([core.md](../herdr-fleet/references/core.md)).
 
-5. It prints `<lead> <job dir>`. On `BLOCKED ...`, read the lead's pane (`herdr agent read <lead> --source visible --lines 30`), clear the startup dialog, then send the `stampede tell` line it printed. Tell the owner the lead's name and the workspace label.
+6. It prints `<lead> <job dir>`. On `BLOCKED ...`, read the lead's pane (`herdr agent read <lead> --source visible --lines 30`), clear the startup dialog, then send the `stampede tell` line it printed. Tell the owner the lead's name and the workspace label.
 
 ## Relay (a `--front-door` job)
 
@@ -47,4 +49,4 @@ Start it again after each return until the job is finished. Each item is `<job d
 
 **The lead's pane is not the owner.** In `herdr agent read`, the grey text in its input line is Claude's own prompt suggestion, not the owner typing, and `.focused` can read true while nobody types. Go by the outbox, `plan.md` and `reports/`.
 
-**Gates** (merge, push to main, deploy, send, spend, close) are always the owner's own yes: in this chat (recorded with `approve-gate` as above), in the lead's pane, or on their phone (on Herdr Core only the recorded yes, never a typed one); never your decision.
+**Gates** (merge, push to main, deploy, send, spend, close) are always the owner's own yes: in this chat (recorded with `approve-gate` as above), in a Claude lead's pane, or on their phone (for a Codex lead and on Herdr Core only the recorded yes, never a typed one); never your decision.

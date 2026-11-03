@@ -5,9 +5,9 @@ description: Use only when the owner explicitly asks to see or approve the plan 
 
 # Share the plan
 
-1. Mark the job as one to review before any pane opens: start it with `fleet-job new --file <ask.md> --review`, or, when the lead already runs, `touch <job>/review` before it starts a worker. `fleet-job start` then refuses until step 5.
+1. Mark the job as one to review before any pane opens: start it with `fleet-job new --file <ask.md> [--lead claude|codex] --review`, or, when the lead already runs, `touch <job>/review` before it starts a worker. `fleet-job start` then refuses until step 5.
 2. Once the lead has written `<job>/plan.md` (the layout, then the tasks with their pane, then questions), show it where the owner asked: pasted in the chat, or as the md file. A bot posts it in its chat.
-3. Ask one question: Approve, or say what to change. Inside Herdr, the lead's own question card (it reaches the phone); a bot asks in its chat.
+3. Ask one question: Approve, or say what to change. Inside Herdr, the lead's own question card (it reaches the phone), or `fleet-job ask` for a Codex lead, which has no card; a bot asks in its chat.
 4. A change: the lead puts it into `plan.md` in the owner's words; show the new version, ask again.
 5. Approve: `fleet-job approve <job> --by <who carried the yes>`. It records the plan's fingerprint and wakes the lead. Any later change to `plan.md` needs a new approve.
 6. Cancel, or no answer: nothing starts. Ask once more, when the owner next writes.

@@ -7,12 +7,13 @@ A front door is anything that can run a command on the machine where Herdr runs:
 - Tell the owner the lead's name and where its plan will be, then stop.
 - When the owner asked to see the plan first, start with review and use the share-plan skill.
 - Pass on the owner's answers to the lead in their words; never answer for them.
-- A merge or another gate goes back to whoever started the job. A bot gets a `gate` event, asks the owner in chat and records the answer with `stampede approve-gate`; a job started locally asks on the phone or on the lead's own card. On the Herdr TUI a yes typed in the lead's pane also works; on Herdr Core only the recorded yes counts. If a gate approval is typed there, the lead gives a short notice to answer in the chat or on the phone that started the job. Never pass a gate on with `stampede tell` or by typing into a pane.
+- A merge or another gate goes back to whoever started the job. A bot gets a `gate` event, asks the owner in chat and records the answer with `stampede approve-gate`; a job started locally asks on the phone or on the lead's own card. On the Herdr TUI a yes typed in a Claude lead's pane also works; for a Codex lead and on Herdr Core only the recorded yes counts. If a gate approval is typed there, the lead gives a short notice to answer in the chat or on the phone that started the job. Never pass a gate on with `stampede tell` or by typing into a pane.
 - A bot outside Herdr: wait for an event; never poll, never sleep in a loop.
 
 ## Run
 ```bash
 stampede new --file <ask.md>                          # add --review when the owner asks to see the plan first
+stampede new --file <ask.md> --lead codex             # a Codex (GPT-6 Astra) lead in place of the default Claude one
 stampede new --core --file <ask.md> --cwd <repo>      # the whole job on Herdr Core instead of the Herdr TUI
 stampede tell <job dir> lead "<the owner's words>"    # a change or an answer, word for word
 stampede approve <job dir> --by "<front door>"        # only in a review job, after the owner's yes to the plan

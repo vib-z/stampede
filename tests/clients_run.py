@@ -88,15 +88,16 @@ class Job:
 
     state, terminal, calls, labels, program = CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels, CoreCase.program
 
-    def __init__(self, client, row, backend, root, workers, handed=()):
+    def __init__(self, client, row, backend, root, workers, handed=(), lead=None):
         """row: the client's CLIENTS row; workers: WORKERS, the kinds each backend takes; handed: HANDED, the kinds a Core
         job hands to a Herdr TUI pane (--pane) rather than run in a Core terminal. The lead starts every kind of every
-        backend, so a kind this backend does not take is refused; it tells the first kind here that is not Claude."""
-        self.client, self.row, self.backend, self.bot = client, row, backend, row.get('bot')
+        backend, so a kind this backend does not take is refused; it tells the first kind here that is not Claude.
+        lead: the --lead new passes (None: no flag, so the default Claude lead); a job with one plays only its start."""
+        self.client, self.row, self.backend, self.bot, self.lead_kind = client, row, backend, row.get('bot'), lead
         self.handed = handed if backend == 'core' else ()
         self.kinds, self.takes = tuple(dict.fromkeys(k for kinds in workers.values() for k in kinds)), workers[backend]
         self.worker = 'build-' + next(k for k in self.takes if k != 'claude')  # prompted, where a Claude agent reads its inbox
-        self.root = root / f'{client}-{backend}'
+        self.root = root / (f'{client}-{backend}' + (f'-{lead}-lead' if lead else ''))
         self.repo, self.core, self.herdr = self.root / 'code/repo', self.root / 'core', self.root / 'herdr'
         self.home, self.events, self.queue = self.root / 'home', self.root / 'events', self.root / 'queue'
         self.bin = self.home / '.local/bin'
@@ -125,7 +126,7 @@ class Job:
         each pane a Core job hands a worker to shows that worker as freshly started (named, no finished turn yet)."""
         repo, ws = str(self.repo), self.WS
         panes = [{**pane(f'{ws}:p{n}', f'{ws}:t{1 + (n > 1)}', name, repo, kind, 's-' + name), 'workspace_id': ws}
-                 for n, (name, kind) in enumerate([(self.LEAD, 'claude')] + [('build-' + k, k) for k in self.kinds], 1)]
+                 for n, (name, kind) in enumerate([(self.LEAD, self.lead_kind or 'claude')] + [('build-' + k, k) for k in self.kinds], 1)]
         (self.herdr / 'state.json').write_text(json.dumps({
             'pane get': {'pane': {**panes[0], 'foreground_cwd': repo}}, 'pane list': {'panes': panes},
             'agent wait': {'agent': {'agent_status': 'idle'}}, 'agent get': {'agent': {'agent_status': 'idle'}},
@@ -227,21 +228,30 @@ class Job:
             self.error = traceback.format_exc()
         return self
 
+    def opening(self):
+        """Only O2's start, for a job with its own --lead."""
+        try:
+            self.start()
+        except Exception:
+            self.error = traceback.format_exc()
+        return self
+
     def start(self):
         """O2: the front door writes the ask and runs stampede new as its guide says."""
         ask = self.root / 'ask.md'
         ask.write_text(f'Write hello-{self.client}-{self.backend}.txt with one worker.\n')
+        lead = ('--lead', self.lead_kind) if self.lead_kind else ()
         if self.backend == 'core':
-            self.front('new', 'new', '--core', '--file', ask, '--cwd', self.repo, '--name', self.NAME)
+            self.front('new', 'new', '--core', '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
             return
         if self.row['where'] == 'inside':  # a chat in a Herdr pane: the lead gets a lead tab in this workspace
-            self.front('new', 'new', '--file', ask, '--name', self.NAME)
+            self.front('new', 'new', '--file', ask, '--name', self.NAME, *lead)
             return
         code, out, _ = self.front('workspace', 'herdr', 'workspace', 'create', '--cwd', self.repo, '--label', self.NAME, '--no-focus')
         root_pane = json.loads(out)['result']['root_pane']['pane_id'] if code == 0 else '-'
         if self.bot and self.row['owner_from'] == 'tag':  # grokbot-herdr Step 3: tag the workspace before agents start
             self.front('tag', BOT_SCRIPTS / 'herdr-events-owner', self.WS, self.bot)
-        self.front('new', 'new', '--file', ask, '--pane', root_pane, '--name', self.NAME)
+        self.front('new', 'new', '--file', ask, '--pane', root_pane, '--name', self.NAME, *lead)
 
     def workers(self):
         """O3: the lead starts one worker of every kind, each in its pane on the TUI; a kind this backend does not take is

@@ -3,8 +3,9 @@
 # profile (add the line: . ~/.config/stampede/config). The Herdr plugin event reads the same file.
 
 # The lead and its questions (fleet-job, also called stampede)
-export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's Claude model
-export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort
+export FLEET_LEAD_KIND=claude                       # the lead's CLI when stampede new has no --lead: claude, or codex (gpt-6-astra, ultra); --fork and --core take claude
+export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's model, for the CLI it belongs to: a gpt-... model sets a Codex lead, any other a Claude lead; the other CLI's lead keeps its default
+export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort, for the same CLI as FLEET_LEAD_MODEL (a Codex lead's default is ultra)
 export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this, for a question or a gate, in a job started locally; the question and options are appended
 
 export FLEET_JOBS_ROOT=~/code/herdr-jobs         # every job folder goes in <root>/jobs/<date>-<bot or local>-<slug>, never in a repo
