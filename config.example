@@ -19,7 +19,7 @@ export FLEET_WATCH_PASSES=0                         # stop after this many passe
 export FLEET_WATCH_NOTIFY=1                         # 0 turns off the phone push for stalls and vanished agents; a Herdr Core job's follower pushes only when this is 1
 
 # The event relay to a remote bot (herdr-event-post, herdr-event-flush)
-export HERDR_EVENTS_MACHINE=$(hostname -s)          # label sent with every event
+export HERDR_EVENTS_MACHINE=$(hostname -s 2>/dev/null || hostname | cut -d. -f1)  # short hostname sent with every event
 export HERDR_EVENTS_HOME=~/.herdr-events            # the queue and dead letters
 export HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes   # one file per route, holding URL= and KEY=
 export HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log        # the flusher's log

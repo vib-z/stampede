@@ -43,6 +43,8 @@ class CoreCase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
+        xdg = os.environ.pop('XDG_STATE_HOME', None)
+        self.addCleanup(lambda: os.environ.__setitem__('XDG_STATE_HOME', xdg) if xdg is not None else None)
         for name in ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER',
                      'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET'):
             os.environ.pop(name, None)

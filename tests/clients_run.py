@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tests'))
+from events_log import events_log
 from test_core import CoreCase, FAKE_HC, SHA
 from test_fleet_job import valid_brief
 from test_herdr_reopen_snapshot import FAKE_HERDR, pane, rect
@@ -198,7 +199,7 @@ class Job:
         return [json.loads(p.read_text()) for p in sorted((self.queue / 'queue').glob('*.json'))] if (self.queue / 'queue').is_dir() else []
 
     def relay_log(self):
-        path = self.home / 'Library/Logs/herdr-events.log'
+        path = events_log(self.home)
         return path.read_text() if path.is_file() else ''
 
     def herdr_calls(self):

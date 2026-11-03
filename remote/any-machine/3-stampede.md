@@ -14,9 +14,9 @@ stampede is three skills and a command, plus a Herdr plugin for events. Install 
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede && cd ~/stampede
 ./install.sh --dry-run                              # read what it would do
-./install.sh
+./install.sh                                        # on Linux this also starts the event timers
 mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config   # then edit HERDR_EVENTS_MACHINE
-echo '. ~/.config/stampede/config' >> ~/.zshrc
+echo '. ~/.config/stampede/config' >> ~/.zshrc       # bash: ~/.bashrc
 herdr plugin link . && herdr plugin list            # only when a bot should hear events
 ```
 

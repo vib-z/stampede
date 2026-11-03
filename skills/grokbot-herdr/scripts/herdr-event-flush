@@ -4,13 +4,16 @@
 # A stampede question or gate held for a route with no URL, or dead after 24 h, is told once to its job's lead (held/ marks it).
 # Never logs URL or KEY. Empty queue = no network call.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+. "$(dirname "$_src")/herdr-platform"
 H="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"
 Q="$H/queue"; DEAD="$H/dead"; HELD="$H/held"; LOCK="$H/flush.lock"
 ROUTES="${HERDR_EVENTS_ROUTES_DIR:-${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}/routes}"
 LOG="${HERDR_EVENTS_FLUSH_LOG:-$H/flush.log}"
 MAXAGE=86400
 mkdir -p "$Q" "$DEAD" "$HELD"
-if [ -f "$LOG" ] && [ "$(stat -f %z "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then : >"$LOG"; fi
+if [ -f "$LOG" ] && [ "$(file_bytes "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then : >"$LOG"; fi
 log(){ printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG"; }
 is_ask(){ jq -e '.payload.source == "stampede" and (.payload.state == "gate" or .payload.state == "question")' "$1" >/dev/null 2>&1; }
 # A question or gate its bot has not heard is news for the lead waiting on it: one line in its job's inbox.log wakes it.
@@ -23,7 +26,7 @@ shopt -s nullglob
 files=("$Q"/*.json); [ ${#files[@]} -eq 0 ] && exit 0
 # lock (mkdir is atomic); break locks older than 5 min
 if ! mkdir "$LOCK" 2>/dev/null; then
-  if [ $(( $(date +%s) - $(stat -f %m "$LOCK" 2>/dev/null || date +%s) )) -gt 300 ]; then rmdir "$LOCK" 2>/dev/null; mkdir "$LOCK" 2>/dev/null || exit 0
+  if [ $(( $(date +%s) - $(file_mtime "$LOCK" 2>/dev/null || date +%s) )) -gt 300 ]; then rmdir "$LOCK" 2>/dev/null; mkdir "$LOCK" 2>/dev/null || exit 0
   else exit 0; fi
 fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
@@ -41,7 +44,7 @@ while :; do
   for f in "${files[@]}"; do   # glob is sorted; names start with UTC timestamp -> oldest first
     [ -f "$f" ] || continue
     name=$(basename "$f")
-    age=$(( $(date +%s) - $(stat -f %m "$f") ))
+    age=$(( $(date +%s) - $(file_mtime "$f") ))
     if [ "$age" -gt "$MAXAGE" ]; then
       is_ask "$f" && tell_lead "$f" "after 24 h, moved to $DEAD: the bot never heard it; ask again, or (a Claude lead) ask the owner in your pane"
       mv "$f" "$DEAD/"; rm -f "$HELD/$name"; log "dead (>24h): $name"; continue; fi

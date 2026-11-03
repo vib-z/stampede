@@ -5,6 +5,7 @@ set -u
 SRC="$(cd "$(dirname "$0")" && pwd)"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 export HOME="$T" PATH="$T/.local/bin:/opt/homebrew/bin:/usr/bin:/bin" CODEX_HOME="$T/.codex"
+unset XDG_STATE_HOME
 unset HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_EVENTS_OWNER HERDR_EVENTS_HOME HERDR_EVENTS_ROUTES_DIR HERDR_EVENTS_DIR
 B="$T/.local/bin"; F="$T/fake"; mkdir -p "$B" "$F" "$T/.config/herdr-events/owners" "$T/.config/herdr-events/routes"
 for s in herdr-event-post herdr-event-flush herdr-event-watchdog herdr-event-codex-notify herdr-events-owner; do ln -s "$SRC/$s" "$B/$s"; done
@@ -28,19 +29,7 @@ case "\$1 \$2" in
 esac
 EOF
 chmod +x "$B/curl" "$B/herdr"
-# herdr-event-flush asks for BSD stat (-f %m, -f %z). On a GNU host, answer with the same numbers.
-cat > "$B/stat" <<'EOF'
-#!/bin/bash
-if [ "${1:-}" = -f ] && ! /usr/bin/stat -f %m / >/dev/null 2>&1; then
-  fmt=$2; shift 2
-  case "$fmt" in
-    %m) exec /usr/bin/stat -c %Y "$@";;
-    %z) exec /usr/bin/stat -c %s "$@";;
-  esac
-fi
-exec /usr/bin/stat "$@"
-EOF
-chmod +x "$B/stat"
+case "$(uname -s)" in Darwin) EVLOG="$T/Library/Logs/herdr-events.log";; *) EVLOG="$T/.local/state/herdr-events.log";; esac
 
 fail(){ echo "FAIL: $*"; exit 1; }
 sent(){ grep -c . "$F/sent.jsonl" 2>/dev/null || echo 0; }
@@ -81,7 +70,7 @@ HERDR_PANE_ID=w1:p3 herdr-event-codex-notify '{"type":"agent-turn-complete","thr
 HERDR_PANE_ID=w1:p4 herdr-event-codex-notify '{"type":"agent-turn-complete","thread-id":"grd-1"}'
 HERDR_PANE_ID=w1:p5 herdr-event-codex-notify '{"type":"agent-turn-complete","thread-id":"title-1","input-messages":["Generate a concise, single-line task title"]}'
 [ "$(sent)" = "$n" ] || fail "B2 a sub-agent, guardian or side-conversation turn was sent"
-grep -q 'skip: codex sub-agent thread=sub-1' "$T/Library/Logs/herdr-events.log" || fail "B2 sub-agent skip not logged"
+grep -q 'skip: codex sub-agent thread=sub-1' "$EVLOG" || fail "B2 sub-agent skip not logged"
 HERDR_PANE_ID=w1:p6 herdr-event-codex-notify '{"type":"agent-turn-complete","thread-id":"main-1"}'
 [ "$(sent)" = $((n+1)) ] || fail "B2 the agent's own turn was not sent"
 grep . "$F/sent.jsonl" | tail -1 | jq -e '.thread_id=="main-1" and .owner=="bot-alpha"' >/dev/null || fail "B2 payload wrong"

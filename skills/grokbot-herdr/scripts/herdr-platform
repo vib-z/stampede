@@ -1,0 +1,40 @@
+#!/bin/bash
+# herdr-platform: sourced by the relay scripts. File size, mtime and mode, the relay log,
+# a short hostname and the de-dupe lock, on Darwin and on Linux.
+# GNU stat -c is tried first: on GNU, stat -f prints a filesystem report and still exits 0.
+# A script sources the copy beside itself, following one symlink (install.sh links the scripts).
+
+if stat -c %s / >/dev/null 2>&1; then
+  file_bytes() { stat -c %s "$1"; }
+  file_mtime() { stat -c %Y "$1"; }
+  file_mode() { stat -c %a "$1"; }
+else
+  file_bytes() { stat -f %z "$1"; }
+  file_mtime() { stat -f %m "$1"; }
+  file_mode() { stat -f %Lp "$1"; }
+fi
+
+# MD5 of stdin, the same hex on both (pane output, compared only with itself).
+hash_stdin() { python3 -c 'import hashlib,sys; print(hashlib.md5(sys.stdin.buffer.read()).hexdigest())'; }
+
+# ~/Library/Logs on macOS; on Linux the state dir (XDG_STATE_HOME, else ~/.local/state).
+herdr_events_log() {
+  case "$(uname -s)" in
+    Darwin) printf '%s\n' "$HOME/Library/Logs/herdr-events.log";;
+    *) printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events.log";;
+  esac
+}
+
+# hostname -s where it exists; otherwise the name before the first dot.
+short_host() { hostname -s 2>/dev/null || hostname 2>/dev/null | cut -d. -f1; }
+
+# Shared lock on an open fd, 5s, matching the macOS lockf the de-dupe file already uses.
+# Linux has flock and no lockf. A failure leaves the script unlocked, as the old lockf line did.
+hold_shared() {
+  if [ -x /usr/bin/lockf ]; then /usr/bin/lockf -s -t 5 "$1" 2>/dev/null || true
+  elif command -v flock >/dev/null 2>&1; then flock -s -w 5 "$1" 2>/dev/null || true
+  fi
+}
+
+# Running this file defines nothing useful in a child and exits 0.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then exit 0; fi

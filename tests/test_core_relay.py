@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from events_log import events_log
 from test_core import CoreCase, FAKE_HC, ROOT
 
 RELAY = ROOT / 'skills/grokbot-herdr/scripts'
@@ -50,6 +51,7 @@ class Shell(unittest.TestCase):
         self.env.update(HOME=str(self.home), HERDR_EVENTS_DIR=str(self.events), HC=str(FAKE_HC),
                         FAKE_HC=str(self.home / 'core'), PATH=f'{self.bin}:/opt/homebrew/bin:/usr/bin:/bin',
                         HERDR_EVENTS_HOME=str(self.home / 'queue'))
+        self.env.pop('XDG_STATE_HOME', None)
 
     def fake(self, name, body):
         path = self.bin / name
@@ -69,7 +71,7 @@ class Shell(unittest.TestCase):
         return [json.loads(row) for row in path.read_text().splitlines() if row.strip()] if path.is_file() else []
 
     def log(self):
-        path = self.home / 'Library/Logs/herdr-events.log'
+        path = events_log(self.home)
         return path.read_text() if path.is_file() else ''
 
 
@@ -542,7 +544,6 @@ class ReviewWatchdog(Shell):
 
     def test_core_tags_need_no_tui(self):
         self.fake('herdr', 'exit 1\n')  # no Herdr TUI at all
-        (self.home / 'Library/Logs').mkdir(parents=True)  # always there on a Mac; the watchdog never makes it
         self.link('herdr-event-post', 'herdr-event-core')
         socket_file, server = core_socket(self.home)
         self.addCleanup(server.shutdown)

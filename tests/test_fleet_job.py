@@ -673,6 +673,8 @@ class Gates(unittest.TestCase):
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
+        xdg = os.environ.pop('XDG_STATE_HOME', None)
+        self.addCleanup(lambda: os.environ.__setitem__('XDG_STATE_HOME', xdg) if xdg is not None else None)
         self.job = job_with([('lead-demo', 'claude')])
 
     def bot_job(self):

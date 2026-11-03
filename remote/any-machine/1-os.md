@@ -4,7 +4,7 @@ Before installing anything, learn what the machine is, so every later step picks
 
 ## Do
 - Find the operating system, its version and the processor type.
-- Check it is macOS; Linux is untried (tell the person); anything else, stop and tell them.
+- Check it is macOS or Linux; anything else, stop and tell them.
 - Find the shell, the home folder and whether a user bin folder is on PATH.
 - Check the basic tools are present; list the missing ones.
 - Ask the person before installing missing tools with the system's own package manager.

@@ -15,6 +15,9 @@ for option in "$@"; do
   esac
 done
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+. "$(dirname "$_src")/herdr-platform"
 bad=0
 ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }
@@ -72,7 +75,8 @@ if [ -n "$managed" ] && command -v python3 >/dev/null; then
   outside=""
   for l in "$(command -v stampede)" "$HOME"/.claude/skills/{stampede,herdr-fleet,grokbot-herdr,share-plan} "$HOME"/.codex/skills/{stampede,herdr-fleet,grokbot-herdr,share-plan}; do
     { [ -e "$l" ] || [ -L "$l" ]; } || continue
-    case "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$l")" in "$top"/*) ;; *) outside="$outside ${l/#$HOME/~}";; esac
+    case "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$l")" in "$top"/*) ;;
+      *) rel=$l; [ "${l#"$HOME"/}" != "$l" ] && rel="~/${l#"$HOME"/}"; outside="$outside $rel";; esac
   done
   if [ -n "$outside" ]; then problem "${outside# } not in the plugin checkout $managed: bash $managed/install.sh relinks; it skips a link of your own, so remove that first"
   else ok "stampede and the skills resolve into the plugin checkout"; fi
@@ -89,7 +93,7 @@ elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart neede
 else ok "herdr client and server $cv"; fi
 fi
 
-# relay configuration is the signal, not the helper scripts installed for every user
+# relay configuration is the signal, not the helper scripts, and not the Linux timers install.sh starts
 EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"
 R="${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}"
 # Codex's notify array, from its line to the closing bracket (it may span lines)
@@ -118,20 +122,36 @@ for s in herdr-event-post herdr-event-flush herdr-event-watchdog herdr-event-cla
   [ -x "$HOME/.local/bin/$s" ] || problem "$s not installed in ~/.local/bin: copy it from grokbot-herdr/scripts"
 done
 
-# launchd jobs (PID, last exit, label)
-lj=$(launchctl list 2>/dev/null)
-for j in local.herdr-event-watchdog local.herdr-events-flush; do
-  line=$(awk -v j="$j" '$3==j' <<<"$lj")
-  if [ -z "$line" ]; then problem "launchd $j not loaded: launchctl load ~/Library/LaunchAgents/$j.plist"
-  elif [ "$(awk '{print $2}' <<<"$line")" != 0 ]; then warn "launchd $j last exit $(awk '{print $2}' <<<"$line"): see ~/Library/Logs/herdr-events*.log"
-  else ok "launchd $j loaded"; fi
-done
+# Timers: launchd on macOS; on Linux, systemd --user when that bus answers, else the flock loop.
+if [ "$(uname -s)" = Darwin ]; then
+  lj=$(launchctl list 2>/dev/null)
+  for j in local.herdr-event-watchdog local.herdr-events-flush; do
+    line=$(awk -v j="$j" '$3==j' <<<"$lj")
+    if [ -z "$line" ]; then problem "launchd $j not loaded: launchctl load ~/Library/LaunchAgents/$j.plist"
+    elif [ "$(awk '{print $2}' <<<"$line")" != 0 ]; then warn "launchd $j last exit $(awk '{print $2}' <<<"$line"): see ~/Library/Logs/herdr-events*.log"
+    else ok "launchd $j loaded"; fi
+  done
+elif systemctl --user show-environment >/dev/null 2>&1; then
+  for unit in herdr-event-watchdog.timer herdr-events-flush.timer; do
+    state=$(systemctl --user is-enabled "$unit" 2>/dev/null || true)
+    active=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+    if [ "$state" != enabled ] && [ "$state" != static ]; then
+      problem "systemd $unit not enabled: systemctl --user enable --now $unit"
+    elif [ "$active" != active ]; then warn "systemd $unit is ${active:-inactive}: systemctl --user start $unit"
+    else ok "systemd $unit active"; fi
+  done
+else
+  pid=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then ok "event loop running"
+  else problem "event loop not running: re-run install.sh (no systemd --user; it starts a flock-guarded loop)"; fi
+fi
 
 # routes: one file per bot (or default), present and private, contents never read
 n=0
 for f in "$R"/*; do
   [ -f "$f" ] || continue; n=$((n+1))
-  [ "$(stat -f %Lp "$f")" = 600 ] || warn "route $(basename "$f") is mode $(stat -f %Lp "$f"): chmod 600 $f"
+  mode=$(file_mode "$f" 2>/dev/null || echo unknown)
+  [ "$mode" = 600 ] || warn "route $(basename "$f") is mode $mode: chmod 600 $f"
 done
 if [ "$n" = 0 ]; then problem "no route file in $R: add one per bot (remote/events.md)"; else ok "$n route files in $R"; fi
 
