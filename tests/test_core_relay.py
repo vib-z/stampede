@@ -205,9 +205,12 @@ class CoreAlive(Shell):
     def test_the_socket_is_found_as_core_finds_it(self):
         core = follower_module()
         home = Path('/h')
-        self.assertEqual(core.socket_path({'HOME': '/h'}), home / '.local/state/herdr-core/default/default.sock')
-        self.assertEqual(core.socket_path({'HOME': '/h', 'HC_SESSION': ' smoke ', 'XDG_STATE_HOME': '/s'}),
-                         Path('/s/herdr-core/smoke/smoke.sock'))
+        with mock.patch.object(core.Path, 'is_dir', return_value=False):  # no /run/user/<uid>, as on a Mac
+            self.assertEqual(core.socket_path({'HOME': '/h'}), home / '.local/state/herdr-core/default/default.sock')
+            self.assertEqual(core.socket_path({'HOME': '/h', 'HC_SESSION': ' smoke ', 'XDG_STATE_HOME': '/s'}),
+                             Path('/s/herdr-core/smoke/smoke.sock'))
+        with mock.patch.object(core.Path, 'is_dir', return_value=True):  # Linux with a user manager and no XDG_RUNTIME_DIR
+            self.assertEqual(core.socket_path({'HOME': '/h'}), Path(f'/run/user/{os.getuid()}/herdr-core/default.sock'))
         self.assertEqual(core.socket_path({'HOME': '/h', 'XDG_RUNTIME_DIR': '/r'}), Path('/r/herdr-core/default.sock'))
         self.assertEqual(core.socket_path({'HOME': '/h', 'HC_SOCKET': '/x.sock', 'XDG_RUNTIME_DIR': '/r'}), Path('/x.sock'))
         config = self.home / 'config/herdr-core'
