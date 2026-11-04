@@ -41,6 +41,8 @@ herdr-doctor --relay
 
 On Linux, `install.sh` starts the same two timers. When `systemctl --user` answers, it enables `herdr-event-watchdog.timer` (5 minutes) and `herdr-events-flush.timer` (2 minutes). When it does not, it starts one `herdr-event-supervise` process under `flock`, which runs both. `--no-supervise` skips this; `--dry-run` only prints it. A home that is not the login home is skipped too, so a throwaway `HOME` never enables the real user manager; `--supervise` forces it. `herdr-doctor --relay` checks whichever timer is in use. The timers alone do not mark the relay installed: plain `herdr-doctor` stays a core check until a route, a hook or a launchd plist is there.
 
+systemd runs user timers only while your user manager runs. On a machine nobody logs in to (a server a bot reaches over SSH), run `loginctl enable-linger $USER` once, or the timers stop when the last session ends. The flock loop is a plain background process: it does not come back after a reboot, so run `install.sh` again after one.
+
 The relay log is `~/Library/Logs/herdr-events.log` on macOS and `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux.
 
 To stop the Linux timers:
