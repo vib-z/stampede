@@ -1,0 +1,23 @@
+#!/bin/bash
+# herdr-event-supervise: the event timers where systemd --user is not available.
+# One process, held with flock. The watchdog every 300s, the flusher every 120s.
+# install.sh starts it with nohup. A second start exits 0 while the first holds the lock.
+set -u
+export PATH="$HOME/.local/bin:/usr/bin:/bin:${PATH:-}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events"
+mkdir -p "$STATE"
+exec 9>"$STATE/supervise.lock"
+flock -n 9 || exit 0
+printf '%s\n' $$ > "$STATE/supervise.pid"
+trap 'rm -f "$STATE/supervise.pid"' EXIT
+watch=0
+flush=0
+W=${HERDR_SUPERVISE_WATCH_SECONDS:-300}
+F=${HERDR_SUPERVISE_FLUSH_SECONDS:-120}
+T=${HERDR_SUPERVISE_TICK_SECONDS:-30}
+while true; do
+  now=$(date +%s)
+  if [ $((now - flush)) -ge "$F" ]; then herdr-event-flush >/dev/null 2>&1 || true; flush=$now; fi
+  if [ $((now - watch)) -ge "$W" ]; then herdr-event-watchdog >/dev/null 2>&1 || true; watch=$now; fi
+  sleep "$T"
+done

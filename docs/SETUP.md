@@ -16,7 +16,7 @@ The short version is in the [README](../README.md#install). This page adds the d
 
 ## What you need
 
-macOS, Herdr 0.9.4 or later, Claude Code (the lead by default), optionally Codex (workers, or the lead with `stampede new --lead codex`) and Cursor for workers, Python 3.9 or later, git, jq and curl. Tested versions: [README, Install](../README.md#install). Moshi's `moshi-hook` puts the lead's questions on your phone; without it, `stampede ask` reports `ASK FAILED ... exit 127` to the lead's inbox.
+macOS or Linux, Herdr 0.9.4 or later, Claude Code (the lead by default), optionally Codex (workers, or the lead with `stampede new --lead codex`) and Cursor for workers, Python 3.9 or later, git, jq and curl. Tested versions: [README, Install](../README.md#install). Moshi's `moshi-hook` puts the lead's questions on your phone; without it, `stampede ask` reports `ASK FAILED ... exit 127` to the lead's inbox.
 
 ## Install
 
@@ -32,7 +32,8 @@ cd ~/stampede
 - **Skills:** `skills/stampede` (the front door), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` are linked into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists.
 - **Commands:** `scripts/stampede` (also as `fleet-job`, its first name) and every `skills/grokbot-herdr/scripts/herdr-*` helper are linked into `~/.local/bin`. `stampede --version` prints the version. Put it on your PATH, also for non-interactive SSH shells if a bot will call it.
 - **Safe to re-run:** a link already in place prints `ok`. Run from a Herdr-managed checkout (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install is moved to this checkout and prints `relinked`; a clone relinks nothing. Anything else already at that path prints `skip ... left as is` and is never replaced. That keeps your own copy of a skill or helper.
-- **Flags:** `--dry-run` prints `would link` lines and changes nothing; `--from-plugin` is what Herdr's plugin build passes (the same links); `--help`. Exit 0 done, 2 usage.
+- **Flags:** `--dry-run` prints `would link` lines and changes nothing; `--from-plugin` is what Herdr's plugin build passes (the same links); `--no-supervise` skips the Linux event timers; `--supervise` starts them even when `HOME` is not the login home; `--help`. Exit 0 done, 2 usage.
+- **Linux timers:** when `systemctl --user` answers, systemd user timers for the watchdog (5 minutes) and the flusher (2 minutes); otherwise one flock-guarded loop. A `HOME` that is not the login home is skipped, so a throwaway home never enables a real user manager. macOS still loads its launchd jobs by hand ([watchdogs](../remote/watchdogs.md)).
 - **Never** installs Herdr or an agent CLI. Start each CLI once by hand to sign in.
 
 **Install as a Herdr plugin:** the same installer, plus the event hook, from a checkout Herdr manages.
@@ -65,9 +66,9 @@ bash "$M/install.sh"
 
 Run `herdr-doctor` after installation with the Herdr server already running. It checks `herdr`, `jq`, `git` and `python3`, client/server versions, `stampede --version` against the checkout's `VERSION`, all three skill links for each agent home that exists, owner tags, worktrees and disk. For a GitHub-managed plugin it also checks that `stampede` and the skill links resolve into the checkout `herdr plugin list --json` reports. A missing event plugin, and a missing `FLEET_TRUST_ROOT` folder (`warn no ~/code (FLEET_TRUST_ROOT): create it or set the key before herdr-trust`), are warnings for a core install.
 
-The relay is optional for a lead inside Herdr. Its checks run when a routes directory, either relay launchd plist, a Claude relay hook or a Codex relay notify line exists, or whenever you pass `--relay`. The routes key `HERDR_EVENTS_ROUTES_DIR` is respected. Helper scripts or an enabled plugin alone do not mark the relay installed.
+The relay is optional for a lead inside Herdr. Its checks run when a routes directory, either relay launchd plist, a Claude relay hook or a Codex relay notify line exists, or whenever you pass `--relay`. The routes key `HERDR_EVENTS_ROUTES_DIR` is respected. Helper scripts, an enabled plugin, or the Linux timers `install.sh` starts do not by themselves mark the relay installed.
 
-With no relay configuration, one line says `ok event relay not installed (optional): herdr-doctor --relay checks it`. Remote bots always run `herdr-doctor --relay`, even before relay setup, so missing hooks, helpers, timers, plugin or routes remain a `PROBLEM`.
+With no relay configuration, one line says `ok event relay not installed (optional): herdr-doctor --relay checks it`. Remote bots always run `herdr-doctor --relay`, even before relay setup, so missing hooks, helpers, timers, plugin or routes remain a `PROBLEM`. On macOS the timers are the two launchd jobs in [watchdogs](../remote/watchdogs.md). On Linux, `install.sh` enables systemd user timers when `systemctl --user` answers, and otherwise starts one flock-guarded loop (`herdr-event-supervise`); `--relay` checks that one. `--no-supervise` leaves them off.
 
 Flags: `--relay` forces relay checks; `--core` checks Herdr Core in place of the Herdr TUI ([Herdr Core](#herdr-core)); `-h` / `--help` prints usage. Exit 0 means no `PROBLEM`, 1 means at least one `PROBLEM`, 2 means a usage error. Warnings do not change the exit code. The doctor reads state only and never fixes settings or prints route contents.
 
@@ -83,7 +84,7 @@ Every key is an environment variable with a default. Copy [config.example](../co
 
 ```bash
 mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config
-echo '. ~/.config/stampede/config' >> ~/.zshrc
+echo '. ~/.config/stampede/config' >> ~/.zshrc   # bash: ~/.bashrc
 ```
 
 The full table: [README, Configure](../README.md#configure). `stampede`, the hooks and the helpers read the variables from their environment, so set them where your Herdr panes' shells pick them up; the plugin event reads the file itself.
@@ -129,7 +130,7 @@ herdr plugin uninstall stampede
 
 Already uninstalled? Then `herdr plugin list` no longer names the checkout. Find the exact one first with `ls -d ~/.config/herdr/plugins/github-installations/stampede-*/*/checkout`, set `M` to that path (`M=<the path>`), and run the same `find` loop. Never match links by a pattern such as `stampede-*`: another plugin or a backup can share it. Herdr deletes the old checkout (about 31 MB) the next time its server starts. Never remove a real folder or another checkout's links.
 
-If you set up the relay, unload its two launchd jobs and remove only its hook/notify entries before removing its helper links. See [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks) for their labels and commands. Uninstalling the plugin alone does not remove timers, hooks or route files.
+If you set up the relay, unload its two launchd jobs on macOS, or on Linux disable the systemd user timers or stop the flock loop, and remove only its hook/notify entries before removing its helper links. See [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks) for their labels and commands. Uninstalling the plugin alone does not remove timers, hooks or route files.
 
 Job folders (`~/code/herdr-jobs/`, or `FLEET_JOBS_ROOT`; older ones in `<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herdr-events/` stay until you remove them yourself. So does the daily update check's one-line cache: `rm -rf ~/.cache/stampede` (or `$XDG_CACHE_HOME/stampede` when that is set).
 
