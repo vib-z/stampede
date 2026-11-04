@@ -17,7 +17,8 @@ F=${HERDR_SUPERVISE_FLUSH_SECONDS:-120}
 T=${HERDR_SUPERVISE_TICK_SECONDS:-30}
 while true; do
   now=$(date +%s)
-  if [ $((now - flush)) -ge "$F" ]; then herdr-event-flush >/dev/null 2>&1 || true; flush=$now; fi
-  if [ $((now - watch)) -ge "$W" ]; then herdr-event-watchdog >/dev/null 2>&1 || true; watch=$now; fi
-  sleep "$T"
+  # children never get fd 9, so the lock goes with this process and proves it runs
+  if [ $((now - flush)) -ge "$F" ]; then herdr-event-flush >/dev/null 2>&1 9>&- || true; flush=$now; fi
+  if [ $((now - watch)) -ge "$W" ]; then herdr-event-watchdog >/dev/null 2>&1 9>&- || true; watch=$now; fi
+  sleep "$T" 9>&-
 done

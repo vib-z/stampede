@@ -52,6 +52,7 @@ write_unit() {  # write_unit <path> <text>. A file without the stampede marker i
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "$2" > "$1"
 }
+. "$ROOT/skills/grokbot-herdr/scripts/herdr-platform"   # event_loop_running
 linux_timers() {
   [ "$(uname -s)" = Linux ] || return 0
   [ "$NO_SUPERVISE" = 1 ] && return 0
@@ -100,18 +101,18 @@ Persistent=true
 WantedBy=timers.target' && n=$((n+1))
     [ "$n" = 4 ] || return 0
     if [ "$DRY" = 1 ]; then echo "would enable systemd user timers (watchdog every 5 min, flush every 2 min)"; return 0; fi
-    pid=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid" 2>/dev/null || true)
-    if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; fi
+    # the timers replace a running flock loop; only the lock holder's pid file is trusted
+    if event_loop_running; then kill "$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid")" 2>/dev/null || true; fi
     systemctl --user daemon-reload
     systemctl --user enable --now herdr-event-watchdog.timer herdr-events-flush.timer
     echo "ok systemd user timers"
   elif command -v flock >/dev/null 2>&1; then
-    local state pid
+    local state
     state="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events"
     if [ "$DRY" = 1 ]; then echo "would start the event loop (flock, nohup): watchdog every 5 min, flush every 2 min"; return 0; fi
     mkdir -p "$state"
-    pid=$(cat "$state/supervise.pid" 2>/dev/null || true)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "ok event loop"; return 0; fi
+    if event_loop_running; then echo "ok event loop"; return 0; fi
+    rm -f "$state/supervise.pid"   # a stale one from a loop that died, or its pid now someone else's
     nohup "$HOME/.local/bin/herdr-event-supervise" >>"$state/supervise.log" 2>&1 &
     disown || true
     local i

@@ -141,8 +141,7 @@ elif systemctl --user show-environment >/dev/null 2>&1; then
     else ok "systemd $unit active"; fi
   done
 else
-  pid=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid" 2>/dev/null || true)
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then ok "event loop running"
+  if event_loop_running; then ok "event loop running"
   else problem "event loop not running: re-run install.sh (no systemd --user; it starts a flock-guarded loop)"; fi
 fi
 

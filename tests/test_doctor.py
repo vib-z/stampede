@@ -109,7 +109,7 @@ exit 0
                 else:
                     path.unlink()
 
-    def configure_relay(self):
+    def configure_relay(self, armed=True):
         hooks = {event: [{'hooks': [{'command': 'herdr-event-claude-hook'}]}]
                  for event in ('Stop', 'StopFailure', 'Notification')}
         (self.home / '.claude/settings.json').write_text(json.dumps({'hooks': hooks}))
@@ -120,7 +120,8 @@ exit 0
         route.write_text('private route content must never print\n')
         route.chmod(0o600)
         env = {'TEST_PLUGIN': '1', 'HERDR_EVENTS_ROUTES_DIR': str(routes)}
-        env.update(self.arm_supervisor())
+        if armed:
+            env.update(self.arm_supervisor())
         return env
 
     def timer_problems(self):
@@ -129,19 +130,34 @@ exit 0
         return ('event loop not running',)
 
     def arm_supervisor(self):
-        """The timer check passes: launchd on macOS, a live pid on Linux (the fake systemctl declines the bus)."""
+        """The timer check passes: launchd on macOS, the loop's lock held on Linux (the fake systemctl declines the bus)."""
         if platform.system() == 'Darwin':
             return {'TEST_LAUNCHD': '1'}
-        proc = subprocess.Popen(['sleep', '300'])
+        state = self.home / '.local/state/herdr-events'
+        state.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.Popen(['bash', '-c', 'exec 9>"$1"; flock 9; echo held; exec sleep 300', 'bash',
+                                 str(state / 'supervise.lock')], stdout=subprocess.PIPE, text=True)
 
         def stop(p=proc):
             p.kill()
             p.wait(timeout=5)
+            p.stdout.close()
         self.addCleanup(stop)
-        state = self.home / '.local/state/herdr-events'
-        state.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(proc.stdout.readline().strip(), 'held')
         (state / 'supervise.pid').write_text(f'{proc.pid}\n')
         return {}
+
+    def test_linux_a_stale_loop_pid_is_not_a_running_loop(self):
+        if platform.system() != 'Linux':
+            self.skipTest('the flock loop is the Linux fallback')
+        env = self.configure_relay(armed=False)
+        unrelated = subprocess.Popen(['sleep', '300'])  # the dead loop's pid, now another process's
+        self.addCleanup(lambda: (unrelated.kill(), unrelated.wait()))
+        state = self.home / '.local/state/herdr-events'
+        state.mkdir(parents=True, exist_ok=True)
+        (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
+        (state / 'supervise.lock').touch()
+        self.assert_problem(self.doctor(**env), 'event loop not running')
 
     def test_full_relay_passes_with_custom_routes_and_hides_contents(self):
         result = self.doctor(**self.configure_relay())

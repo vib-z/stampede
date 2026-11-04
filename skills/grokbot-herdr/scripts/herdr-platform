@@ -28,12 +28,21 @@ herdr_events_log() {
 # hostname -s where it exists; otherwise the name before the first dot.
 short_host() { hostname -s 2>/dev/null || hostname 2>/dev/null | cut -d. -f1; }
 
-# Shared lock on an open fd, 5s, matching the macOS lockf the de-dupe file already uses.
+# Exclusive lock on an open fd, 5s, as macOS lockf takes it (its -s means silent, not shared).
 # Linux has flock and no lockf. A failure leaves the script unlocked, as the old lockf line did.
-hold_shared() {
+hold_lock() {
   if [ -x /usr/bin/lockf ]; then /usr/bin/lockf -s -t 5 "$1" 2>/dev/null || true
-  elif command -v flock >/dev/null 2>&1; then flock -s -w 5 "$1" 2>/dev/null || true
+  elif command -v flock >/dev/null 2>&1; then flock -w 5 "$1" 2>/dev/null || true
   fi
+}
+
+# Whether herdr-event-supervise runs: it holds supervise.lock while it lives. Its pid file can outlive it,
+# and the pid can belong to another process by then, so the lock is the only proof.
+event_loop_running() {
+  local lock="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.lock"
+  { [ -e "$lock" ] && command -v flock >/dev/null 2>&1; } || return 1
+  flock -n -E 75 "$lock" true 2>/dev/null
+  [ $? = 75 ]
 }
 
 # Running this file defines nothing useful in a child and exits 0.

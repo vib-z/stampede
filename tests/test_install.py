@@ -233,11 +233,22 @@ class Install(unittest.TestCase):
         env = {**self.env, 'PATH': f'{bin_dir}:/usr/bin:/bin'}
         return env
 
+    def _stale_loop_pid(self):
+        """A pid file left by a loop that died, whose pid now belongs to an unrelated live process."""
+        unrelated = subprocess.Popen(['sleep', '300'])
+        self.addCleanup(lambda: (unrelated.kill(), unrelated.wait()))
+        state = self.home / '.local/state/herdr-events'
+        state.mkdir(parents=True, exist_ok=True)
+        (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
+        (state / 'supervise.lock').touch()
+        return unrelated
+
     def test_linux_systemd_units_when_the_user_bus_answers(self):
         if platform.system() != 'Linux':
             self.skipTest('systemd user timers are the Linux supervisor')
         env = self._linux_env('#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$HOME/systemctl-calls"\n'
                               'case "$1 $2" in "--user show-environment") exit 0;; esac\nexit 0\n')
+        unrelated = self._stale_loop_pid()
         dry = self.run_install('--dry-run', '--supervise', env=env)
         self.assertEqual(dry.returncode, 0, dry.stderr)
         self.assertIn('would enable systemd user timers', dry.stdout)
@@ -254,6 +265,7 @@ class Install(unittest.TestCase):
         again = self.run_install('--supervise', env=env)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn('linked', again.stdout)
+        self.assertIsNone(unrelated.poll(), 'a stale pid file must never get its process killed')
 
     def test_linux_loop_when_systemd_user_is_absent(self):
         if platform.system() != 'Linux':
@@ -270,10 +282,13 @@ class Install(unittest.TestCase):
                 pass
         self.addCleanup(stop)
         env = self._linux_env('#!/bin/bash\nexit 1\n')
+        unrelated = self._stale_loop_pid()
         result = self.run_install('--supervise', env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('started the event loop', result.stdout)
         pid = int((state / 'supervise.pid').read_text())
+        self.assertNotEqual(pid, unrelated.pid)
+        self.assertIsNone(unrelated.poll())
         os.kill(pid, 0)  # the flock holder is alive
         again = self.run_install('--supervise', env=env)
         self.assertIn('ok event loop', again.stdout)

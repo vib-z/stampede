@@ -49,7 +49,7 @@ To stop the Linux timers:
 
 ```bash
 systemctl --user disable --now herdr-event-watchdog.timer herdr-events-flush.timer 2>/dev/null || true
-kill "$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid")" 2>/dev/null || true
+pkill -u "$USER" -f herdr-event-supervise || true
 ```
 
 Never test a network watchdog with a live `tailscale down` over SSH: it cuts your own connection.
