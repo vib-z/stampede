@@ -1,6 +1,7 @@
 """Portable file facts and the relay scripts that use them, on this host's stat (GNU or BSD)."""
 import hashlib
 import os
+import signal
 import subprocess
 import tempfile
 import time
@@ -15,6 +16,20 @@ WATCH = ROOT / 'skills/herdr-fleet/scripts/fleet-watch.sh'
 
 def bash(script, *args, env=None):
     return subprocess.run(['bash', '-c', script, 'bash', *args], env=env, capture_output=True, text=True, timeout=20)
+
+
+def fake_loop(home):
+    """A live process that runs a script named herdr-event-supervise, as the real loop does. The caller kills it."""
+    script = Path(home) / 'fake-loop/herdr-event-supervise'
+    script.parent.mkdir(exist_ok=True)
+    script.write_text('#!/bin/bash\nsleep 300\n')
+    script.chmod(0o755)
+    loop = subprocess.Popen([str(script)], start_new_session=True)
+    for _ in range(50):  # until the kernel shows it running the script
+        if Path(f'/proc/{loop.pid}/cmdline').read_bytes().endswith(b'/herdr-event-supervise\0'):
+            return loop
+        time.sleep(0.02)
+    return loop
 
 
 class Platform(unittest.TestCase):
@@ -44,10 +59,9 @@ class Platform(unittest.TestCase):
         if gnu.returncode == 0 and gnu.stdout.strip() != '3':
             self.assertNotEqual(self.fact('file_bytes', path), gnu.stdout.strip())
 
-    def hold(self, lock, *source):
-        """A process that holds an exclusive lock on <lock> (through herdr-platform when sourced) until killed."""
-        take = f'. "{PLATFORM}"; hold_lock 9' if source else 'flock 9'
-        holder = subprocess.Popen(['bash', '-c', f'exec 9>"$1"; {take}; echo held; exec sleep 60', 'bash', str(lock)],
+    def hold(self, lock):
+        """A process that holds herdr-platform's lock on <lock> until killed."""
+        holder = subprocess.Popen(['bash', '-c', f'exec 9>"$1"; . "{PLATFORM}"; hold_lock 9; echo held; exec sleep 60', 'bash', str(lock)],
                                   env=self.env, stdout=subprocess.PIPE, text=True)
         self.addCleanup(lambda: (holder.kill(), holder.wait(), holder.stdout.close()))
         self.assertEqual(holder.stdout.readline().strip(), 'held')
@@ -56,26 +70,31 @@ class Platform(unittest.TestCase):
     def test_the_de_dupe_lock_is_exclusive(self):
         """Two posts never rewrite dedupe.tsv at once: a second taker is refused while the first holds the lock."""
         lock = self.home / 'dedupe.lock'
-        self.hold(lock, 'herdr-platform')
+        self.hold(lock)
         if Path('/usr/bin/lockf').exists():
             second = subprocess.run(['/usr/bin/lockf', '-t', '0', str(lock), 'true'], capture_output=True)
         else:
             second = subprocess.run(['flock', '-n', '-E', '75', str(lock), 'true'], capture_output=True)
         self.assertEqual(second.returncode, 75)
 
-    def test_the_event_loop_runs_only_while_its_lock_is_held(self):
-        if subprocess.run(['bash', '-c', 'command -v flock'], capture_output=True).returncode:
+    def test_the_event_loop_runs_only_when_its_pid_file_names_it(self):
+        if not Path('/proc/self/cmdline').exists():
             self.skipTest('the flock loop is the Linux fallback')
         state = self.home / '.local/state/herdr-events'
         state.mkdir(parents=True)
         running = lambda: bash(f'. "{PLATFORM}"\nevent_loop_running\n', env=self.env).returncode == 0
-        self.assertFalse(running(), 'no lock file: no loop')
+        self.assertFalse(running(), 'no pid file: no loop')
         unrelated = subprocess.Popen(['sleep', '60'])
         self.addCleanup(lambda: (unrelated.kill(), unrelated.wait()))
         (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
-        (state / 'supervise.lock').touch()
         self.assertFalse(running(), 'a live pid in a stale pid file is not the loop')
-        self.hold(state / 'supervise.lock')
+        # checks at the same time never count each other as the loop (review-codex round 2)
+        many = bash(f'. "{PLATFORM}"\nfor i in 1 2 3 4 5 6; do (for j in 1 2 3 4 5 6 7 8 9 10; do '
+                    'event_loop_running && echo RUNNING; done) & done; wait\n', env=self.env)
+        self.assertNotIn('RUNNING', many.stdout)
+        loop = fake_loop(self.home)
+        self.addCleanup(lambda: (os.killpg(loop.pid, signal.SIGKILL), loop.wait()))
+        (state / 'supervise.pid').write_text(f'{loop.pid}\n')
         self.assertTrue(running())
 
     def test_hash_stdin_matches_md5(self):

@@ -3,11 +3,16 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_platform import fake_loop
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -130,20 +135,17 @@ exit 0
         return ('event loop not running',)
 
     def arm_supervisor(self):
-        """The timer check passes: launchd on macOS, the loop's lock held on Linux (the fake systemctl declines the bus)."""
+        """The timer check passes: launchd on macOS, a live loop in the pid file on Linux (the fake systemctl declines the bus)."""
         if platform.system() == 'Darwin':
             return {'TEST_LAUNCHD': '1'}
         state = self.home / '.local/state/herdr-events'
         state.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.Popen(['bash', '-c', 'exec 9>"$1"; flock 9; echo held; exec sleep 300', 'bash',
-                                 str(state / 'supervise.lock')], stdout=subprocess.PIPE, text=True)
+        proc = fake_loop(self.home)
 
         def stop(p=proc):
-            p.kill()
+            os.killpg(p.pid, signal.SIGKILL)
             p.wait(timeout=5)
-            p.stdout.close()
         self.addCleanup(stop)
-        self.assertEqual(proc.stdout.readline().strip(), 'held')
         (state / 'supervise.pid').write_text(f'{proc.pid}\n')
         return {}
 
@@ -156,7 +158,6 @@ exit 0
         state = self.home / '.local/state/herdr-events'
         state.mkdir(parents=True, exist_ok=True)
         (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
-        (state / 'supervise.lock').touch()
         self.assert_problem(self.doctor(**env), 'event loop not running')
 
     def test_full_relay_passes_with_custom_routes_and_hides_contents(self):

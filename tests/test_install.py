@@ -240,7 +240,6 @@ class Install(unittest.TestCase):
         state = self.home / '.local/state/herdr-events'
         state.mkdir(parents=True, exist_ok=True)
         (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
-        (state / 'supervise.lock').touch()
         return unrelated
 
     def test_linux_systemd_units_when_the_user_bus_answers(self):

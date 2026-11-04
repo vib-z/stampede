@@ -101,7 +101,7 @@ Persistent=true
 WantedBy=timers.target' && n=$((n+1))
     [ "$n" = 4 ] || return 0
     if [ "$DRY" = 1 ]; then echo "would enable systemd user timers (watchdog every 5 min, flush every 2 min)"; return 0; fi
-    # the timers replace a running flock loop; only the lock holder's pid file is trusted
+    # the timers replace a running flock loop; a stale pid file is never signalled
     if event_loop_running; then kill "$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid")" 2>/dev/null || true; fi
     systemctl --user daemon-reload
     systemctl --user enable --now herdr-event-watchdog.timer herdr-events-flush.timer
@@ -112,15 +112,14 @@ WantedBy=timers.target' && n=$((n+1))
     if [ "$DRY" = 1 ]; then echo "would start the event loop (flock, nohup): watchdog every 5 min, flush every 2 min"; return 0; fi
     mkdir -p "$state"
     if event_loop_running; then echo "ok event loop"; return 0; fi
-    rm -f "$state/supervise.pid"   # a stale one from a loop that died, or its pid now someone else's
     nohup "$HOME/.local/bin/herdr-event-supervise" >>"$state/supervise.log" 2>&1 &
     disown || true
     local i
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-      [ -s "$state/supervise.pid" ] && break
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do   # until the pid file names the new loop
+      event_loop_running && break
       sleep 0.1
     done
-    [ -s "$state/supervise.pid" ] || { echo "event loop did not start; see $state/supervise.log" >&2; exit 1; }
+    event_loop_running || { echo "event loop did not start; see $state/supervise.log" >&2; exit 1; }
     echo "started the event loop"
   else
     echo "skip event timers: no systemd --user and no flock" >&2

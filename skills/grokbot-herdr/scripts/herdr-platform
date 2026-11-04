@@ -36,13 +36,14 @@ hold_lock() {
   fi
 }
 
-# Whether herdr-event-supervise runs: it holds supervise.lock while it lives. Its pid file can outlive it,
-# and the pid can belong to another process by then, so the lock is the only proof.
+# Whether herdr-event-supervise runs (Linux): its pid file names a live process that runs that script.
+# The file can outlive the loop and its pid can belong to another process by then, so a live pid alone is
+# no proof. Takes no lock, so checks running at the same time never see each other as the loop.
 event_loop_running() {
-  local lock="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.lock"
-  { [ -e "$lock" ] && command -v flock >/dev/null 2>&1; } || return 1
-  flock -n -E 75 "$lock" true 2>/dev/null
-  [ $? = 75 ]
+  local pid
+  pid=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/herdr-events/supervise.pid" 2>/dev/null) || return 1
+  case $pid in ''|*[!0-9]*) return 1;; esac
+  tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null | grep -qx '.*/herdr-event-supervise'
 }
 
 # Running this file defines nothing useful in a child and exits 0.
