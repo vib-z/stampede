@@ -1,13 +1,19 @@
 """install.sh and the Herdr plugin, only in temporary HOME directories with fakes (stdlib)."""
 import json
 import os
+import platform
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import sys
 import tomllib
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from events_log import events_log
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ('stampede', 'herdr-fleet', 'grokbot-herdr', 'share-plan')
@@ -20,9 +26,10 @@ class Install(unittest.TestCase):
         self.home = Path(self.temporary.name).resolve()
         (self.home / '.claude').mkdir()
         self.env = {**os.environ, 'HOME': str(self.home)}
+        self.env.pop('XDG_STATE_HOME', None)
 
-    def run_install(self, *flags, root=ROOT):
-        return subprocess.run(['bash', str(root / 'install.sh'), *flags], env=self.env,
+    def run_install(self, *flags, root=ROOT, env=None):
+        return subprocess.run(['bash', str(root / 'install.sh'), *flags], env=env or self.env,
                               capture_output=True, text=True, timeout=30)
 
     def managed_checkout(self, n):
@@ -214,9 +221,77 @@ class Install(unittest.TestCase):
         result = subprocess.run(['bash', str(ROOT / 'scripts/herdr-plugin-event')],
                                 env=env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('logged-only (no route URL)', (self.home / 'Library/Logs/herdr-events.log').read_text())
+        self.assertIn('logged-only (no route URL)', events_log(self.home).read_text())
         self.assertFalse((self.home / 'network-called').exists())
         self.assertFalse((self.home / '.herdr-events/queue').exists())
+
+    def _linux_env(self, systemctl):
+        bin_dir = self.home / 'fake-bin'
+        bin_dir.mkdir()
+        (bin_dir / 'systemctl').write_text(systemctl)
+        (bin_dir / 'systemctl').chmod(0o755)
+        env = {**self.env, 'PATH': f'{bin_dir}:/usr/bin:/bin'}
+        return env
+
+    def _stale_loop_pid(self):
+        """A pid file left by a loop that died, whose pid now belongs to an unrelated live process."""
+        unrelated = subprocess.Popen(['sleep', '300'])
+        self.addCleanup(lambda: (unrelated.kill(), unrelated.wait()))
+        state = self.home / '.local/state/herdr-events'
+        state.mkdir(parents=True, exist_ok=True)
+        (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
+        return unrelated
+
+    def test_linux_systemd_units_when_the_user_bus_answers(self):
+        if platform.system() != 'Linux':
+            self.skipTest('systemd user timers are the Linux supervisor')
+        env = self._linux_env('#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$HOME/systemctl-calls"\n'
+                              'case "$1 $2" in "--user show-environment") exit 0;; esac\nexit 0\n')
+        unrelated = self._stale_loop_pid()
+        dry = self.run_install('--dry-run', '--supervise', env=env)
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertIn('would enable systemd user timers', dry.stdout)
+        self.assertFalse((self.home / '.config/systemd/user/herdr-event-watchdog.timer').exists())
+        result = self.run_install('--supervise', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('ok systemd user timers', result.stdout)
+        timer = (self.home / '.config/systemd/user/herdr-event-watchdog.timer').read_text()
+        self.assertIn('stampede-unit', timer)
+        self.assertIn('OnUnitActiveSec=5min', timer)
+        self.assertIn('OnUnitActiveSec=2min', (self.home / '.config/systemd/user/herdr-events-flush.timer').read_text())
+        calls = (self.home / 'systemctl-calls').read_text()
+        self.assertIn('--user enable --now herdr-event-watchdog.timer herdr-events-flush.timer', calls)
+        again = self.run_install('--supervise', env=env)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn('linked', again.stdout)
+        self.assertIsNone(unrelated.poll(), 'a stale pid file must never get its process killed')
+
+    def test_linux_loop_when_systemd_user_is_absent(self):
+        if platform.system() != 'Linux':
+            self.skipTest('the flock loop is the Linux fallback')
+        state = self.home / '.local/state/herdr-events'
+
+        def stop():
+            pidfile = state / 'supervise.pid'
+            if not pidfile.is_file():
+                return
+            try:
+                os.kill(int(pidfile.read_text().strip()), signal.SIGTERM)
+            except (ProcessLookupError, ValueError):
+                pass
+        self.addCleanup(stop)
+        env = self._linux_env('#!/bin/bash\nexit 1\n')
+        unrelated = self._stale_loop_pid()
+        result = self.run_install('--supervise', env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('started the event loop', result.stdout)
+        pid = int((state / 'supervise.pid').read_text())
+        self.assertNotEqual(pid, unrelated.pid)
+        self.assertIsNone(unrelated.poll())
+        os.kill(pid, 0)  # the flock holder is alive
+        again = self.run_install('--supervise', env=env)
+        self.assertIn('ok event loop', again.stdout)
+        self.assertEqual(int((state / 'supervise.pid').read_text()), pid)
 
 
 if __name__ == '__main__':

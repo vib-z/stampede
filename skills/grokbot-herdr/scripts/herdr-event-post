@@ -10,7 +10,10 @@
 # Routes: $HERDR_EVENTS_ROUTES_DIR (default $HERDR_EVENTS_DIR/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
 # HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/, handed/ and the default routes/.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
-LOG="$HOME/Library/Logs/herdr-events.log"
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+. "$(dirname "$_src")/herdr-platform"
+LOG=$(herdr_events_log)
 STATE_DIR="$HOME/.local/state/herdr-events"
 DEDUPE_SECS=120
 mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
@@ -25,7 +28,7 @@ else
   for kv in "$@"; do payload=$(jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" '.[$k]=$v' <<<"$payload"); done
 fi
 if ! payload=$(jq -c . <<<"$payload" 2>/dev/null) || [ -z "$payload" ]; then [ "$STRICT" = 1 ] && refuse 2 "invalid json"; log "skip: invalid json"; exit 0; fi
-payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENTS_MACHINE:-$(hostname -s)}" '. + {machine:$m, timestamp:$ts}' <<<"$payload")
+payload=$(jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg m "${HERDR_EVENTS_MACHINE:-$(short_host)}" '. + {machine:$m, timestamp:$ts}' <<<"$payload")
 summary=$(jq -r '"\(.source//"?") pane=\(.pane//.session_id//"-") state=\(.state//"-")"' <<<"$payload")
 
 # Workspace, for the job marker and for routing.
@@ -90,7 +93,7 @@ eid=$(jq -r '.event_id // empty' <<<"$payload")
 # the agent's own hook and the follower are one wake for one episode, whichever comes first; a later episode is new.
 akey=""; [ -n "$eid" ] && [ "${key#attention|}" != "$key" ] && akey="attention|$pane"
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
-exec 9>"$STATE_DIR/dedupe.lock"; /usr/bin/lockf -s -t 5 9 2>/dev/null || true
+exec 9>"$STATE_DIR/dedupe.lock"; hold_lock 9
 touch "$DB"
 seen(){ awk -F'\t' -v k="$1" -v n="$now" -v w="$2" '$1==k && n-$2<w {f=1} END{exit !f}' "$DB"; }
 if [ "$STRICT" = 0 ] && seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summary"; exit 0; fi
@@ -136,5 +139,6 @@ if jq -c --arg r "$route" '{route:$r, payload:.}' <<<"$payload" >"$QH/queue/.tmp
   log "queued $qname: $summary"
 else rm -f "$QH/queue/.tmp-$qname"; [ "$STRICT" = 1 ] && refuse 4 "queue write failed"; log "queue-write-failed: $summary"
   [ -n "$eid" ] && exit 5; exit 0; fi
+exec 9>&-   # the de-dupe record is written: release its lock before the network
 "$HOME/.local/bin/herdr-event-flush" </dev/null >/dev/null 2>&1
 exit 0

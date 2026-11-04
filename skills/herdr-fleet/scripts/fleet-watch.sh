@@ -11,8 +11,14 @@
 # because Moshi's own agent hooks already cover completions, questions and approvals but cannot
 # see a hung or vanished agent. FLEET_WATCH_NOTIFY=0 turns the push off.
 # FLEET_WATCH_PASSES=N stops after N passes and FLEET_WATCH_INTERVAL sets the seconds between
-# them (default 30), for testing. Needs herdr and jq; stat -f is the macOS form.
+# them (default 30), for testing. Needs herdr and jq. File age uses herdr-platform (GNU or BSD stat).
 set -u
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+_p="$(cd "$(dirname "$_src")/../../grokbot-herdr/scripts" 2>/dev/null && pwd)/herdr-platform"
+if [ -f "$_p" ]; then . "$_p"
+else file_mtime() { if stat -c %Y "$1" >/dev/null 2>&1; then stat -c %Y "$1"; else stat -f %m "$1"; fi; }
+fi
 emit() { printf '%s %s\n' "$(date '+%F %R')" "$*"; }
 REPORTS=${1:?usage: fleet-watch.sh <reports-dir> [workspace-id] [stall-minutes]}
 WS=${2:-${HERDR_WORKSPACE_ID:-}}
@@ -62,7 +68,7 @@ while true; do
     [ "$status" = blocked ] && once "blk:$name:$(( now / 600 ))" "BLOCKED $name"
     [ "$status" = working ] && [ "$sid" != - ] || continue
     log=$(session_log "$sid"); [ -n "$log" ] || continue
-    age=$(( now - $(stat -f %m "$log") ))
+    age=$(( now - $(file_mtime "$log") ))
     [ "$age" -gt $(( STALL_MIN * 60 )) ] || continue
     msg=$(once "stall:$name:$(( now / 1800 ))" "STALL? $name log idle $(( age / 60 ))m")
     [ -n "$msg" ] && { echo "$msg"; phone --title "$name may be stuck" "Working, but its log has not moved for $(( age / 60 ))m (herdr workspace ${WS:-?})."; }

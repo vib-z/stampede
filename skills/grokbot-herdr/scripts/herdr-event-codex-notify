@@ -1,6 +1,10 @@
 #!/bin/bash
 # Codex notify: forwards agent-turn-complete JSON (last arg) to herdr-event-post, then chains to the previous notify.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+. "$(dirname "$_src")/herdr-platform"
+LOG=$(herdr_events_log); mkdir -p "$(dirname "$LOG")"
 json="${@: -1}"
 PREV="$HOME/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
 [ -x "$PREV" ] && "$PREV" turn-ended "$json" >/dev/null 2>&1 &
@@ -11,8 +15,7 @@ if [ -z "$pane" ] && [ -n "${HC_TERMINAL_ID:-}" ] && [[ "${STAMPEDE_JOB_KEY:-}" 
 fi
 # A turn with no Herdr pane or stampede Core terminal (the Codex desktop app, any other notify) is not a fleet event.
 if [ -z "$pane" ]; then
-  mkdir -p "$(dirname "$HOME/Library/Logs/herdr-events.log")"
-  printf '%s skip: codex turn with no herdr pane\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>"$HOME/Library/Logs/herdr-events.log"
+  printf '%s skip: codex turn with no herdr pane\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>"$LOG"
   wait
   exit 0
 fi
@@ -27,7 +30,7 @@ if [ -n "$tid" ]; then
   if [ -z "$f" ]; then why="side conversation (no rollout)"
   elif head -1 "$f" | jq -e '.payload.parent_thread_id // .payload.source.subagent' >/dev/null 2>&1; then why="sub-agent"; fi
   if [ -n "$why" ]; then
-    printf '%s skip: codex %s thread=%s pane=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$why" "$tid" "${pane:--}" >>"$HOME/Library/Logs/herdr-events.log"
+    printf '%s skip: codex %s thread=%s pane=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$why" "$tid" "${pane:--}" >>"$LOG"
     wait; exit 0
   fi
 fi

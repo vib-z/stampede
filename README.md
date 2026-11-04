@@ -69,7 +69,7 @@ Either way:
 
 ## Quick start
 
-On a Mac with [Herdr](https://herdr.dev/docs/install/) 0.9.4 or later, Claude Code signed in, Python 3.9 or later, git, jq and curl:
+On a Mac or a Linux machine with [Herdr](https://herdr.dev/docs/install/) 0.9.4 or later, Claude Code signed in, Python 3.9 or later, git, jq and curl:
 
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede
@@ -87,7 +87,7 @@ herdr-doctor                           # exit 0, with Herdr running
 **On Herdr Core instead of the Herdr TUI.** With [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) installed and running, run `herdr-doctor --core`, then ask *"With stampede, on Herdr Core: ..."*. The front door runs `stampede new --core`, and each agent runs in a Core terminal of its own ([Herdr Core](#herdr-core)).
 
 **Limits.**
-- macOS only. No Linux run has been tried.
+- macOS, and Linux with less testing. On macOS you load the event relay's two launchd jobs yourself. On Linux `install.sh` starts the same timers (systemd user units, or one flock-guarded loop when `systemctl --user` does not answer). On Linux the tests, the relay samples and the install run in CI; a live job there (Herdr, Herdr Core, Moshi or a bot over SSH) has not been run yet.
 - The lead is Claude by default (any Claude model, set by `FLEET_LEAD_MODEL`), or Codex with `stampede new --lead codex` on the Herdr TUI. Workers can be Claude, Codex or Cursor (on Herdr Core, Claude or Codex in Core terminals, and Cursor, Hermes or Kimi handed to Herdr TUI panes).
 - Version 0.1.x, and early: commands and files may still change.
 - For big jobs. A small job runs as one agent session in a single tagged Herdr pane ([FAQ](#troubleshoot)).
@@ -245,7 +245,7 @@ REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close (a Core j
 
 ## Install
 
-**Prerequisites** (tested on macOS 27.2, 21 Oct 2026):
+**Prerequisites** (tested on macOS 27.2, 21 Oct 2026; the unit tests, the relay samples and `install.sh` also on Ubuntu 24.04 with fakes, 4 Nov 2026, with no live Herdr there):
 
 | tool | version tested | needed for |
 |---|---|---|
@@ -260,7 +260,7 @@ REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close (a Core j
 | [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.33 | questions on your phone, optional |
 | [Tailscale](https://tailscale.com/kb/1017/install) | 1.104.1 | a bot on another computer, optional |
 
-**Step by step**, on a Mac with Herdr, Claude Code (signed in), Python 3 and git:
+**Step by step**, on a Mac or a Linux machine with Herdr, Claude Code (signed in), Python 3 and git:
 
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede
@@ -283,11 +283,9 @@ herdr-trust ~/code/my-app            # once per repo, before agents start there
 
 Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: ..."*. The [walkthrough](#use-one-job-start-to-finish) shows a whole job.
 
-`install.sh` links the four skills into `~/.claude/skills/` and `~/.codex/skills/` (each only when `~/.claude` or `~/.codex` exists), and links `stampede`, `fleet-job` and the `herdr-*` helpers into `~/.local/bin`. It is safe to re-run (`ok` for a link already in place) and never replaces anything already there (`skip ... left as is`), except, in a Herdr plugin install, its own link to the same file in an older checkout of that same install, which it moves to the new one (`relinked`). A clone relinks nothing. `herdr-trust` marks a repo trusted for Claude, and for Codex when `~/.codex` exists, so agents start without the folder-trust dialog; it refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`), so keep your repos there or set the key.
+`install.sh` links the four skills into `~/.claude/skills/` and `~/.codex/skills/` (each only when `~/.claude` or `~/.codex` exists), and links `stampede`, `fleet-job` and the `herdr-*` helpers into `~/.local/bin`. It is safe to re-run (`ok` for a link already in place) and never replaces anything already there (`skip ... left as is`), except, in a Herdr plugin install, its own link to the same file in an older checkout of that same install, which it moves to the new one (`relinked`). A clone relinks nothing. On Linux it also starts the event timers: systemd user timers when `systemctl --user` answers, otherwise one flock-guarded loop. `--no-supervise` skips that, `--dry-run` only prints it, and a `HOME` that is not the login home is skipped so a throwaway home never touches a real user manager. macOS still loads its launchd jobs by hand ([watchdogs](remote/watchdogs.md)). `herdr-trust` marks a repo trusted for Claude, and for Codex when `~/.codex` exists, so agents start without the folder-trust dialog; it refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`), so keep your repos there or set the key.
 
 **Then, once:** the settings that let agents start and run without a visit to their pane, which you run yourself: [unattended-setup.md](skills/herdr-fleet/references/unattended-setup.md). A remote bot also needs the event relay. Both: [docs/SETUP.md](docs/SETUP.md). To uninstall: [docs/SETUP.md, Uninstall](docs/SETUP.md#uninstall).
-
-**Linux:** the lead, `stampede` and `herdr-trust` use only Python and git, but the event relay scripts use macOS tools (`launchd`, BSD `stat`, `md5`), and no Linux run has been tried.
 
 ## Updating
 
@@ -550,7 +548,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `FLEET_WATCH_INTERVAL` | `30` | seconds between `fleet-watch.sh` passes (a bot outside Herdr) |
 | `FLEET_WATCH_PASSES` | `0` | stop the watch after this many passes; 0 runs until stopped |
 | `FLEET_WATCH_NOTIFY` | `1` | `0` turns off the watch's phone push. A Herdr Core job's follower pushes stalls and ended terminals to the phone (`moshi-hook notify`) only when it is `1`; unset, it does not |
-| `HERDR_EVENTS_MACHINE` | `hostname -s` | the machine label sent with every event |
+| `HERDR_EVENTS_MACHINE` | short hostname (`hostname -s`, else the name before the first dot) | the machine label sent with every event |
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
 | `HERDR_EVENTS_ROUTES_DIR` | `$HERDR_EVENTS_DIR/routes` | one file per route, `URL=` and `KEY=` |
 | `HERDR_EVENTS_STALE_MINUTES` | `30` | a Herdr Core job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
@@ -585,7 +583,9 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `fleet-job new: new needs --workspace or --pane, or run it inside Herdr` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([skills/stampede](skills/stampede/SKILL.md)) |
 | `PROBLEM` from `herdr-doctor` | the line names the broken part and its fix. Plain `herdr-doctor` checks the core install only; the event relay's checks run when the relay is installed, or with `--relay` |
 | `PROBLEM herdr server not running` from `herdr-doctor` | start Herdr (run `herdr` in a terminal), then run `herdr-doctor` again |
-| `PROBLEM` lines for stampede on PATH, linked skills or the relay's launchd jobs from `herdr-doctor --core` in a checkout that is not installed | expected until `install.sh` runs; the Core checks are the `ok hc`, `ok Herdr Core answers`, `ok claude` and `ok codex` lines |
+| `PROBLEM` lines for stampede on PATH, linked skills or the relay's timers from `herdr-doctor --core` in a checkout that is not installed | expected until `install.sh` runs; the Core checks are the `ok hc`, `ok Herdr Core answers`, `ok claude` and `ok codex` lines |
+| `PROBLEM event loop not running` or `systemd ... not enabled` from `herdr-doctor --relay` | on Linux, re-run `install.sh`. It enables the systemd user timers, or starts the flock loop when `systemctl --user` does not answer. On macOS, load the launchd jobs in [watchdogs](remote/watchdogs.md) |
+| On Linux the systemd timers stop when you log out, or the flock loop is gone after a reboot | systemd runs user timers only while your user manager runs: on a machine nobody logs in to, run `loginctl enable-linger $USER` once. The flock loop does not survive a reboot: run `install.sh` again after one ([watchdogs](remote/watchdogs.md)) |
 | `PROBLEM Herdr Core not running` from `herdr-doctor --core` | start the core yourself (`hc server start`), then check again; the doctor and stampede never start one |
 | `BLOCKED <lead>: <kind>` or `NOT READY <lead>: ...` from `stampede new --core` (exit 1) | the lead runs but is not ready: `hc read <address>`, clear a dialog with `hc keys <address> <keys>`, then send the printed `stampede tell` line; never run `new` again for that folder |
 | `FAILED <lead> (...): nothing of <job> runs` | the start never ran, or the follower ended at once (`start-failed` in the folder says why): fix it, then start a new job with another `--name` |
@@ -680,7 +680,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 ```text
 README.md  CHANGELOG.md  CONTRIBUTING.md  RELEASING.md  SECURITY.md  LICENSE  VERSION
 AGENTS.md  CLAUDE.md  SKILL.md  config.example  install.sh  herdr-plugin.toml
-.github/                issue and pull request templates, workflows/ci.yml (macOS CI)
+.github/                issue and pull request templates, workflows/ci.yml (macOS and Linux CI)
 skills/herdr-fleet/     the job: SKILL.md, references/, scripts/fleet-job, fleet_job.py, fleet-watch.sh
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor,
                         the relay, herdr-event-core: a Herdr Core job's follower)
@@ -720,7 +720,7 @@ tests/                  python3 -m unittest discover tests; fake_hc.py (a fake H
 
 How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The rules every change follows: [AGENTS.md](AGENTS.md).
 
-- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr or Herdr Core: a fake `herdr` through `HERDR`, and [tests/fake_hc.py](tests/fake_hc.py) through `HC`). [CI](.github/workflows/ci.yml) runs them on macOS on every push and pull request, then a real install and `herdr-doctor` against Homebrew Herdr, then [tests/core_smoke.py](tests/core_smoke.py) on Herdr Core 0.1.13 (downloaded and checked against its pinned checksum) in a scratch `HC_SESSION`, never a machine's own core. The Herdr Core tests ([test_core.py](tests/test_core.py), [test_core_relay.py](tests/test_core_relay.py), and [test_mixed.py](tests/test_mixed.py) with [tests/fake_herdr.py](tests/fake_herdr.py) for handed agents) state the Core contract; a test marked as an expected failure is a part not built yet.
+- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr or Herdr Core: a fake `herdr` through `HERDR`, and [tests/fake_hc.py](tests/fake_hc.py) through `HC`). [CI](.github/workflows/ci.yml) runs them on macOS and on Linux on every push and pull request. The macOS job then does a real install and `herdr-doctor` against Homebrew Herdr, the relay sample payloads ([test-relay.sh](skills/grokbot-herdr/scripts/test-relay.sh)), and [tests/core_smoke.py](tests/core_smoke.py) on Herdr Core 0.1.13 (downloaded and checked against its pinned checksum) in a scratch `HC_SESSION`, never a machine's own core. The Linux job runs the same unit suite and relay samples, then `install.sh` with the timers left off. The Herdr Core tests ([test_core.py](tests/test_core.py), [test_core_relay.py](tests/test_core_relay.py), and [test_mixed.py](tests/test_mixed.py) with [tests/fake_herdr.py](tests/fake_herdr.py) for handed agents) state the Core contract; a test marked as an expected failure is a part not built yet.
 - **The cross-client suite:** `python3 -m unittest tests.test_clients` (about 25 s) plays one job per client (a Herdr chat, Claude, Codex, Cursor, Hermes, a bot over SSH) and backend against the fakes and checks each outcome's command contract, O1 to O9, for each; the agents' own work is left to the live runs. A client is one row in `CLIENTS` in [tests/test_clients.py](tests/test_clients.py) plus one in [docs/CLIENTS.md](docs/CLIENTS.md), which also holds the live runbook and the clients that do worse; a worker kind is one entry in `WORKERS` there, which every client's job then starts.
 - **The four skills are copies** of the maintainer's own skills, scrubbed of anything personal. A pull request that changes `skills/` is welcome; the maintainer carries it to the source first, then copies it back here.
 - **A front door:** a guide in `remote/` that writes the ask and runs `stampede new`, linked from [Front doors](#front-doors).
@@ -758,9 +758,12 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **Unreleased, 2 Nov 2026. Core approval notice:** the generated lead brief now tells the lead to reply to a typed gate approval with one short line pointing to the starting chat or phone. Gate authority is unchanged. Tests check the Core and TUI briefs and that `yes`, `approve` and `go ahead` leave Core gates closed for every client. The notice has not been checked with a live agent.
 
+**Unreleased, 4 Nov 2026. Linux, beside macOS.** The event relay, `herdr-doctor`, `install.sh` and `fleet-watch.sh` run on Linux. File size, age and mode go through one helper, so GNU `stat` and BSD `stat` both answer the file and not the filesystem. The relay log is `~/Library/Logs/herdr-events.log` on macOS and `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux. On Linux `install.sh` enables systemd user timers for the watchdog (5 minutes) and the flusher (2 minutes), or starts one flock-guarded loop when `systemctl --user` does not answer. `herdr-doctor --relay` checks whichever is in use, and counts the loop as running only when its pid file names a live `herdr-event-supervise`, never by a live pid alone. The de-dupe lock is exclusive on both, `lockf` on macOS and `flock` on Linux, and is let go before the flush. CI now runs on Linux too: the unit suite, the relay samples, `install.sh --dry-run` and an install with the timers left off. Tested on Ubuntu 24.04, in CI and in a local container: the full unit suite, the relay samples, both installs, and the flock loop started for real. The systemd timers were checked only against a fake `systemctl`. Not run on Linux yet: a live Herdr TUI, Herdr Core, Moshi, a real systemd user manager, or a bot over SSH.
+
 **Unreleased, 3 Nov 2026. Pick the lead:** `stampede new --lead claude|codex` and `FLEET_LEAD_KIND`; with neither the lead is Claude, as before. A Codex lead (GPT-6 Astra, `ultra`) starts with its notify hook, auto mode, network in its sandbox and write access to `.git` and the worktrees folder; a deliverer types its inbox into its pane while it is idle; its own turn ends go to the relay; it acts on a gate only after `gate-ok`. `--fork` and `--core` refuse it. Tested with fakes: the unit tests, the cross-client suite (every client starts a Codex lead on the TUI and is refused on Core), and the walkthrough's commands and the deliverer against a fake Herdr in a scratch home. Not run live with a real Codex lead yet.
 
 **Next:**
+- A live job on Linux, planned: Herdr and Herdr Core, the systemd user timers on a real user manager, Moshi and a bot over SSH.
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
 - On Herdr Core, planned: workers on a second machine (`hc run --on`), a bot front door over `hc`, the job shown in the Herdr app (its `herdr.space` and `herdr.tab` labels), Hermes and Kimi workers on a TUI-only job, and Kimi's and Hermes's empty prompts, so a handed one is briefed and told without a hand.
 - Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.
@@ -768,7 +771,6 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 - Cursor as the lead, and a Codex lead on Herdr Core.
 - ChatGPT Dots as a front door, once it can be woken by a webhook.
 - Report to Herdr that Codex's "Implement this plan?" and Cursor's "Ready to build?" dialogs read as `idle` and `done`, not `blocked` (needs the owner's yes).
-- A Linux run.
 
 ## Credits and license
 

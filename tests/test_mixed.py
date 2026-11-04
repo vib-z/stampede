@@ -7,6 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, LEAD, ROOT, SCRIPTS, SHA, fj, git
+from events_log import events_log
 from test_core_relay import RELAY, Shell, follower_module, status
 
 FAKE_HERDR = ROOT / 'tests/fake_herdr.py'
@@ -443,7 +444,7 @@ class MixedMarks(MixedCase):
         for source, state in (('herdr', 'blocked'), ('herdr', 'done'), ('herdr-watchdog', 'dead'), ('claude', 'Notification')):
             self.assertEqual(self.post(source=source, pane=PANE, workspace='w9', state=state).returncode, 0)
         self.assertEqual(self.queued(), [])
-        self.assertIn('handed-skip', (self.root / 'home/Library/Logs/herdr-events.log').read_text())
+        self.assertIn('handed-skip', events_log(self.root / 'home').read_text())
         self.post(source='hc', pane=PANE, workspace=self.key, state='blocked', kind='dialog', event_id=self.key + '/x|blocked|1')
         self.post(source='herdr', pane='w9:p8', workspace='w9', state='blocked')
         self.assertEqual(self.queued(), [('hc', PANE), ('herdr', 'w9:p8')])
@@ -461,7 +462,6 @@ class MixedWatchdog(Shell):
     def test_a_marked_pane_is_never_stale_or_dead(self):
         (self.events / 'handed').mkdir()
         (self.events / 'handed/w9:p3').write_text('/repo/.herdr-demo\naaaaaaaaaaaa\n')
-        (self.home / 'Library/Logs').mkdir(parents=True)
         agents = self.home / 'agents.json'
         self.fake('herdr', f'case "$1 $2" in\n  "agent list") cat "{agents}";;\n  "pane read") echo same;;\n'
                            '  "workspace list") echo \'{"result":{"workspaces":[]}}\';;\nesac\n')
@@ -470,7 +470,7 @@ class MixedWatchdog(Shell):
         working = {'agent_status': 'working', 'agent': 'hermes', 'workspace_id': 'w9', 'tab_id': 'w9:t1'}
         listed = lambda *panes: agents.write_text(json.dumps({'result': {'agents': [{**working, 'pane_id': p} for p in panes]}}))
         listed('w9:p3', 'w9:p4', 'w9:p5')
-        path = f'{self.bin}:/usr/bin:/bin:/sbin'  # md5 is in /sbin
+        path = f'{self.bin}:/usr/bin:/bin'  # hash_stdin uses python3
         self.assertEqual(self.run_script('herdr-event-watchdog', PATH=path).returncode, 0)
         self.assertEqual(self.posted(), [])
         self.assertFalse((state / 'w9_p3').exists())

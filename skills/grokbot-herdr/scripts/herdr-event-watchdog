@@ -1,10 +1,13 @@
 #!/bin/bash
-# Run by launchd every 5 min. Flags agents stuck in working with no output change
+# Run every 5 min (launchd on macOS; a systemd user timer or herdr-event-supervise on Linux). Flags agents stuck in working with no output change
 # for 30+ min (stale) and agent panes that vanished without a done/idle state (dead).
 # A pane a Herdr Core job handed an agent to ($EV/handed/<pane>) is its job's follower's: never tracked here.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+. "$(dirname "$_src")/herdr-platform"
 S="$HOME/.local/state/herdr-events/watchdog"; mkdir -p "$S"
-LOG="$HOME/Library/Logs/herdr-events.log"
+LOG=$(herdr_events_log); mkdir -p "$(dirname "$LOG")"
 STALE=$((30*60)); now=$(date +%s)
 # A Herdr Core job's owner tag (hc-<12 hex>) needs no Herdr TUI: it stays while the job is open (its marker) or its
 # own core (the tag's session= and socket=) runs one of its terminals, and goes a day after that core confirmed
@@ -36,7 +39,7 @@ while read -r a; do
   if [ -f "$EV/handed/$pane" ]; then rm -f "$f"; continue; fi   # a Herdr Core job's handed pane: its follower watches it
   printf '%s\t%s\t%s\t%s\t%s\n' "$pane" "$st" "$kind" "$ws" "$tab" >>"$S/seen.new"
   if [ "$st" = working ]; then
-    h=$(herdr pane read "$pane" --source recent --lines 40 2>/dev/null | md5 -q)
+    h=$(herdr pane read "$pane" --source recent --lines 40 2>/dev/null | hash_stdin)
     read -r oh since flagged < "$f" 2>/dev/null || true
     if [ "$h" != "$oh" ]; then echo "$h $now 0" > "$f"
     elif [ $((now-since)) -ge $STALE ] && [ "$flagged" != 1 ]; then

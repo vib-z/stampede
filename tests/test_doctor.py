@@ -1,12 +1,18 @@
 """Read-only doctor checks in a temporary HOME, with no live Herdr or launchd access."""
 import json
 import os
+import platform
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_platform import fake_loop
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,6 +29,7 @@ class Doctor(unittest.TestCase):
                     if not k.startswith(('HERDR_', 'FLEET_', 'STAMPEDE_'))}
         self.env.update(HOME=str(self.home), PATH=f'{self.bin}:/opt/homebrew/bin:/usr/bin:/bin',
                         STAMPEDE_NO_UPDATE_CHECK='1')
+        self.env.pop('XDG_STATE_HOME', None)
         subprocess.run(['bash', str(ROOT / 'install.sh')], env=self.env, check=True,
                        capture_output=True, timeout=15)
         self.fake('herdr', '''case "$1 $2" in
@@ -40,6 +47,7 @@ exit 0
 exit 0
 ''')
         self.fake('df', "printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 99999999 0 %s 0%% /\\n' \"${TEST_DISK_KB:-52428800}\"\n")
+        self.fake('systemctl', 'exit 1\n')  # a real user bus must not decide these checks
 
     def fake(self, name, body):
         path = self.bin / name
@@ -75,8 +83,7 @@ exit 0
     def test_explicit_relay_requires_hooks_plugin_jobs_and_routes(self):
         result = self.doctor('--relay')
         for text in ('event plugin not enabled', 'Claude hook Stop missing',
-                     'Codex notify line missing', 'launchd local.herdr-event-watchdog not loaded',
-                     'launchd local.herdr-events-flush not loaded', 'no route file'):
+                     'Codex notify line missing', 'no route file', *self.timer_problems()):
             self.assert_problem(result, text)
         self.assertNotIn('event relay not installed', result.stdout)
 
@@ -99,7 +106,7 @@ exit 0
                 else:
                     path.write_text(content)
                 result = self.doctor()
-                self.assert_problem(result, 'launchd local.herdr-events-flush not loaded')
+                self.assert_problem(result, self.timer_problems()[-1])
                 if name == '.codex/config.toml':
                     self.assertIn('ok Codex notify chains herdr-event-codex-notify', result.stdout)
                 if content is None:
@@ -107,7 +114,7 @@ exit 0
                 else:
                     path.unlink()
 
-    def configure_relay(self):
+    def configure_relay(self, armed=True):
         hooks = {event: [{'hooks': [{'command': 'herdr-event-claude-hook'}]}]
                  for event in ('Stop', 'StopFailure', 'Notification')}
         (self.home / '.claude/settings.json').write_text(json.dumps({'hooks': hooks}))
@@ -117,13 +124,82 @@ exit 0
         route = routes / 'bot'
         route.write_text('private route content must never print\n')
         route.chmod(0o600)
-        return {'TEST_PLUGIN': '1', 'TEST_LAUNCHD': '1', 'HERDR_EVENTS_ROUTES_DIR': str(routes)}
+        env = {'TEST_PLUGIN': '1', 'HERDR_EVENTS_ROUTES_DIR': str(routes)}
+        if armed:
+            env.update(self.arm_supervisor())
+        return env
+
+    def timer_problems(self):
+        if platform.system() == 'Darwin':
+            return ('launchd local.herdr-event-watchdog not loaded', 'launchd local.herdr-events-flush not loaded')
+        return ('event loop not running',)
+
+    def arm_supervisor(self):
+        """The timer check passes: launchd on macOS, a live loop in the pid file on Linux (the fake systemctl declines the bus)."""
+        if platform.system() == 'Darwin':
+            return {'TEST_LAUNCHD': '1'}
+        state = self.home / '.local/state/herdr-events'
+        state.mkdir(parents=True, exist_ok=True)
+        proc = fake_loop(self.home)
+
+        def stop(p=proc):
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait(timeout=5)
+        self.addCleanup(stop)
+        (state / 'supervise.pid').write_text(f'{proc.pid}\n')
+        return {}
+
+    def test_linux_a_stale_loop_pid_is_not_a_running_loop(self):
+        if platform.system() != 'Linux':
+            self.skipTest('the flock loop is the Linux fallback')
+        env = self.configure_relay(armed=False)
+        unrelated = subprocess.Popen(['sleep', '300'])  # the dead loop's pid, now another process's
+        self.addCleanup(lambda: (unrelated.kill(), unrelated.wait()))
+        state = self.home / '.local/state/herdr-events'
+        state.mkdir(parents=True, exist_ok=True)
+        (state / 'supervise.pid').write_text(f'{unrelated.pid}\n')
+        self.assert_problem(self.doctor(**env), 'event loop not running')
 
     def test_full_relay_passes_with_custom_routes_and_hides_contents(self):
         result = self.doctor(**self.configure_relay())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('ok 1 route files', result.stdout)
         self.assertNotIn('private route content', result.stdout + result.stderr)
+
+    def test_a_route_that_is_not_private_is_a_warning(self):
+        env = self.configure_relay()
+        route = next(Path(env['HERDR_EVENTS_ROUTES_DIR']).iterdir())
+        route.chmod(0o644)
+        result = self.doctor(**env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f'warn route {route.name} is mode 644: chmod 600', result.stdout)
+
+    def test_linux_systemd_timers_pass_when_systemctl_says_active(self):
+        if platform.system() != 'Linux':
+            self.skipTest('systemd user timers are the Linux supervisor')
+        self.fake('systemctl', '''case "$1 $2" in
+  "--user show-environment") exit 0;;
+  "--user is-enabled") echo enabled; exit 0;;
+  "--user is-active") echo active; exit 0;;
+esac
+echo disabled; exit 1
+''')
+        result = self.doctor(**self.configure_relay())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('ok systemd herdr-event-watchdog.timer active', result.stdout)
+        self.assertIn('ok systemd herdr-events-flush.timer active', result.stdout)
+
+    def test_linux_systemd_timers_missing_are_a_problem(self):
+        if platform.system() != 'Linux':
+            self.skipTest('systemd user timers are the Linux supervisor')
+        self.fake('systemctl', '''case "$1 $2" in
+  "--user show-environment") exit 0;;
+esac
+echo disabled; exit 1
+''')
+        result = self.doctor('--relay')
+        self.assert_problem(result, 'systemd herdr-event-watchdog.timer not enabled')
+        self.assert_problem(result, 'systemd herdr-events-flush.timer not enabled')
 
     def test_stale_queue_remains_a_problem(self):
         env = self.configure_relay()
@@ -150,6 +226,7 @@ exit 0
         copy = self.home / 'skill-copy/scripts/herdr-doctor'  # no VERSION three folders up
         copy.parent.mkdir(parents=True)
         shutil.copy(ROOT / 'skills/grokbot-herdr/scripts/herdr-doctor', copy)
+        shutil.copy(ROOT / 'skills/grokbot-herdr/scripts/herdr-platform', copy.parent / 'herdr-platform')
         self.fake('stampede', 'echo 9.9.9\n')
         result = subprocess.run([str(copy)], env=self.env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
