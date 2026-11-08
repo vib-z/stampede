@@ -694,7 +694,8 @@ class Gates(unittest.TestCase):
     def approve(self, ident, sha):
         from unittest import mock
         with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            return self.quiet(fj.approve_gate, self.job, ident, sha, 'owner in Grok Bot chat')
+            return self.quiet(fj.approve_gate, self.job, ident, sha, 'owner in Grok Bot chat',
+                              fj.gate_digest(fj.load_gate(self.job, ident)))
 
     def test_new_records_the_bot_that_started_the_job(self):
         tag = self.home / '.config/herdr-events/owners/w9'
@@ -958,6 +959,17 @@ class Gates(unittest.TestCase):
             fj.gate_ok(self.job, ident, self.SHA)
         self.assertIn('changed after the yes', str(refused.exception))
 
+    def test_e17b_approve_gate_without_the_digest_is_refused(self):
+        """review round 2, R1: leaving --digest out is no way around the check."""
+        from unittest import mock
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (ident,) = self.gate_ids()
+        with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError) as refused:
+            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
+        self.assertIn('--digest', str(refused.exception))
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+
     def test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused(self):
         self.bot_job()
         self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
@@ -975,6 +987,9 @@ class Gates(unittest.TestCase):
                 self.assertTrue(fj.inside_herdr({}, 4242))
         with mock.patch.object(fj.subprocess, 'run', side_effect=FileNotFoundError('ps')):
             self.assertTrue(fj.inside_herdr({}))
+        for rows in ('4242  4141 python3\n', '  1     0 launchd\n 4242  4141 python3\n 4141  4242 bash\n'):
+            with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
+                self.assertTrue(fj.inside_herdr({}, 4242))  # an ancestor not shown, or a loop (review round 2, R7)
         rows = '  1     0 launchd\n 4242     1 bash\n'
         with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
             self.assertFalse(fj.inside_herdr({}, 4242))  # shown, with no Herdr above it: outside
@@ -1071,7 +1086,9 @@ class FrontDoor(unittest.TestCase):
         from unittest import mock
         self.job = job_with([('lead-demo', 'claude'), ('build-x', 'claude')])
         (self.job / 'front-door').write_text('relay\n')
-        patch = mock.patch.dict(os.environ, {'HERDR': screen_herdr('❯ \n')})
+        scratch = Path(tempfile.mkdtemp())  # finish takes the handed-mark lock: never the user's own events folder
+        patch = mock.patch.dict(os.environ, {'HERDR': screen_herdr('❯ \n'), 'HERDR_EVENTS_DIR': str(scratch / 'events'),
+                                             'HERDR_EVENTS_HOME': str(scratch / 'queue')})
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -1139,7 +1156,7 @@ class FrontDoor(unittest.TestCase):
         self.assertIn(f'approve-gate {self.job.absolute()} {ident} --sha {sha}', item)
         self.assertEqual(fj.load_gate(self.job, ident)['route'], 'front-door')
         with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            self.quiet(fj.approve_gate, self.job, ident, sha, "owner in desktop chat: 'push the PR'")
+            self.quiet(fj.approve_gate, self.job, ident, sha, "owner in desktop chat: 'push the PR'", fj.gate_digest(fj.load_gate(self.job, ident)))
         _, out = self.quiet(fj.gate_ok, self.job, ident, sha)
         self.assertIn("APPROVED " + ident + " by owner in desktop chat: 'push the PR'", out)
         with mock.patch.object(fj, 'inside_herdr', return_value=True), self.assertRaises(PermissionError):
@@ -1240,6 +1257,7 @@ class LeadChoice(unittest.TestCase):
         send.write_text('#!/bin/bash\nprintf "%s %s\\n" "$1" "$2" >> "$(dirname "$0")/sent"\necho "SUBMITTED $1"\n')
         send.chmod(0o755)
         mock.patch.object(fj, 'HERDR_SEND', send).start()
+        mock.patch.dict(os.environ, {'HERDR_EVENTS_DIR': str(folder / 'events'), 'HERDR_EVENTS_HOME': str(folder / 'queue')}).start()
         self.kick = mock.patch.object(fj, 'deliver_soon').start()
         self.addCleanup(mock.patch.stopall)
         self.job = job_with([('lead-demo', 'codex'), ('build-x', 'claude')])

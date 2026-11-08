@@ -93,8 +93,10 @@ eid=$(jq -r '.event_id // empty' <<<"$payload")
 # the agent's own hook and the follower are one wake for one episode, whichever comes first; a later episode is new.
 akey=""; [ -n "$eid" ] && [ "${key#attention|}" != "$key" ] && akey="attention|$pane"
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
-exec 9>"$STATE_DIR/dedupe.lock"
-hold_lock 9 || log "lock-not-taken (the de-dupe lock was held past 5 s, or there is no lock tool): de-duping unlocked: $summary"
+exec 9>"$STATE_DIR/dedupe.lock"; locked=1
+# Without the lock the de-dupe file is only read, never rewritten: a lost update could let a repeat through later, so
+# this event goes out (at worst twice) and the file stays as the lock holder leaves it.
+hold_lock 9 || { locked=0; log "lock-not-taken (the de-dupe lock was held past 5 s, or there is no lock tool): sent without recording it for de-dupe: $summary"; }
 touch "$DB"
 seen(){ awk -F'\t' -v k="$1" -v n="$now" -v w="$2" '$1==k && n-$2<w {f=1} END{exit !f}' "$DB"; }
 if [ "$STRICT" = 0 ] && seen "$key" "$DEDUPE_SECS"; then log "dedupe-skip: $summary"; exit 0; fi
@@ -112,8 +114,9 @@ if [ -n "$tkey" ]; then
     *) tkey="";;
   esac
 fi
-seen_now(){   # the de-dupe record of this event
-  local tmp="$DB.tmp.$$"   # one per writer: an unlocked writer never truncates another's half-written copy
+seen_now(){   # the de-dupe record of this event; only under the lock
+  [ "$locked" = 1 ] || return 0
+  local tmp="$DB.tmp.$$"
   awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" -v a="$akey" '$1!=k && $1!=t && (a=="" || $1!=a) && n-$2<600' "$DB" >"$tmp"
   printf '%s\t%s\n' "$key" "$now" >>"$tmp"; [ -n "$tkey" ] && printf '%s\t%s\n' "$tkey" "$now" >>"$tmp"
   [ -n "$akey" ] && printf '%s\t%s\t%s\n' "$akey" "$now" "$eid" >>"$tmp"

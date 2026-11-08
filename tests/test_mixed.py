@@ -560,7 +560,8 @@ class MixedGates(MixedCase):
         self.assertIn('approve-gate runs only outside Herdr and Herdr Core', result.stderr)
         self.assertFalse((self.job_dir / 'gates/0123456789ab.approved').exists())
         with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            self.quiet(fj.approve_gate, self.job_dir, '0123456789ab', SHA, 'owner in alpha chat')
+            self.quiet(fj.approve_gate, self.job_dir, '0123456789ab', SHA, 'owner in alpha chat',
+                       fj.gate_digest(fj.load_gate(self.job_dir, '0123456789ab')))
         self.assertIn('APPROVED 0123456789ab', self.quiet(fj.gate_ok, self.job_dir, '0123456789ab', SHA)[1])
 
 
@@ -581,7 +582,7 @@ class MixedFingerprints(MixedCase):
 
     def approve(self, ident, sha):
         with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            return self.quiet(fj.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat')
+            return self.quiet(fj.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat', fj.gate_digest(fj.load_gate(self.job_dir, ident)))
 
     def test_gate_ok_with_another_commit_refuses(self):
         ident = self.gate('Merge PR #3 into main')

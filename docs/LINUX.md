@@ -43,7 +43,7 @@ Herdr and Herdr Core publish Linux builds for x86_64 and arm64: [Herdr](https://
 | relay log | `~/Library/Logs/herdr-events.log` | `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` |
 | de-dupe lock | `lockf` | `flock` |
 | tools on a bare PATH (timers, the plugin hook) | `~/.local/bin`, `/opt/homebrew/bin` | `~/.local/bin`, `/usr/local/bin`, `/home/linuxbrew/.linuxbrew/bin` (both lists are searched on both) |
-| who started a command (`approve-gate`) | `ps` | `ps` from procps; a command whose own row `ps` does not show is refused |
+| who started a command (`approve-gate`) | `ps` | `ps` from procps; a command whose row, or an ancestor's, `ps` does not show is refused |
 
 Herdr Core 0.1.17 and later start a terminal at once on a Linux machine without polkit (before, after 25 seconds); C12 measured the first status 0.1 s after start.
 
@@ -52,6 +52,7 @@ Herdr Core 0.1.17 and later start a terminal at once on a Linux machine without 
 - **systemd user timers** are not verified live: an unprivileged container has no user manager, so the live runs cover the flock loop only.
 - **x86_64** runs only in CI (unit suite, install, doctor, the Core smoke run, the fixture evals); the live TUI and Core jobs ran on arm64.
 - **No signed-in Claude or Codex** ran on Linux, no paired Moshi (only the unpaired `moshi-hook`, which makes `stampede ask` fail loudly), and no bot over SSH to a Linux machine.
+- **`/proc` mounted with `hidepid`** hides other users' processes (root's `sshd`, say), so `approve-gate` cannot read its ancestry and refuses: a bot's yes over SSH does not work on such a host.
 - **Other distributions** than Ubuntu 24.04 were not run. Herdr Core's own changelog covers RHEL, Rocky and AlmaLinux 8 and Ubuntu 22.04.
 - **After a Herdr server restart** Herdr restores the job's workspace with plain shells. `reopen.sh` refuses while it is open and says so: close that workspace, then run `reopen.sh` again.
 

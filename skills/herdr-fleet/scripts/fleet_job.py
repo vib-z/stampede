@@ -263,17 +263,31 @@ def ask_background(job, question, options, command=None, gate=None):
     return ident
 
 
-def cancel(job, ident):
-    """Stop an answered or unwanted question: its waiter and its card, as one process group."""
-    if not GATE.fullmatch(ident) or not (Path(job) / 'asks' / (ident + '.pid')).is_file():
-        raise ValueError('no phone card ' + line(ident) + ' waiting in this job (a question sent to a bot is answered in its chat)')
-    pid = int((Path(job) / 'asks' / (ident + '.pid')).read_text())
+def own_waiter(job, pid):
+    """True when pid still runs this job's _ask (a pid file can outlive its waiter, and its pid be reused)."""
     try:
-        os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    (Path(job) / 'asks' / (ident + '.pid')).unlink()
-    print('CANCELLED ' + ident)
+        args = subprocess.run(['ps', '-o', 'args=', '-p', str(pid)], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    return 'fleet_job.py' in args and ' _ask ' in args and str(Path(job).absolute()) in args
+
+
+def cancel(job, ident):
+    """Stop an answered or unwanted question: its waiter and its card, as one process group. A record whose pid no
+    longer runs this job's waiter (it answered, or the pid was reused) is dropped without a signal."""
+    path = Path(job) / 'asks' / (str(ident) + '.pid')
+    if not GATE.fullmatch(str(ident)) or not path.is_file():
+        raise ValueError('no phone card ' + line(ident) + ' waiting in this job (a question sent to a bot is answered in its chat)')
+    text = path.read_text().strip()
+    if text.isdigit() and own_waiter(job, int(text)):
+        try:
+            os.killpg(int(text), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        print('CANCELLED ' + ident)
+    else:
+        print('CANCELLED ' + ident + ' (its waiter had already gone)')
+    path.unlink()
 
 
 def job_owner(job):
@@ -450,7 +464,10 @@ def finish(job, summary):
             post_local(job, fields)
         stamp.write_text(summary + '\n')
     for waiter in sorted((job / 'asks').glob('*.pid')) if (job / 'asks').is_dir() else []:
-        cancel(job, waiter.stem)
+        try:
+            cancel(job, waiter.stem)
+        except (ValueError, OSError) as error:  # one bad record never keeps the next waiter alive
+            print('NOT CANCELLED ' + waiter.stem + ': ' + line(error))
     if (job / 'workspace').is_file():
         clear_job_marker((job / 'workspace').read_text().strip(), job)
     unmark_handed(job)
@@ -591,9 +608,9 @@ def inside_herdr(env=None, pid=None):
         if len(cells) == 3 and cells[0].isdigit() and cells[1].isdigit():
             tree[int(cells[0])] = (int(cells[1]), os.path.basename(cells[2].strip()))
     pid, seen = os.getpid() if pid is None else pid, set()
-    if pid not in tree:
-        return True  # the table does not show this command (an empty or partial ps): cannot tell, so refuse
-    while pid > 1 and pid in tree and pid not in seen:
+    while pid > 1:
+        if pid not in tree or pid in seen:
+            return True  # a command or an ancestor the table does not show, or a loop: cannot tell, so refuse
         seen.add(pid)
         if tree[pid][1] in AGENT_HOSTS:
             return True
@@ -617,6 +634,9 @@ def approve_gate(job, ident, sha, by, digest=None):
                               + (' or in Herdr' if pane_yes(job) else ''))
     if not line(by):
         raise ValueError('--by says who said yes and where, e.g. "owner in Grok Bot chat"')
+    if not digest:
+        raise PermissionError(f'approve-gate needs --digest, the gate {ident} as it was asked: run the approve command the gate '
+                              'event or the front-door post gave you, as written')
     record_yes(job, ident, sha, by, digest)
     print(f'APPROVED {ident} at {sha}')
 

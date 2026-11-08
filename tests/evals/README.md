@@ -31,7 +31,7 @@ python3 tests/evals/record.py fixture                      # the environment a r
 
 ## Adding a case
 
-Add it to `cases.json` with a new id in its area's letter (G gate, S side effects, L lifecycle, P portability, D dependencies, V versions, I Linux install, T TUI live, C Core live), then implement it in its runner. `tests/test_evals.py` checks that every fixture case has an implementation and every runner that exists names each case it owns. An eval that can never fail is not an eval: each one must be able to catch the regression it is about.
+Add it to `cases.json` with a new id in its area's letter (G gate, S side effects, L lifecycle, P portability, D dependencies, V versions, I Linux install, T TUI live, C Core live), then implement it in its runner. `tests/test_evals.py` checks that every fixture case has an implementation, and that every runner the dataset names exists and names each case it owns. An eval that can never fail is not an eval: each one must be able to catch the regression it is about.
 
 ## Results, 8 Nov 2026
 

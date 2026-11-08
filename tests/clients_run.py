@@ -280,7 +280,10 @@ class Job:
         phone card, opens it for that commit only."""
         out = self.lead('gate', 'ask', self.job, '--gate', '--sha', SHA, '--pr', '3', GATE)[1]
         self.ident = ident = (re.findall(r'^GATE ([0-9a-f]{12}) ', out, re.M) or ['000000000000'])[0]
-        approve = ('approve-gate', self.job, ident, '--by', f'owner in {self.bot or "local"} chat', '--sha')
+        event = next((q['payload'] for q in self.queued() if q['payload'].get('gate') == ident), None)
+        digest = ('--digest', shlex.split(event['approve'])[shlex.split(event['approve']).index('--digest') + 1]) \
+            if event and '--digest' in event.get('approve', '') else ()  # the bot runs the event's own approve line
+        approve = ('approve-gate', self.job, ident, *digest, '--by', f'owner in {self.bot or "local"} chat', '--sha')
         record = self.job / 'gates' / (ident + '.approved')
         self.closed = {}  # what ran -> (gate-ok's exit code right after it, whether a yes was recorded)
 
