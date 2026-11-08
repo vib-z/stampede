@@ -970,6 +970,18 @@ class Gates(unittest.TestCase):
         self.assertIn('--digest', str(refused.exception))
         self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
 
+    def test_e18_cancel_signals_only_this_questions_own_waiter(self):
+        """review round 2 recheck, R4: another job whose path starts with this one's, another question, a reused pid."""
+        from unittest import mock
+        job = str(Path(self.job).absolute())
+        cases = {f'python3 fleet_job.py _ask {job} --ident abcdefabcdef --command c -- q': True,
+                 f'python3 fleet_job.py _ask {job}-other --ident abcdefabcdef --command c -- q': False,
+                 f'python3 fleet_job.py _ask {job} --ident 000000000000 --command c -- q': False,
+                 'sleep 60': False}
+        for args, mine in cases.items():
+            with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, args + '\n', '')):
+                self.assertEqual(fj.own_waiter(self.job, 4242, 'abcdefabcdef'), mine, args)
+
     def test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused(self):
         self.bot_job()
         self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)

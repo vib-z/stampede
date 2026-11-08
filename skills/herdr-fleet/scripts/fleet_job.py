@@ -253,7 +253,7 @@ def ask_background(job, question, options, command=None, gate=None):
     folder = job / 'asks'
     folder.mkdir(parents=True, exist_ok=True)
     ident = uuid.uuid4().hex[:12]
-    argv = [sys.executable, '-I', str(SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--command', command or ASK_CMD,
+    argv = [sys.executable, '-I', str(SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command or ASK_CMD,
             *(['--gate', gate] if gate else []), *['--option=' + option for option in options], '--', question]
     with (folder / (ident + '.log')).open('a') as output:
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True)
@@ -263,13 +263,14 @@ def ask_background(job, question, options, command=None, gate=None):
     return ident
 
 
-def own_waiter(job, pid):
-    """True when pid still runs this job's _ask (a pid file can outlive its waiter, and its pid be reused)."""
+def own_waiter(job, pid, ident):
+    """True when pid still runs this very question's _ask: its argv names this job and this question's id, word for word
+    (a pid file can outlive its waiter, and its pid be reused, by another job's waiter too)."""
     try:
-        args = subprocess.run(['ps', '-o', 'args=', '-p', str(pid)], capture_output=True, text=True).stdout
+        args = subprocess.run(['ps', '-o', 'args=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
     except OSError:
         return False
-    return 'fleet_job.py' in args and ' _ask ' in args and str(Path(job).absolute()) in args
+    return 'fleet_job.py _ask ' in args and f' _ask {Path(job).absolute()} --ident {ident} ' in args + ' '
 
 
 def cancel(job, ident):
@@ -279,7 +280,7 @@ def cancel(job, ident):
     if not GATE.fullmatch(str(ident)) or not path.is_file():
         raise ValueError('no phone card ' + line(ident) + ' waiting in this job (a question sent to a bot is answered in its chat)')
     text = path.read_text().strip()
-    if text.isdigit() and own_waiter(job, int(text)):
+    if text.isdigit() and own_waiter(job, int(text), ident):
         try:
             os.killpg(int(text), signal.SIGTERM)
         except ProcessLookupError:
@@ -2378,6 +2379,7 @@ def main(argv):
     p = sub.add_parser('_wake', help='start a _deliver in the background (a Claude lead needs none)'); p.add_argument('job')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
     p.add_argument('--gate')
+    p.add_argument('--ident', help='this question\'s id: names its waiter, so cancel signals only that process')
     p.add_argument('question', nargs='+')
     a = parser.parse_args(argv)
     if a.cmd == 'new' and a.cwd and not a.core:

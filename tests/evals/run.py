@@ -1150,10 +1150,13 @@ def l17():
     state = json.loads((job.herdr / 'state.json').read_text())
     state['workspace list'] = {'workspaces': [{'workspace_id': 'w9x', 'label': 'someone else'}]}
     (job.herdr / 'state.json').write_text(json.dumps(state))
+    mark = len(job.herdr_calls())
     r = outside(ev, job, '/bin/bash', job.job / 'reopen.sh', '--into', 'w9x')
+    opened = [c for c in job.herdr_calls()[mark:] if c.startswith(('tab create', 'agent start', 'pane split'))]
     kept = (job.events / 'jobs' / 'w9x').read_text().strip() == str(other)
-    ok = all(code != 0 and same for code, same in results.values()) and kept
-    return ev.done(ok, f'(exit, nothing changed) per bad --into {results}; --into another job\'s workspace: exit {r[0]}, its marker kept {kept}')
+    ok = all(code != 0 and same for code, same in results.values()) and r[0] != 0 and kept and not opened
+    return ev.done(ok, f'(exit, nothing changed) per bad --into {results}; --into another job\'s workspace: exit {r[0]}, '
+                       f'its marker kept {kept}, tabs or agents opened there {len(opened)}')
 
 
 @case('L18')
@@ -1166,15 +1169,22 @@ def l18():
     bystander = subprocess.Popen(['sleep', '60'], start_new_session=True)  # an unrelated process a stale pid file names
     try:
         (job.job / 'asks' / '000000000001.pid').write_text(f'{bystander.pid}\n')
+        twin = Path(str(job.job) + '-other')  # another job whose path starts with this job's: its waiter is not ours
+        twin.mkdir()
+        neighbour = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)', str(ROOT / 'skills/herdr-fleet/scripts/fleet_job.py'),
+                                      '_ask', str(twin), '--ident', '000000000002', '--command', 'x', '--', 'q'], start_new_session=True)
+        (job.job / 'asks' / '000000000002.pid').write_text(f'{neighbour.pid}\n')
         (job.job / 'asks' / '000000000000.pid').write_text('not a pid\n')
         time.sleep(0.5)
         r = lead(ev, job, 'finish', job.job, 'all done')
         time.sleep(0.5)
-        spared, cancelled = alive(bystander.pid), real and not any(alive(p) for p in real)
+        spared, cancelled = alive(bystander.pid) and alive(neighbour.pid), real and not any(alive(p) for p in real)
         ok = r[0] == 0 and 'FINISHED' in r[1] and spared and cancelled
-        return ev.done(bool(ok), f'finish exit {r[0]}; the unrelated process alive {spared}; the real waiter cancelled {bool(cancelled)}')
+        return ev.done(bool(ok), f'finish exit {r[0]}; the unrelated process and the other job\'s waiter alive {spared}; '
+                                 f'the real waiter cancelled {bool(cancelled)}')
     finally:
         bystander.kill()
+        neighbour.kill()
         stop_asks(job)
 
 
