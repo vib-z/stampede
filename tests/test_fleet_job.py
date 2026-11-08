@@ -933,6 +933,52 @@ class Gates(unittest.TestCase):
         with self.assertRaises(PermissionError):
             fj.gate_ok(self.job, second, self.SHA)
 
+    def test_e17_a_yes_covers_only_the_gate_as_asked(self):
+        """eval G17, G18: the yes is bound to the gate's action, PR, commit and route, not only its id and commit."""
+        import shlex
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (ident,) = self.gate_ids()
+        command = shlex.split(json.loads(next((self.home / 'events/queue').glob('*.json')).read_text())['payload']['approve'])
+        digest = command[command.index('--digest') + 1]
+        self.assertEqual(digest, fj.gate_digest(fj.load_gate(self.job, ident)))  # the bot is handed the gate as asked
+        path = self.job / 'gates' / (ident + '.json')
+        asked = path.read_text()
+        path.write_text(asked.replace('Merge PR #12 into main', 'Delete the production database'))
+        from unittest import mock
+        with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
+            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat', digest)
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+        path.write_text(asked)
+        with mock.patch.object(fj, 'inside_herdr', return_value=False):
+            self.quiet(fj.approve_gate, self.job, ident, self.SHA, 'owner in Grok Bot chat', digest)
+        self.quiet(fj.gate_ok, self.job, ident, self.SHA)
+        path.write_text(asked.replace('"pr": 12', '"pr": 13'))
+        with self.assertRaises(PermissionError) as refused:
+            fj.gate_ok(self.job, ident, self.SHA)
+        self.assertIn('changed after the yes', str(refused.exception))
+
+    def test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused(self):
+        self.bot_job()
+        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        (ident,) = self.gate_ids()
+        record = self.job / 'gates' / (ident + '.approved')
+        for old in ({'gate': ident, 'sha': self.SHA, 'by': 'owner', 'at': 'then'}, {'gate': ident, 'sha': self.SHA}):
+            record.write_text(json.dumps(old) + '\n')
+            with self.assertRaises(PermissionError):
+                fj.gate_ok(self.job, ident, self.SHA)
+
+    def test_e21_a_process_table_that_does_not_show_this_command_cannot_approve(self):
+        from unittest import mock
+        for answer in (subprocess.CompletedProcess([], 0, '', ''), subprocess.CompletedProcess([], 0, '  1     0 launchd\n', '')):
+            with mock.patch.object(fj.subprocess, 'run', return_value=answer):
+                self.assertTrue(fj.inside_herdr({}, 4242))
+        with mock.patch.object(fj.subprocess, 'run', side_effect=FileNotFoundError('ps')):
+            self.assertTrue(fj.inside_herdr({}))
+        rows = '  1     0 launchd\n 4242     1 bash\n'
+        with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
+            self.assertFalse(fj.inside_herdr({}, 4242))  # shown, with no Herdr above it: outside
+
     def test_p2_a_malformed_starter_is_refused_before_any_job_exists(self):
         tag = self.home / '.config/herdr-events/owners/w9'
         tag.parent.mkdir(parents=True)

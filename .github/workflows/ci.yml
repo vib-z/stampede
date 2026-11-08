@@ -31,17 +31,19 @@ jobs:
           exit 1
       - name: herdr-doctor, core checks
         run: PATH="$HOME/.local/bin:$PATH" herdr-doctor
-      - name: Herdr Core 0.1.13, pinned by checksum
+      - name: Herdr Core 0.1.19, pinned by checksum
         run: |
           mkdir -p "$RUNNER_TEMP/hc"
-          curl -fsSL https://releases.herdr.dev/core/0.1.13/herdr-core-macos-aarch64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
-          echo "fc1ffba3820b93b0e2faa5394a64b9ff5528f135611b6034469d81c0fa1c37aa  $RUNNER_TEMP/hc.tar.gz" | shasum -a 256 -c -
+          curl -fsSL https://releases.herdr.dev/core/0.1.19/herdr-core-macos-aarch64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
+          echo "5338d900adadb6d273b9c8e97027247db3179ccffede10a1793358f16e08d683  $RUNNER_TEMP/hc.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/hc.tar.gz" -C "$RUNNER_TEMP/hc"
           ln -s herdr-core "$RUNNER_TEMP/hc/hc"
           echo "$RUNNER_TEMP/hc" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/hc/hc" --version
       - name: Herdr Core smoke run, in a scratch session
         run: PATH="$HOME/.local/bin:$PATH" python3 tests/core_smoke.py
+      - name: evals, the fixture cases (tests/evals)
+        run: python3 tests/evals/run.py --label ci-macos --out "$RUNNER_TEMP/evals"
       - name: stop the Herdr server
         if: always()
         run: herdr server stop || true
@@ -61,3 +63,33 @@ jobs:
         run: ./install.sh --dry-run
       - name: install, timers left off
         run: mkdir -p ~/.claude && ./install.sh --no-supervise
+      - name: Herdr 0.9.5 and Herdr Core 0.1.19, pinned by checksum
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64 -o "$RUNNER_TEMP/bin/herdr"
+          echo "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d  $RUNNER_TEMP/bin/herdr" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/herdr"
+          curl -fsSL https://releases.herdr.dev/core/0.1.19/herdr-core-linux-x86_64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
+          echo "4adcfb423d52f24c5cc4a1e2cd2fcad1f62d28bb77876ac472c29082a3eaa424  $RUNNER_TEMP/hc.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/hc.tar.gz" -C "$RUNNER_TEMP/bin" herdr-core
+          ln -s herdr-core "$RUNNER_TEMP/bin/hc"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/herdr" --version && "$RUNNER_TEMP/bin/hc" --version
+      - name: start the Herdr server
+        run: |
+          nohup herdr server > "$RUNNER_TEMP/herdr.log" 2>&1 &
+          for _ in $(seq 30); do
+            herdr status 2>/dev/null | grep -q 'status: running' && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/herdr.log"
+          exit 1
+      - name: herdr-doctor, core checks
+        run: PATH="$HOME/.local/bin:$PATH" herdr-doctor
+      - name: Herdr Core smoke run, in a scratch session
+        run: PATH="$HOME/.local/bin:$PATH" python3 tests/core_smoke.py
+      - name: evals, the fixture cases (tests/evals)
+        run: python3 tests/evals/run.py --label ci-linux --out "$RUNNER_TEMP/evals"
+      - name: stop the Herdr server
+        if: always()
+        run: herdr server stop || true

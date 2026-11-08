@@ -428,7 +428,9 @@ def post_local(job, fields):
 
 def finish(job, summary):
     """One done event, then drop the workspace marker. A second call does not post again.
-    A job a bot started uses the strict route; a local job uses the ordinary relay."""
+    A job a bot started uses the strict route; a local job uses the ordinary relay. Every question still waiting on the
+    phone is cancelled: its waiter runs in a session of its own, which outlives the lead's pane on the Herdr TUI and,
+    since Herdr Core 0.1.19, a Core terminal too, so nothing else ends it."""
     job = Path(job).absolute()
     summary = line(summary)
     if not summary:
@@ -447,6 +449,8 @@ def finish(job, summary):
         else:
             post_local(job, fields)
         stamp.write_text(summary + '\n')
+    for waiter in sorted((job / 'asks').glob('*.pid')) if (job / 'asks').is_dir() else []:
+        cancel(job, waiter.stem)
     if (job / 'workspace').is_file():
         clear_job_marker((job / 'workspace').read_text().strip(), job)
     unmark_handed(job)
@@ -505,7 +509,7 @@ def ask_gate(job, action, sha, pr=None):
     typed = ', or on the owner\'s yes typed in your pane' if pane_yes(job) else ''
     if route == 'front-door':
         n = outbox_post(job, 'gate', gate_question(gate) + '\nOne exact action, yes or no. Show the owner this action as written.',
-                        answer=shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha])
+                        answer=shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--digest', gate_digest(gate)])
                         + ' --by "owner in <chat>: <their exact words>"   (a no: '
                         + shlex.join(['fleet-job', 'tell', str(job), 'lead', f'GATE {ident} NO: <their words>']) + ')')
         return print(f'GATE {ident} posted to the front door as outbox {n}; act after {check} prints APPROVED{typed}')
@@ -514,12 +518,18 @@ def ask_gate(job, action, sha, pr=None):
         return print(f'GATE {ident} on the phone; act after {check} prints APPROVED{typed}')
     try:
         post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
-                                'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--by', 'owner in ' + owner + ' chat']),
+                                'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--digest',
+                                                       gate_digest(gate), '--by', 'owner in ' + owner + ' chat']),
                                 'deny': shlex.join(['fleet-job', 'tell', str(job), 'lead', f"GATE {ident} NO: <the owner's words>"])})
     except ValueError:
         (job / 'gates' / (ident + '.json')).unlink()  # a gate its bot never hears is no gate
         raise
     print(f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED{typed}')
+
+
+def gate_digest(gate):
+    """One fingerprint of a gate as asked: the yes recorded for it covers exactly this action, PR, commit and route."""
+    return hashlib.sha256(json.dumps(gate, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def gate_question(gate):
@@ -530,18 +540,23 @@ def load_gate(job, ident):
     path = Path(job) / 'gates' / (str(ident) + '.json')
     if not GATE.fullmatch(str(ident)) or not path.is_file():
         raise ValueError('no gate ' + line(ident) + ' in this job')
-    return json.loads(path.read_text())
+    gate = json.loads(path.read_text())
+    if not isinstance(gate, dict) or gate.get('gate') != ident or not SHA.fullmatch(str(gate.get('sha', ''))) or 'route' not in gate:
+        raise ValueError(f'gate {ident} is malformed: ask again')
+    return gate
 
 
 def record_yes(job, ident, sha, by, asked=None):
-    """The owner's yes for one gate at one commit, then wake the lead. asked: the gate as it was when asked."""
+    """The owner's yes for one gate at one commit, then wake the lead. asked: the gate as it was when asked, or the
+    digest the bot was handed with it."""
     gate = load_gate(job, ident)
-    if asked is not None and gate != asked:
+    if asked is not None and (gate_digest(gate) != asked if isinstance(asked, str) else gate != asked):
         raise PermissionError(f'gate {ident} changed while the owner was asked: ask again')
     if sha != gate['sha']:
         raise PermissionError(f'gate {ident} asked about {gate["sha"]}, not {sha}: a stale yes; ask again')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
-    (Path(job) / 'gates' / (ident + '.approved')).write_text(json.dumps({'gate': ident, 'sha': sha, 'by': line(by), 'at': when}) + '\n')
+    (Path(job) / 'gates' / (ident + '.approved')).write_text(json.dumps({'gate': ident, 'sha': sha, 'by': line(by), 'at': when,
+                                                                         'digest': gate_digest(gate)}) + '\n')
     tell(job, 'lead', f'GATE {ident} APPROVED by {line(by)} at {when}: {gate["action"]} at {sha}. '
                       f'Run fleet-job gate-ok {Path(job).absolute()} {ident} --sha <the commit you act on>, then act.')
 
@@ -564,7 +579,10 @@ def inside_herdr(env=None, pid=None):
     env = os.environ if env is None else env
     if env.get('HERDR_ENV') or env.get('HERDR_PANE_ID') or any(env.get(name) for name in CORE_TERMINAL):
         return True
-    ps = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True)
+    try:
+        ps = subprocess.run(['ps', '-axo', 'pid=,ppid=,comm='], capture_output=True, text=True)
+    except OSError:
+        return True  # no ps: cannot tell, so refuse
     if ps.returncode:
         return True  # cannot tell: refuse
     tree = {}
@@ -573,6 +591,8 @@ def inside_herdr(env=None, pid=None):
         if len(cells) == 3 and cells[0].isdigit() and cells[1].isdigit():
             tree[int(cells[0])] = (int(cells[1]), os.path.basename(cells[2].strip()))
     pid, seen = os.getpid() if pid is None else pid, set()
+    if pid not in tree:
+        return True  # the table does not show this command (an empty or partial ps): cannot tell, so refuse
     while pid > 1 and pid in tree and pid not in seen:
         seen.add(pid)
         if tree[pid][1] in AGENT_HOSTS:
@@ -581,8 +601,9 @@ def inside_herdr(env=None, pid=None):
     return False
 
 
-def approve_gate(job, ident, sha, by):
-    """The starting bot's command, run outside Herdr: the owner said yes in its chat to this gate at this commit."""
+def approve_gate(job, ident, sha, by, digest=None):
+    """The starting bot's command, run outside Herdr: the owner said yes in its chat to this gate at this commit.
+    digest: the gate as the bot was handed it (its approve command carries it); a gate changed since then takes no yes."""
     core = backend(job) == 'core'
     if inside_herdr():
         if core:
@@ -596,7 +617,7 @@ def approve_gate(job, ident, sha, by):
                               + (' or in Herdr' if pane_yes(job) else ''))
     if not line(by):
         raise ValueError('--by says who said yes and where, e.g. "owner in Grok Bot chat"')
-    record_yes(job, ident, sha, by)
+    record_yes(job, ident, sha, by, digest)
     print(f'APPROVED {ident} at {sha}')
 
 
@@ -608,11 +629,16 @@ def gate_ok(job, ident, sha):
         raise PermissionError(f'gate {ident} has no recorded yes: wait for it'
                               + (', or the owner\'s yes typed in your pane' if pane_yes(job) else ''))
     record = json.loads(path.read_text())
+    if not isinstance(record, dict) or not all(line(record.get(k, '')) for k in ('gate', 'sha', 'by', 'at')):
+        raise PermissionError(f'the yes recorded for gate {ident} is malformed: ask again')
     if record.get('gate') != ident:
         raise PermissionError(f'the yes recorded under gate {ident} is for gate {record.get("gate")}: ask again')
     if not record.get('sha') == gate['sha'] == sha:
         raise PermissionError(f'gate {ident} was approved for {record.get("sha")}, not {sha}: a push after the yes '
                               'withdraws it; ask again')
+    if record.get('digest') != gate_digest(gate):
+        raise PermissionError(f'gate {ident} changed after the yes (its action, PR or route), or the yes predates that check: '
+                              'the yes covers only what was asked; ask again')
     print(f'APPROVED {ident} by {record["by"]} at {record["at"]}: {gate["action"]} at {sha}')
 
 
@@ -2317,6 +2343,7 @@ def main(argv):
     p.add_argument('--sha', help='with --gate: the full commit id it is about'); p.add_argument('--pr', type=int, help='with --gate: the PR number')
     p = sub.add_parser('approve-gate'); p.add_argument('job'); p.add_argument('gate'); p.add_argument('--sha', required=True)
     p.add_argument('--by', required=True)
+    p.add_argument('--digest', help='the gate as it was asked, from the approve command the bot was handed')
     p = sub.add_parser('gate-ok'); p.add_argument('job'); p.add_argument('gate'); p.add_argument('--sha', required=True)
     p = sub.add_parser('cancel'); p.add_argument('job'); p.add_argument('ident')
     p = sub.add_parser('approve'); p.add_argument('job'); p.add_argument('--by', required=True)
@@ -2344,7 +2371,7 @@ def main(argv):
             raise
         print('fleet-job ' + a.cmd + ': ' + line(error), file=sys.stderr)
         return 2
-    except HcError as error:  # Herdr Core failed: one line, never a traceback (a TUI job never calls hc)
+    except (HcError, HerdrError, OSError) as error:  # Herdr, Herdr Core or a program failed: one line, never a traceback
         print('fleet-job ' + a.cmd + ': ' + line(error), file=sys.stderr)
         return 1
 
@@ -2370,7 +2397,7 @@ def run(a):
     if a.cmd == 'ask':
         return ask(a.job, ' '.join(a.question), a.option) and 0
     if a.cmd == 'approve-gate':
-        return approve_gate(a.job, a.gate, a.sha, a.by)
+        return approve_gate(a.job, a.gate, a.sha, a.by, a.digest)
     if a.cmd == 'gate-ok':
         return gate_ok(a.job, a.gate, a.sha)
     if a.cmd == 'cancel':

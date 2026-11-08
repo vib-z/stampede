@@ -413,8 +413,7 @@ class Outcomes(unittest.TestCase):
         self.assertTrue(job.until(lambda: job.asked() or job.moshi()), 'no card at all')
         return job
 
-    @unittest.expectedFailure
-    def test_f4_a_herdr_refusal_at_start_is_one_line(self):
+    def test_f4_a_herdr_refusal_at_start_is_one_line(self):  # fixed after 0.1.8: main() catches Herdr's error too
         """F4: on the TUI, a Herdr refusal at start, such as a worker name a pane of another job already holds (Herdr's
         agent names are global), ends in a Python traceback: main() catches HcError, not HerdrError. On Core, one line."""
         job = self.fresh('f4', 'tui')

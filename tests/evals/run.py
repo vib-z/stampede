@@ -706,7 +706,7 @@ def doctor(ev, env, *flags):
 
 def reachable(tool):
     """Where herdr-doctor would find a tool with a fresh HOME: the folders its own PATH line always adds."""
-    return shutil.which(tool, path='/opt/homebrew/bin:/usr/bin:/bin')
+    return shutil.which(tool, path='/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin')
 
 
 @case('D01')

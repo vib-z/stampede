@@ -30,6 +30,7 @@ from pathlib import Path
 
 HERDR = os.environ.get('HERDR', 'herdr')
 COLS = ('name', 'kind', 'session', 'brief', 'args')   # agents.tsv, tab separated; args is shell-quoted
+HERE = Path(__file__).resolve().parent  # the helpers beside this script
 RESUME = {'claude': '--resume', 'hermes': '--resume', 'codex': 'resume', 'kimi': '-S'}   # agents-and-models.md
 TOL = 2   # cells of slack between neighbouring pane rects (borders)
 
@@ -177,13 +178,15 @@ def reopen_sh(ws, owner, tabs, when):
         '# Refuses while a workspace with this label is open (without --into), or when a cwd is gone.',
         '# Opening needs no ask; closing does (herdr-fleet, Wrap up).',
         'set -euo pipefail',
-        'export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"',
+        'export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"',
         'H=${HERDR:-herdr}; FRESH=0; PROMPT=0; WS=""',
         'while [ $# -gt 0 ]; do',
         '  case "$1" in --fresh) FRESH=1;; --prompt) PROMPT=1;; --into) WS=${2:?--into needs a workspace id}; shift;;',
         '    *) sed -n "3,7p" "$0" >&2; exit 64;; esac; shift',
         'done',
         f'LABEL={q(ws["label"])}; OWNER={q(owner)}; INTO=$WS',
+        f'TAG=$(command -v herdr-events-owner || true); [ -n "$TAG" ] || TAG={q(HERE / "herdr-events-owner")}   # installed, else this checkout\'s',
+        f'SEND=$(command -v herdr-send || true); [ -n "$SEND" ] || SEND={q(HERE / "herdr-send")}',
         'if [ -z "$INTO" ] && "$H" workspace list | jq -e --arg l "$LABEL" \'.result.workspaces[] | select(.label == $l)\' >/dev/null; then',
         '  echo "refused: a workspace labelled $LABEL is already open (herdr workspace list); use --into <id> or close it first" >&2; exit 2',
         'fi',
@@ -200,7 +203,10 @@ def reopen_sh(ws, owner, tabs, when):
         '    R=$("$H" workspace create --cwd "$2" --label "$LABEL" --no-focus)',
         '    WS=$(jq -r .result.workspace.workspace_id <<<"$R")',
         '    "$H" tab rename "$(jq -r .result.tab.tab_id <<<"$R")" "$1" >/dev/null',
-        '    if [ -n "$OWNER" ]; then herdr-events-owner "$WS" "$OWNER"; fi',
+        '    if [ -n "$OWNER" ] && ! "$TAG" "$WS" "$OWNER" >/dev/null; then',
+        '      echo "reopen.sh: workspace $WS is open but not tagged for $OWNER, so its events would reach no bot: run herdr-events-owner $WS $OWNER" >&2',
+        '      exit 5',
+        '    fi',
         '  else',
         '    R=$("$H" tab create --workspace "$WS" --cwd "$2" --label "$1" --no-focus)',
         '  fi',
@@ -214,7 +220,7 @@ def reopen_sh(ws, owner, tabs, when):
         '  "$H" agent start "$n" --kind "$k" --pane "$p" --timeout 90000 -- ${r[@]+"${r[@]}"} "$@" >/dev/null \\',
         '    || echo "WARN $n: agent start did not confirm; read its pane" >&2',
         '  "$H" agent read "$n" --source visible --lines 30 || true   # clear any startup dialog first (herdr-fleet failure-modes)',
-        '  if [ "$PROMPT" = 1 ] && [ -n "$b" ]; then herdr-send "$n" "You are $n in a herdr fleet. Read $b and do everything it says."; fi',
+        '  if [ "$PROMPT" = 1 ] && [ -n "$b" ]; then "$SEND" "$n" "You are $n in a herdr fleet. Read $b and do everything it says."; fi',
         '}',
     ]
     k = 0

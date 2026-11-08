@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+Every gap the new evals found on both macOS and Linux is fixed, and a yes now covers exactly the gate you were asked. No command changes its name or flags; a bot that runs the gate event's `approve` command as given needs no change. A yes recorded by 0.1.8 or older for a gate still open is refused, so the lead asks that gate again.
+
+- **Evals.** `tests/evals/` holds the dataset (`cases.json`: the owner's yes, side effects, lifecycle, portability, dependencies, versions, a Linux install, live Herdr TUI and live Herdr Core cases), the fixture runner (`run.py`: 54 cases through the real `stampede` command against the fakes), the live runners and the recorder (`record.py`: one scrubbed run with its environment, digests and tool versions). The baseline before these fixes and the run after are in `tests/evals/runs/`. CI runs the fixture cases on macOS and on Linux.
+- **A yes covers the gate as asked.** The approval record holds a digest of the gate (action, PR, commit, route); `gate-ok` refuses a gate changed after the yes, and the `approve` command a bot or front door is handed carries the digest (`approve-gate --digest`), so a gate edited between the question and the yes takes none. A malformed gate or approval record is refused in one line.
+- **No process table, no approval.** `approve-gate` refuses when `ps` cannot run, fails, or does not show the command itself, instead of taking an empty table for "not inside Herdr".
+- **`finish` cancels the job's questions still waiting on the phone.** Their waiters run in a session of their own, which outlives the lead's pane, and since Herdr Core 0.1.19 a Core terminal too.
+- **Herdr's own errors are one line.** A command that Herdr refuses, or a program that cannot run, prints `fleet-job <command>: <error>` and exits 1, as Herdr Core's already did (finding F4 in docs/CLIENTS.md, fixed).
+- **`herdr-doctor` checks Herdr's version:** 0.9.4 or later, and no readable version is a `PROBLEM`; an `hc` that prints no version is told apart from no `hc`.
+- **The relay says when its lock was not taken** (`lock-not-taken` in its log) and still sends the event; each writer keeps its own temporary de-dupe file.
+- **The scripts find tools where Linux keeps them:** the relay, the plugin hook, `herdr-doctor` and `reopen.sh` add `/usr/local/bin` and Homebrew's Linux prefix to the bare PATH of a timer or a Herdr plugin.
+- **`reopen.sh` uses the installed helpers, else this checkout's,** and exits 5 when it cannot tag the new workspace for its bot, instead of carrying on silently.
+- **CI** pins Herdr Core 0.1.19 on macOS and adds Herdr 0.9.5, Herdr Core 0.1.19, `herdr-doctor` and the Core smoke run on Linux.
+
 ## 0.1.8 (4 Nov 2026)
 
 You can now choose the lead for each job, Claude or Codex, and the event relay runs on Linux as well as macOS. On Herdr Core, a yes typed into a job terminal now gets a short reply that says where to answer instead. A job started without `--lead` runs exactly as before, with a Claude lead. Update with `stampede update` or `herdr plugin update stampede --yes`. Linux has passed the unit suite, the relay samples and the install in CI and in a container, but no live job has run on a real Linux machine yet.
