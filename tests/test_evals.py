@@ -38,8 +38,9 @@ class Dataset(unittest.TestCase):
     def test_each_existing_runner_names_its_cases(self):
         for backend, runner in BACKENDS.items():
             path = ROOT / runner
-            if backend == 'fixture' or not path.is_file():
+            if backend == 'fixture':
                 continue
+            self.assertTrue(path.is_file(), f'{runner} is named by the dataset but missing')
             text = path.read_text()
             missing = [c['id'] for c in self.cases if c['backend'] == backend and not re.search(rf"\b{c['id']}\b", text)]
             self.assertEqual(missing, [], f'{runner} does not implement {missing}')
