@@ -6,6 +6,7 @@ One command runs stampede on a real Linux, with the real Herdr TUI 0.9.5 and the
 tests/evals/linux/run.sh                      # this checkout; runs land in tests/evals/runs/<stamp>-baseline-linux-{install,tui,core}
 tests/evals/linux/run.sh --src <checkout> --label after-linux   # another checkout, another label
 tests/evals/linux/run.sh --keep               # leave the container for a look: docker exec -it stampede-eval-<stamp> bash
+tests/evals/linux/run.sh --only tui           # one runner (install, tui or core); install.sh and the plugin link still happen
 ```
 
 It needs Docker (colima is fine) and the network once, for the pinned downloads. It exits 1 when a case failed or broke. Nothing is signed in, paired or sent anywhere: the bot's webhook is a stand-in on 127.0.0.1 inside the container.
