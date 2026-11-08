@@ -111,6 +111,12 @@ def approved(job, ident):
     return (job.job / 'gates' / f'{ident}.approved').is_file()
 
 
+def digest_args(job, ident):
+    """['--digest', d] exactly when the bot's approve line carries one (main's line has none), else []."""
+    digest = digest_of(job, ident)
+    return ['--digest', digest] if digest else []
+
+
 def approve(ev, job, ident, sha=SHA, digest=None, **kw):
     """The bot's approve-gate, from outside Herdr, with the digest from the gate event it was handed."""
     digest = digest or digest_of(job, ident)
@@ -210,8 +216,7 @@ def g06():
     ev = Ev('G06')
     job = new_job(ev)
     ident = gate(ev, job)
-    digest = digest_of(job, ident)
-    codes = {name: under(ev, job, name, 'approve-gate', job.job, ident, '--sha', SHA, '--digest', digest, '--by', 'owner')[0]
+    codes = {name: under(ev, job, name, 'approve-gate', job.job, ident, '--sha', SHA, *digest_args(job, ident), '--by', 'owner')[0]
              for name in ('herdr', 'herdr-core', 'hc')}
     refused = all(codes.values()) and not approved(job, ident)
     ok = control(ev, job, ident)
@@ -338,7 +343,7 @@ def g15():
     ident = gate(ev, job)
     box = Path(tempfile.mkdtemp(prefix='escape-', dir=job.root))
     (box / 'herdr').symlink_to('/bin/bash')
-    argv = shlex.join([str(STAMPEDE), 'approve-gate', str(job.job), ident, '--sha', SHA, '--digest', digest_of(job, ident), '--by', 'agent'])
+    argv = shlex.join([str(STAMPEDE), 'approve-gate', str(job.job), ident, '--sha', SHA, *digest_args(job, ident), '--by', 'agent'])
     inner = (f'sleep 0.5; env -i HOME={shlex.quote(job.base["HOME"])} PATH={shlex.quote(job.base["PATH"])} {argv} '
              f'>{box}/out 2>&1; echo $? >{box}/code')
     script = f'/bin/bash -c {shlex.quote(inner)} & exit 0'  # a fresh bash, not a copy named herdr; its parent exits at once
@@ -994,7 +999,7 @@ def g21():
             (job.bin / 'ps').chmod(0o755)
         env = {**job.base, 'PATH': f'{job.bin}:{job.base["PATH"]}' if body else str(tools)}
         a = ev.note(['approve-gate', f'({name})'], job.run('approve ' + name, (STAMPEDE, 'approve-gate', job.job, ident, '--sha', SHA,
-                                                                              '--digest', digest_of(job, ident), '--by', 'owner'), env))
+                                                                              *digest_args(job, ident), '--by', 'owner'), env))
         results[name] = (a[0], approved(job, ident), 'Traceback' in a[2])
         (job.job / 'gates' / f'{ident}.approved').unlink(missing_ok=True)
     (job.bin / 'ps').unlink(missing_ok=True)
