@@ -87,7 +87,7 @@ herdr-doctor                           # exit 0, with Herdr running
 **On Herdr Core instead of the Herdr TUI.** With [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) installed and running, run `herdr-doctor --core`, then ask *"With stampede, on Herdr Core: ..."*. The front door runs `stampede new --core`, and each agent runs in a Core terminal of its own ([Herdr Core](#herdr-core)).
 
 **Limits.**
-- macOS, and Linux with less testing. On macOS you load the event relay's two launchd jobs yourself. On Linux `install.sh` starts the same timers (systemd user units, or one flock-guarded loop when `systemctl --user` does not answer). On Linux the tests, the relay samples and the install run in CI; a live job there (Herdr, Herdr Core, Moshi or a bot over SSH) has not been run yet.
+- macOS and Linux. On macOS you load the event relay's two launchd jobs yourself; on Linux `install.sh` starts the same timers (systemd user units, or one flock-guarded loop when `systemctl --user` does not answer). On Linux a whole job ran live on the Herdr TUI and on Herdr Core (Ubuntu 24.04 arm64, stand-in agents; [docs/LINUX.md](docs/LINUX.md) says exactly what was real); a signed-in agent, the systemd timers, Moshi paired and a bot over SSH have not been run there yet.
 - The lead is Claude by default (any Claude model, set by `FLEET_LEAD_MODEL`), or Codex with `stampede new --lead codex` on the Herdr TUI. Workers can be Claude, Codex or Cursor (on Herdr Core, Claude or Codex in Core terminals, and Cursor, Hermes or Kimi handed to Herdr TUI panes).
 - Version 0.1.x, and early: commands and files may still change.
 - For big jobs. A small job runs as one agent session in a single tagged Herdr pane ([FAQ](#troubleshoot)).
@@ -245,19 +245,19 @@ REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close (a Core j
 
 ## Install
 
-**Prerequisites** (tested on macOS 27.2, 21 Oct 2026; the unit tests, the relay samples and `install.sh` also on Ubuntu 24.04 with fakes, 4 Nov 2026, with no live Herdr there):
+**Prerequisites** (tested on macOS 27.2, 21 Oct 2026, and with Herdr 0.9.5, Herdr Core 0.1.19 and moshi-hook 0.4.50 on 8 Nov 2026 on macOS 27.2 and Ubuntu 24.04 arm64; Linux in detail: [docs/LINUX.md](docs/LINUX.md)):
 
 | tool | version tested | needed for |
 |---|---|---|
-| [Herdr](https://herdr.dev/docs/install/) | 0.9.4 (the plugin needs 0.9.4 or later) | the panes |
-| [Herdr Core](https://herdr.dev/core/) `hc` | 0.1.13 | a job on Herdr Core, optional; a live test also ran on 0.1.14 |
+| [Herdr](https://herdr.dev/docs/install/) | 0.9.5 (0.9.4 or later: the plugin and `herdr-doctor` check it) | the panes |
+| [Herdr Core](https://herdr.dev/core/) `hc` | 0.1.19 (0.1.13 or later) | a job on Herdr Core, optional |
 | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.306 (2.1.295 or later on Herdr Core, for its status) | the lead, and workers |
 | [Codex CLI](https://developers.openai.com/codex/cli) | 0.163.0 (0.165.0 checked for `--no-daemon` on Herdr Core) | workers, optional |
 | [Cursor Agent](https://cursor.com/docs/cli/installation) | 2026.10.19 | workers, optional |
 | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.22.5 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
 | [Kimi Code](https://moonshotai.github.io/kimi-code/) | 2.2.0 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
-| Python 3, git, jq, curl | Python 3.9 (the tests need 3.11), git 2.56, jq 1.7 | the scripts |
-| [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.33 | questions on your phone, optional |
+| Python 3, git, jq, curl; on Linux also `flock` (util-linux) and `ps` (procps) | Python 3.9 (the tests need 3.11), git 2.56, jq 1.7 | the scripts |
+| [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.50 (`ask`, `notify` and `job` flags checked with `--help`; on Linux, unpaired) | questions on your phone, optional |
 | [Tailscale](https://tailscale.com/kb/1017/install) | 1.104.1 | a bot on another computer, optional |
 
 **Step by step**, on a Mac or a Linux machine with Herdr, Claude Code (signed in), Python 3 and git:
@@ -567,6 +567,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 
 | what you see | fix |
 |---|---|
+| `refused: a workspace labelled <label> is already open` from `reopen.sh`, with `none of this job's agents runs there` | after a Herdr server restart, Herdr restores the job's workspace with plain shells: close that workspace (your yes, as for any close), then run `reopen.sh` again |
 | `fleet-job gate-ok: gate <id> changed after the yes` | the gate's record changed after your yes (its action, PR or route), or the yes was recorded by stampede 0.1.8 or older: the lead asks the gate again |
 | `fleet-job approve-gate: gate <id> changed while the owner was asked` | the gate was edited after the bot asked you, so your yes was for something else: the lead asks again |
 | `reopen.sh: workspace <id> is open but not tagged for <bot>` (exit 5) | `herdr-events-owner` failed, so the bot would not hear that workspace: run the command it prints, then carry on |
@@ -712,6 +713,7 @@ tests/evals/            the evals: cases.json, run.py, record.py, live/, linux/,
 | doc | for |
 |---|---|
 | [docs/SETUP.md](docs/SETUP.md) | the full setup: installer, unattended agents, the event relay, uninstall |
+| [docs/LINUX.md](docs/LINUX.md) | stampede on Linux: what was verified and how, the install, the timers, what differs from macOS, the gaps |
 | [SKILL.md](SKILL.md) | the entry point an agent reads to run a job |
 | [skills/herdr-fleet](skills/herdr-fleet/SKILL.md) | the lead's playbook, with [failure modes](skills/herdr-fleet/references/failure-modes.md) and [a job on Herdr Core](skills/herdr-fleet/references/core.md) |
 | [remote/](remote/README.md) | one guide per front door, Moshi and the event relay |
@@ -771,8 +773,11 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **0.1.8, 4 Nov 2026. Linux, beside macOS:** The event relay, `herdr-doctor`, `install.sh` and `fleet-watch.sh` run on Linux. File size, age and mode go through one helper, so GNU `stat` and BSD `stat` both answer the file and not the filesystem. The relay log is `~/Library/Logs/herdr-events.log` on macOS and `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux. On Linux `install.sh` enables systemd user timers for the watchdog (5 minutes) and the flusher (2 minutes), or starts one flock-guarded loop when `systemctl --user` does not answer. `herdr-doctor --relay` checks whichever is in use, and counts the loop as running only when its pid file names a live `herdr-event-supervise`, never by a live pid alone. The de-dupe lock is exclusive on both, `lockf` on macOS and `flock` on Linux, and is let go before the flush. CI now runs on Linux too: the unit suite, the relay samples, `install.sh --dry-run` and an install with the timers left off. Tested on Ubuntu 24.04, in CI and in a local container: the full unit suite, the relay samples, both installs, and the flock loop started for real. The systemd timers were checked only against a fake `systemctl`. Not run on Linux yet: a live Herdr TUI, Herdr Core, Moshi, a real systemd user manager, or a bot over SSH.
 
+**Unreleased, 8 Nov 2026. Linux live, the evals, and the gaps they found:** a reproducible eval suite in [tests/evals](tests/evals/README.md) (cases for the owner's yes, side effects, lifecycle, portability, dependencies, versions, a Linux install and live jobs on both backends), recorded before and after the fixes on macOS 27.2 and on Ubuntu 24.04 arm64. Live on Linux, with the real Herdr 0.9.5, Herdr Core 0.1.19 and moshi-hook 0.4.50 and stand-in agents: the install, a whole TUI job and a whole Core job. Live on macOS: a whole Core job on 0.1.19 in a scratch session. Fixed with a case each: a yes now covers the gate as asked (its digest), `approve-gate` refuses when `ps` cannot show it, `finish` cancels waiting phone questions, `reopen.sh` moves an open job's marker and fails loudly when it cannot tag, Herdr errors are one line, `herdr-doctor` checks Herdr's version, the relay logs a lock it could not take, and the scripts find tools in Linux folders. Counts, commands and what was a stand-in: [docs/LINUX.md](docs/LINUX.md) and the run records.
+
 **Next:**
-- A live job on Linux, planned: Herdr and Herdr Core, the systemd user timers on a real user manager, Moshi and a bot over SSH.
+- On Linux: the systemd user timers on a real user manager, x86_64 live (CI covers it with fakes and a Core smoke run), a signed-in Claude and Codex, Moshi paired, and a bot over SSH.
+- A Herdr server restart: `reopen.sh` into the workspace Herdr restores, starting the agents in its plain shells, instead of asking to close it first.
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
 - On Herdr Core, planned: workers on a second machine (`hc run --on`), a bot front door over `hc`, the job shown in the Herdr app (its `herdr.space` and `herdr.tab` labels), Hermes and Kimi workers on a TUI-only job, and Kimi's and Hermes's empty prompts, so a handed one is briefed and told without a hand.
 - Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.

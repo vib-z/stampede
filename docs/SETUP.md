@@ -16,7 +16,7 @@ The short version is in the [README](../README.md#install). This page adds the d
 
 ## What you need
 
-macOS or Linux, Herdr 0.9.4 or later, Claude Code (the lead by default), optionally Codex (workers, or the lead with `stampede new --lead codex`) and Cursor for workers, Python 3.9 or later, git, jq and curl. Tested versions: [README, Install](../README.md#install). Moshi's `moshi-hook` puts the lead's questions on your phone; without it, `stampede ask` reports `ASK FAILED ... exit 127` to the lead's inbox.
+macOS or Linux, Herdr 0.9.4 or later, Claude Code (the lead by default), optionally Codex (workers, or the lead with `stampede new --lead codex`) and Cursor for workers, Python 3.9 or later, git, jq and curl (on Linux also `flock` from util-linux and `ps` from procps). Tested versions: [README, Install](../README.md#install); Linux in detail: [LINUX.md](LINUX.md). Moshi's `moshi-hook` puts the lead's questions on your phone; without it, `stampede ask` reports `ASK FAILED ... exit 127` to the lead's inbox.
 
 ## Install
 

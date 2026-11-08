@@ -13,6 +13,9 @@ Every gap the new evals found on both macOS and Linux is fixed, and a yes now co
 - **The relay says when its lock was not taken** (`lock-not-taken` in its log) and still sends the event; each writer keeps its own temporary de-dupe file.
 - **The scripts find tools where Linux keeps them:** the relay, the plugin hook, `herdr-doctor` and `reopen.sh` add `/usr/local/bin` and Homebrew's Linux prefix to the bare PATH of a timer or a Herdr plugin.
 - **`reopen.sh` uses the installed helpers, else this checkout's,** and exits 5 when it cannot tag the new workspace for its bot, instead of carrying on silently.
+- **`reopen.sh` moves an open job's marker to the workspace it reopens in** (with `<job>/workspace`), so Herdr's plain turn ends there stay on the machine and `finish` clears the right marker; found live on Linux. After a Herdr server restart, when the job's workspace is back with plain shells, it says so and what to do instead of refusing without a reason.
+- **Linux, live.** On Ubuntu 24.04 arm64 with the real Herdr 0.9.5, Herdr Core 0.1.19 and moshi-hook 0.4.50 (stand-in agents, nothing signed in): the install, `herdr-doctor`, the Herdr plugin, a whole TUI job and a whole Core job. [docs/LINUX.md](docs/LINUX.md) holds the matrix, what was real and the gaps (systemd user timers, x86_64 live, signed-in agents, Moshi paired, a bot over SSH).
+- **Versions.** Checked against Herdr 0.9.5 (it stopped installing Codex turn hooks; stampede's own Codex notify hook and Herdr's screen detection still give the lead its turns), Herdr Core 0.1.19 (detached programs outlive their terminal, hence `finish` above; `hc server restart` keeps the core's environment and the job's terminals) and moshi-hook 0.4.50 (`ask`, `notify`, `job` unchanged). The minimums stay Herdr 0.9.4 and Herdr Core 0.1.13.
 - **CI** pins Herdr Core 0.1.19 on macOS and adds Herdr 0.9.5, Herdr Core 0.1.19, `herdr-doctor` and the Core smoke run on Linux.
 
 ## 0.1.8 (4 Nov 2026)
