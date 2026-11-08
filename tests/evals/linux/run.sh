@@ -11,8 +11,8 @@
 # usage: tests/evals/linux/run.sh [--src <checkout>] [--label <label>] [--core-script <core_e2e.py>] [--only install|tui|core] [--keep]
 #   --src           the checkout under test (default: the one holding this script)
 #   --label         the run label prefix (default baseline-linux; the runs are <label>-install, <label>-tui, <label>-core)
-#   --core-script   a tests/evals/live/core_e2e.py to copy into the container copy (default: the one in --src if any,
-#                   else `git show qa/core-live:tests/evals/live/core_e2e.py` from --src when that branch has it)
+#   --core-script   a tests/evals/live/core_e2e.py to copy into the container copy, with the core_*.py files beside it
+#                   (default: the one in --src if any, else tests/evals/live/core_*.py from the branch qa/core-live of --src)
 #   --only          run one runner only (the TUI and Core runners still get install.sh and the plugin link)
 #   --keep          leave the container running for a look (docker exec -it <name> bash); remove it yourself
 set -euo pipefail
@@ -48,10 +48,16 @@ export COPYFILE_DISABLE=1
 git -C "$SRC" ls-files -z -co --exclude-standard | (cd "$SRC" && tar --null -T - -cf - --no-xattrs 2>/dev/null) \
   | docker exec -i "$C" bash -c 'mkdir -p "$HOME/stampede" && tar -xf - -C "$HOME/stampede" --warning=no-unknown-keyword'
 if [ -z "$CORE" ] && [ ! -f "$SRC/tests/evals/live/core_e2e.py" ] && git -C "$SRC" show qa/core-live:tests/evals/live/core_e2e.py >/dev/null 2>&1; then
-  CORE="${TMPDIR:-/tmp}/$C-core_e2e.py"; git -C "$SRC" show qa/core-live:tests/evals/live/core_e2e.py >"$CORE"
-  echo "Core scenario: tests/evals/live/core_e2e.py from branch qa/core-live (read-only copy)"
+  mkdir -p "${TMPDIR:-/tmp}/$C-core"
+  for f in $(git -C "$SRC" ls-tree --name-only qa/core-live tests/evals/live/ | grep '/core_.*\.py$'); do
+    git -C "$SRC" show "qa/core-live:$f" >"${TMPDIR:-/tmp}/$C-core/$(basename "$f")"
+  done
+  CORE="${TMPDIR:-/tmp}/$C-core/core_e2e.py"
+  echo "Core scenario: $(ls "${TMPDIR:-/tmp}/$C-core" | paste -sd' ' -) from branch qa/core-live (read-only copies)"
 fi
-[ -n "$CORE" ] && docker cp "$CORE" "$C:$home/stampede/tests/evals/live/core_e2e.py"
+if [ -n "$CORE" ]; then
+  for f in "$(dirname "$CORE")"/core_*.py; do docker cp "$f" "$C:$home/stampede/tests/evals/live/$(basename "$f")"; done
+fi
 before=$(docker exec "$C" bash -c 'ls "$HOME/stampede/tests/evals/runs" 2>/dev/null' || true)
 rc=0
 docker exec -e STAMPEDE_EVAL_COMMIT="$commit" -e STAMPEDE_EVAL_DIRTY="$dirty" -e EVAL_EXTRA_JSON="$extra" -e EVAL_ONLY="$ONLY" "$C" \

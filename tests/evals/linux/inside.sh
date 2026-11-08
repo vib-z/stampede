@@ -60,7 +60,7 @@ if [ "$ONLY" = all ] || [ "$ONLY" = tui ]; then
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = core ]; then
   if [ -f tests/evals/live/core_e2e.py ]; then
-    python3 tests/evals/live/core_e2e.py --label "$LABEL-core" --extra "$EXTRA" || rc=1
+    python3 tests/evals/live/core_e2e.py --label "$LABEL-core" || rc=1   # qa-core's runner: its own scratch core and stand-ins
   else
     echo "no tests/evals/live/core_e2e.py in this checkout: the Core cases did not run here"
   fi

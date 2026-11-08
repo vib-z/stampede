@@ -172,7 +172,8 @@ def i04(ev, a):
         ev.sh(['git', '-C', str(copy), 'init', '-q'])
         ev.sh(['git', '-C', str(copy), 'add', '-A'])
         ev.sh(['git', '-C', str(copy), 'commit', '-q', '-m', 'the checkout under test, for the unit suite'])
-    code, out, err = ev.sh([sys.executable, '-m', 'unittest', 'discover', 'tests'], cwd=copy, timeout=2400)
+    clean = {k: v for k, v in os.environ.items() if not k.startswith(('FLEET_', 'HERDR_', 'HC_', 'STAMPEDE_', 'XDG_'))}  # as CI runs it
+    code, out, err = ev.sh([sys.executable, '-m', 'unittest', 'discover', 'tests'], cwd=copy, timeout=2400, env=clean)
     tail = [row for row in err.strip().splitlines()[-6:]]
     ran = next((row for row in tail if row.startswith('Ran ')), '')
     verdict = tail[-1] if tail else ''
@@ -181,7 +182,8 @@ def i04(ev, a):
     ev.note('failed tests: ' + (', '.join(failed) if failed else 'none'))
     return ev.result('pass' if code == 0 and verdict.startswith('OK') else 'fail', f'exit {code}; {ran}; {verdict}'
                      + (f'; failed: {", ".join(failed)[:600]}' if failed else ''),
-                     notes='Run from a copy with a throwaway .git (the copied checkout has none); the full output is I04-unittest.log in this run folder.')
+                     notes='Run from a copy with a throwaway .git (the copied checkout has none) and without the settings this run exports '
+                           '(FLEET_, HERDR_, HC_, STAMPEDE_, XDG_), as CI runs it; the full output is I04-unittest.log in this run folder.')
 
 
 def i06(ev, a):
