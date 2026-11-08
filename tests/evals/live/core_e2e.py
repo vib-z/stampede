@@ -15,7 +15,8 @@ the session it named and refuses any other (C09). The machine's own core is only
 hc command. On macOS the core is started the way an ssh session starts it (a plain detached process); a start from a
 desktop shell goes through a one-shot launchd job, which the run must not leave behind (the brief's rule: stop and
 record if launchd gains anything). The owner's surrogate for approve-gate (C05) runs detached to pid 1 with every Herdr
-and Core variable removed, as tests/clients_run.py's detached() runs a client outside Herdr, and its ancestry is logged.
+and Core variable removed, as tests/clients_run.py's detached() runs a client outside Herdr, and its ancestry is logged; it runs
+the gate event's own approve line as the bot was handed it (with --digest where the product adds one), never a line of its own.
 """
 import argparse, json, os, platform, re, shlex, shutil, signal, subprocess, sys, tempfile, time, traceback, uuid
 from datetime import datetime
@@ -69,6 +70,21 @@ class Blocked(Exception):
 
 class Skip(Exception):
     """The case does not apply here."""
+
+
+RESTART_MARK = 'HC_EVAL_RESTART_MARK'  # set only in the shell that runs hc server restart (C10)
+
+
+def restart_leak(start):
+    """C10's oracle on a worker's start record (core_agent.py's start event): the reason it fails, or None. A record with
+    no recorded environment mapping is a failure too, never read as an empty one."""
+    env = start.get('env')
+    if not isinstance(env, dict) or not env:
+        return f'the start record holds no recorded environment, so nothing shows what the core passed the worker: {start}'
+    if RESTART_MARK in env:
+        return (f'a worker started after the restart got the restart shell\'s variable {RESTART_MARK}: the core took the new '
+                f'environment, not the one it started with; the worker saw {env}')
+    return None
 
 
 def shell(path, text):
@@ -527,9 +543,12 @@ class Harness:
                             lambda: [r for r in self.standin(self.lead)[n:] if r.get('event') == 'action' and 'approve-gate' in ' '.join(r.get('argv', []))], 30)[0]
         if inside.get('exit') != 2 or 'runs only outside Herdr and Herdr Core' not in inside.get('stderr', '') or approved.exists():
             raise Fail(f'approve-gate inside the lead terminal: {inside}')
-        code, out, err, chain_text = self.outside([str(self.home / '.local/bin/fleet-job'), 'approve-gate', job, gate, '--sha', sha, '--by', f'owner in {BOT} chat'])
+        approve = queued[0][2].get('approve') or ''  # the bot runs the gate event's own approve line, as given
+        if not approve.startswith('fleet-job approve-gate '):
+            raise Fail(f'the gate event carries no approve line: {approve!r}')
+        code, out, err, chain_text = self.outside(shlex.split(approve))
         if code != 0 or f'APPROVED {gate} at {sha}' not in out or not approved.is_file():
-            raise Fail(f'approve-gate from outside: exit {code}: {out} {err}')
+            raise Fail(f'the gate event\'s approve line from outside: exit {code}: {out} {err}')
         if 'herdr' in chain_text.lower() or re.search(r'\bhc\b', chain_text):
             raise Fail(f'the outside approver had Herdr or Core above it: {chain_text}')
         self.until('GATE APPROVED in the lead inbox', lambda: f'GATE {gate} APPROVED by owner in {BOT} chat' in self.read(f'inbox/{self.lead}.md'), 20)
@@ -547,8 +566,8 @@ class Harness:
         before = {name: self.hc_ok('get', addr) for name, addr in self.addr.items()}
         live_before = self.live()
         lines, sent, calls = list(self.inbox_log()), set(self.relay_sent()), len(self.hc_calls())
-        env = {**self.env, 'HC_EVAL_RESTART_MARK': 'restarted'}  # a changed environment: 0.1.19 keeps the one the core started with
-        self.commands.append(f'HC_EVAL_RESTART_MARK=restarted HC_SESSION={self.session} hc server restart')
+        env = {**self.env, RESTART_MARK: 'restarted'}  # a changed environment: 0.1.19 keeps the one the core started with
+        self.commands.append(f'{RESTART_MARK}=restarted HC_SESSION={self.session} hc server restart')
         restarted = self.sh(['hc', 'server', 'restart', '--json'], env=env, timeout=90, show=False)
         if restarted.returncode:
             raise Fail(f'hc server restart: exit {restarted.returncode}: {restarted.stdout[-300:]} {restarted.stderr[-300:]}')
@@ -570,10 +589,12 @@ class Harness:
             raise Fail('the follower lost its record of what it sent')
         self.addr['worker-d'] = self.start_worker('worker-d', 'claude')
         start = self.until('worker-d logged its start', lambda: [r for r in self.standin('worker-d') if r.get('event') == 'start'], 20)[0]
-        kept = 'HC_EVAL_RESTART_MARK' not in start.get('env', {})
+        self.note(f'worker-d, started after the restart, saw: {start.get("env")}')
+        fault = restart_leak(start)
+        if fault:
+            raise Fail(fault)
         return (f'hc server restart kept the job\'s {len(before)} terminals (same addresses and pids); the follower reconnected and wrote no '
-                f'duplicate line; a worker started after it {"did not get" if kept else "got"} the restart shell\'s variable'
-                + ('' if kept else ' (the core took the new environment)'))
+                f'duplicate line; a worker started after it did not get the restart shell\'s variable (its environment is in the log)')
 
     def c11(self):
         workers = {name: addr for name, addr in self.addr.items() if name.startswith('worker-')}
