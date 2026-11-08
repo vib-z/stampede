@@ -537,18 +537,28 @@ def l07():
                    f'first start {first[0]}, second {second[0]}; hc runs {runs} -> {len(job.calls("run"))}')
 
 
+def waiting(job):
+    """FLEET_ASK_CMD that never answers: a card still waiting on the phone."""
+    path = job.bin / 'ask-wait'
+    path.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$(dirname "$0")/asked"\nsleep 60\nexit 3\n')
+    path.chmod(0o755)
+    job.base['FLEET_ASK_CMD'] = str(path)
+
+
 @case('L09')
 def l09():
     ev = Ev('L09')
     job = new_job(ev, client='herdr-chat')
+    waiting(job)
     lead(ev, job, 'ask', job.job, 'Keep hello in the root?', '--option', 'yes', '--option', 'no')
     pids = [int(p.read_text()) for p in (job.job / 'asks').glob('*.pid')] if (job.job / 'asks').is_dir() else []
-    waiting = [p for p in pids if alive(p)]
+    time.sleep(0.5)
+    waiting_ = [p for p in pids if alive(p)]
     lead(ev, job, 'finish', job.job, 'all done')
     time.sleep(0.5)
     left = [p for p in pids if alive(p)]
     try:
-        return ev.done(bool(waiting) and not left, f'asks waiting before finish {len(waiting)}, still alive after {len(left)}')
+        return ev.done(bool(waiting_) and not left, f'asks waiting before finish {len(waiting_)}, still alive after {len(left)}')
     finally:
         stop_asks(job)
 
@@ -557,13 +567,16 @@ def l09():
 def l10():
     ev = Ev('L10')
     job = new_job(ev, client='herdr-chat')
+    waiting(job)
     out = lead(ev, job, 'ask', job.job, 'Keep hello in the root?', '--option', 'yes', '--option', 'no')[1]
     ident = (re.findall(r'ASKED ([0-9a-f]{12})', out) or ['none'])[0]
     pid = int((job.job / 'asks' / f'{ident}.pid').read_text()) if (job.job / 'asks' / f'{ident}.pid').is_file() else 0
+    job.until(lambda: pid and alive(pid), 2)
+    was = bool(pid) and alive(pid)
     first, second = lead(ev, job, 'cancel', job.job, ident), lead(ev, job, 'cancel', job.job, ident)
     time.sleep(0.3)
     try:
-        return ev.done(pid and first[0] == 0 and not alive(pid) and second[0] != 0,
+        return ev.done(was and first[0] == 0 and not alive(pid) and second[0] != 0,
                        f'cancel {first[0]}, waiter alive {pid and alive(pid)}, second cancel {second[0]}')
     finally:
         stop_asks(job)
