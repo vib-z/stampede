@@ -15,8 +15,9 @@ PLAYBOOK_DIRS = ("skills", "remote")
 TEXT_EXT = {".md", ".py", ".sh", ".toml", ".html", ".css", ".js", ".json", ".txt", ".example", ".plist", ".tsv", ".yml", ".yaml"}
 DASHES = re.compile("[\u2013\u2014]")
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
-PERSONAL = re.compile(r"/Use" r"rs/(?!you\b|<|\$USER|USER\b)[A-Za-z0-9._-]+|/home/(?!you\b|<|\$USER|user\b)[a-z0-9._-]+/"
+PERSONAL = re.compile(r"/Use" r"rs/(?!you\b|<|\$USER|USER\b)[A-Za-z0-9._-]+|/home/(?!you\b|<|\$USER|user\b|linuxbrew/)[a-z0-9._-]+/"
                       r"|-Users-[A-Za-z]|[A-Za-z0-9-]+\.ts\.net\b")
+# /home/linuxbrew is Homebrew's own prefix on Linux, not a person's home.
 # Private words (the owner's name, hosts, bots, projects, private skills), kept as sha256 prefixes so this file never names them.
 PRIVATE = {"05bd4b1a17d3955b", "1afc78a3a8aca49e", "270d76c78b081db7", "34d87f87a274e311", "4e09d4303ab499d0", "5a5a908605d4726a",
            "60019f2d98774f2e", "60c268171f89f3ed", "61ea0803f8853523", "6ea1969caf4636dc", "7221ac81b18aa788", "7277ce043c1567e2",

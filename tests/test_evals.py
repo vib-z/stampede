@@ -46,7 +46,7 @@ class Dataset(unittest.TestCase):
 class Recorder(unittest.TestCase):
     def test_a_run_is_scrubbed_and_counted(self):
         with tempfile.TemporaryDirectory() as out:
-            run = record.Run('unit', backend='fixture', out_root=out)
+            run = record.Run('unit', backend='fixture', cases=['G01', 'G02'], out_root=out)
             home, other = str(Path.home()), '/ho' 'me/somebody'  # split, so this file holds no home path itself
             run.case('G01', 'pass', 'x', f'ok in {home}/job and {other}/x', commands=[f'cd {record.ROOT}'])
             run.case('G02', 'fail', 'y', 'no')
@@ -60,9 +60,33 @@ class Recorder(unittest.TestCase):
 
     def test_a_bad_status_is_refused(self):
         with tempfile.TemporaryDirectory() as out:
-            run = record.Run('unit', backend='fixture', out_root=out)
+            run = record.Run('unit', backend='fixture', cases=['G01'], out_root=out)
             with self.assertRaises(ValueError):
                 run.case('G01', 'ok', 'x', 'y')
+
+    def test_every_selected_case_gets_one_result(self):
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(ValueError):
+                record.Run('unit', backend='fixture', cases=['G01', 'G01'], out_root=out)
+            with self.assertRaises(ValueError):
+                record.Run('unit', backend='fixture', cases=['ZZ9'], out_root=out)
+            run = record.Run('unit', backend='fixture', cases=['G01', 'G02'], out_root=out)
+            run.case('G01', 'pass', 'anything the runner says', 'ok')
+            with self.assertRaises(ValueError):
+                run.case('G01', 'pass', None, 'again')
+            with self.assertRaises(ValueError):
+                run.case('G03', 'pass', None, 'not selected')
+            self.assertEqual(run.close(), 1)  # G02 never ran: an error, so the run fails
+            rows = {json.loads(r)['id']: json.loads(r) for r in (run.dir / 'results.jsonl').read_text().splitlines()}
+            self.assertEqual(rows['G02']['status'], 'error')
+            self.assertEqual(rows['G01']['expected'], record.cases()['G01']['expect'])  # the dataset's text, always
+
+    def test_a_run_records_what_it_measured(self):
+        with tempfile.TemporaryDirectory() as out:
+            env = json.loads(record.Run('unit', backend='fixture', cases=['G01'], out_root=out).dir.joinpath('env.json').read_text())
+            for key in ('product_sha256', 'harness_sha256', 'dataset_sha256', 'argv', 'settings', 'selected', 'tools'):
+                self.assertIn(key, env)
+            self.assertEqual(env['selected'], ['G01'])
 
 
 if __name__ == '__main__':
