@@ -6,10 +6,10 @@ stampede runs on Linux as on macOS: the same command, the same skills, both back
 
 | platform | backend and versions | how | result | date |
 |---|---|---|---|---|
-| Ubuntu 24.04 arm64, a container under colima | install, `herdr-doctor`, the Herdr plugin, moshi-hook unpaired, the unit suite | [tests/evals/linux](../tests/evals/linux/README.md), cases I01 to I06 | 6 of 6 pass | 8 Nov 2026 |
-| the same | a whole job on the real Herdr TUI 0.9.5 server | [tui_e2e.py](../tests/evals/live/tui_e2e.py), cases T01 to T10 | 10 of 10 pass | 8 Nov 2026 |
-| the same | a whole job on the real Herdr Core 0.1.19 | [core_e2e.py](../tests/evals/live/core_e2e.py), cases C01 to C12 | 11 of 12 before the fixes (C08 failed: a phone question outlived `finish`) | 8 Nov 2026 |
-| the same | the fixture evals, through the real `stampede` command against the fakes | [run.py](../tests/evals/run.py), 56 cases | 40 pass, 12 fail before the fixes; 54 pass after | 8 Nov 2026 |
+| Ubuntu 24.04 arm64, a container under colima | install, `herdr-doctor`, the Herdr plugin, moshi-hook unpaired, the unit suite | [tests/evals/linux](../tests/evals/linux/README.md), cases I01 to I06 | 6 of 6 pass, before and after the fixes | 8 Nov 2026 |
+| the same | a whole job on the real Herdr TUI 0.9.5 server | [tui_e2e.py](../tests/evals/live/tui_e2e.py), cases T01 to T10 | 10 of 10 pass, before and after the fixes | 8 Nov 2026 |
+| the same | a whole job on the real Herdr Core 0.1.19 | [core_e2e.py](../tests/evals/live/core_e2e.py), cases C01 to C12 | before the fixes 11 of 12 (C08 failed: a phone question outlived `finish`); after 12 of 12 | 8 Nov 2026 |
+| the same | the fixture evals, through the real `stampede` command against the fakes | [run.py](../tests/evals/run.py), 56 cases | before the fixes 40 pass, 14 fail, 1 blocked, 1 gap; after 54 pass, 0 fail, 1 blocked, 1 gap | 8 Nov 2026 |
 | GitHub's `ubuntu-latest`, x86_64 | the unit suite, the relay samples, `install.sh`, Herdr 0.9.5 with `herdr-doctor`, the Herdr Core 0.1.19 smoke run, the fixture evals | [CI](../.github/workflows/ci.yml), every push and pull request | see the latest run | |
 
 "Real" here means the real Ubuntu, Herdr server, panes, agent detection, plugin events, Herdr Core, moshi-hook binary, `install.sh`, relay scripts and `stampede` commands. The agents and the bot are stand-ins: small programs that look to Herdr and Herdr Core exactly like Claude or Codex at their prompt (their screen, their status, their hook calls), and a webhook on 127.0.0.1. A pass proves that Herdr, Herdr Core and stampede work together on Linux; it does not prove a signed-in Claude or Codex does. The run records, with every command, expected and actual, are in [tests/evals/runs](../tests/evals/runs).

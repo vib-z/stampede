@@ -32,3 +32,18 @@ python3 tests/evals/record.py fixture                      # the environment a r
 ## Adding a case
 
 Add it to `cases.json` with a new id in its area's letter (G gate, S side effects, L lifecycle, P portability, D dependencies, V versions, I Linux install, T TUI live, C Core live), then implement it in its runner. `tests/test_evals.py` checks that every fixture case has an implementation and every runner that exists names each case it owns. An eval that can never fail is not an eval: each one must be able to catch the regression it is about.
+
+## Results, 8 Nov 2026
+
+Before is main's product code (0.1.8, product digest `8f99b46a668f`); after is this branch's fixes (product digest `b60c22104803`). Each row compares the same harness and dataset before and after. The fixture rows' "before" are the `baseline-final-harness` runs, the final runner on main's product code checked out into a throwaway commit; the first baseline, `baseline-fixture-*`, ran the harness as it stood before any fix and found the same 12 failures (L15 and L16 came later, from the live Linux runs).
+
+| runner | platform | before | after |
+|---|---|---|---|
+| fixture, 56 cases | macOS 27.2 arm64 | 39 pass, 14 fail, 2 blocked, 1 gap | 53 pass, 0 fail, 2 blocked, 1 gap |
+| fixture, 56 cases | Ubuntu 24.04 arm64 | 40 pass, 14 fail, 1 blocked, 1 gap | 54 pass, 0 fail, 1 blocked, 1 gap |
+| linux-install, I01 to I06 | Ubuntu 24.04 arm64 | 6 pass | 6 pass |
+| tui-live, T01 to T10 | Ubuntu 24.04 arm64, Herdr 0.9.5 | 10 pass | 10 pass |
+| core-live, C01 to C12 | Ubuntu 24.04 arm64, Herdr Core 0.1.19 | 11 pass, 1 fail (C08) | 12 pass |
+| core-live, C01 to C12 | macOS 27.2 arm64, Herdr Core 0.1.19 | 10 pass, 1 fail (C08), 1 skip (C12 is Linux only) | 11 pass, 1 skip |
+
+The failures before: D02, D07, D08, G17, G18, G20, G21, L09, L12, L14, L15, L16, P06, V02 (fixture) and C08 (live). Blocked: D01 and D04 on macOS (Homebrew's herdr and the system jq sit in folders `herdr-doctor` always searches, so their absence cannot be staged), D04 on Linux. The gap: G15, an agent that double-forks to pid 1 with a scrubbed environment can run `approve-gate` (same Unix user; measured: it records a yes). The live runners also recorded two findings no case had caught yet; they are now L15 and L16.
