@@ -1037,6 +1037,51 @@ def l14():
                                    f'a failure said so {loud}: {r[2].strip()[-160:]}')
 
 
+def closed(job):
+    """The fake Herdr after the job's workspace closed: no workspace, no agent."""
+    state = json.loads((job.herdr / 'state.json').read_text())
+    state['workspace list'] = {'workspaces': []}
+    (job.herdr / 'state.json').write_text(json.dumps(state))
+
+
+@case('L15')
+def l15():
+    ev = Ev('L15')
+    job = new_job(ev)
+    job.workers()
+    snapshot(ev, job)
+    old = (job.job / 'workspace').read_text().strip()
+    marker = lambda ws: job.events / 'jobs' / ws
+    had = marker(old).is_file()
+    closed(job)
+    fake = job.bin / 'herdr'
+    fake.rename(job.bin / 'herdr-fake')  # Herdr gives a reopened workspace a new id: w10 here
+    fake.write_text('#!/bin/bash\nif [ "$1 $2" = "workspace create" ]; then echo "workspace create $*" >> "$FAKE_DIR/calls"\n'
+                    '  echo \'{"result":{"workspace":{"workspace_id":"w10"},"tab":{"tab_id":"w10:t1"},"root_pane":{"pane_id":"w10:p1"}}}\'\n'
+                    '  exit 0; fi\nexec "$(dirname "$0")/herdr-fake" "$@"\n')
+    fake.chmod(0o755)
+    job.base['HERDR'] = str(fake)
+    r = outside(ev, job, '/bin/bash', job.job / 'reopen.sh')
+    now = (job.job / 'workspace').read_text().strip()
+    moved = now == 'w10' and marker('w10').is_file() and marker('w10').read_text().strip() == str(job.job) and not marker(old).exists()
+    return ev.done(r[0] == 0 and had and moved, f'reopen.sh exit {r[0]}; marker before on {old} {had}; <job>/workspace now {now}; '
+                                                f'marker on w10 {marker("w10").is_file()}, still on {old} {marker(old).exists()}')
+
+
+@case('L16')
+def l16():
+    ev = Ev('L16')
+    job = new_job(ev)
+    job.workers()
+    snapshot(ev, job)
+    state = json.loads((job.herdr / 'state.json').read_text())
+    state['agent list'] = {'agents': []}  # the label is open, its panes plain shells: what Herdr restores after a server restart
+    (job.herdr / 'state.json').write_text(json.dumps(state))
+    r = outside(ev, job, '/bin/bash', job.job / 'reopen.sh')
+    told = 'restart' in r[2] and 'close' in r[2].lower()
+    return ev.done(r[0] == 2 and told, f'reopen.sh exit {r[0]}; explains the restored workspace {told}: {r[2].strip()[-200:]}')
+
+
 @case('P07')
 def p07():
     ev = Ev('P07')
