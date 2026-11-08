@@ -32,6 +32,8 @@ class Dataset(unittest.TestCase):
         import run
         fixture = {c['id'] for c in self.cases if c['backend'] == 'fixture'}
         self.assertEqual(fixture, set(run.CASES), 'cases.json and run.CASES differ')
+        stubs = [i for i, fn in run.CASES.items() if fn.__name__ == '<lambda>' or 'not implemented' in (fn.__doc__ or '')]
+        self.assertEqual(stubs, [], 'fixture cases still stubbed')
 
     def test_each_existing_runner_names_its_cases(self):
         for backend, runner in BACKENDS.items():
