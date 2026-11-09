@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A smoke run on a real Herdr Core (hc 0.1.13) in a scratch session of its own (HC_SESSION and XDG folders under a
+"""A smoke run on a real Herdr Core (hc 0.1.13 or later; CI pins 0.1.19 on macOS and Linux) in a scratch session of its own (HC_SESSION and XDG folders under a
 temporary folder), never the machine's own core. CI runs it after installing hc; it prints PASS or the first FAIL.
 The stampede part (new --core, tell, finish, the follower's exit) runs once herdr-event-core is in the checkout."""
 import json, os, queue, shutil, subprocess, sys, tempfile, threading, time

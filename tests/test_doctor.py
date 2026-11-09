@@ -33,6 +33,7 @@ class Doctor(unittest.TestCase):
         subprocess.run(['bash', str(ROOT / 'install.sh')], env=self.env, check=True,
                        capture_output=True, timeout=15)
         self.fake('herdr', '''case "$1 $2" in
+  "--version ") echo "herdr ${TEST_CLIENT_VERSION:-0.9.5}";;
   "status ") printf 'client:\n  version: 0.9.5\nserver:\n  status: %s\n  version: %s\n' "${TEST_SERVER_STATE:-running}" "${TEST_SERVER_VERSION:-0.9.5}";;
   "plugin list") if [ "${3:-}" = --json ]; then
       [ -n "${TEST_MANAGED:-}" ] && printf '{"result":{"plugins":[{"plugin_id":"stampede","source":{"managed_path":"%s"}}]}}' "$TEST_MANAGED"

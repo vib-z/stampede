@@ -1,6 +1,6 @@
 #!/bin/bash
 # Codex notify: forwards agent-turn-complete JSON (last arg) to herdr-event-post, then chains to the previous notify.
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
 . "$(dirname "$_src")/herdr-platform"

@@ -29,10 +29,12 @@ herdr_events_log() {
 short_host() { hostname -s 2>/dev/null || hostname 2>/dev/null | cut -d. -f1; }
 
 # Exclusive lock on an open fd, 5s, as macOS lockf takes it (its -s means silent, not shared).
-# Linux has flock and no lockf. A failure leaves the script unlocked, as the old lockf line did.
+# Linux has flock and no lockf. Returns non-zero when the lock was not taken (held past 5 s, or no lock tool), so the
+# caller can say so; it still never blocks an event for good.
 hold_lock() {
-  if [ -x /usr/bin/lockf ]; then /usr/bin/lockf -s -t 5 "$1" 2>/dev/null || true
-  elif command -v flock >/dev/null 2>&1; then flock -w 5 "$1" 2>/dev/null || true
+  if [ -x /usr/bin/lockf ]; then /usr/bin/lockf -s -t 5 "$1" 2>/dev/null
+  elif command -v flock >/dev/null 2>&1; then flock -w 5 "$1" 2>/dev/null
+  else return 1
   fi
 }
 

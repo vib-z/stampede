@@ -1,0 +1,51 @@
+......xxxx.xxx.........ssssssssssss......./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................................................................../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpu5lhoxcu/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 10698 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpjkoy73ka/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpqf6zhfz0/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpwa8p669z/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:551: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  for row in self.stream():
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........../tmp/tmp5wklme7c~/bin/herdr-event-post: line 142: /tmp/tmp5wklme7c/queue/queue/.tmp-20261108T224455Z-12539-18417.json: Not a directory
+........../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmp9wtyp1v5/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpi3ehbm6n/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 17108 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................................................................................................................................................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=9 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....................................................
+----------------------------------------------------------------------
+Ran 430 tests in 122.849s
+
+OK (skipped=12, expected failures=7)

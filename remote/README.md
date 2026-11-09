@@ -17,7 +17,7 @@ stampede new --file <ask.md> --lead codex             # a Codex (GPT-6 Astra) le
 stampede new --core --file <ask.md> --cwd <repo>      # the whole job on Herdr Core instead of the Herdr TUI
 stampede tell <job dir> lead "<the owner's words>"    # a change or an answer, word for word
 stampede approve <job dir> --by "<front door>"        # only in a review job, after the owner's yes to the plan
-stampede approve-gate <job dir> <gate> --sha <commit> --by "owner in <bot> chat"   # a bot, outside Herdr, after the owner's yes to that gate
+stampede approve-gate <job dir> <gate> --sha <commit> --digest <d> --by "owner in <bot> chat"   # a bot, outside Herdr: the gate event's approve line, after the owner's yes
 ```
 
 | front door | what it is | guide |

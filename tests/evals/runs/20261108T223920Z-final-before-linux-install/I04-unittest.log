@@ -1,0 +1,198 @@
+......xxxxFxxx.........ssssssssssss......./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................................................................../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmp6rex_10a/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 10522 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpxgoftjxy/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmprd3h0qjk/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmppwvpsunn/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:551: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  for row in self.stream():
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........../tmp/tmp9zhc5zjk~/bin/herdr-event-post: line 137: /tmp/tmp9zhc5zjk/queue/queue/.tmp-20261108T224022Z-12337-19771.json: Not a directory
+........../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmphpm2h86l/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpuhcbkq33/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 16714 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................E..............E.EFEFF........E....E.....................................................................................EE.....~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=9 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......E..................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:554: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....................................................
+======================================================================
+ERROR: test_a_gate_goes_to_the_outbox_and_the_front_door_records_the_quoted_yes (test_fleet_job.FrontDoor.test_a_gate_goes_to_the_outbox_and_the_front_door_records_the_quoted_yes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 1171, in test_a_gate_goes_to_the_outbox_and_the_front_door_records_the_quoted_yes
+    self.quiet(fj.approve_gate, self.job, ident, sha, "owner in desktop chat: 'push the PR'", fj.gate_digest(fj.load_gate(self.job, ident)))
+                                                                                              ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+ERROR: test_a_stale_commit_is_refused (test_fleet_job.Gates.test_a_stale_commit_is_refused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 818, in test_a_stale_commit_is_refused
+    self.approve(ident, 'b' * 40)  # the bot's yes was for another commit
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/unit-suite/tests/test_fleet_job.py", line 698, in approve
+    fj.gate_digest(fj.load_gate(self.job, ident)))
+    ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+ERROR: test_e17_a_yes_covers_only_the_gate_as_asked (test_fleet_job.Gates.test_e17_a_yes_covers_only_the_gate_as_asked)
+eval G17, G18: the yes is bound to the gate's action, PR, commit and route, not only its id and commit.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 944, in test_e17_a_yes_covers_only_the_gate_as_asked
+    digest = command[command.index('--digest') + 1]
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: '--digest' is not in list
+
+======================================================================
+ERROR: test_e18_cancel_signals_only_this_questions_own_waiter (test_fleet_job.Gates.test_e18_cancel_signals_only_this_questions_own_waiter)
+review round 2 recheck, R4: another job whose path starts with this one's, another question, a reused pid.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 983, in test_e18_cancel_signals_only_this_questions_own_waiter
+    self.assertEqual(fj.own_waiter(self.job, 4242, 'abcdefabcdef'), mine, args)
+                     ^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'own_waiter'
+
+======================================================================
+ERROR: test_p2_gate_ok_needs_the_record_of_that_very_gate (test_fleet_job.Gates.test_p2_gate_ok_needs_the_record_of_that_very_gate)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 932, in test_p2_gate_ok_needs_the_record_of_that_very_gate
+    self.approve(first, self.SHA)
+  File "~/unit-suite/tests/test_fleet_job.py", line 698, in approve
+    fj.gate_digest(fj.load_gate(self.job, ident)))
+    ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+ERROR: test_the_owners_yes_is_recorded_and_matched_to_the_commit (test_fleet_job.Gates.test_the_owners_yes_is_recorded_and_matched_to_the_commit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 809, in test_the_owners_yes_is_recorded_and_matched_to_the_commit
+    self.approve(ident, self.SHA)
+  File "~/unit-suite/tests/test_fleet_job.py", line 698, in approve
+    fj.gate_digest(fj.load_gate(self.job, ident)))
+    ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+ERROR: test_a_yes_for_one_gate_never_passes_another (test_mixed.MixedFingerprints.test_a_yes_for_one_gate_never_passes_another)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_mixed.py", line 602, in test_a_yes_for_one_gate_never_passes_another
+    self.approve(first, SHA)
+  File "~/unit-suite/tests/test_mixed.py", line 585, in approve
+    return self.quiet(fj.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat', fj.gate_digest(fj.load_gate(self.job_dir, ident)))
+                                                                                        ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+ERROR: test_gate_ok_with_another_commit_refuses (test_mixed.MixedFingerprints.test_gate_ok_with_another_commit_refuses)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_mixed.py", line 590, in test_gate_ok_with_another_commit_refuses
+    self.approve(ident, 'b' * 40)  # a yes for another commit is never recorded
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/unit-suite/tests/test_mixed.py", line 585, in approve
+    return self.quiet(fj.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat', fj.gate_digest(fj.load_gate(self.job_dir, ident)))
+                                                                                        ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+ERROR: test_only_the_recorded_yes_and_never_from_a_handed_pane (test_mixed.MixedGates.test_only_the_recorded_yes_and_never_from_a_handed_pane)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_mixed.py", line 564, in test_only_the_recorded_yes_and_never_from_a_handed_pane
+    fj.gate_digest(fj.load_gate(self.job_dir, '0123456789ab')))
+    ^^^^^^^^^^^^^^
+AttributeError: module 'fleet_job' has no attribute 'gate_digest'. Did you mean: 'plan_digest'?
+
+======================================================================
+FAIL: test_f4_a_herdr_refusal_at_start_is_one_line (test_clients.Outcomes.test_f4_a_herdr_refusal_at_start_is_one_line)
+F4: on the TUI, a Herdr refusal at start, such as a worker name a pane of another job already holds (Herdr's
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_clients.py", line 425, in test_f4_a_herdr_refusal_at_start_is_one_line
+    self.assertEqual(len(err.strip().splitlines()), 1, err)
+AssertionError: 18 != 1 : Traceback (most recent call last):
+  File "~/unit-suite/skills/herdr-fleet/scripts/fleet_job.py", line 2413, in <module>
+    raise SystemExit(main(sys.argv[1:]) or 0)
+                     ^^^^^^^^^^^^^^^^^^
+  File "~/unit-suite/skills/herdr-fleet/scripts/fleet_job.py", line 2341, in main
+    return run(a)
+           ^^^^^^
+  File "~/unit-suite/skills/herdr-fleet/scripts/fleet_job.py", line 2363, in run
+    return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in, a.cwd)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/unit-suite/skills/herdr-fleet/scripts/fleet_job.py", line 1163, in start
+    blocked = launch(agent, kind, pane, args)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/unit-suite/skills/herdr-fleet/scripts/fleet_job.py", line 1122, in launch
+    herdr('agent', 'start', agent, '--kind', kind, '--pane', pane, '--timeout', '90000', '--', *args)
+  File "~/unit-suite/skills/herdr-fleet/scripts/fleet_job.py", line 1113, in herdr
+    raise HerdrError('herdr ' + ' '.join(args[:2]) + ': ' + line(error or result.stderr),
+HerdrError: herdr agent start: {'code': 'agent_name_taken', 'message': 'refused'}
+
+
+======================================================================
+FAIL: test_e17b_approve_gate_without_the_digest_is_refused (test_fleet_job.Gates.test_e17b_approve_gate_without_the_digest_is_refused)
+review round 2, R1: leaving --digest out is no way around the check.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 968, in test_e17b_approve_gate_without_the_digest_is_refused
+    with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError) as refused:
+AssertionError: PermissionError not raised
+
+======================================================================
+FAIL: test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused (test_fleet_job.Gates.test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 992, in test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused
+    with self.assertRaises(PermissionError):
+AssertionError: PermissionError not raised
+
+======================================================================
+FAIL: test_e21_a_process_table_that_does_not_show_this_command_cannot_approve (test_fleet_job.Gates.test_e21_a_process_table_that_does_not_show_this_command_cannot_approve)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "~/unit-suite/tests/test_fleet_job.py", line 999, in test_e21_a_process_table_that_does_not_show_this_command_cannot_approve
+    self.assertTrue(fj.inside_herdr({}, 4242))
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 430 tests in 122.418s
+
+FAILED (failures=4, errors=9, skipped=12, expected failures=7)

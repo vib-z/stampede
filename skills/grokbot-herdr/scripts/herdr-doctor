@@ -14,11 +14,12 @@ for option in "$@"; do
     *) usage >&2; exit 2;;
   esac
 done
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
 . "$(dirname "$_src")/herdr-platform"
 bad=0
+HERDR_MIN=0.9.4 HC_MIN=0.1.13 CLAUDE_CORE_MIN=2.1.295   # the minimums; herdr-plugin.toml and the README state the same
 ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }
 problem(){ echo "PROBLEM $*"; bad=1; }
@@ -30,18 +31,26 @@ done
 
 # Herdr Core: the CLI, the selected core (asked on its socket, never started), and agents that report OSC 7501 status
 newer(){ python3 -c 'import sys; v=[tuple(int(n) for n in x.split(".")[:3]) for x in sys.argv[1:]]; sys.exit(v[0] < v[1])' "$1" "$2" 2>/dev/null; }
+version_of(){ "$@" --version 2>/dev/null | awk '{print $2}' | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }
+if [ "$core" = 0 ] && command -v herdr >/dev/null; then
+  hv=$(version_of herdr)
+  if [ -z "$hv" ]; then problem "herdr --version printed no version: reinstall Herdr $HERDR_MIN or later"
+  elif ! newer "$hv" "$HERDR_MIN"; then problem "herdr $hv is older than $HERDR_MIN: upgrade Herdr; the owner restarts the server after"
+  else ok "herdr $hv"; fi
+fi
 if [ "$core" = 1 ]; then
-  hcv=$("${HC:-hc}" --version 2>/dev/null | awk '{print $2}')
-  if [ -z "$hcv" ]; then problem "hc not on PATH: install Herdr Core 0.1.13 or later (curl -fsSL https://releases.herdr.dev/core/install.sh | sh), or set HC"
-  elif ! newer "$hcv" 0.1.13; then problem "hc $hcv is older than 0.1.13: hc update"
+  hcv=$(version_of "${HC:-hc}")
+  if ! command -v "${HC:-hc}" >/dev/null; then problem "hc not on PATH: install Herdr Core $HC_MIN or later (curl -fsSL https://releases.herdr.dev/core/install.sh | sh), or set HC"
+  elif [ -z "$hcv" ]; then problem "hc --version printed no version: reinstall Herdr Core $HC_MIN or later"
+  elif ! newer "$hcv" "$HC_MIN"; then problem "hc $hcv is older than $HC_MIN: hc update"
   else ok "hc $hcv"; fi
   follower=$(python3 -c 'import os,sys; print(os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "herdr-event-core"))' "${BASH_SOURCE[0]}")
   if "$follower" --alive; then ok "Herdr Core answers (HC_SESSION ${HC_SESSION:-default})"
   else problem "Herdr Core not running for HC_SESSION ${HC_SESSION:-default}: the owner starts it (hc server start); this check never does"; fi
   cv=$(claude --version 2>/dev/null | awk '{print $1}')
   if [ -z "$cv" ]; then problem "claude not on PATH: every lead runs on Claude Code"
-  elif newer "$cv" 2.1.295; then ok "claude $cv reports its status (OSC 7501)"
-  else problem "claude $cv reports no status on Herdr Core (OSC 7501 came in 2.1.295): update Claude Code"; fi
+  elif newer "$cv" "$CLAUDE_CORE_MIN"; then ok "claude $cv reports its status (OSC 7501)"
+  else problem "claude $cv reports no status on Herdr Core (OSC 7501 came in $CLAUDE_CORE_MIN): update Claude Code"; fi
   if ! command -v codex >/dev/null; then ok "codex not installed (optional)"
   elif codex --help 2>/dev/null | grep -q -- '--no-daemon'; then ok "codex runs with --no-daemon"
   else problem "codex has no --no-daemon: update Codex before starting Codex workers on Herdr Core"; fi

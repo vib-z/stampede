@@ -2,7 +2,7 @@
 # Run every 5 min (launchd on macOS; a systemd user timer or herdr-event-supervise on Linux). Flags agents stuck in working with no output change
 # for 30+ min (stale) and agent panes that vanished without a done/idle state (dead).
 # A pane a Herdr Core job handed an agent to ($EV/handed/<pane>) is its job's follower's: never tracked here.
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
 . "$(dirname "$_src")/herdr-platform"

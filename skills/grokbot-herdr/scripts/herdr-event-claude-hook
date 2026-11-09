@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code hook (Stop/StopFailure/Notification) -> herdr-event-post
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 in=$(cat)
 pane=${HERDR_PANE_ID:-}; ws=${HERDR_WORKSPACE_ID:-}
 # A Herdr Core terminal stampede started has no Herdr ids: its job's key and its terminal name it instead.

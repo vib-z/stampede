@@ -3,7 +3,7 @@
 # Queue: $HERDR_EVENTS_HOME/queue/*.json ({"route":..,"payload":{..}}), dead letters >24h -> dead/, older states of a pane -> dead/*.superseded.
 # A stampede question or gate held for a route with no URL, or dead after 24 h, is told once to its job's lead (held/ marks it).
 # Never logs URL or KEY. Empty queue = no network call.
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
 . "$(dirname "$_src")/herdr-platform"
