@@ -1,8 +1,8 @@
-# Eval run 20261108T213722Z-baseline-linux-tui
+# Eval run 20261108T224133Z-final-before-linux-tui
 
-Backend tui-live; Ubuntu 24.04.5 LTS aarch64; Python 3.12.3; commit b7732cd794a9; 89 s.
+Backend tui-live; Ubuntu 24.04.5 LTS aarch64; Python 3.12.3; commit d7a1237e161e; 89 s.
 
-Product 8f99b46a668f, harness d8360a5de274, dataset 8dbb9a56b2d2; 10 cases selected.
+Product 8f99b46a668f, harness e6f1f21ee23a, dataset f3363bc3ac63; 10 cases selected.
 
 Tools: herdr herdr 0.9.5, hc hc 0.1.19, moshi-hook moshi-hook version 0.4.50, jq jq-1.7, git git version 2.43.0, bash GNU bash, version 5.2.21(1)-release (aarch64-unknown-linux-gnu), python3 Python 3.12.3, claude 2.1.300 (Claude Code), codex codex-cli 0.100.0, flock flock from util-linux 2.39.3, ps ps from procps-ng 4.0.4.
 
@@ -26,4 +26,4 @@ Tools: herdr herdr 0.9.5, hc hc 0.1.19, moshi-hook moshi-hook version 0.4.50, jq
 | T06 | pass | After the workspace is closed, reopen.sh recreates it with each agent in its pane, refuses while it is open, and the job carries on. | refused while open (exit 2) ok; agents gone after the close ok; reopen.sh exit 0, REOPENED ok; all three agents back, settled ok; each in a pane of the new workspace ok; the job carries on (tell, echo |
 | T07 | pass | After herdr server stop and start in the scratch home, the job's record and reopen.sh still bring it back. | server stopped ok; server running again ok; reopen.sh exit 0, REOPENED ok; all three agents back, settled ok; the job carries on (tell, echo, lead woke) ok |
 | T08 | pass | finish queues one done event; the flusher delivers it once to a local stand-in route; a second finish adds nothing. | first finish FINISHED ok; one done event reached the route ok; second finish FINISHED, no new event ok; queue empty (flushed) ok; marker gone ok; finished stamp written ok |
-| T09 | pass | Two checks: in a pane with no open job, a stand-in going working then idle makes Herdr's plugin event post one event to the relay queue; in an open job's pane the same turn end stays on the machine (j | turn ends in the open job were job-skipped by the relay ok; after finish, the plugin event reached the route ok; exactly one event for that turn ok; it says working before, done or idle now ok; Herdr  |
+| T09 | pass | Two checks: in a pane with no open job, a stand-in going working then idle makes Herdr's plugin event post one event to the relay queue; in an open job's pane the same turn end stays on the machine (j | turn ends in the open job were job-skipped by the relay ok; no plain turn end from a reopened workspace reached the bot while the job was open ok; after finish, the plugin event reached the route ok;  |

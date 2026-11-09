@@ -14,8 +14,10 @@ Real: Herdr, its server, panes, agent detection, prompts and plugin events; ever
 Stand-ins: the agents (no model, nothing spent) and the bot's webhook (127.0.0.1). The job is started as a bot would
 start it, from outside Herdr (workspace create, owner tag, stampede new --pane); the lead's own commands run inside a
 real pane of the job's workspace (an `ops` tab), so Herdr's ids and process tree are real on both sides.
-Order: T01 T02 T03 T04 T10 T05 T06 T07 T08 T09. T09's first check is measured while the job is open, its second after finish."""
+Order: T01 T02 T03 T04 T10 T05 T06 T07 T08 T09. T09's first check is measured while the job is open, its second after finish;
+it also fails when a plain turn end from a workspace reopen.sh made reached the bot while the job was open."""
 import argparse, json, os, platform, re, shlex, subprocess, sys, tempfile, time, traceback, uuid
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -79,6 +81,7 @@ class Live:
         self.ev = Ev('none')
         self.ws = self.first_ws = self.job = self.lead = self.ops = None
         self.reopened = []  # workspace ids reopen.sh made
+        self.finished_at = None  # when the first finish ran (T08)
         self.sha = subprocess.run(['git', '-C', str(self.repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
         self.op = 0
         self.workers = {}  # name -> kind
@@ -208,6 +211,21 @@ class Live:
         woke = echoed and self.wait(lambda: token in self.standin_log(self.lead), 30)
         return code, out, bool(echoed), bool(woke), token
 
+    def marker_note(self, old):
+        """What happened to the job marker and <job>/workspace at a reopen from old to self.ws, as measured."""
+        named = (self.job / 'workspace').read_text().strip() if (self.job / 'workspace').is_file() else ''
+        new_marker, old_marker = (EVENTS / 'jobs' / self.ws).is_file(), (EVENTS / 'jobs' / old).is_file()
+        if named == self.ws and new_marker and not old_marker:
+            return f'the job marker moved to jobs/{self.ws} and <job>/workspace names {self.ws}'
+        return f'the job marker did not follow: <job>/workspace names {named or "nothing"}, jobs/{self.ws} {"present" if new_marker else "absent"}, jobs/{old} {"kept" if old_marker else "gone"}'
+
+    @staticmethod
+    def relay_time(line):
+        try:
+            return datetime.strptime(line[:24], '%Y-%m-%dT%H:%M:%S%z').timestamp()
+        except ValueError:
+            return 0.0
+
     @staticmethod
     def verdict(checks, notes=''):
         text = '; '.join(f'{k} {"ok" if v else "NO"}' for k, v in checks.items())
@@ -334,7 +352,9 @@ class Live:
         before = self.in_pane(f'stampede gate-ok {shlex.quote(str(self.job))} {ident} --sha {self.sha}')
         inside = self.in_pane(f'stampede approve-gate {shlex.quote(str(self.job))} {ident} --sha {self.sha} --by "owner in {self.bot} chat"')
         recorded_inside = (self.job / 'gates' / f'{ident}.approved').is_file()
-        outside = self.outside([STAMPEDE, 'approve-gate', self.job, ident, '--sha', self.sha, '--by', f'owner in {self.bot} chat'])
+        line = event[0].get('approve', '') if event else ''
+        approve = shlex.split(line) if line else [str(STAMPEDE), 'approve-gate', str(self.job), ident, '--sha', self.sha, '--by', f'owner in {self.bot} chat']
+        outside = self.outside(approve)  # the bot's own computer runs the event's approve line as given; fleet-job is the installed link
         ok_right = self.in_pane(f'stampede gate-ok {shlex.quote(str(self.job))} {ident} --sha {self.sha}')
         ok_wrong = self.in_pane(f'stampede gate-ok {shlex.quote(str(self.job))} {ident} --sha {OTHER}')
         told = self.wait(lambda: f'GATE {ident} APPROVED' in self.inbox(), 10)
@@ -346,12 +366,14 @@ class Live:
                   'gate-ok at another commit refused': ok_wrong[0] != 0 and 'APPROVED' not in ok_wrong[1],
                   'the lead was told of the yes': bool(told)}
         self.ev.note(f'gate event: {json.dumps(event[0]) if event else "none"}')
-        return self.verdict(checks, notes='The outside approve-gate ran from this runner, whose ancestry (ANCESTRY line in the log) holds no herdr process.')
+        return self.verdict(checks, notes=f'The outside yes ran the gate event\'s approve line as given ({"with" if "--digest" in line else "without"} --digest), '
+                            'from this runner, whose ancestry (ANCESTRY line in the log) holds no herdr process.')
 
     def t06(self):
         """Close the workspace; reopen.sh refuses while open, then recreates it with every agent, and the job carries on."""
         self.require('workers')
         names = [self.lead, *self.workers]
+        old = self.ws
         refused = self.outside(['bash', self.job / 'reopen.sh'])
         self.herdr('workspace', 'close', self.ws)
         self.ops = None
@@ -371,12 +393,13 @@ class Live:
                   'all three agents back, settled': bool(back), 'each in a pane of the new workspace': all(p and p.startswith(self.ws + ':') for p in panes.values()),
                   'the job carries on (tell, echo, lead woke)': code == 0 and echoed and woke}
         self.ev.note(f'panes after reopen: {json.dumps(panes)}; snapshot: {snap[1].strip()[-200:]}')
-        return self.verdict(checks, notes=f'reopened as workspace {self.ws}; the job record still names {self.first_ws} and its marker jobs/{self.first_ws} stays')
+        return self.verdict(checks, notes=f'reopened as workspace {self.ws}; {self.marker_note(old)}')
 
     def t07(self):
         """herdr server stop and start again in this home; then the job's record and reopen.sh bring the job back."""
         self.require('workers')
         names = [self.lead, *self.workers]
+        old = self.ws
         stopped = self.sh(['herdr', 'server', 'stop'])
         down = self.wait(lambda: 'status: running' not in self.sh(['herdr', 'status'], quiet=True)[1], 30)
         log = (HOME / 'herdr-server-restart.log').open('a')
@@ -402,7 +425,8 @@ class Live:
         checks = {'server stopped': stopped[0] == 0 and bool(down), 'server running again': bool(up),
                   'reopen.sh exit 0, REOPENED': reopened[0] == 0 and 'REOPENED' in reopened[1], 'all three agents back, settled': bool(back),
                   'the job carries on (tell, echo, lead woke)': code == 0 and echoed and woke}
-        return self.verdict(checks, notes=f'after the restart Herdr showed {observed}; the restored shell workspace was closed before reopen.sh, as its refusal asks')
+        return self.verdict(checks, notes=f'after the restart Herdr showed {observed}; the restored shell workspace was closed before reopen.sh, '
+                            f'as its refusal asks; {self.marker_note(old) if found else "no reopened workspace"}')
 
     def t08(self):
         """finish relays one done event to the bot's route; a second finish adds nothing; the marker is gone."""
@@ -410,6 +434,7 @@ class Live:
         dones = lambda: [e for e in self.route_events() if e.get('source') == 'stampede' and e.get('state') == 'done' and e.get('job') == str(self.job)]
         before = len(dones())
         first = self.in_pane(f'stampede finish {shlex.quote(str(self.job))} "linux eval done"')
+        self.finished_at = time.time()
         delivered = self.wait(lambda: len(dones()) == before + 1, 20)
         second = self.in_pane(f'stampede finish {shlex.quote(str(self.job))} "linux eval done"')
         time.sleep(5)
@@ -428,16 +453,16 @@ class Live:
         if 'stampede' not in plugins:
             raise Blocked('the stampede plugin is not linked in this Herdr (I05)')
         skips = [r for r in self.relay_log().splitlines() if 'job-skip' in r and f'workspace={self.first_ws}' in r and 'herdr pane=' in r]
-        leaked = [r for r in self.relay_log().splitlines() if 'queued' in r and 'herdr pane=' in r and f'workspace={self.first_ws}' not in r
-                  and any(f'pane={w}:' in r for w in self.reopened)]
+        closed_at = self.finished_at or time.time()  # a turn end queued before finish was queued while the job was open
+        leaked = [r for r in self.relay_log().splitlines() if 'queued' in r and 'herdr pane=' in r
+                  and any(f'pane={w}:' in r for w in self.reopened) and self.relay_time(r) < closed_at]
         pane = (self.agent('build-claude') or {}).get('pane_id')
         if not pane:
             raise Blocked('no live build-claude pane')
         # the relay de-dupes one pane's state for 120 s: wait that out after this pane's last post, so the check is its own
         posted = [r for r in self.relay_log().splitlines() if f'pane={pane} ' in r and ('queued' in r or 'dedupe-skip' in r)]
         if posted:
-            last = time.mktime(time.strptime(posted[-1][:19], '%Y-%m-%dT%H:%M:%S'))
-            time.sleep(max(0, 125 - (time.time() - last)))
+            time.sleep(max(0, 125 - (time.time() - self.relay_time(posted[-1]))))
         mine = lambda: [e for e in self.route_events() if e.get('source') == 'herdr' and e.get('pane') == pane]
         before = len(mine())
         token = uuid.uuid4().hex[:8]
@@ -447,6 +472,7 @@ class Live:
         new = mine()[before:]
         logs = [r for r in self.herdr('plugin', 'log', 'list', '--plugin', 'stampede').get('logs', []) if r.get('event') == 'pane.agent_status_changed']
         checks = {'turn ends in the open job were job-skipped by the relay': len(skips) >= 1,
+                  'no plain turn end from a reopened workspace reached the bot while the job was open': not leaked,
                   'after finish, the plugin event reached the route': bool(got),
                   'exactly one event for that turn': len(new) == 1,
                   'it says working before, done or idle now': bool(new) and new[0].get('previous_state') == 'working' and new[0].get('state') in ('done', 'idle'),
@@ -454,8 +480,7 @@ class Live:
         self.ev.note(f'job-skip lines: {skips[-3:]}\nturn ends from reopened workspaces that reached the route while the job was open: {leaked[-4:]}\n'
                      f'new route events: {json.dumps(new)[:1200]}\nplugin log entries: {len(logs)}, last: {json.dumps(logs[-1:])[:400]}')
         return self.verdict(checks, notes=f'{len(skips)} job-skip lines for workspace {self.first_ws}; {len(new)} event(s) after finish; '
-                            f'{len(leaked)} turn end(s) from the reopened workspaces {self.reopened} were not suppressed while the job was open '
-                            '(the job marker stays on the first workspace id after reopen.sh)')
+                            f'{len(leaked)} plain turn end(s) from the reopened workspaces {self.reopened} reached the bot while the job was open')
 
 
 def preflight(a):
