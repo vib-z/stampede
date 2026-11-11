@@ -65,13 +65,7 @@ Where agents work:
 
 ## Thinker and doer
 
-This is the default shape. The owner can override it per job.
-
-- **Lead = thinker.** High effort (Claude xhigh, Codex ultra). It plans once at the start and writes a tight spec for each task: what to build, which files, what done looks like, and which tests to run. It does not re-plan mid-build unless a builder is blocked.
-- **Builders = doers.** Medium effort by default. They follow the spec and do not redesign it. Raise a builder to high or xhigh only for a genuinely hard task the lead flags in the plan.
-- **Tests** run after each builder step: a cheap, fast check the brief names. The lead still runs the full gates once after integration.
-- **Review:** one Codex pass at the end, on a different model than the builder. Loop again only for a real bug (broken behaviour, a failing test, or a regression). Style or wording nits go in the report; they are not fix-looped.
-- **Proof frames** only for UI changes the owner will look at. No extra frames.
+The default shape; the owner can override it per job. **Lead = thinker:** high effort (Claude xhigh, Codex ultra); it plans once and writes a tight spec per task (what to build, which files, what done looks like, which tests to run), and re-plans mid-build only if a builder is blocked. **Builders = doers:** medium effort by default; they follow the spec and do not redesign it, raised to high or xhigh only for a genuinely hard task the lead flags in the plan. **Tests** run after each builder step (a cheap, fast check the brief names); the lead still runs the full gates once after integration. **Review:** one Codex pass at the end, on a different model than the builder; loop again only for a real bug (broken behaviour, a failing test, or a regression); style or wording nits go in the report and are not fix-looped. **Proof frames** only for UI changes the owner will look at.
 
 ## Pick the agent and model
 
@@ -95,10 +89,7 @@ Never substitute a model the owner named. **Fallback:** when a lane's agent hits
 
 ## Panes, not built-in subagents
 
-Every lane is a Herdr pane with its own agent, so the owner sees it, Moshi reaches it, and the register, watch and review cover it. Open a pane for:
-- parallel independent work (research, ideas, builds, asset generation) that pays a pane (The lead, item 2), even when the brief does not name a pane for it;
-- work on another model family (Codex, Cursor, Hermes) or another Claude model;
-- every review: a reviewer is never a subagent of the agent it reviews.
+Every lane is a Herdr pane with its own agent, so the owner sees it, Moshi reaches it, and the register, watch and review cover it. Open a pane for: parallel independent work (research, ideas, builds, asset generation) that pays a pane (The lead, item 2), even when the brief does not name a pane for it; work on another model family (Codex, Cursor, Hermes) or another Claude model; and every review (a reviewer is never a subagent of the agent it reviews).
 
 A built-in subagent (Claude's Agent or Task tool, a Codex sub-agent) is only for a quick lookup the lead reads itself: find a file, check a flag, skim one page. A brief that says "in parallel" without naming panes still means panes: name them `<role>-<scope>` (`research-web`, `research-local`) in a tab of their own. Seen 2026-10-17: a promo lead ran both research lanes as hidden subagents because its brief named a pane for every step except research.
 
@@ -144,7 +135,5 @@ Integrate, run the gates once, push the work branch and open a DRAFT PR (no need
 **Ask before close (owner's rule, 17 Oct 2026).** Never close a pane, tab or workspace, and never clear the owner tag to close one, automatically when a job ends. Leave everything open; the very last step is a question to the owner: AskUserQuestion inside Herdr in a job started locally (it reaches the phone), or, in a job a bot started, the end of the lead's report and so the bot's chat or done event ("Close workspace <label>? Reopen with <job dir>/reopen.sh"). No answer is a no. Only after the owner's explicit yes, in this order: exit each agent gracefully so its session stays resumable (`/exit` for Claude, Hermes and Kimi, `/quit` for Codex), refresh the reopen record (`herdr-reopen-snapshot <ws> <job dir>`), clear the owner tag (`herdr-events-owner <ws> --clear`), then close only what you created: the whole workspace (`herdr workspace close <id>`) if the fleet created it, else only your own panes and tabs, never one of the owner's project workspaces. Remove only your worktrees, after their panes are closed (keep the branches, so `reopen.sh` can come back to them).
 
 ## Official docs
-- https://herdr.dev/docs/cli-reference/
-- https://herdr.dev/docs/agent-automation/
 
-Re-check both, and `herdr <cmd> --help`, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (herdr 0.9.5 on 2026-11-11).
+[CLI reference](https://herdr.dev/docs/cli-reference/) and [agent automation](https://herdr.dev/docs/agent-automation/). Re-check both, and `herdr <cmd> --help`, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (herdr 0.9.5 on 2026-11-11).
