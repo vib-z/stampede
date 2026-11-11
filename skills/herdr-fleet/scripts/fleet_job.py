@@ -524,8 +524,18 @@ def outbox_post(job, kind, text, files=(), answer=None):
 
 
 def post(job, text, files=()):
+    """One item for the owner. outbox/<n>.md is always the record; a job a bot started (and no front door) also sends that
+    bot one post event on the strict route, since only a front door's wait reads the outbox."""
+    owner = '' if front_door(job) else job_owner(job)
     n = outbox_post(job, 'post', text, files)
-    print(f'POSTED {n} for the front door to relay ({Path(job).absolute() / "outbox" / (n + ".md")})')
+    item = Path(job).absolute() / 'outbox' / (n + '.md')
+    if not owner:
+        return print(f'POSTED {n} for the front door to relay ({item})')
+    copies = [str(item.parent / n / Path(f).name) for f in files]
+    post_event(job, owner, {'state': 'post', 'text': str(text).strip(), 'outbox': n, 'item': str(item), 'files': copies},
+               refused=lambda why: f'outbox {n} is written but {owner} never heard it: the relay refused it ({why}). '
+                                   'Fix the route (herdr-doctor --relay), then post again')
+    print(f'POSTED {n} to {owner} (and {item})')
 
 
 def lead_card(job):
@@ -669,14 +679,17 @@ def finish(job, summary):
     print('FINISHED ' + str(job))
 
 
-def post_event(job, owner, fields):
+def post_event(job, owner, fields, refused=None):
     """One event to the bot that started the job, queued by the relay in strict mode: only the bot's own route with a
     URL (never the default route, perhaps another bot's), or a refusal. No `pane`: the flusher keeps only a pane's
-    newest event after an outage, and a question or a gate must never be dropped for a later turn end."""
+    newest event after an outage, and a question, a gate or a post must never be dropped for a later turn end.
+    refused: the error for a refusal, given the relay's reason; by default the one for a question, a gate or finish."""
     event = {'source': 'stampede', 'owner': owner, 'job': str(Path(job).absolute()), 'agent': roster(job)[1], **fields,
              **caller_ids(job)}
     result = subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), '--strict', json.dumps(event)],
                             capture_output=True, text=True)
+    if result.returncode and refused:
+        raise ValueError(refused(line(result.stderr) or 'exit ' + str(result.returncode)))
     if result.returncode:
         raise ValueError(f'the relay did not queue this for {owner} ({line(result.stderr) or "exit " + str(result.returncode)}), '
                          'so the bot would never hear it: fix its route (herdr-doctor --relay)'
@@ -2560,7 +2573,10 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
     reach = (f'The owner talks only to the front-door chat that started you, never to your pane: AskUserQuestion and SendUserFile '
              f'reach no one (a hook turns them into posts). Reach the owner with: fleet-job post {job} "<text>" --file <path> '
              '(the plan, files to look at, decisions, your report); put undecided questions in a post, never on one card with a gate. '
-             if front else '')
+             if front else
+             f'Reach the owner with: fleet-job post {job} "<text>" --file <path> (the plan, files to look at, decisions, your '
+             f'report): it goes to {owner}, which shows the owner in chat; if the relay refuses it, fix the route and post again. '
+             if owner else '')
     return (f'Every fleet-job below means {SCRIPTS / "fleet-job"}: the one that started this job, so run it by that path '
             f'(a fleet-job on PATH may be older and lack its commands). '
             f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '

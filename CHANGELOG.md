@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A bot hears every post.** In a job a bot started (and no front door), `stampede post` used to write only `<job>/outbox/`, which only a front door's `wait` reads, so the bot never heard the lead's plan, files or report. Now it also sends that bot one `post` event (`source` stampede, `text`, `outbox`, `item`, `files`, no `pane`) on the same strict route as a question, and prints `POSTED NNN to <bot>`. When the relay refuses, the outbox item stays, nothing says `POSTED`, and the command exits 2 with one line naming the item and the fix (`herdr-doctor --relay`, then post again). Front-door and local jobs are unchanged. The lead's brief in a bot's job now says how to reach the owner with `post`, and the bot's guides say what to do with a `post` event: show the owner the text and files; there is nothing to answer.
+
 ## 0.1.9 (11 Nov 2026)
 
 stampede now keeps up with Herdr Core 0.1.20: a message waits while you are typing in an agent's terminal, a Codex lead can run a Herdr Core job, a Core job can show in the Herdr app if you ask for it, and `herdr-doctor` checks whichever of the Herdr TUI and Herdr Core you have installed. The evals that came with the Linux work are part of this release, with every failure they found fixed. Two changes in behaviour: a standing `FLEET_LEAD_KIND=codex` now gives a Herdr Core job a Codex lead too (it used to stay on Claude), and plain `herdr-doctor` now also checks Herdr Core when `hc` is installed. For bots: `approve-gate` requires `--digest`, which the gate event's `approve` line already carries. Update with `stampede update` or `herdr plugin update stampede --yes`. Herdr Core 0.1.13 is still the minimum; 0.1.20 is the one to run, and `herdr-doctor` warns below it.

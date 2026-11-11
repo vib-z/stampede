@@ -23,6 +23,7 @@ BOT_SCRIPTS = ROOT / 'skills/grokbot-herdr/scripts'
 OTHER_SHA = 'b' * 40
 LEAD_MODEL = 'test-lead-model'  # FLEET_LEAD_MODEL, as a front door sets it
 QUESTION, ANSWER, GATE, SUMMARY = 'Keep hello in the repo root?', 'yes, the root', 'Merge PR #3 into main', 'hello written'
+POST = 'PLAN READY: one worker writes hello'
 # a recorder in place of Moshi (FLEET_ASK_CMD): logs each card; answers a question with its first option, and a gate
 # (no options) with yes only once the test makes the file `yes` beside it, the owner's tap; no yes in 60 s is a no
 ASK = '#!/bin/bash\nprintf "%s\\n" "$*" >> "$(dirname "$0")/asked"\nwhile [ $# -gt 0 ]; do\n' \
@@ -265,7 +266,7 @@ class Job:
             self.lead('start ' + kind, 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief, *where)
 
     def question(self):
-        """O4: the lead asks; the client's channel gets it; the client's answer reaches the lead."""
+        """O4: the lead asks; the client's channel gets it; the client's answer reaches the lead. Then the lead posts."""
         self.lead('ask', 'ask', self.job, QUESTION, '--option', ANSWER, '--option', 'no')
         if self.bot:
             event = next(q['payload'] for q in self.queued() if q['payload'].get('state') == 'question')
@@ -273,6 +274,7 @@ class Job:
             self.front('answer', STAMPEDE, *answer[1:-1], answer[-1].replace("<the owner's words>", ANSWER))
         else:
             self.until(lambda: ANSWER in self.inbox())
+        self.lead('post', 'post', self.job, POST)  # O4 too: a bot hears a post; the outbox stays the record
 
     def gate(self):
         """O5: the lead asks a gate. Before the owner's yes, and after each approve-gate that must be refused, gate-ok

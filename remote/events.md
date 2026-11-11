@@ -32,6 +32,7 @@ herdr-event-flush                                    # send what is queued, olde
 - **Payload:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`; from Herdr also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines); from Claude and Codex `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (first 2000 characters).
 - **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`): ask the owner in chat, then run it with their words.
 - **A gate:** `job`, `agent` (the lead), `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and the two answers as commands: `approve` (`stampede approve-gate <job> <gate> --sha <sha> --digest <d> --by "owner in <bot> chat"`; run it as given: the digest is the gate as it was asked and is required, so a gate changed since takes no yes) and `deny` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat with the action, PR and commit; run `approve` over plain SSH (never `hc exec`) only on their yes to that gate, else `deny` with their words. Never type a yes into a pane.
+- **A post:** `job`, `agent` (the lead), `lead_pane`, `text`, `outbox` (its number), `item` (`<job>/outbox/NNN.md`) and `files` (the copies under `outbox/NNN/`, on the machine): the lead's plan, files to look at, a decision or its report. Show the owner the text and send the files; there is nothing to answer.
 - **Delivery:** an HTTP POST of the JSON to `URL`, with `Authorization: Bearer <KEY>` when `KEY` is set. URL and KEY are never logged. Queue and dead letters: `HERDR_EVENTS_HOME` (default `~/.herdr-events`). Log: `~/Library/Logs/herdr-events.log` on macOS, `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux.
 
 ## While a job is open
@@ -43,7 +44,7 @@ herdr-event-flush                                    # send what is queued, olde
 - Claude's `idle_prompt` notification
 - Codex `agent-turn-complete`
 
-These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question` or `gate`. `finish` sends one event, `source` stampede, `state` done, plus `summary`. In a job a bot started, that uses the same strict route as a question (exit 3 with no route of its own, exit 4 if it is not queued). In a job started locally, it uses the ordinary relay and still clears the marker. A second `finish` does not send again.
+These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question`, `gate` or `post` (`stampede post`, in a job a bot started). `finish` sends one event, `source` stampede, `state` done, plus `summary`. In a job a bot started, that uses the same strict route as a question (exit 3 with no route of its own, exit 4 if it is not queued). In a job started locally, it uses the ordinary relay and still clears the marker. A second `finish` does not send again.
 
 A Codex turn with no Herdr pane (`HERDR_PANE_ID` empty), including the Codex desktop app, is not sent. After the marker is gone, that workspace behaves as before.
 
