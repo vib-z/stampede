@@ -1639,6 +1639,9 @@ class Deliver(unittest.TestCase):
                                     ({'agent_status': 'idle'}, CODEX_167_FOOTER + '\n' + CODEX_167_DRAFT, False),  # above the prompt
                                     ({'agent_status': 'idle', 'focused': True}, CODEX_167_EMPTY, False),
                                     ({'agent_status': 'working'}, CODEX_167_EMPTY, False),
+                                    ({'agent_status': 'idle'}, CODEX_167_QUOTED, False),            # a draft that quotes the footer
+                                    ({'agent_status': 'idle'}, CODEX_167_EMPTY + '  something below the footer\n', False),
+                                    ({'agent_status': 'idle'}, '› \n' + CODEX_167_FOOTER.strip() + '\n› \n', False),  # last row a prompt
                                     ({'agent_status': 'idle'}, '', False)):                         # nothing readable
             with self.subTest(shown=shown, screen=screen), mock.patch.object(fj, 'herdr', return_value={'agent': shown}), \
                     mock.patch.object(fj, 'screen_of', return_value=screen):
@@ -1693,3 +1696,5 @@ CODEX_167_TOP = ('     ~/repo\n\n⚠ Heads up, you have less than 25% of your we
 CODEX_167_EMPTY = CODEX_167_TOP + '› Ask Codex to do anything\n\n  GPT-6.1-Sol default · ~/repo\n' + CODEX_167_FOOTER + '\n'
 CODEX_167_DRAFT = (CODEX_167_TOP + '› Explain how to get started\n\n  GPT-6.1-Sol default · ~/repo\n'
                    '                                                         ⚠ 2 warnings · f2 to view\n')
+CODEX_167_QUOTED = (CODEX_167_TOP + '› Explain this footer:\n  Here is what I see: ← for agents · ? for shortcuts\n\n'
+                    '  GPT-6.1-Sol default · ~/repo\n                                     ⚠ 2 warnings · f2 to view\n')  # review R1
