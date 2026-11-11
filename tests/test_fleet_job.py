@@ -1140,6 +1140,46 @@ class Gates(unittest.TestCase):
         self.assertTrue(last.startswith('UNDELIVERED gate ') and 'after 24 h' in last, last)
         self.assertEqual(len(list((self.home / 'events/dead').glob('*.json'))), 1)
 
+    def test_a_held_post_tells_its_lead_once_and_goes_out_when_the_route_comes_back(self):
+        self.bot_job()
+        post = [str(SCRIPTS / 'fleet-job'), 'post', str(self.job)]
+        self.assertEqual(subprocess.run(post + ['PLAN READY: two lanes'], capture_output=True, text=True).returncode, 0)
+        (self.home / 'routes/alpha').unlink()  # the owner rotates the route after the post was queued
+        flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
+        for _ in range(2):  # every flush holds it; the lead hears it once
+            subprocess.run(flush, check=True, timeout=30)
+        self.assertEqual([json.loads(p.read_text())['payload']['state'] for p in queue.glob('*.json')], ['post'])
+        self.assertIn('held (route alpha has no URL)', (self.home / 'events/flush.log').read_text())
+        told = (self.job / 'inbox.log').read_text().splitlines()
+        self.assertEqual(len(told), 1, told)
+        self.assertTrue(told[0].startswith('UNDELIVERED post outbox 001 for alpha held: '), told[0])
+        self.assertIn('do not post it again', told[0])  # it goes out by itself: a second post would be heard twice
+        curl = self.home / '.local/bin/curl'
+        curl.parent.mkdir(parents=True)
+        curl.write_text('#!/bin/sh\ncat >/dev/null; printf 200\n')
+        curl.chmod(0o755)
+        (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        subprocess.run(flush, check=True, timeout=30)
+        self.assertEqual((list(queue.glob('*.json')), list((self.home / 'events/held').iterdir())), ([], []))
+        self.assertEqual(len((self.job / 'inbox.log').read_text().splitlines()), 1, 'sent: the lead hears nothing more')
+
+    def test_a_post_dead_after_24_h_tells_its_lead_to_post_again(self):
+        self.bot_job()
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'post', str(self.job), 'Report ready'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (self.home / 'routes/alpha').unlink()
+        flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
+        subprocess.run(flush, check=True, timeout=30)
+        for path in queue.glob('*.json'):
+            os.utime(path, (time.time() - 86460,) * 2)
+        subprocess.run(flush, check=True, timeout=30)
+        told = (self.job / 'inbox.log').read_text().splitlines()
+        self.assertEqual(len(told), 2, told)  # held once, then dead once
+        self.assertTrue(told[-1].startswith('UNDELIVERED post outbox 001 for alpha after 24 h'), told[-1])
+        self.assertIn('the bot never heard it', told[-1])
+        self.assertIn('post again', told[-1])
+        self.assertEqual((list(queue.glob('*.json')), len(list((self.home / 'events/dead').glob('*.json')))), ([], 1))
+
     def test_r2_a_route_with_no_effective_url_or_no_queue_is_a_refusal(self):
         self.bot_job()
         (self.home / 'routes/alpha').write_text('URL="" # disabled during route rotation\n')

@@ -1,7 +1,7 @@
 #!/bin/bash
 # herdr-event-flush: POST queued herdr events oldest-first; 2xx -> delete, failure -> keep & stop.
 # Queue: $HERDR_EVENTS_HOME/queue/*.json ({"route":..,"payload":{..}}), dead letters >24h -> dead/, older states of a pane -> dead/*.superseded.
-# A stampede question or gate held for a route with no URL, or dead after 24 h, is told once to its job's lead (held/ marks it).
+# A stampede question, gate or post held for a route with no URL, or dead after 24 h, is told once to its job's lead (held/ marks it).
 # Never logs URL or KEY. Empty queue = no network call.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
@@ -15,11 +15,13 @@ MAXAGE=86400
 mkdir -p "$Q" "$DEAD" "$HELD"
 if [ -f "$LOG" ] && [ "$(file_bytes "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then : >"$LOG"; fi
 log(){ printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG"; }
-is_ask(){ jq -e '.payload.source == "stampede" and (.payload.state == "gate" or .payload.state == "question")' "$1" >/dev/null 2>&1; }
-# A question or gate its bot has not heard is news for the lead waiting on it: one line in its job's inbox.log wakes it.
+is_ask(){ jq -e '.payload.source == "stampede" and (.payload.state == "gate" or .payload.state == "question" or .payload.state == "post")' "$1" >/dev/null 2>&1; }
+is_post(){ jq -e '.payload.state == "post"' "$1" >/dev/null 2>&1; }
+# A question, gate or post its bot has not heard is news for the lead: one line in its job's inbox.log wakes it.
+# A post has no ask or gate id: its line names it by its outbox number.
 tell_lead(){
   local job; job=$(jq -r '.payload.job // ""' "$1" 2>/dev/null); [ -f "$job/lead" ] || return 0
-  printf 'UNDELIVERED %s %s\n' "$(jq -r '"\(.payload.state) \(.payload.gate // .payload.ask) for \(.payload.owner)"' "$1")" "$2" >>"$job/inbox.log"
+  printf 'UNDELIVERED %s %s\n' "$(jq -r '"\(.payload.state) \(if .payload.state == "post" then "outbox \(.payload.outbox)" else (.payload.gate // .payload.ask) end) for \(.payload.owner)"' "$1")" "$2" >>"$job/inbox.log"
   fleet-job _wake "$job" >/dev/null 2>&1 || true   # a Codex lead has no file hook: fleet-job types the line once it is idle
 }
 shopt -s nullglob
@@ -46,15 +48,18 @@ while :; do
     name=$(basename "$f")
     age=$(( $(date +%s) - $(file_mtime "$f") ))
     if [ "$age" -gt "$MAXAGE" ]; then
-      is_ask "$f" && tell_lead "$f" "after 24 h, moved to $DEAD: the bot never heard it; ask again, or (a Claude lead) ask the owner in your pane"
+      if is_post "$f"; then tell_lead "$f" "after 24 h, moved to $DEAD: the bot never heard it; fix the route (herdr-doctor --relay), then post again"
+      else is_ask "$f" && tell_lead "$f" "after 24 h, moved to $DEAD: the bot never heard it; ask again, or (a Claude lead) ask the owner in your pane"; fi
       mv "$f" "$DEAD/"; rm -f "$HELD/$name"; log "dead (>24h): $name"; continue; fi
     route=$(jq -r '.route // "default"' "$f" 2>/dev/null)
     if [ -z "$route" ] || ! jq -e .payload "$f" >/dev/null 2>&1; then mv "$f" "$DEAD/"; log "dead (bad file): $name"; continue; fi
     URL=""; KEY=""
     [ -r "$ROUTES/$route" ] && . "$ROUTES/$route"
-    if [ -z "$URL" ]; then  # a stampede question or gate waits for its route to come back (24 h, then dead/)
+    if [ -z "$URL" ]; then  # a stampede question, gate or post waits for its route to come back (24 h, then dead/)
       if is_ask "$f"; then
-        [ -e "$HELD/$name" ] || { tell_lead "$f" "held: route $route has no URL; it goes out once the route has one (herdr-doctor --relay), for 24 h, or (a Claude lead) ask the owner in your pane"; : >"$HELD/$name"; }
+        if is_post "$f"; then why="held: route $route has no URL; it goes out by itself once the route has one (herdr-doctor --relay), for 24 h, so do not post it again"
+        else why="held: route $route has no URL; it goes out once the route has one (herdr-doctor --relay), for 24 h, or (a Claude lead) ask the owner in your pane"; fi
+        [ -e "$HELD/$name" ] || { tell_lead "$f" "$why"; : >"$HELD/$name"; }
         log "held (route $route has no URL): $name"; continue; fi
       rm -f "$f"; log "dropped (route $route has no URL): $name"; continue; fi
     hdr=(); [ -n "$KEY" ] && hdr=(-H "Authorization: Bearer $KEY")
