@@ -71,11 +71,14 @@ printf 'URL=http://127.0.0.1:%s/hook\nKEY=eval-key\n' "$PORT" > "$H/.config/herd
 run git init -q "$H/code/eval-repo" && echo '# eval repo' > "$H/code/eval-repo/README.md" \
   && run git -C "$H/code/eval-repo" add README.md && run git -C "$H/code/eval-repo" commit -q -m start
 
-run python3 "$SRC/tests/evals/linux/route_server.py" --port "$PORT" --log "$H/route-received.jsonl" >"$T/route-server.log" 2>&1 &
+# exec, so that $! is the route server itself: a plain `run ... &` gives the pid of a shell around it, and killing
+# that shell would leave the server running after the script
+( exec env -i HOME="$H" PATH="$CLEAN" python3 "$SRC/tests/evals/linux/route_server.py" --port "$PORT" --log "$H/route-received.jsonl" ) >"$T/route-server.log" 2>&1 &
 ROUTE_PID=$!
 run nohup herdr server >"$T/herdr-server.log" 2>&1 &
 stop() {
   kill "$ROUTE_PID" 2>/dev/null || true
+  wait "$ROUTE_PID" 2>/dev/null || true
   if [ "$KEEP" = 1 ]; then echo "kept: $T (stop its server with: env -i HOME=$H PATH=$CLEAN herdr server stop)"; return; fi
   # only this HOME's server, by its own socket; checked again, since a case restarts the server
   case "$(socket_of)" in "$H"/*) run herdr server stop >/dev/null 2>&1 || true;; esac
