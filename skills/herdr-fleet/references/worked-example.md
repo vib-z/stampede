@@ -1,6 +1,6 @@
 # Worked example: a lead, two builders and a reviewer
 
-A feature with a server half and a UI half. The lead is `lead-alerts`, started with its hooks by `fleet-job new --file <ask.md> --name alerts` in the project workspace, which made the job folder `~/code/herdr-jobs/jobs/<date>-local-alerts`. `build-api` is Claude Opus 5.5 at xhigh, `build-ui` is Codex `gpt-6.1-sol` at xhigh, and `review-alerts` is Claude Fable 5.1 at max. Each builder gets its own worktree because both halves touch shared code. Run everything from the lead's pane. IDs come from JSON responses, never from these examples. External callers (over ssh): see "Where are you?" in SKILL.md and put literal ids where this example uses `$HERDR_WORKSPACE_ID`.
+A feature with a server half and a UI half. The lead is `lead-alerts`, started with its hooks by `fleet-job new --file <ask.md> --name alerts` in the project workspace, which made the job folder `~/code/herdr-jobs/jobs/<date>-local-alerts`. `build-api` is Claude Opus 5.5 at medium, `build-ui` is Codex `gpt-6.1-sol` at medium, and `review-alerts` is Codex `gpt-6-astra` at ultra. Each builder gets its own worktree because both halves touch shared code. Run everything from the lead's pane. IDs come from JSON responses, never from these examples. External callers (over ssh): see "Where are you?" in SKILL.md and put literal ids where this example uses `$HERDR_WORKSPACE_ID`.
 
 ## 1. Contract, briefs, register (lead)
 
@@ -32,7 +32,7 @@ Read its src/lib/alerts/types.ts contract.
 ## Constraints
 Follow _common.md. Commit only to alerts/api. Do not change the contract; propose changes in your report.
 ## Done when
-- `npx vitest run tests/alerts-api.test.ts` passes and the API and hourly evaluator match the contract.
+- `npx vitest run tests/alerts-api.test.ts` passes and the API and hourly evaluator match the contract. Run that test after the step, before the report.
 ## Report back
 Write <abs job folder>/reports/build-api.md last, under 60 lines: Status: DONE in the first 10 lines, what changed, files touched, unverified and decisions.
 ## If blocked
@@ -61,8 +61,8 @@ herdr pane rename "$PU" build-ui
 
 ```bash
 # each: auto mode, the job's hooks, --add-dir "$B" for Codex, the reopen record, then the brief pointer
-fleet-job start "$B" build-api --kind claude --pane "$PA" --brief "$B/build-api.md" --model claude-opus-5-5 --effort xhigh --report reports/build-api.md
-fleet-job start "$B" build-ui --kind codex --pane "$PU" --brief "$B/build-ui.md" --model gpt-6.1-sol --effort xhigh --report reports/build-ui.md
+fleet-job start "$B" build-api --kind claude --pane "$PA" --brief "$B/build-api.md" --model claude-opus-5-5 --effort medium --report reports/build-api.md
+fleet-job start "$B" build-ui --kind codex --pane "$PU" --brief "$B/build-ui.md" --model gpt-6.1-sol --effort medium --report reports/build-ui.md
 herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # REOPEN.md and reopen.sh in $B; Codex reports its session id after its first turn, so refresh later too
 ```
 
@@ -91,7 +91,7 @@ Do the same for `build-ui`. Then run the full gates once in `$WT/alerts` (type c
 git -C "$REPO" worktree add --detach "$WT/alerts-review" claude/alerts
 PR=$(herdr pane split --pane "$PU" --direction down --cwd "$WT/alerts-review" --no-focus | jq -r .result.pane.pane_id)
 herdr pane rename "$PR" review-alerts
-fleet-job start "$B" review-alerts --kind claude --pane "$PR" --brief "$B/_review.md" --model claude-fable-5-1 --effort max --report reports/review-alerts.md
+fleet-job start "$B" review-alerts --kind codex --pane "$PR" --brief "$B/_review.md" --model gpt-6-astra --effort ultra --report reports/review-alerts.md
 herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
 ```
 
@@ -99,29 +99,29 @@ herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
 - Goal: independently review the alerts feature; Why: you did not build it and it will ship.
 - Inputs: read `_common.md` first, then the absolute worktree path, branch, starting commit, diff (`git diff origin/main...HEAD`) and builder briefs.
 - Constraints: small fixes outside the builders' files only; report everything else, under the ownership rules.
-- Done when: check correctness, security, data loss, then style, with proof for numbered findings `R1..Rn`.
+- Done when: check correctness, security, data loss and regressions, with proof for numbered findings `R1..Rn`. List style or wording nits in the report; do not treat them as bugs to send back.
 - Report back: the absolute report path, under 60 lines, `Status: PASS` or `Status: FINDINGS` in the first 10 lines, files touched, unverified and decisions.
 - If blocked: write the lead's question file, say so and end your turn; make and record reasonable calls.
 
-For a cross-vendor second pass in a plain pane, add `herdr pane run <pane> "codex review --base origin/main"`.
+This is the one Codex review pass. Proof frames only for UI changes the owner will look at.
 
-## 7. Fix round
+## 7. Fix only real bugs
 
-The lead triages the review into `$B/fixes-api.md` and `$B/fixes-ui.md` on the [hand-off template](brief.md), referencing unchanged sections from the original briefs. It fast-forwards each builder to the integration branch and prompts them:
+If the review found a real bug (broken behaviour, a failing test, or a regression), the lead triages those into `$B/fixes-api.md` and `$B/fixes-ui.md` on the [hand-off template](brief.md), referencing unchanged sections from the original briefs. Style or wording nits stay in the review report and are not sent back. It fast-forwards each builder to the integration branch and prompts them:
 
 ```bash
 git -C "$WT/alerts-api" merge --ff-only claude/alerts
 git -C "$WT/alerts-ui" merge --ff-only claude/alerts
-herdr agent prompt build-api "Review round 1: read $B/fixes-api.md and fix each finding, one commit per finding, same checks. Append 'Review fixes, round 1' to your report."
-herdr agent prompt build-ui "Review round 1: read $B/fixes-ui.md and fix each finding, one commit per finding, same checks. Append 'Review fixes, round 1' to your report."
+herdr agent prompt build-api "Review fixes: read $B/fixes-api.md and fix each finding, one commit per finding, same checks. Append 'Review fixes' to your report."
+herdr agent prompt build-ui "Review fixes: read $B/fixes-ui.md and fix each finding, one commit per finding, same checks. Append 'Review fixes' to your report."
 ```
 
 When both reports update, the lead:
 1. merges the fixes;
 2. moves the review worktree with `git -C "$WT/alerts-review" checkout --detach claude/alerts`;
-3. updates `_review.md` on the same template to recheck only R1-R5 at the integration commit, then sends `herdr agent prompt review-alerts "Round 2: read $B/_review.md; append to your report."`
+3. updates `_review.md` on the same template to recheck only those IDs at the integration commit, then sends `herdr agent prompt review-alerts "Recheck: read $B/_review.md; append to your report."`
 
-Stop at "ship". After two rounds the lead decides.
+Stop at pass. There is no second loop for style. If the recheck still finds a real bug, the lead decides.
 
 ## 8. Wrap up
 

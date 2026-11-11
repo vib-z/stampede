@@ -6,11 +6,11 @@ The [routing table](../SKILL.md#pick-the-agent-and-model) gives defaults. Choose
 
 A Codex lead runs like a Codex worker (`--approve-for-me`, `--add-dir <job>`, its model and effort), with three differences. Its sandbox has the network on (Herdr's socket, `git push`, `gh`) and two more writable roots, `<jobs root>/worktrees` and the repo's git folder (Codex keeps `.git` read-only otherwise). That last root lets the lead commit, and also lets it write `.git/hooks` and `.git/config`, which run later outside any sandbox; it is still narrower than a Claude lead in auto mode, which has no sandbox at all. Rarer writes, such as the relay queue behind `fleet-job ask`, `--gate` and `finish`, still go through Codex's approval review. Its notify hook forwards its own turn ends to the relay (`herdr-event-codex-notify`, which Codex's global notify would otherwise call) and never writes `TURN` to `inbox.log`. And, having no file hook, it is woken by `fleet-job _deliver`: a short-lived process that types the new lines of `inbox.log` and `inbox/<lead>.md` into its pane with herdr-send while it is idle or done, unfocused and with nothing typed in its prompt, moving the read offsets only after `SUBMITTED` (log: `<job>/hooks/deliver.log`). Because text is typed into its pane, only `fleet-job gate-ok` counts as the owner's yes, as on Herdr Core. Quit it with `herdr-send <lead> /quit`, never `/exit`: `fleet-job tell` puts text in its inbox, which is typed with a fleet-job mark, so a slash command there is just chat. A `--fork` or a Herdr Core job keeps a Claude lead.
 
-- **Opus 5.5 at xhigh** is the owner's standard builder (since the first fleet, 2026-09-30). It uses tools well and finishes a 25 to 45 minute slice without drifting.
-- **Fable 5.1 at max** is the owner's standard independent reviewer. "Ultra" in the owner's words means max, the Claude CLI's top level. It is slower and dearer, which is worth it where a missed bug costs more than tokens. A reviewer on a different model from the builder does not share the builder's blind spots.
-- **Codex is the second vendor.** Use it for second opinions, design direction (it wrote one site's design direction and later reviewed the built pages against it) and a parallel builder slice (two database slices in one fleet). `gpt-6-astra` at `ultra` is the frontier setting the owner picked for builders and reviews. `gpt-6.1-sol` at `xhigh` is the config default and the workhorse.
-- **Sonnet 5.5, Haiku 5.5, `gpt-6.1-sol` medium and `gpt-6-luna`** are for cheap, fully specified bulk work. If a slice needs judgement, it is not a Sonnet slice. Exception (2026-10): Sonnet 5.5 may take heavy coding once a cross-model-reviewed, hardened plan specifies it fully.
-- **Effort follows ambiguity, not size.** A big mechanical change runs at medium. A small subtle one runs at xhigh.
+- **Opus 5.5 at medium** is the default builder. It follows the lead's spec and does not redesign it. Raise it to xhigh only when the lead flags a genuinely hard task.
+- **Codex `gpt-6-astra` at ultra** is the default reviewer at the end of a job. Fable 5.1 at max is the fallback when the work under review was itself built by Codex. A reviewer on a different model from the builder does not share the builder's blind spots.
+- **Codex is the second vendor.** Use it for the end review, design direction and a parallel builder slice. The Codex lead stays at `gpt-6-astra` ultra. Builders on Codex default to `gpt-6.1-sol` at medium; raise to `gpt-6-astra` ultra only when the lead flags a hard task.
+- **Sonnet 5.5, Haiku 5.5, `gpt-6.1-sol` medium and `gpt-6-luna`** are for cheap, fully specified bulk work. If a slice needs judgement, it is not a Sonnet slice. Exception (2026-10): Sonnet 5.5 may take heavy coding once the lead's spec covers it fully.
+- **Effort follows the thinker and doer split.** The lead plans at high effort. A specified builder task runs at medium. Raise a builder to xhigh only for a hard or subtle task the lead flags.
 - If a model the owner named is unavailable or at capacity, say so and wait or ask. Do not quietly swap it. A lane whose model the owner did not name moves to its fallback after a usage limit or a second "at capacity" (the Fallback column in SKILL.md, or the plan's `fallback` column).
 
 | CLI | Auto mode (use) | Plan mode | Never |
@@ -33,7 +33,7 @@ Yolo, case by case: a worker in its own git worktree may run without checks (`fl
 Interactive in a pane, the fleet default:
 
 ```bash
-fleet-job start "$B" build-api --kind claude --pane "$P" --brief "$B/build-api.md" --model claude-opus-5-5 --effort xhigh \
+fleet-job start "$B" build-api --kind claude --pane "$P" --brief "$B/build-api.md" --model claude-opus-5-5 --effort medium \
   --report reports/build-api.md   # adds --permission-mode auto, -n build-api, the job's hooks and the reopen record; sends the brief pointer
 ```
 
@@ -45,7 +45,7 @@ Resume a session in the same pane (after a hang or a restart). The id comes from
 
 ```bash
 herdr agent start build-api --kind claude --pane "$P" --timeout 90000 -- \
-  --resume <session-id> --model claude-opus-5-5 --effort xhigh --permission-mode auto
+  --resume <session-id> --model claude-opus-5-5 --effort medium --permission-mode auto
 ```
 
 A reviewer can take over a finished builder's pane, which keeps the tab small:
@@ -53,7 +53,7 @@ A reviewer can take over a finished builder's pane, which keeps the tab small:
 ```bash
 herdr agent prompt build-api "/exit"
 herdr agent wait build-api --until unknown --timeout 30000   # ends with agent_not_running once it exits and the name clears
-fleet-job start "$B" review-api --kind claude --pane "$P" --brief "$B/review-api.md" --model claude-fable-5-1 --effort max \
+fleet-job start "$B" review-api --kind codex --pane "$P" --brief "$B/review-api.md" --model gpt-6-astra --effort ultra \
   --report reports/review-api.md   # hooked like any start; sends the brief pointer
 ```
 
@@ -68,7 +68,7 @@ One-shot, no herdr state: `claude -p --model claude-sonnet-5-5 --output-format j
 Interactive in a pane:
 
 ```bash
-fleet-job start "$B" build-db --kind codex --pane "$P" --brief "$B/build-db.md" --model gpt-6-astra --effort ultra \
+fleet-job start "$B" build-db --kind codex --pane "$P" --brief "$B/build-db.md" --model gpt-6.1-sol --effort medium \
   --report reports/build-db.md   # adds --approve-for-me, --add-dir "$B", the notify hook and the reopen record; sends the brief pointer
 ```
 
@@ -105,7 +105,7 @@ Every CLI prints its resume command on exit (`claude --resume <id>`, `codex resu
 
 ## Writing start commands in zsh
 
-- zsh does not word-split `$ARGS`, so `-- $ARGS` passes one argument. Write the flags literally, or use an array: `args=(--model claude-opus-5-5 --effort xhigh); ... -- "${args[@]}"`.
+- zsh does not word-split `$ARGS`, so `-- $ARGS` passes one argument. Write the flags literally, or use an array: `args=(--model claude-opus-5-5 --effort medium); ... -- "${args[@]}"`.
 - Keep the Codex `-c` value in single quotes so the inner double quotes reach TOML.
 - `echo ====` fails in zsh (`=` expansion). Use `printf`.
 - `herdr agent prompt` takes no `--` separator and no `--no-focus`; those belong to `agent start` and `pane split`. A wrong flag fails with "unknown option".

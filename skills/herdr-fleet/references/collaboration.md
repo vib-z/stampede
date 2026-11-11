@@ -1,4 +1,4 @@
-# Collaboration: briefs, messages, review loops, monitoring
+# Collaboration: briefs, messages, review, monitoring
 
 ## Files are the channel
 
@@ -38,15 +38,17 @@ Rules for every message:
 - Before every prompt, `herdr agent get <name>`: it should be idle or done. `agent prompt --wait` does not track turns, so prompting an agent that is already working can match that turn's completion. An agent at a dialog rejects the prompt with `agent_blocked` and nothing is sent; a startup dialog can also show as `idle`, so read the screen once after every start, before its first prompt.
 - Before prompting, check the owner is not in that pane: `herdr agent get <name> | jq .result.agent.focused`.
 
-## The review loop
+## Review
 
-1. The builder finishes, writes its report and stops.
+Default: one Codex review pass at the end (see Thinker and doer in SKILL.md). The owner can override per job.
+
+1. The builder finishes, runs the tests its brief names, writes its report and stops.
 2. The lead merges main into the lane's branch (a worktree per agent): on a real conflict, `git merge --abort` and send the builder the conflicted files and the target commit. Then it integrates (commit or merge) and runs the gates.
-3. The reviewer, on a different model or vendor, reads `_review.md`. It writes `reports/review-<scope>.md` with numbered findings `R1..Rn`. Each carries `file:line`, a **severity** (critical, major, minor, trivial), its **proof** (what the reviewer ran or saw: a command and its output, a failing test, the exact lines) and **pre-existing** yes or no (already on main before this work). It may fix small things only in files nobody else is editing. Everything else goes in the report.
-4. The verdict follows from the findings, not from taste: **pass** when no new finding is major or worse, else **fail**. A critical with no proof counts as major. Pre-existing findings never send work back; they go in the lead's final report as suggestions.
-5. The lead triages. New major and critical findings go into `fixes-<scope>.md`; minor and trivial ones only if cheap. Rejected ones get a reason.
-6. The builder fixes them, one commit per finding, and appends "Review fixes, round N" to its report.
-7. The reviewer rechecks only those IDs. Stop at pass. After two rounds the lead decides.
+3. The reviewer, Codex by default and on a different model than the builder, reads `_review.md`. It writes `reports/review-<scope>.md` with numbered findings `R1..Rn`. Each carries `file:line`, a **severity** (critical, major, minor, trivial), its **proof** (what the reviewer ran or saw: a command and its output, a failing test, the exact lines) and **pre-existing** yes or no (already on main before this work). It may fix small things only in files nobody else is editing. Everything else goes in the report.
+4. The verdict follows from the findings, not from taste: **pass** when there is no new real bug (broken behaviour, a failing test, or a regression; treat a new critical or major finding with proof as a real bug), else **fail**. A critical with no proof counts as major. Style or wording nits, and minor or trivial taste notes, are listed in the report and are not sent back. Pre-existing findings never send work back; they go in the lead's final report as suggestions.
+5. The lead triages. Only new real bugs go into `fixes-<scope>.md`. Rejected ones get a reason. Nits stay in the review report.
+6. If there are real bugs, the builder fixes them, one commit per finding, and appends "Review fixes" to its report.
+7. The reviewer rechecks only those IDs, once. Stop at pass. There is no second loop for style. If a recheck still finds a real bug, the lead decides.
 
 When a passed review stands (no second review run, the gates still run):
 - The only change since the reviewed commit is a clean merge of main, or a conflict fix that touches only the conflicted files: rerun the gates, not the reviewer.
@@ -56,9 +58,9 @@ When a passed review stands (no second review run, the gates still run):
 The lead writes the reviewed commit into `register.md` (`Reviewed: <lane> <sha>`) and moves it to the new head when the review stands as above. The merge pins it (`gh pr merge <n> --squash --match-head-commit <sha>`, see Wrap up in SKILL.md), so a commit nobody reviewed cannot slip into the merge.
 
 Variations that have worked:
-- **Cross-vendor pair.** Claude builds and Codex reviews, or the reverse.
-- **Design track.** Codex writes `design-direction.md`, a Claude builder implements it, and Codex reviews the rendered pages against its own file.
-- **Agents run the loop themselves.** The brief names both peers. The builder prompts `review-api "build-api: R1-R3 fixed in abc123"`, and the reviewer answers with the next round's file. The lead still merges.
+- **Cross-vendor pair.** Claude builds and Codex reviews (the default), or Claude reviews a Codex build.
+- **Design track.** Codex writes `design-direction.md`, a Claude builder implements it, and Codex reviews the rendered pages against its own file, still in one pass.
+- **Agents can message each other.** The brief may name both peers. The builder prompts `review-api "build-api: R1-R3 fixed in abc123"`, and the reviewer answers after its one recheck. The lead still merges.
 - **Workflow review.** For a big candidate, the lead can run an Ultracode multi-agent review (two refuters per finding) as the independent reviewer, if the owner opted in.
 
 ## Ownership rules (paste into every `_common.md`)
@@ -67,7 +69,7 @@ Variations that have worked:
 - In a shared worktree, run no git writes (commit, add, stash, checkout, reset, restore, rebase, clean); the lead commits. In your own worktree, commit only to your branch.
 - For append-only shared files (DECISIONS, changelogs), use the section letter your brief gives you, or propose the entry in your report.
 - Start no dev server and no production build unless your brief says so. One dev server on a fixed port serves everyone; separate worktrees get separate ports.
-- Run named test files only. The lead runs the full type check, suite and build once; parallel `tsc` runs exhaust the Mac's memory.
+- Run named test files only. After each step, run the tests the brief names (a cheap, fast check) before writing the report. The lead runs the full type check, suite and build once; parallel `tsc` runs exhaust the Mac's memory.
 - Browser: BrowserOS Neo only, in a new window of your own, and close your tabs when you finish. If a Neo call has not returned within about 2 minutes, stop using Neo and fetch that page with WebFetch or `curl -sL`.
 - Credentials and `.env` files are not part of any brief: never read, copy or print them.
 - Work autonomously. Make the reasonable call and record it in your report.
