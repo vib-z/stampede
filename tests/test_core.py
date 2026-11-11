@@ -45,8 +45,9 @@ class CoreCase(unittest.TestCase):
         self.addCleanup(patch.stop)
         xdg = os.environ.pop('XDG_STATE_HOME', None)
         self.addCleanup(lambda: os.environ.__setitem__('XDG_STATE_HOME', xdg) if xdg is not None else None)
+        # XDG_CONFIG_HOME: a host that sets it (a GitHub Linux runner does) would put Core's config.toml outside this HOME
         for name in ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER',
-                     'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET'):
+                     'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET', 'XDG_CONFIG_HOME'):
             os.environ.pop(name, None)
 
     # the fake core

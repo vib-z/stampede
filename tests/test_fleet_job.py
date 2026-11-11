@@ -1416,7 +1416,9 @@ class LeadChoice(unittest.TestCase):
             self.assertFalse((root / 'jobs').exists())
         _, job, log = self.new({'FLEET_LEAD_KIND': 'codex'}, kind='claude', fork=sid)   # --lead claude forks as before
         self.assertIn(f'--kind claude --pane w9:p2 --timeout 90000 -- --resume {sid} --fork-session', log)
-        with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(fj, 'new_core', return_value=0) as core:
+        # typing_unsafe asks the machine's own Herdr Core for its version and hold: not this test's subject, and no test's to ask
+        with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(fj, 'new_core', return_value=0) as core, \
+                mock.patch.object(fj, 'typing_unsafe', return_value=''):
             self.assertEqual(fj.new('ask.md', None, core=True), 0)
         self.assertEqual(core.call_args.args[5], 'codex')   # the standing choice is the lead of a Core job too
 

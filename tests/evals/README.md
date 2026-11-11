@@ -38,7 +38,7 @@ Add it to `cases.json` with a new id in its area's letter (G gate, S side effect
 
 ## Results, 11 Nov 2026: Herdr Core 0.1.20
 
-Before is main's product code (commit dca8ba9, product digest `0a1d6bef90cc`); after is this branch (product digest `07be6e60e6cd`). Both columns used one harness (`1ea870ab3a38`) and one dataset (`c12007c19294`), so a row's before and after differ only in the product files. Each before ran from a throwaway commit, never pushed: this branch's tests with main's product files checked out. That harness is this folder and the test files it names as they stood for the runs; what came after changes only this README and how `live/tui_scratch.sh` stops its stand-in route server when it ends (it used to leave that process running).
+Before is main's product code (commit dca8ba9, product digest `0a1d6bef90cc`); after is this branch (product digest `07be6e60e6cd`). Both columns used one harness (`1ea870ab3a38`) and one dataset (`c12007c19294`), so a row's before and after differ only in the product files. Each before ran from a throwaway commit, never pushed: this branch's tests with main's product files checked out. That harness is this folder and the test files it names as they stood for the runs; what came after changes only this README, how `live/tui_scratch.sh` stops its stand-in route server when it ends (it used to leave that process running), and two unit-test fixtures that CI showed were reading the machine they ran on: `tests/test_core.py` now drops `XDG_CONFIG_HOME` (a GitHub Linux runner sets it), and one test in `tests/test_fleet_job.py` no longer asks the machine's own Herdr Core for its version.
 
 | runner | platform | before | after | runs |
 |---|---|---|---|---|
