@@ -25,7 +25,7 @@ STATE = Path(os.environ.get('XDG_STATE_HOME') or HOME / '.local/state')
 RELAY_LOG = STATE / 'herdr-events.log'
 PINS = {row.split()[0]: row.split()[3] for row in (HERE / 'pins.txt').read_text().splitlines()
         if row.strip() and not row.startswith('#') and row.split()[1] == {'aarch64': 'arm64', 'x86_64': 'amd64'}.get(os.uname().machine, '')}
-WANT = {'herdr': 'herdr 0.9.5', 'hc': 'hc 0.1.19', 'moshi-hook': 'moshi-hook version 0.4.50'}
+WANT = {'herdr': 'herdr 0.9.5', 'hc': 'hc 0.1.20', 'moshi-hook': 'moshi-hook version 0.4.50'}
 SHA = 'a' * 40
 
 

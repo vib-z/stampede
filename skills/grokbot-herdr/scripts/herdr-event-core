@@ -5,10 +5,14 @@ it as relay-<12 hex of the key> in the job's launch environment; reopen.sh start
   herdr-event-core <job dir>   follow the job's terminals (hc events --label stampede.job=<key>) until the job is finished
                                or never started (<job>/finished or <job>/start-failed); exit 0, or 1 after RELAY DOWN
   herdr-event-core --alive     exit 0 when the selected core answers hello on its socket, else 1; never starts a core
+  herdr-event-core --core-version   print the version the running core gives in that hello; exit 1 when none answers
   herdr-event-core --socket    print the selected core's socket path, as Core finds it
 
 To the lead, in <job>/inbox.log, for every terminal but the lead's and its own: BLOCKED <agent> <kind>, ERROR <agent> <msg>,
 GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone),
+GONE <agent> <reason> exit - (a shell is in its place at <address>) when a kept terminal lost its program (Core's lost
+and restarted events: the Herdr app turns keep on for a terminal it shows, and Core then puts a shell there, never the
+agent again), told once and never as an idle agent,
 STALE <agent> no new output for <N>m (working, and its screen unchanged for HERDR_EVENTS_STALE_MINUTES, default 30).
 With FLEET_WATCH_NOTIFY=1 a stall and a terminal's end also go straight to the owner's phone (moshi-hook notify).
 To the bot, through herdr-event-post (source hc, pane hc:<key>/<address>, workspace <key>): blocked, error, done and idle
@@ -29,6 +33,7 @@ import fcntl, hashlib, json, os, queue, re, shutil, socket, subprocess, sys, thr
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+FLEET_JOB = HERE.parent.parent / 'herdr-fleet/scripts/fleet-job'
 GIVE_UP = 600  # seconds of failed reconnects before RELAY DOWN
 RETRY_EVERY = 30  # seconds between tries of the bot events the relay did not take
 STALL_EVERY = 60  # seconds between reads of the working terminals' screens
@@ -38,6 +43,10 @@ POLL_DEADLINE = 20  # seconds one such read may take in all; what it has not rea
 HERDR_TIMEOUT = 10  # seconds one herdr call may take
 TICK = 1  # seconds a quiet stream waits before a tick, which applies the reader's results
 TURNS = ('hermes', 'kimi')  # handed kinds with no turn hook of their own: the follower writes their TURN line
+BEAT_LOST = 60  # seconds without a line from a stream that has sent a heartbeat (Core sends one every 15 s) before it is reopened
+# every event type Herdr Core's events.subscribe sends (hc schema 0.1.20), each with a decision: a test keeps this whole
+EVENTS = ('created', 'status', 'turn', 'finished', 'removed', 'lost', 'restarted', 'keep', 'labels')  # handled below
+IGNORED = ('title', 'size', 'doc', 'foreground')  # no news for a job: a name is never taken from a title
 clock, sleep, wall = time.monotonic, time.sleep, time.time
 FRESH = {'status': None, 'last': None, 'turn': 0, 'finished': False, 'reported': {}, 'episodes': {}}
 
@@ -68,16 +77,22 @@ def socket_path(env=None):
     return (Path(run) / 'herdr-core' if run else state) / (session + '.sock')
 
 
-def alive(env=None):
-    """Whether the selected core answers hello. Any doubt is down, and no hc command runs: one would start a core."""
+def hello(env=None):
+    """The selected core's answer to hello, or None. Any doubt is None, and no hc command runs: one would start a core."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
             conn.settimeout(3)
             conn.connect(str(socket_path(env)))
             conn.sendall(b'{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}\n')
-            return 'result' in json.loads(conn.makefile('rb').readline())
+            answer = json.loads(conn.makefile('rb').readline())
     except (OSError, ValueError):
-        return False
+        return None
+    return answer['result'] if isinstance(answer, dict) and isinstance(answer.get('result'), dict) else None
+
+
+def alive(env=None):
+    """Whether the selected core answers hello."""
+    return hello(env) is not None
 
 
 def hc(*args):
@@ -157,11 +172,21 @@ def append(path, text):
         out.write(line(text) + '\n')
 
 
+def shelled(terminal):
+    """True when a live terminal is the shell Core put in a lost program's place: no longer the job's launch, whose
+    argv names STAMPEDE_JOB_KEY (as fleet_job.shelled). Whether keep is still on does not matter: turning it off
+    later does not bring the agent back."""
+    argv = terminal.get('argv') or []
+    return terminal.get('state', 'live') == 'live' and bool(argv) and not any(str(a).startswith('STAMPEDE_JOB_KEY=') for a in argv)
+
+
 class Follower:
     def __init__(self, job):
         self.job = Path(job).absolute()
         self.key = (self.job / 'workspace').read_text().strip()
         self.relay = 'relay-' + self.key[3:]
+        lead = self.job / 'lead'
+        self.lead = lead.read_text().strip() if lead.is_file() else ''
         owner = self.job / 'owner'
         self.owner = owner.read_text().strip() if owner.is_file() else ''
         path = self.job / 'relay-state.json'
@@ -188,13 +213,12 @@ class Follower:
 
     def known(self):
         """Every terminal core.json binds: its agent, and its role (lead, worker, relay)."""
-        path, lead = self.job / 'core.json', self.job / 'lead'
+        path = self.job / 'core.json'
         entries = json.loads(path.read_text()) if path.is_file() else {}
-        lead = lead.read_text().strip() if lead.is_file() else ''
         for agent, entry in entries.items():
             if entry.get('address'):
                 self.track(entry['address'], agent, entry.get('role') or
-                           ('relay' if agent == self.relay else 'lead' if agent == lead else 'worker'))
+                           ('relay' if agent == self.relay else 'lead' if agent == self.lead else 'worker'))['bound'] = True
 
     def adopt(self, terminal):
         """A terminal the stream shows: known, or new with this job's labels (a worker, or a wait the lead started)."""
@@ -239,11 +263,24 @@ class Follower:
             del self.unsent[ident]
         self.save()
 
+    def tell(self, text):
+        """One line for the lead in inbox.log. A Claude lead's file hook sees it; a Codex lead has none, so fleet-job
+        types it into its terminal once it is idle (a short-lived deliverer, started here and never waited for)."""
+        append(self.job / 'inbox.log', text)
+        roster = self.job / 'agents.tsv'
+        rows = [row.split('\t') for row in (roster.read_text().splitlines() if roster.is_file() else [])]
+        if any(row[0] == self.lead and row[1:2] == ['codex'] for row in rows):
+            try:
+                subprocess.Popen([str(FLEET_JOB), '_wake', str(self.job)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass  # the line is in inbox.log; the lead's own turn end starts the next deliverer
+
     def notify(self, ident, address, lead=None, post=None):
         """Each notification once, by its identity: (address, state, episode), (address, turn) or (address, finished).
         The lead's line and the bot's event are recorded apart, so a post that hung is never marked sent."""
         if lead and ident + ' lead' not in self.sent:
-            append(self.job / 'inbox.log', lead)
+            self.tell(lead)
             self.sent.add(ident + ' lead')
         if post and ident not in self.sent and ident not in self.unsent:
             event = self.payload(address, {**post, 'event_id': f'{self.key}/{ident}'})
@@ -278,6 +315,8 @@ class Follower:
 
     def turned(self, address, data):
         record, n, word = self.terminals[address], data.get('turn') or 0, data.get('state')
+        if record['finished']:  # a shell Core put in a lost agent's place is no agent: its turns are nobody's
+            return
         if n != record['turn']:
             record.pop('stall', None)
         record['turn'] = max(record['turn'], n)
@@ -301,6 +340,8 @@ class Follower:
         dead = not clean and (record['last'] in ('working', 'blocked') or record['last'] is None)
         phone(f'{agent} left its terminal', f'{reason}, exit {shown} (Herdr Core job {self.key}).', error=True)
         gone = f'GONE {agent} {reason}' + ('' if record.get('pane') else f' exit {shown}')  # Herdr shows a handed one's exit no code
+        if data.get('shell'):  # kept: Core puts a shell at the same address, and never runs the agent again
+            gone += f' (a shell is in its place at {address}: restart the agent with bash {self.job / "reopen.sh"})'
         self.notify(f'{address}|finished', address, None if record['role'] == 'lead' else gone,
                     {'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason} if dead else None)
 
@@ -322,7 +363,10 @@ class Follower:
             shown.add(terminal['address'])
             if terminal.get('state') == 'finished':
                 self.finish(terminal['address'], terminal)
+            elif self.replaced(terminal):  # lost and restarted while this follower was away
+                self.finish(terminal['address'], {'reason': 'lost', 'shell': True})
             else:
+                self.terminals[terminal['address']]['keep'] = bool(terminal.get('keep'))
                 self.observe(terminal['address'], terminal.get('status'), terminal.get('turn'))
         for address, record in list(self.terminals.items()):
             if address in shown or record['finished'] or record['role'] == 'relay' or record.get('pane'):
@@ -334,19 +378,39 @@ class Follower:
                 self.finish(address, terminal)
         self.save()
 
+    def replaced(self, terminal):
+        """True for a lead's or worker's terminal that core.json binds (so stampede launched it) and that is now the
+        shell Core put in its place. A terminal only adopted by its labels is told by the restarted event alone."""
+        record = self.terminals.get(terminal.get('address'), {})
+        return record.get('bound') and record['role'] in ('lead', 'worker') and shelled(terminal)
+
     def event(self, params):
+        """One fact change. lost: a program died with no exit of its own (a signal, its holder gone); under keep a shell
+        follows at the same address (restarted), so the agent is gone for good and is told once, here, and never as idle
+        again. keep and labels only update what is known. IGNORED types are no news."""
         address, kind, data = params.get('terminal'), params.get('type'), params.get('data') or {}
         if kind == 'created':
             self.adopt(data)
         record = self.terminals.get(address)
-        if record is None or record['role'] == 'relay':
+        if record is None or record['role'] == 'relay' or kind not in EVENTS:
             return
+        if kind == 'created':
+            record['keep'] = bool(data.get('keep'))
         if kind == 'status':
             self.observe(address, data.get('status'))
         elif kind == 'turn':
             self.turned(address, data)
         elif kind == 'finished':
             self.finish(address, data)
+        elif kind == 'lost':
+            self.finish(address, {**data, 'reason': data.get('reason') or 'lost', 'shell': bool(record.get('keep'))})
+        elif kind == 'restarted':
+            self.finish(address, {'reason': 'lost', 'shell': True})  # nothing more when its lost event already told it
+        elif kind == 'keep':
+            record['keep'] = bool(data.get('keep'))
+        elif kind == 'labels' and not record.get('bound'):  # an adopted terminal is who its labels say; a bound one, core.json
+            labels = data.get('labels') or {}
+            record.update(agent=labels.get('stampede.agent') or record['agent'], role=labels.get('stampede.role') or record['role'])
         elif kind == 'removed' and not record['finished']:
             self.lost(address)
         self.save()
@@ -505,7 +569,7 @@ class Follower:
     def stream(self):
         """One connection's lines, and {} for each TICK seconds it is quiet: a tick, so the reader's results, stalls and
         retries are applied when Core says nothing. seq restarts with each core process, so it is compared within one
-        connection only."""
+        connection only. A stream that has sent a heartbeat and then says nothing for BEAT_LOST seconds is ended here."""
         process = subprocess.Popen([os.environ.get('HC') or 'hc', 'events', '--json', '--label', 'stampede.job=' + self.key],
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         rows = queue.Queue()
@@ -515,19 +579,25 @@ class Follower:
                 rows.put(row)
             rows.put(None)
         threading.Thread(target=pump, daemon=True).start()
+        beats, heard = False, clock()  # Core's heartbeat (every 15 s): once one came, a stream that goes silent is hung
         try:
             while True:
                 try:
                     row = rows.get(timeout=TICK)
                 except queue.Empty:
+                    if beats and clock() - heard > BEAT_LOST:
+                        return  # the caller reconnects, and the snapshot that opens the next stream reconciles
                     yield {}
                     continue
                 if row is None:
                     return
+                heard = clock()
                 try:
-                    yield json.loads(row)
+                    row = json.loads(row)
                 except ValueError:
                     continue
+                beats = beats or row.get('method') == 'heartbeat'
+                yield row
         finally:
             process.kill()
             process.wait()
@@ -558,7 +628,7 @@ class Follower:
                 return 0
             down_since = clock() if down_since is None else down_since
             if clock() - down_since >= GIVE_UP:
-                append(self.job / 'inbox.log', 'RELAY DOWN ' + reason)
+                self.tell('RELAY DOWN ' + reason)
                 path = self.job / 'core.json'
                 address = (json.loads(path.read_text()) if path.is_file() else {}).get(self.relay, {}).get('address')
                 self.post(self.payload(address, {'state': 'relay_down', 'agent': self.relay, 'reason': reason,
@@ -574,6 +644,9 @@ def main(argv):
         return 0 if alive() else 1
     if argv == ['--socket']:
         return print(socket_path()) or 0
+    if argv == ['--core-version']:  # the core that runs, which an hc on PATH may be newer than
+        version = (hello() or {}).get('version')
+        return print(version) or 0 if isinstance(version, str) and version else 1
     if len(argv) != 1 or argv[0].startswith('-'):
         print(__doc__.strip(), file=sys.stderr)
         return 2

@@ -724,13 +724,13 @@ def p06():
 
 
 # Dependencies
-def doctor_home(herdr_version='0.9.5', hc_version=None, jq=True):
+def doctor_home(herdr_version='0.9.5', hc_version=None, jq=True, server='running'):
     root = Path(tempfile.mkdtemp(prefix='ev-doc-', dir=TMP))
     home, bin_dir = root / 'home', root / 'home/.local/bin'
     bin_dir.mkdir(parents=True)
     if herdr_version:
         (bin_dir / 'herdr').write_text('#!/bin/bash\ncase "$1" in\n  --version) echo "herdr ' + herdr_version + '";;\n'
-                                       '  status) printf "client:\\n  version: ' + herdr_version + '\\nserver:\\n  status: running\\n  version: '
+                                       '  status) printf "client:\\n  version: ' + herdr_version + '\\nserver:\\n  status: ' + server + '\\n  version: '
                                        + herdr_version + '\\n";;\n  *) echo "{\\"result\\":{}}";;\nesac\n')
     (bin_dir / 'stampede').symlink_to(STAMPEDE)
     if hc_version:
@@ -739,10 +739,29 @@ def doctor_home(herdr_version='0.9.5', hc_version=None, jq=True):
     for f in bin_dir.iterdir():
         if not f.is_symlink():
             f.chmod(0o755)
-    env = {'HOME': str(home), 'PATH': f'{bin_dir}:/usr/bin:/bin', 'STAMPEDE_NO_UPDATE_CHECK': '1', 'TMPDIR': str(TMP)}
+    env = {'HOME': str(home), 'PATH': f'{bin_dir}:/usr/bin:/bin', 'STAMPEDE_NO_UPDATE_CHECK': '1', 'TMPDIR': str(TMP),
+           'HC_SOCKET': str(root / 'no-core.sock')}  # never this machine's own core; a case that needs one names core_socket()
     if hc_version:
         env['HC'] = str(bin_dir / 'hc')
     return env
+
+
+def core_socket():
+    """A Unix socket that answers hello as a running Herdr Core does (herdr-event-core --alive asks it): its path."""
+    import socket, threading
+    path = Path(tempfile.mkdtemp(prefix='evc', dir='/tmp')) / 'c.sock'  # short: a socket path holds about 100 bytes
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(str(path))
+    server.listen(8)
+
+    def answer():
+        while True:
+            conn, _ = server.accept()
+            with conn:
+                conn.recv(4096)
+                conn.sendall(b'{"jsonrpc":"2.0","id":1,"result":{}}\n')
+    threading.Thread(target=answer, daemon=True).start()
+    return str(path)
 
 
 def doctor(ev, env, *flags):
@@ -1222,6 +1241,52 @@ def d09():
     problems = [r for r in out.splitlines() if r.startswith('PROBLEM hc')]
     return ev.done(code != 0 and bool(problems), f'exit {code}; {problems}')
 
+
+@case('D10')
+def d10():
+    ev = Ev('D10')
+    core = core_socket()
+    lines = lambda out: [r for r in out.splitlines() if r.startswith(('PROBLEM', 'warn herdr', 'warn Herdr Core', 'ok backend'))]
+    both = doctor(ev, {**doctor_home(hc_version='0.1.20'), 'HC_SOCKET': core})
+    core_only = doctor(ev, {**doctor_home(hc_version='0.1.20', server='not running'), 'HC_SOCKET': core})
+    tui_only = doctor(ev, doctor_home(hc_version='0.1.20'))
+    neither = doctor(ev, doctor_home(hc_version='0.1.20', server='not running'))
+    one = doctor(ev, {**doctor_home(hc_version='0.1.20', server='not running'), 'HC_SOCKET': core}, '--tui')
+    backend = lambda out: [r for r in out.splitlines() if r.startswith(('ok backend', 'PROBLEM no usable backend'))]
+    gaps = lambda out: [r for r in out.splitlines() if re.match(r'PROBLEM (herdr|hc|Herdr Core)', r)]
+    checks = {'both installed and usable: ok backend tui,core': backend(both[1]) == ['ok backend tui,core'] and not gaps(both[1]),
+              'the TUI down, Core up: a warn, ok backend core': backend(core_only[1]) == ['ok backend core'] and not gaps(core_only[1])
+              and 'warn herdr server not running' in core_only[1],
+              'Core down, the TUI up: a warn, ok backend tui': backend(tui_only[1]) == ['ok backend tui'] and not gaps(tui_only[1])
+              and 'warn Herdr Core not running' in tui_only[1],
+              'neither usable: PROBLEM lines, exit non-zero': neither[0] != 0 and backend(neither[1]) == ['PROBLEM no usable backend: fix the Herdr TUI or the Herdr Core lines above (a job runs on either)']
+              and len(gaps(neither[1])) == 2,
+              '--tui with the TUI down is a PROBLEM though Core is up': one[0] != 0 and bool(gaps(one[1])) and 'Herdr Core' not in one[1]}
+    return ev.done(all(checks.values()), '; '.join(f'{k} {"ok" if v else "NO"}' for k, v in checks.items())
+                   + f'; neither: {lines(neither[1])}')
+
+
+@case('D11')
+def d11():
+    ev = Ev('D11')
+    job = new_job(ev, start=False)
+    (job.bin / 'herdr').write_text('#!/bin/bash\necho \'{"error":{"code":"server_not_running","message":"no herdr server is running"}}\'\nexit 1\n')
+    ask = job.root / 'ask.md'
+    ask.write_text('Write hello.txt.\n')
+    argv = [str(STAMPEDE), 'new', '--file', str(ask), '--pane', f'{job.WS}:p1', '--name', job.NAME]
+    hint = 'Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
+
+    def new(core):
+        done = subprocess.run(argv, env={**job.client_env('outside'), 'HC_SOCKET': core}, capture_output=True, text=True, timeout=60)
+        return ev.note(['HC_SOCKET=' + ('<a core that answers>' if core.endswith('c.sock') else '<no core>'), 'stampede', *argv[1:]],
+                       (done.returncode, done.stdout, done.stderr))
+    with_core, without = new(core_socket()), new(str(job.root / 'no-core.sock'))
+    jobs = list((job.jobs_root / 'jobs').glob('*')) if (job.jobs_root / 'jobs').is_dir() else []
+    checks = {'refused before anything is made': with_core[0] != 0 and without[0] != 0 and not jobs,
+              'one line, Herdr\'s own error first': len(with_core[2].strip().splitlines()) == 1 and 'no herdr server is running' in with_core[2],
+              'it names new --core when a core answers': hint in with_core[2],
+              'and says nothing of Core when none does': 'Herdr Core' not in without[2] and 'no herdr server is running' in without[2]}
+    return ev.done(all(checks.values()), '; '.join(f'{k} {"ok" if v else "NO"}' for k, v in checks.items()) + f': {with_core[2].strip()[-230:]}')
 
 
 def main(argv):

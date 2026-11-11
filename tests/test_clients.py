@@ -33,12 +33,12 @@ CLIENTS = {
 WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex', 'cursor', 'hermes', 'kimi')}
 HANDED = ('cursor', 'hermes', 'kimi')
 # the leads new takes on each backend (--lead; none given is claude): a Core job refuses a Codex lead before making anything
-LEADS = {'tui': ('claude', 'codex'), 'core': ('claude',)}
-LEAD_REFUSED = 'a Herdr Core job runs a Claude lead only'
+LEADS = {'tui': ('claude', 'codex'), 'core': ('claude', 'codex')}
+LEAD_REFUSED = 'the lead runs on claude or codex'  # no backend refuses either lead today; kept for one that would
 KINDS = tuple(dict.fromkeys(kind for kinds in WORKERS.values() for kind in kinds))  # O3 starts each on every backend
 REFUSED = {kind: kind + ' runs only as a handed agent of a Herdr Core job' for kind in ('hermes', 'kimi')}  # why a
 # backend that does not take a kind refuses it
-UNHANDED = 'reports no OSC 7501 status, so Herdr Core cannot run it: hand it to a Herdr TUI pane'
+UNHANDED = 'hand it to a Herdr TUI pane at its shell prompt with --pane'
 OUTCOMES = {
     'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question', 'O5': 'gate',
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
@@ -167,7 +167,7 @@ class Outcomes(unittest.TestCase):
         def check(job):
             code, out = self.health[(job.client, job.backend)]
             self.assertEqual((code, out), self.reference[self.doctor_flags(job)], 'the doctor reads the machine, not the client')
-            self.assertIn('ok hc 0.1.13' if job.backend == 'core' else 'ok herdr on PATH', out)
+            self.assertIn('ok hc 0.1.20' if job.backend == 'core' else 'ok herdr on PATH', out)
         self.outcome('O1', check)
 
     def test_o2_start(self):
@@ -191,7 +191,8 @@ class Outcomes(unittest.TestCase):
 
     def test_o2_start_each_lead(self):
         """O2 with --lead: claude starts the same lead as no flag; codex starts a hooked Codex lead on its own defaults (the
-        front door's FLEET_LEAD_MODEL is a Claude model, so it stays with Claude) and types its brief pointer at once; a
+        front door's FLEET_LEAD_MODEL is a Claude model, so it stays with Claude) and types its brief pointer at once; on
+        Herdr Core the Codex lead runs in a Core terminal without its daemon, its brief pointer as its first prompt; a
         backend that does not take a lead refuses it before anything is made."""
         for job in self.leads:
             with self.subTest(f'{job.client}/{job.backend} O2 --lead {job.lead_kind}'):
@@ -205,6 +206,21 @@ class Outcomes(unittest.TestCase):
                 if job.lead_kind == 'claude' and job.backend == 'core':
                     (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
                     self.assertIn(f'--model {LEAD_MODEL} --effort low', ' '.join(lead))
+                    continue
+                if job.backend == 'core':  # a Codex lead in a Core terminal
+                    (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
+                    self.assertTrue(lead[-1].startswith(pointer), 'the brief pointer is the first prompt')
+                    lead = ' '.join(lead)
+                    self.assertIn('/codex ', lead)
+                    self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra" --no-daemon', lead)
+                    self.assertIn('-c sandbox_workspace_write.network_access=true', lead)
+                    self.assertIn('codex-notify', lead)
+                    self.assertNotIn('--session-id', lead, 'Codex names its own session')
+                    brief = (job.job / 'briefs' / (Job.LEAD + '.md')).read_text()
+                    self.assertIn('fleet-job types each new line of', brief)
+                    self.assertIn('into this terminal', brief)
+                    self.assertIn('prints APPROVED', brief)
+                    self.assertNotIn('typed in your pane', brief)
                     continue
                 (lead,) = [c for c in job.herdr_calls() if c.startswith(f'agent start {Job.LEAD} --kind {job.lead_kind} ')]
                 if job.lead_kind == 'claude':
@@ -228,7 +244,7 @@ class Outcomes(unittest.TestCase):
                     self.assertNotIn(agent, runs)
                     self.assertFalse(any(c.startswith(f'agent start {agent} ') for c in job.herdr_calls()))
                 elif job.backend == 'core' and kind in HANDED:
-                    self.refused(job, 'start ' + kind + ' on core', kind.capitalize() + ' ' + UNHANDED)
+                    self.refused(job, 'start ' + kind + ' on core', UNHANDED)
                     self.ok(job, 'start ' + kind, f'STARTED {agent} (pane {job.WS}:p')
                     self.assertNotIn(agent, runs, 'a handed kind never runs in a Core terminal')
                     self.assertTrue(any(c.startswith(f'agent start {agent} --kind {kind}') for c in job.herdr_calls()))

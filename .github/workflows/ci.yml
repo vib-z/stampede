@@ -31,11 +31,11 @@ jobs:
           exit 1
       - name: herdr-doctor, core checks
         run: PATH="$HOME/.local/bin:$PATH" herdr-doctor
-      - name: Herdr Core 0.1.19, pinned by checksum
+      - name: Herdr Core 0.1.20, pinned by checksum
         run: |
           mkdir -p "$RUNNER_TEMP/hc"
-          curl -fsSL https://releases.herdr.dev/core/0.1.19/herdr-core-macos-aarch64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
-          echo "5338d900adadb6d273b9c8e97027247db3179ccffede10a1793358f16e08d683  $RUNNER_TEMP/hc.tar.gz" | shasum -a 256 -c -
+          curl -fsSL https://releases.herdr.dev/core/0.1.20/herdr-core-macos-aarch64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
+          echo "e58985d3fef6e909f33d3c5a4426e4898c81564a557d4636591cec9e3a06af26  $RUNNER_TEMP/hc.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/hc.tar.gz" -C "$RUNNER_TEMP/hc"
           ln -s herdr-core "$RUNNER_TEMP/hc/hc"
           echo "$RUNNER_TEMP/hc" >> "$GITHUB_PATH"
@@ -63,14 +63,14 @@ jobs:
         run: ./install.sh --dry-run
       - name: install, timers left off
         run: mkdir -p ~/.claude && ./install.sh --no-supervise
-      - name: Herdr 0.9.5 and Herdr Core 0.1.19, pinned by checksum
+      - name: Herdr 0.9.5 and Herdr Core 0.1.20, pinned by checksum
         run: |
           mkdir -p "$RUNNER_TEMP/bin"
           curl -fsSL https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64 -o "$RUNNER_TEMP/bin/herdr"
           echo "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d  $RUNNER_TEMP/bin/herdr" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/bin/herdr"
-          curl -fsSL https://releases.herdr.dev/core/0.1.19/herdr-core-linux-x86_64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
-          echo "4adcfb423d52f24c5cc4a1e2cd2fcad1f62d28bb77876ac472c29082a3eaa424  $RUNNER_TEMP/hc.tar.gz" | sha256sum -c -
+          curl -fsSL https://releases.herdr.dev/core/0.1.20/herdr-core-linux-x86_64.tar.gz -o "$RUNNER_TEMP/hc.tar.gz"
+          echo "ac6b86890c451a37584620aaa438b71bc0d0bd430a2e7c1d7e095f052c414e74  $RUNNER_TEMP/hc.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/hc.tar.gz" -C "$RUNNER_TEMP/bin" herdr-core
           ln -s herdr-core "$RUNNER_TEMP/bin/hc"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"

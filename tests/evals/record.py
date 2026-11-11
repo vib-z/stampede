@@ -37,6 +37,11 @@ def _patterns():
     if home not in ('/', ''):
         pairs += [(os.path.realpath(home), '~'), (home, '~')]
     names = {socket.gethostname(), socket.gethostname().split('.')[0], platform.node()}
+    for key in ('LocalHostName', 'ComputerName', 'HostName'):  # macOS: the names a program may derive its own from
+        try:
+            names.add(subprocess.run(['scutil', '--get', key], capture_output=True, text=True, timeout=5).stdout.strip())
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     user = getpass.getuser()
     return pairs, sorted({n for n in names if len(n) > 2}, key=len, reverse=True), user
 
@@ -51,8 +56,8 @@ def scrub(text):
         text = text.replace(old, new)
     text = re.sub(r'/' r'Users/[^/\s"\']+', '~', text)
     text = re.sub(r'/home/(?!you\b|user\b)[^/\s"\']+', '~', text)
-    for name in HOSTS:
-        text = re.sub(r'\b' + re.escape(name) + r'\b', '<host>', text)
+    for name in HOSTS:  # in any case: Herdr Core 0.1.20 names a core after the machine, lower-cased
+        text = re.sub(r'\b' + re.escape(name) + r'\b', '<host>', text, flags=re.IGNORECASE)
     if len(USER) > 2:
         text = re.sub(r'\b' + re.escape(USER) + r'\b', '<user>', text)
     return text

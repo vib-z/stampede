@@ -621,8 +621,8 @@ class LiveFixes(unittest.TestCase):
 
 class StampedeReview1(unittest.TestCase):
     """Fixes from the stampede review, round 1."""
-    def cli(self, *args, path_herdr=None, drop=()):
-        env = {k: v for k, v in os.environ.items() if k not in drop}
+    def cli(self, *args, path_herdr=None, drop=(), **more):
+        env = {**{k: v for k, v in os.environ.items() if k not in drop}, **more}
         if path_herdr:
             env['PATH'] = str(Path(path_herdr).parent) + ':' + env['PATH']
         return subprocess.run([str(SCRIPTS / 'fleet-job'), *args], capture_output=True, text=True, env=env)
@@ -642,10 +642,54 @@ class StampedeReview1(unittest.TestCase):
         ask = Path(tempfile.mkdtemp()) / 'ask.md'
         ask.write_text('Fix the login bug\n')
         herdr, log = fake_herdr(ask.parent)
-        result = self.cli('new', '--file', str(ask), drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr)
+        no_core = str(ask.parent / 'no-core.sock')   # this machine's own Herdr Core is not asked
+        result = self.cli('new', '--file', str(ask), drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr, HC_SOCKET=no_core)
         self.assertEqual((result.returncode, result.stderr.strip()),
                          (2, 'fleet-job new: new needs --workspace or --pane, or run it inside Herdr'))
         self.assertFalse(log.exists())
+
+    def test_new_names_core_when_herdr_cannot_take_the_job_and_a_core_answers(self):
+        """D2: the Herdr TUI stays the default backend. When it is not there (no target outside Herdr, a server that is
+        not running, no herdr at all) and a Herdr Core answers on its socket, the error names new --core; with no core,
+        or a Herdr that answers, nothing changes. Nothing is made either way."""
+        import socket, threading
+        folder = Path(tempfile.mkdtemp(dir='/tmp'))   # a Unix socket path is short
+        ask = folder / 'ask.md'
+        ask.write_text('Fix the login bug\n')
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(str(folder / 'core.sock'))
+        server.listen(8)
+
+        def answer():   # a core that answers hello, as herdr-event-core --alive asks
+            while True:
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    return
+                with conn:
+                    conn.recv(4096)
+                    conn.sendall(b'{"jsonrpc":"2.0","id":1,"result":{}}\n')
+        threading.Thread(target=answer, daemon=True).start()
+        self.addCleanup(server.close)
+        down = folder / 'herdr'
+        down.write_text('#!/bin/bash\necho \'{"error":{"code":"server_not_running","message":"no herdr server is running"}}\'\nexit 1\n')
+        down.chmod(0o755)
+        hint = 'Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
+        env = {'FLEET_JOBS_ROOT': str(folder / 'jobs-root'), 'HC_SOCKET': str(folder / 'core.sock')}
+        cases = ((('new', '--file', str(ask)), {'drop': ('HERDR_WORKSPACE_ID',)}, 2, 'new needs --workspace or --pane, or run it inside Herdr; '),
+                 (('new', '--file', str(ask), '--workspace', 'w9'), {'path_herdr': down}, 1, 'no herdr server is running'),
+                 (('new', '--file', str(ask), '--workspace', 'w9'), {'HERDR': str(folder / 'no-herdr')}, 2, 'did not answer'))
+        for argv, kw, code, said in cases:
+            with self.subTest(argv=argv[2:], kw=sorted(kw)):
+                result = self.cli(*argv, **kw, **env)
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertIn(said, result.stderr)
+                self.assertIn(hint, result.stderr)
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+                quiet = self.cli(*argv, **kw, **{**env, 'HC_SOCKET': str(folder / 'none.sock')})
+                self.assertEqual(quiet.returncode, code)
+                self.assertNotIn('Herdr Core answers', quiet.stderr)
+        self.assertFalse((folder / 'jobs-root').exists())
 
     def test_r6_the_references_start_agents_hooked_and_copy_no_env_file(self):
         refs = ROOT / 'skills/herdr-fleet/references'
@@ -1359,12 +1403,12 @@ class LeadChoice(unittest.TestCase):
         self.assertIn('claude', result.stderr.splitlines()[-1])
         self.assertFalse((ask.parent / 'jobs').exists())
 
-    def test_a_fork_or_herdr_core_takes_a_claude_lead_only(self):
+    def test_a_fork_takes_a_claude_lead_only(self):
         from unittest import mock
         sid = '0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37'
         for env, kw, said in (({}, {'kind': 'codex', 'fork': sid}, '--fork forks a Claude chat, so it takes a Claude lead'),
                               ({'FLEET_LEAD_KIND': 'codex'}, {'fork': sid}, '--fork forks a Claude chat'),
-                              ({}, {'kind': 'codex', 'core': True}, 'a Herdr Core job runs a Claude lead only')):
+                              ({}, {'kind': 'codex', 'fork': sid, 'core': True}, '--fork forks a Claude chat')):
             root = Path(tempfile.mkdtemp())
             with self.subTest(kw=kw), self.assertRaises(ValueError) as refused:
                 self.new({'FLEET_JOBS_ROOT': str(root), **env}, **kw)
@@ -1373,8 +1417,8 @@ class LeadChoice(unittest.TestCase):
         _, job, log = self.new({'FLEET_LEAD_KIND': 'codex'}, kind='claude', fork=sid)   # --lead claude forks as before
         self.assertIn(f'--kind claude --pane w9:p2 --timeout 90000 -- --resume {sid} --fork-session', log)
         with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(fj, 'new_core', return_value=0) as core:
-            self.assertEqual(fj.new('ask.md', None, core=True), 0)    # a standing Codex choice leaves a Core job on Claude
-        core.assert_called_once()
+            self.assertEqual(fj.new('ask.md', None, core=True), 0)
+        self.assertEqual(core.call_args.args[5], 'codex')   # the standing choice is the lead of a Core job too
 
     def test_its_sandbox_reaches_the_network_git_and_the_worktrees_and_a_workers_does_not(self):
         from unittest import mock
@@ -1423,10 +1467,10 @@ class LeadChoice(unittest.TestCase):
         self.assertIn('lead-demo You are lead-demo in a herdr fleet', self.sent.read_text())   # the Codex restart's pointer, typed
         core = job_with([('lead-demo', 'claude')])
         (core / 'backend').write_text('core\n')
-        for agent_kind in ('cursor', 'codex'):
-            with self.subTest(kind=agent_kind), self.assertRaises(ValueError) as refused:
-                fj.start(core if agent_kind == 'codex' else job, 'lead-demo', agent_kind, None, '-')
-            self.assertIn('the lead runs on claude or codex, and on claude in a Herdr Core job', str(refused.exception))
+        for folder in (job, core):  # no backend runs a lead on another CLI
+            with self.subTest(job=folder.name), self.assertRaises(ValueError) as refused:
+                fj.start(folder, 'lead-demo', 'cursor', None, '-')
+            self.assertIn('the lead runs on claude or codex', str(refused.exception))
 
     def test_a_refused_or_failed_switch_never_leaves_a_lead_the_other_clis_brief(self):
         import contextlib, io

@@ -1,6 +1,6 @@
 """fleet-job: a Herdr job's messages, background owner questions, plan approval and per-CLI hooks.
 Ported from stampede (scripts/stampede_hooks.py at 0871ae3) and cut down."""
-import contextlib, fcntl, glob, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, time, uuid
+import contextlib, fcntl, glob, hashlib, json, math, os, re, shlex, shutil, signal, subprocess, sys, time, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -63,7 +63,8 @@ def tell(job, name, text):
         append(Path(job) / 'inbox' / (name + '.md'), line(text))
         if people[name] != 'claude':  # a Codex lead has no file hook: the line is typed into its pane once it is idle
             deliver_soon(job)
-            return print('DELIVERED ' + name + ' (inbox file; typed into its pane once it is idle)')
+            where = 'terminal' if backend(job) == 'core' else 'pane'
+            return print(f'DELIVERED {name} (inbox file; typed into its {where} once it is idle)')
         # a pending card holds the turn: the inbox is read only once the card is answered (a Core agent has no pane to read)
         if backend(job) != 'core' and agent_card(name):
             print(f'BLOCKED_ON_CARD {name}: queued in its inbox, but it waits at a question card and reads nothing until '
@@ -126,7 +127,8 @@ DELIVER_CALL, DELIVER_SEND = 15, 120  # seconds a Herdr look and a herdr-send ma
 
 def deliver(job):
     """Type a Codex lead's unread inbox lines (inbox/<lead>.md and inbox.log) into its pane while it is idle or done
-    and not focused, until none is unread. One deliverer at a time: another one exits at once, and the one running looks
+    and not focused, until none is unread (a Herdr Core job: deliver_core, after typing_unsafe says it may type at all).
+    One deliverer at a time: another one exits at once, and the one running looks
     again after letting go of its lock, so a line written meanwhile is never stranded. A read offset moves only after
     herdr-send says SUBMITTED. Exit 3 when the lead stayed busy, focused, drafting or gone for DELIVER_FOR seconds; exit 4
     at once when Herdr does not answer (a deliverer started inside a sandbox without network), so it never holds the lock.
@@ -135,6 +137,9 @@ def deliver(job):
     lead = roster(job)[1]
     if lead_kind(job) != 'codex':
         return 0
+    if backend(job) == 'core':
+        target(job)
+        return deliver_core(job, lead)
     deadline = time.monotonic() + DELIVER_FOR
     while True:
         with (job / 'hooks' / '.deliver.lock').open('a') as lock:
@@ -155,6 +160,132 @@ def deliver(job):
                 time.sleep(DELIVER_EVERY)
         if not unread(job, lead):
             return 0
+
+
+def deliver_core(job, lead):
+    """deliver for a Codex lead in a Herdr Core terminal: its unread lines typed with hc send while it is idle or done,
+    each line at most once. A send that got no answer may or may not have typed; most often a person's draft held it
+    until it was stopped. Then the lines' offsets move with no acknowledgement, the lead is owed a pointer to them
+    (point_owed), and nothing more is typed into that terminal until it has taken a turn, which only a submitted prompt
+    gives, so the text someone may have left there is no longer in it. Until then every deliverer leaves (7) once the
+    hold has its turn count, staying only for the settled look that gives it, and the owner is told once. Clearing the hold by hand, after a look at the lead's prompt, is removing
+    <job>/hooks/deliver-held.json. Before every send, typing_guard says whether it may type at all and what Core's hold
+    is, and that same hold limits the send. Exit 3 after DELIVER_FOR seconds of a busy or gone lead, 4 when Core does not
+    answer, 6 when typing_guard refuses (nothing is typed where a person's draft could go in with it)."""
+    deadline = time.monotonic() + DELIVER_FOR
+    while True:
+        with (job / 'hooks' / '.deliver.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return 0  # the deliverer running sees this line once it lets go
+            while unread(job, lead) or owed(job):
+                if time.monotonic() > deadline:
+                    print(f'{datetime.now():%Y-%m-%d %H:%M} GAVE UP after {DELIVER_FOR}s: {lead} stayed busy, blocked, drafting or gone')
+                    return 3
+                try:
+                    terminal = core_ready(job, lead)
+                    if terminal and held(job, terminal) and hold_count(job) is not None:
+                        print(f'{datetime.now():%Y-%m-%d %H:%M} HELD: a send to {lead} got no answer, so text may sit in its prompt at '
+                              f'{terminal["address"]}; nothing more is typed there until it has taken a turn, or until '
+                              f'{job / "hooks" / "deliver-held.json"} is removed by someone who looked')
+                        return 7
+                    if terminal and not held(job, terminal):
+                        unsafe, seconds = typing_guard()
+                        if unsafe:
+                            print(f'{datetime.now():%Y-%m-%d %H:%M} NOT TYPED: {unsafe}; the lines stay in {job / "inbox.log"} and '
+                                  f'{job / "inbox" / (lead + ".md")}')
+                            return 6
+                        limit = send_limit(seconds)
+                        outcome = point_owed(job, lead, limit) if owed(job) else type_unread(job, lead, limit)
+                        if outcome is None:
+                            hold(job, lead, terminal['address'])
+                        if outcome is not False:
+                            continue
+                except (ValueError, HcError) as error:  # the next kick from outside the sandbox delivers the line
+                    print(f'{datetime.now():%Y-%m-%d %H:%M} CANNOT REACH HERDR ({line(error)}): left for the next deliverer')
+                    return 4
+                time.sleep(DELIVER_EVERY)
+        if not (unread(job, lead) or owed(job)):
+            return 0
+
+
+HOLD_SETTLE = 5  # seconds a terminal must have been at rest before its turn count can start a hold
+
+
+def settled(terminal):
+    """The terminal's turn count when it is at rest (idle or done) and has been for HOLD_SETTLE seconds by Core's own
+    clock (status_ms): no turn is under way, and none has only just ended whose count might not show yet. Else None."""
+    since = terminal.get('status_ms')
+    if terminal.get('state') == 'live' and core_status(terminal) in ('idle', 'done') and isinstance(since, (int, float)) \
+            and not isinstance(since, bool) and time.time() * 1000 - since >= HOLD_SETTLE * 1000:
+        return terminal.get('turn') or 0
+    return None
+
+
+def held(job, terminal):
+    """True while a send to this terminal that got no answer is unresolved. terminal: its record as core_ready gives it.
+    The hold counts turns from a look taken after that send with the terminal settled at rest (settled): no turn was
+    under way then, so a higher count now means a prompt was submitted since, and with it whatever sat in the prompt.
+    A hold that has no such look yet takes this one if it is settled, and stands either way. Another terminal (a
+    restarted lead, with a prompt of its own) ends the hold; so does removing its file."""
+    path = Path(job) / 'hooks' / 'deliver-held.json'
+    try:
+        record = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    if record.get('address') != terminal.get('address'):
+        path.unlink(missing_ok=True)
+        return False
+    if not isinstance(record.get('turn'), int):
+        if settled(terminal) is not None:
+            save_hold(job, {**record, 'turn': settled(terminal)})
+        return True
+    if (terminal.get('turn') or 0) <= record['turn']:
+        return True
+    path.unlink(missing_ok=True)
+    return False
+
+
+def hold_count(job):
+    """The turn count a hold stands on, or None while it has none yet (or there is no hold)."""
+    try:
+        turn = json.loads((Path(job) / 'hooks' / 'deliver-held.json').read_text()).get('turn')
+    except (OSError, ValueError):
+        return None
+    return turn if isinstance(turn, int) else None
+
+
+def save_hold(job, record):
+    path = Path(job) / 'hooks' / 'deliver-held.json'
+    temporary = path.with_name('.deliver-held.json.' + str(os.getpid()))
+    temporary.write_text(json.dumps(record) + '\n')
+    os.replace(temporary, path)
+
+
+def hold(job, lead, address):
+    """Start a hold on the lead's terminal after a send to it got no answer, and tell whoever started the job once (a
+    blocked event through the relay, as the job's follower sends them; best effort). Its turn count is read now, after
+    the send, and kept only when the terminal is settled at rest (settled): a count from before the send, or one taken
+    while a turn is under way or has just ended, could be passed by a turn that began before the text in the prompt
+    did. Without one the hold has no count yet, and held takes the first settled look."""
+    key, turn = core_key(job), None
+    try:
+        turn = settled(hc('get', address))
+    except HcError:
+        pass
+    record = {'address': address, 'turn': turn, 'at': datetime.now().strftime('%Y-%m-%d %H:%M')}
+    save_hold(job, record)
+    owner = job_owner(job)
+    event = {'source': 'hc', 'workspace': key, 'job': str(Path(job).absolute()), 'agent': lead, 'state': 'blocked', 'kind': 'held',
+             'msg': f'A message for {lead} got no answer from Herdr Core, so text may be left typed in its terminal ({address}). '
+                    'Nothing more is typed there until it takes a turn: send or clear what is in its prompt.',
+             'pane': f'hc:{key}/{address}', 'event_id': f'{key}/{address}|held|{uuid.uuid4().hex[:8]}', **({'owner': owner} if owner else {})}
+    try:
+        subprocess.run([str(SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), json.dumps(event)],
+                       capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def screen_of(agent):
@@ -186,6 +317,24 @@ def ready(agent):
     return shown.get('agent_status') in ('idle', 'done') and not shown.get('focused') and composer_empty(screen_of(agent))
 
 
+def core_ready(job, lead):
+    """The lead's Core terminal (its record) when it is this job's, live, and idle or done by its own status. Whether a
+    person is typing there is Core's to guard (its draft hold) and send_core's (text already in the prompt). An HcError
+    when Core does not answer; None when the terminal is gone, another job's, or a shell Core put in the lead's place."""
+    target(job)
+    address = core_entries(job).get(lead, {}).get('address')
+    try:
+        terminal = hc('get', address) if address else {}
+    except HcError as error:
+        if error.kind != 'not_found':
+            raise
+        return None
+    labels = terminal.get('labels') or {}
+    ready = (terminal.get('state') == 'live' and not shelled(terminal) and core_status(terminal) in ('idle', 'done')
+             and labels.get('stampede.job') == core_key(job) and labels.get('stampede.agent') == lead)
+    return terminal if ready else None
+
+
 def unread(job, agent):
     """[(path, lines, offset after them)] for each watched file of the lead with complete lines it has not been given."""
     job = Path(job).absolute()
@@ -195,21 +344,66 @@ def unread(job, agent):
                 if found[0]]
 
 
-def type_unread(job, lead):
-    """One prompt with every unread line, marked as from fleet-job; the offsets move only once herdr-send submitted it."""
+def type_unread(job, lead, limit=None):
+    """One prompt with every unread line, marked as from fleet-job; the offsets move only once herdr-send submitted it.
+    On Herdr Core a send can end with no answer (None): the lines may have been typed or not, so they are never typed
+    again. Their offsets move, with no acknowledgement of a reopen's line among them, and the lead is owed a pointer to
+    them (point_owed), which says where to read them."""
     found = unread(job, lead)
     text = f'[fleet-job inbox for {lead}, not typed by the owner] ' + ' '.join(
         f'{path.name}: ' + ' | '.join(lines) for path, lines, _ in found)
     if len(text) > DELIVER_MAX:
         text = text[:DELIVER_MAX - 120].rstrip() + ' ... (cut: read the rest at the end of ' + ' and '.join(
             str(path) for path, _, _ in found) + ')'
-    submitted, said = herdr_send(job, lead, re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text))  # typed as keys: no control characters
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)  # typed into a prompt: no control characters
+    submitted, said = send_core(job, lead, text, limit) if backend(job) == 'core' else herdr_send(job, lead, text)
     print(f'{datetime.now():%Y-%m-%d %H:%M} {said}')
-    if submitted:
+    if submitted is not False:
         with (Path(job) / 'hooks/.wake.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            if submitted is None:
+                owe(job, lead, found)
             for path, lines, end in found:
-                mark_read(job, lead, path.resolve(), end, lines)
+                mark_read(job, lead, path.resolve(), end, lines, ack=submitted is True)
+    return submitted
+
+
+def owed(job):
+    """The line ranges a Codex lead on Herdr Core may or may not have been given: [[path, first line, last line], ...]."""
+    path = Path(job) / 'hooks' / 'deliver-owed.json'
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def owe(job, lead, found):
+    """Record the lines of a delivery whose outcome is unknown, by their numbers in their files, before their offsets
+    move; the caller holds the wake lock."""
+    state_path = Path(job) / 'hooks' / ('wake-' + lead + '.json')
+    state = json.loads(state_path.read_text()) if state_path.is_file() else {}
+    ranges = owed(job)
+    for path, _, end in found:
+        content, start = path.read_bytes(), state.get(str(path.resolve()), 0)
+        start = 0 if start > len(content) else start
+        ranges.append([str(path), content[:start].count(b'\n') + 1, content[:end].count(b'\n')])
+    path = Path(job) / 'hooks' / 'deliver-owed.json'
+    temporary = path.with_name('.deliver-owed.json.' + str(os.getpid()))
+    temporary.write_text(json.dumps(ranges) + '\n')
+    os.replace(temporary, path)
+
+
+def point_owed(job, lead, limit=None):
+    """Tell the lead where to read the lines it may have missed: True once that pointer was submitted, False when
+    nothing was typed, None when that send got no answer either (the caller then holds the terminal again). The
+    pointer is the same whoever reads it and however often, so unlike the lines themselves it may be sent again."""
+    where = '; '.join(f'lines {first} to {last} of {path}' for path, first, last in owed(job))
+    text = (f'[fleet-job inbox for {lead}, not typed by the owner] Herdr Core gave no answer to a delivery, so these lines '
+            f'may not have reached you. Read them yourself, each once: {where}')
+    submitted, said = send_core(job, lead, text, limit)
+    print(f'{datetime.now():%Y-%m-%d %H:%M} {said}')
+    if submitted:
+        (Path(job) / 'hooks' / 'deliver-owed.json').unlink(missing_ok=True)
     return submitted
 
 
@@ -763,15 +957,16 @@ def new_lines(job, agent, path):
     return [line(row.decode('utf-8', 'replace')) for row in addition[:complete].split(b'\n')[:-1] if row.strip()], offset + complete
 
 
-def mark_read(job, agent, path, end, lines):
-    """Move the agent's read offset of a watched file to end; the caller holds the wake lock."""
+def mark_read(job, agent, path, end, lines, ack=True):
+    """Move the agent's read offset of a watched file to end; the caller holds the wake lock. ack: the lines were
+    delivered, so a reopen's line among them is acknowledged; without it only the offset moves."""
     job = Path(job)
     state_path = job / 'hooks' / ('wake-' + agent + '.json')
     state = json.loads(state_path.read_text()) if state_path.is_file() else {}
     state[str(path)] = end
     state_path.write_text(json.dumps(state) + '\n')
     attempts = [found.group(1) for found in (re.fullmatch('REOPENED ' + re.escape(agent) + ' ([0-9a-f]{12})', row)
-                                              for row in lines) if found]
+                                              for row in lines) if found] if ack else []
     if attempts:  # this file's hook delivered a reopen's line: that reopen's proof the restarted agent reads this file
         ack_path = job / 'hooks' / ('ack-' + agent + '.json')
         acks = json.loads(ack_path.read_text()) if ack_path.is_file() else {}
@@ -859,28 +1054,35 @@ def codex_notify(job, agent, payload):
     or a sub-agent source, is Codex's background work (as stampede's codex_notify at 0871ae3).
     A Codex lead's own turn goes to the relay, as Codex's global notify would have sent it, never to inbox.log, and
     then lets the deliverer type what came in while it worked."""
-    if agent == roster(job)[1]:
+    lead = agent == roster(job)[1]
+    if lead:
         subprocess.run([str(RELAY_CODEX), json.dumps(payload)], stdin=subprocess.DEVNULL, capture_output=True)
-        if payload.get('type') == 'agent-turn-complete':
-            deliver_soon(job)
-        return
     if payload.get('type') != 'agent-turn-complete':
         return
+    thread = own_thread(payload)
+    row = agent_rows(job).get(agent) if thread and backend(job) == 'core' else None
+    if row is not None and row.get('session') != thread:  # on Core no snapshot sees Codex's session: its own turn names it
+        record(job, agent, 'codex', row.get('brief') or '-', shlex.split(row.get('args', '')), thread)
+    if lead:
+        return deliver_soon(job)
+    if thread:
+        notify_lead(job, line('TURN ' + agent + ' ' + payload.get('last-assistant-message', '')))
+
+
+def own_thread(payload):
+    """The thread id when a Codex turn end is the agent's own turn, else None (Codex's background work)."""
     thread = payload.get('thread-id')
     if not thread or payload.get('parent_thread_id') or isinstance(payload.get('source'), dict) and payload['source'].get('subagent'):
-        return
+        return None
     home = os.environ.get('CODEX_HOME') or os.path.expanduser('~/.codex')
     files = glob.glob(os.path.join(home, 'sessions', '*', '*', '*', 'rollout-*' + thread + '.jsonl'))
     if not files:
-        return
+        return None
     with open(files[0]) as source:
         first = json.loads(source.readline()).get('payload', {})
     if first.get('parent_thread_id') or isinstance(first.get('source'), dict) and first['source'].get('subagent'):
-        return
-    row = agent_rows(job).get(agent) if backend(job) == 'core' else None
-    if row is not None and row.get('session') != thread:  # on Core no snapshot sees Codex's session: its own turn names it
-        record(job, agent, 'codex', row.get('brief') or '-', shlex.split(row.get('args', '')), thread)
-    notify_lead(job, line('TURN ' + agent + ' ' + payload.get('last-assistant-message', '')))
+        return None
+    return thread
 
 
 def session_end(job, agent, payload):
@@ -976,14 +1178,15 @@ def lead_model(kind, model=None, effort=None):
 def lead_brief_for(job, lead, kind, brief):
     """A lead restarted on the other CLI (a usage-limit fallback) gets its generated brief rewritten for that CLI, so a
     Codex lead never reads that a yes typed in its pane counts. Decided by the brief's own text, not the roster, so a
-    retry after a failed switch is put right too. Only the brief fleet-job new wrote, only on a Herdr TUI job. Returns the
-    text it replaced, for start to put back when the launch fails; None when it left the brief alone."""
+    retry after a failed switch is put right too. Only the brief fleet-job new wrote. Returns the text it replaced, for
+    start to put back when the launch fails; None when it left the brief alone."""
     job, path = Path(job).absolute(), Path(brief).absolute()
-    if backend(job) == 'core' or path != job / 'briefs' / (lead + '.md') or not path.is_file():
+    if path != job / 'briefs' / (lead + '.md') or not path.is_file():
         return
     previous = path.read_text()
     if ('fleet-job types each new line of' in previous) != (kind == 'codex'):
-        path.write_text(lead_brief(job, lead, job_owner(job), (job / 'review').is_file(), None, front=front_door(job), kind=kind))
+        key = core_key(job) if backend(job) == 'core' else None
+        path.write_text(lead_brief(job, lead, job_owner(job), (job / 'review').is_file(), None, key, front=front_door(job), kind=kind))
         return previous
 
 
@@ -1053,10 +1256,140 @@ class HcError(RuntimeError):
         self.kind, self.code = kind, code
 
 
-def hc(*args):
-    """One Herdr Core command (HC names the binary) and its JSON answer; on failure Core's error kind and exit code."""
+HC_CALL = 60  # seconds one hc call may take on top of what the command itself waits for
+# A send is stopped SEND_MARGIN seconds before Core's draft hold could run out, so it never goes in after a draft someone
+# began after stampede looked at the prompt and then left: Core types after a draft only once its hold is over, and a
+# send stopped while held types nothing. SEND_FLOOR is what a send needs with no draft (Core's quiet pause, then its
+# look for a started turn), so a shorter hold than their sum leaves no safe limit.
+SEND_MARGIN, SEND_FLOOR = 10, 15
+HOLD_SINCE = (0, 1, 20)  # the Herdr Core that holds a send while a person has an unsent draft
+
+
+DRAFT_DEFAULT = 60.0  # Core's own draft_wait
+
+
+def draft_config(env=None):
+    """Herdr Core's draft_wait as its config.toml gives it, read as Core reads it: ('set', seconds) for a number there (a
+    negative one is 0); ('default', 60.0) when the file does not set it, is missing, or is no valid TOML (Core then uses
+    its defaults); ('unknown', None) when what it sets cannot be established here: not a finite number of seconds that
+    fits a duration, or a file that names draft_wait on a Python with no TOML parser (3.11 has one). env: the
+    environment whose config folder it is, the running core's own (core_env); this process's when none is given."""
+    env = os.environ if env is None else env
+    config = Path(env.get('XDG_CONFIG_HOME') or Path(env.get('HOME') or Path.home()) / '.config') / 'herdr-core/config.toml'
     try:
-        result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True)
+        text = config.read_text()
+    except (OSError, ValueError):  # no file, or not text: nothing Core could read a setting from
+        return 'default', DRAFT_DEFAULT
+    try:
+        import tomllib
+    except ImportError:
+        return ('unknown', None) if 'draft_wait' in text else ('default', DRAFT_DEFAULT)
+    try:
+        settings = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return 'default', DRAFT_DEFAULT
+    if 'draft_wait' not in settings:
+        return 'default', DRAFT_DEFAULT
+    value = settings['draft_wait']
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value > 1e9:
+        return 'unknown', None
+    return 'set', max(0.0, float(value))
+
+
+def core_hold():
+    """(seconds, where it is set): how long the running Herdr Core (0.1.20 on) holds a send while a person's draft sits
+    unsent, resolved as Core resolves it, from the core's own environment (core_env): draft_wait in the config.toml
+    that environment names, else its HC_DRAFT_MS (a setting for Core's tests, and still what it would use), else
+    Core's 60. (None, why) when that cannot be established. The one value both decides whether lines may be typed
+    unattended and limits every send, so the two never disagree. An older core holds nothing."""
+    env = core_env()
+    if env is None:
+        return None, 'the running core\'s environment cannot be read (hc exec), so how long it holds a message for a draft is not known'
+    kind, seconds = draft_config(env)
+    if kind == 'set':
+        return seconds, 'in Herdr Core\'s config.toml'
+    if kind == 'unknown':
+        return None, ('draft_wait in Herdr Core\'s config.toml cannot be read here as Core reads it (not a plain number of seconds, '
+                      'or this Python has no TOML parser)')
+    if 'HC_DRAFT_MS' in env:
+        try:
+            fallback = float(env['HC_DRAFT_MS'])
+        except ValueError:
+            fallback = math.nan
+        if not math.isfinite(fallback):
+            return None, 'HC_DRAFT_MS in the running core\'s environment is no number'
+        return max(0.0, fallback) / 1000, 'by HC_DRAFT_MS in the running core\'s environment'
+    return seconds, 'by Herdr Core\'s default'
+
+
+def core_env():
+    """The running core's own environment, as a program it runs sees it (hc exec, read only, as herdr-doctor reads it):
+    {name: value}, or None when it cannot be read. Core reads its config from the folders this names, which need not
+    be this process's."""
+    try:
+        shown = subprocess.run([os.environ.get('HC') or 'hc', 'exec', '--', '/usr/bin/env'], capture_output=True, text=True, timeout=HC_CALL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if shown.returncode:
+        return None
+    return dict(row.split('=', 1) for row in shown.stdout.splitlines() if '=' in row)
+
+
+def send_limit(seconds=None):
+    """Seconds a send may take, for a hold of that many seconds (default: core_hold's): up to SEND_MARGIN before the
+    hold could run out, and never under SEND_FLOOR, which is also the limit when the hold cannot be established."""
+    seconds = core_hold()[0] if seconds is None else seconds
+    return SEND_FLOOR if seconds is None else max(seconds - SEND_MARGIN, SEND_FLOOR)
+
+
+def hc_version():
+    """Herdr Core's version as a tuple: the running core's own, asked on its socket (never started), since it is the core
+    that holds a send and an hc on PATH may be newer than it; with no core up, what hc --version prints. None when
+    neither says."""
+    try:
+        shown = subprocess.run([str(FOLLOWER), '--core-version'], capture_output=True, text=True, timeout=HC_CALL).stdout.strip()
+        shown = shown or subprocess.run([os.environ.get('HC') or 'hc', '--version'], capture_output=True, text=True, timeout=HC_CALL).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = re.search(r'(\d+)\.(\d+)\.(\d+)', shown)
+    return tuple(int(n) for n in found.groups()) if found else None
+
+
+def typing_guard():
+    """(why, seconds): why lines must not be typed into a Codex lead's Core terminal on their own ('' when they may),
+    and the hold that was resolved for it, which the send that follows is limited by. Only Core's draft hold keeps a
+    person's typing apart from a typed line, so it has to be there (0.1.20 on) and long enough for a send to end
+    before it runs out."""
+    version = hc_version()
+    if version is None or version < HOLD_SINCE:
+        return ('Herdr Core ' + ('.'.join(map(str, version)) if version else 'of an unknown version') + ' does not hold a message while '
+                'a person is typing (0.1.20 on does): hc update, or run the lead on Claude'), None
+    need = SEND_FLOOR + SEND_MARGIN + 5
+    seconds, where = core_hold()
+    if seconds is None:
+        return f'{where}: set draft_wait to a number of {need} or more in Herdr Core\'s config.toml, or run the lead on Claude', None
+    if seconds < need:
+        return (f'draft_wait is {seconds:g} s {where}, too short to keep a draft you leave apart from a typed line: set it to '
+                f'{need} or more (60 is the default), or run the lead on Claude'), seconds
+    return '', seconds
+
+
+def typing_unsafe():
+    """typing_guard's reason alone: '' when lines may be typed into a Codex lead's Core terminal on their own."""
+    return typing_guard()[0]
+
+
+def hc(*args, wait=0, limit=None):
+    """One Herdr Core command (HC names the binary) and its JSON answer; on failure Core's error kind and exit code.
+    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer HC_CALL seconds after that
+    (or after limit seconds, when given) is stopped, kind 'timeout': a hung hc never holds a lock or a lead. Core
+    cancels a send whose caller is gone before it typed anything."""
+    limit = limit or HC_CALL + wait
+    try:
+        result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True,
+                                timeout=limit)
+    except subprocess.TimeoutExpired:
+        raise HcError(f'hc {args[0]}: no answer in {limit:g} s, so it was stopped', 'timeout', 124) from None
     except OSError as error:
         raise ValueError('Herdr Core is not installed (' + line(error) + '): install hc 0.1.13 or later, or set HC') from None
     if result.returncode:
@@ -1124,7 +1457,7 @@ def launching(job, agent):
 CONFIG_KEYS = ('FLEET_LEAD_KIND', 'FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_TRUST_ROOT', 'FLEET_JOBS_ROOT', 'FLEET_WATCH_INTERVAL',
                'FLEET_WATCH_PASSES', 'FLEET_WATCH_NOTIFY', 'HERDR_EVENTS_MACHINE', 'HERDR_EVENTS_HOME', 'HERDR_EVENTS_ROUTES_DIR',
                'HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_DIR', 'HERDR_EVENTS_STALE_MINUTES', 'HC', 'HC_SESSION', 'HC_SOCKET',
-               'STAMPEDE_NO_UPDATE_CHECK',
+               'STAMPEDE_NO_UPDATE_CHECK', 'STAMPEDE_APP_SPACE',
                'STAMPEDE_UPDATE_URL')  # every key in config.example; a test keeps them equal
 HERDR_IDS = ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER')
 
@@ -1182,8 +1515,8 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     if not NAME.fullmatch(agent):
         raise ValueError('agent names are <role>-<scope>, lowercase')
     lead = agent == roster(job)[1]  # a restarted lead keeps the lead's hooks
-    if lead and kind not in LEAD or lead and kind == 'codex' and backend(job) == 'core':
-        raise ValueError('the lead runs on claude or codex, and on claude in a Herdr Core job')
+    if lead and kind not in LEAD:
+        raise ValueError('the lead runs on claude or codex')
     if lead:  # a restarted lead keeps the lead model and effort of its CLI unless told otherwise
         model, effort = lead_model(kind, model, effort)
     if not lead:
@@ -1196,7 +1529,17 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     if backend(job) == 'core':
         if pane:
             return start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, lead)
-        return start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, lead)
+        if lead and kind == 'codex':
+            target(job)
+            if typing_unsafe():
+                raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + typing_unsafe())
+        previous = lead_brief_for(job, agent, kind, brief) if lead else None
+        try:
+            return start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, lead)
+        except BaseException:
+            if previous is not None:  # nothing was recorded for the other CLI: its brief goes back
+                Path(brief).write_text(previous)
+            raise
     if cwd:
         raise ValueError('--cwd is for a Herdr Core job; on the Herdr TUI the agent starts in its --pane')
     if kind in ('hermes', 'kimi'):
@@ -1256,9 +1599,20 @@ def core_status(terminal):
     return (terminal.get('status') or {}).get('state')
 
 
+def shelled(terminal):
+    """True when a terminal that carries an agent's labels no longer runs the job's launch: a kept terminal lost its
+    program and Core put a shell in its place (the Herdr app turns keep on for a terminal it shows), live at the same
+    address with the same name and labels. Every launch of stampede's names STAMPEDE_JOB_KEY in its argv, and Core
+    shows a terminal's argv as what it runs now, so one without it is that shell, whether keep is still on or was
+    turned off since. Core never runs the original command again, so the agent is gone. A record with no argv is not
+    judged."""
+    argv = terminal.get('argv') or []
+    return bool(argv) and not any(str(a).startswith('STAMPEDE_JOB_KEY=') for a in argv)
+
+
 def live_terminal(job, agent):
     """This job's live terminal for the agent: its bound address, else one the job's and the agent's labels name,
-    which is adopted (bound). None when no live terminal runs it."""
+    which is adopted (bound). None when no live terminal runs it; a shell Core put in a lost agent's place is not one."""
     key = core_key(job)
     address = core_entries(job).get(agent, {}).get('address')
     if address:
@@ -1269,19 +1623,23 @@ def live_terminal(job, agent):
                 raise
             terminal = {}
         labels = terminal.get('labels') or {}
-        if terminal.get('state') == 'live' and labels.get('stampede.job') == key and labels.get('stampede.agent') == agent:
+        if terminal.get('state') == 'live' and labels.get('stampede.job') == key and labels.get('stampede.agent') == agent \
+                and not shelled(terminal):
             return terminal
-    found = [t for t in hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent).get('terminals', [])
-             if t.get('state', 'live') == 'live']
-    if found:
-        bind(job, agent, {'state': 'live', 'address': found[0]['address'], 'name': found[0].get('name') or agent})
-        try:  # hc ls shows no labels; the terminal's own record says which Claude session it runs
-            session = (hc('get', found[0]['address']).get('labels') or {}).get('stampede.session')
+    for found in hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent).get('terminals', []):
+        if found.get('state', 'live') != 'live':
+            continue
+        try:  # hc ls shows no labels and no argv; the terminal's own record says which Claude session it runs
+            shown = hc('get', found['address'])
         except HcError:
-            session = None
+            shown = {}
+        if shelled(shown):
+            continue
+        bind(job, agent, {'state': 'live', 'address': found['address'], 'name': found.get('name') or agent})
+        session = (shown.get('labels') or {}).get('stampede.session')
         if session:
             prove(job, agent, session, 'ran')
-        return found[0]
+        return found
     return None
 
 
@@ -1330,6 +1688,22 @@ def session_proof(job, agent, session):
     return proof
 
 
+def app_space(job):
+    """The Herdr app space a Core job asked to show in (new --core --app-space), or ''."""
+    path = Path(job) / 'app-space'
+    return path.read_text().strip() if path.is_file() else ''
+
+
+def app_labels(job, agent, role):
+    """The labels that make the Herdr app show a terminal: herdr.space=<the job's space> and herdr.tab=<the agent's
+    name>, Herdr's own mechanism, only for a job that asked and only for its lead and workers (the follower and wait
+    terminals stay out of the window). The tab id is the agent's name, never a terminal title."""
+    space = app_space(job)
+    if not space or role not in ('lead', 'worker'):
+        return []
+    return ['--label', 'herdr.space=' + space, '--label', 'herdr.tab=' + agent]
+
+
 def core_run(job, agent, role, program, cwd, session=None):
     """Start one program of this job in its own Core terminal (no parent, no notes), the caller holding the agent's launch
     lock, and bind it. session: the Claude session it runs, labelled on the terminal and proved per session. A failed
@@ -1339,21 +1713,26 @@ def core_run(job, agent, role, program, cwd, session=None):
     launches = dict(core_entries(job).get(agent, {}).get('launches', {}))
     if session and launches.get(session, {}).get('proof') != 'ran':
         launches[session] = {'proof': 'unknown', 'at': int(time.time())}  # a new launch has not run until shown
-    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), **endpoint(job), 'launches': launches}, fresh=True)
+    launch = uuid.uuid4().hex[:8]  # this attempt's own label: after a lost answer, only its terminal is looked for
+    bind(job, agent, {'state': 'starting', 'role': role, 'cwd': str(cwd), **endpoint(job), 'launches': launches, 'launch': launch},
+         fresh=True)
     labels = [part for k, v in (('job', key), ('agent', agent), ('role', role)) for part in ('--label', f'stampede.{k}={v}')]
     labels += ['--label', 'stampede.session=' + session] if session else []
-    name = agent
-    while True:
+    labels += ['--label', 'stampede.launch=' + launch]
+    shown = app_labels(job, agent, role)
+    # a name is free or it is not: another job's terminal, or the shell Core left in a lost launch's place, may hold the
+    # agent's own, and after a second loss the first spare too. Identity is the address, never the name.
+    names = [agent, agent[:27] + '-' + key[3:7]] + [agent[:23] + '-' + uuid.uuid4().hex[:8] for _ in range(4)]
+    for name in names:
         try:
-            terminal = hc('run', '--bg', '--no-parent', '--no-notify', '--name', name, '--cwd', str(cwd), *labels, '--',
+            terminal = hc('run', '--bg', '--no-parent', '--no-notify', '--name', name, '--cwd', str(cwd), *labels, *shown, '--',
                           *launch_env(job), *program)
             break
         except HcError as error:
-            if error.kind == 'name_taken' and name == agent:
-                name = agent[:27] + '-' + key[3:7]  # another job's terminal holds the name; identity is the address
+            if error.kind == 'name_taken' and name != names[-1]:
                 continue
-            try:  # this launch's terminal, live or already finished
-                spawned = hc('ls', '--all', *labels[:4], *labels[6:]).get('terminals', [])
+            try:  # this launch's own terminal, live or already finished: by its launch label, never an older one's
+                spawned = hc('ls', '--all', *labels[:4], *labels[-2:]).get('terminals', [])
             except HcError as lookup:  # the entry stays starting: a later start or reopen reconciles it by its labels
                 raise CoreUnknown(agent, f'hc run answered {line(error)}, and hc ls could not tell whether it started '
                                          f'({line(lookup)})') from None
@@ -1376,7 +1755,7 @@ def core_outcome(job, agent, address, who, brief, plain=False):
     is blocked, at an error or silent after 30 s: it stays this job's agent), or 'failed' (its terminal finished).
     plain: a program with no status (the follower): live after 3 s is 'started'; Core not answering is 'unknown'."""
     try:
-        hc('wait', address, '--timeout', '3' if plain else '30')
+        hc('wait', address, '--timeout', '3' if plain else '30', wait=3 if plain else 30)
     except HcError:
         pass
     try:
@@ -1416,8 +1795,9 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
     """One live launch per agent: under its launch lock, refuse when a live terminal of this job runs it (adopting one its
     labels name), else start it with its hooks, its brief pointer as the first prompt, and Codex without its daemon."""
     if kind in HANDED:
-        raise ValueError(f'{kind.capitalize()} reports no OSC 7501 status, so Herdr Core cannot run it: hand it to a Herdr TUI '
-                         'pane at its shell prompt with --pane <pane>')
+        why = ('reports its status on Herdr Core, but stampede has no turn hook or empty-prompt check for it there yet'
+               if kind == 'kimi' else 'reports no OSC 7501 status, so Herdr Core cannot run it')
+        raise ValueError(f'{kind.capitalize()} {why}: hand it to a Herdr TUI pane at its shell prompt with --pane <pane>')
     job, brief = Path(job).absolute(), Path(brief).expanduser().absolute()  # the agent may start in another folder
     target(job)
     cwd = Path(cwd or job.parent).expanduser().resolve()
@@ -1450,7 +1830,10 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
         return 0 if core_outcome(job, agent, address, 'lead' if lead else agent, brief) == 'started' else 1
 
 
-HANDED = ('cursor', 'hermes', 'kimi')  # kinds Herdr Core cannot run (no OSC 7501 status): a Core job hands them to a TUI pane
+# Kinds stampede does not start on Herdr Core, so a Core job hands them to a TUI pane. Cursor and Hermes report no OSC 7501
+# status. Kimi 2.5.3 does (seen at its trust dialog on hc 0.1.20, 11 Nov 2026), but has no turn hook, and its empty prompt
+# is unchecked, so it stays handed until a signed-in run proves both.
+HANDED = ('cursor', 'hermes', 'kimi')
 PANE_ID = re.compile(r'[A-Za-z0-9_-]+:[A-Za-z0-9_-]+')  # a Herdr pane id, such as w1:p2
 
 
@@ -1948,8 +2331,8 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
         program = [cli(kind)] + args + ['--session-id', session, pointer]
     elif session:  # Codex, with the session its own notify recorded: resumed, without its daemon as at start
         program = [cli(kind), 'resume'] + args + [session] + ([pointer] if prompt else [])
-    else:
-        program = [cli(kind)] + args + ([pointer] if prompt else [])
+    else:  # a Codex lead that never ended a turn has no session to resume: it starts with its brief, as a fresh one
+        program = [cli(kind)] + args + ([pointer] if prompt or lead else [])
     cwd = core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
     if pending:
         pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
@@ -1966,6 +2349,8 @@ def acknowledged(job, lead):
     while pending and time.time() < deadline:
         for path in sorted(pending):
             append(path, f'REOPENED {lead} {attempt}')
+        if lead_kind(job) == 'codex':  # no file hook: its deliverer types the lines, and that is its acknowledgement
+            deliver_soon(job)
         until = min(deadline, time.time() + REOPEN_EVERY)
         while pending and time.time() < until:
             try:
@@ -1999,8 +2384,9 @@ EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get starte
 
 def drafted(address):
     """True when the last 8 non-empty screen lines show no empty-prompt marker: text already typed, which Core would
-    paste after. Cut here, since hc read may give the whole screen, whose scrollback can hold a marker. A screen Core
-    cannot read counts as empty."""
+    paste after. Core 0.1.20 holds a send only while a person is typing; a draft left alone past draft_wait, and text
+    typed with hc keys, still gets the message pasted after it. Cut here, since hc read may give the whole screen, whose
+    scrollback can hold a marker. A screen Core cannot read counts as empty."""
     try:
         screen = hc('read', address, '--lines', '8').get('text', '')
     except HcError:
@@ -2020,10 +2406,26 @@ EMPTY_HANDED = re.compile(EMPTY_PROMPT.pattern + r'|Plan,\s+search,\s+build\s+an
 
 
 def tell_core(job, name, text):
-    """Prompt a Codex agent in its Core terminal by its status: idle types only while idle (atomic); done types at once,
-    so a worker that turned working in between takes it as a message during its turn. One SUBMITTED or FAILED line.
-    It writes only through hc send, which refuses a blocked terminal: no key is ever pressed, since Core cannot guard
-    one. A slash command, or text already typed in the prompt, is refused with the step to do by hand."""
+    """Prompt a Codex agent in its Core terminal: send_core's one SUBMITTED or FAILED line, and exit 2 on FAILED."""
+    submitted, said = send_core(job, name, text)
+    print(said)
+    if not submitted:
+        raise SystemExit(2)
+
+
+SEND_REFUSED = ('not_found', 'machine_unknown', 'finished', 'unavailable', 'blocked', 'status_mismatch', 'invalid_params', 'config',
+                'cancelled')  # hc send's own error kinds (hc schema 0.1.20): each says nothing was typed
+
+
+def send_core(job, name, text, limit=None):
+    """Type one prompt into a Codex agent's Core terminal by its status: idle types only while idle (atomic); done types
+    at once, so a worker that turned working in between takes it as a message during its turn. (submitted, its one
+    SUBMITTED or FAILED line): True, False when nothing was typed, or None when nobody can tell (hc gave no answer, or
+    failed in no way Core names), which the line says to read before any resend. It writes only through hc send, which
+    refuses a blocked terminal and, from Core 0.1.20, waits while a person is typing there: no key is ever pressed,
+    since Core cannot guard one. The send is stopped limit seconds in (default send_limit()), before Core's hold could
+    run out and type it after a draft someone left. A slash command, or text already typed in the prompt, is refused
+    with the step to do by hand."""
     target(job)
     address, lost = core_entries(job).get(name, {}).get('address'), None
     try:
@@ -2036,6 +2438,9 @@ def tell_core(job, name, text):
         why = 'Herdr Core did not answer: ' + line(lost)
     elif labels.get('stampede.job') != core_key(job) or labels.get('stampede.agent') != name:
         why = "not this job's terminal"
+    elif terminal.get('state') == 'live' and shelled(terminal):
+        why = (f'its program was lost and Herdr Core put a shell in its place at {address}: start it again with bash '
+               f'{Path(job).absolute() / "reopen.sh"}')
     elif terminal.get('state') != 'live' or word not in ('idle', 'done', *refused):
         why = 'not ready'
     elif word in refused:
@@ -2050,12 +2455,17 @@ def tell_core(job, name, text):
                 why = (f'text is already typed in its prompt; Core cannot clear it safely: read it with hc read {address}, '
                        f'clear it with hc keys {address} ctrl+c when hc get shows idle, then tell again')
             else:
-                hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text)
-                return print(f'SUBMITTED {name} ({address})')
+                sent = hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text, limit=limit or send_limit())
+                quiet = ('' if sent.get('started') is not False else
+                         f'; it has not gone working yet: read it with hc read {address} before any resend')
+                return True, f'SUBMITTED {name} ({address}){quiet}'
         except HcError as error:
-            why = {9: refused['blocked'], 10: refused['working'], 11: 'not ready'}.get(error.code, line(error))
-    print(f'FAILED {name} ({why})')
-    raise SystemExit(2)
+            if error.kind not in SEND_REFUSED and error.code not in (9, 10, 11):  # no answer, or a failure Core does not name
+                return None, (f'FAILED {name} ({line(error)}; a send still held by a draft types nothing once stopped, '
+                              f'but read it with hc read {address} before any resend)')
+            held = {'cancelled': 'Herdr Core cancelled the send before it typed anything: tell again if still needed'}
+            why = {9: refused['blocked'], 10: refused['working'], 11: 'not ready'}.get(error.code) or held.get(error.kind, line(error))
+    return False, f'FAILED {name} ({why})'
 
 
 FILLER = {'a', 'an', 'the', 'on', 'in', 'of', 'to', 'for', 'and', 'please', 'can', 'you', 'we', 'i', 'my', 'our', 'it', 'this', 'that'}
@@ -2146,7 +2556,7 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
             gate_route += (f'Act only after {gate_ok_cmd} prints APPROVED; a merge uses --match-head-commit <that commit>. fleet-job '
                            'types your inbox into this pane, so a yes typed here, an agent\'s word or a relayed yes never counts.')
     wake = ('hooks wake you' if kind == 'claude' else f'fleet-job types each new line of {job / "inbox.log"} and '
-            f'{job / "inbox" / (lead + ".md")} into this pane, marked as from fleet-job, once you are idle')
+            f'{job / "inbox" / (lead + ".md")} into this {"terminal" if key else "pane"}, marked as from fleet-job, once you are idle')
     reach = (f'The owner talks only to the front-door chat that started you, never to your pane: AskUserQuestion and SendUserFile '
              f'reach no one (a hook turns them into posts). Reach the owner with: fleet-job post {job} "<text>" --file <path> '
              '(the plan, files to look at, decisions, your report); put undecided questions in a post, never on one card with a gate. '
@@ -2163,36 +2573,55 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
             f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')
 
 
-def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False, kind=None):
+def core_hint():
+    """What new adds to its error when the Herdr TUI cannot take the job but a Herdr Core answers on its socket here
+    (asked there, never started): the way to run the job on Core. The TUI stays the default backend, so nothing is
+    switched for the caller. '' when no core answers."""
+    if subprocess.run([str(FOLLOWER), '--alive'], capture_output=True).returncode:
+        return ''
+    return '; Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
+
+
+def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False, kind=None, app=False):
     """Front door: make the job, start its lead with its hooks, print the lead's name.
     kind: the lead's CLI, claude (on claude-opus-5-5) or codex (on gpt-6-astra); with none, FLEET_LEAD_KIND, else claude.
-    A fork of a Claude chat and a Herdr Core job take a Claude lead only; a Core job with no kind is claude.
+    A fork of a Claude chat takes a Claude lead only.
     The job folder is <jobs root>/jobs/<date>-<owner or local>-<slug>; the repo stays the agents' cwd, recorded in `workdir`.
     pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab.
     fork: a Claude session id (the chat that planned the job); the lead starts as a fork of it and keeps that conversation.
-    core: the whole job runs on Herdr Core, in cwd (default: the git root here).
+    core: the whole job runs on Herdr Core, in cwd (default: the git root here). app: its lead and workers also carry
+    the Herdr app's space and tab labels, so the app shows them (STAMPEDE_APP_SPACE=1 is the standing choice).
     front: the chat that runs this, outside Herdr, stays the owner's only contact; the lead posts to <job>/outbox for it."""
-    kind = kind or ('claude' if core else os.environ.get('FLEET_LEAD_KIND') or 'claude')
+    kind = kind or os.environ.get('FLEET_LEAD_KIND') or 'claude'
     if kind not in LEAD:
         raise ValueError(f'the lead runs on claude or codex, not {kind!r} (--lead, or FLEET_LEAD_KIND)')
     if kind != 'claude' and fork:
         raise ValueError('--fork forks a Claude chat, so it takes a Claude lead: drop --lead codex, or start without --fork')
-    if kind != 'claude' and core:
-        raise ValueError('a Herdr Core job runs a Claude lead only: drop --lead codex, or run the job on the Herdr TUI')
+    if core and kind == 'codex' and typing_unsafe():
+        raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + typing_unsafe())
     if core:
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
         if front:
             raise ValueError('--front-door is for a Herdr TUI job: the front door reads the lead\'s pane, and a Herdr Core job has none')
-        return new_core(ask_file, name, review, fork, cwd)
+        return new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1')
+    if app:
+        raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if not (workspace or pane):
-        raise ValueError('new needs --workspace or --pane, or run it inside Herdr')
+        raise ValueError('new needs --workspace or --pane, or run it inside Herdr' + core_hint())
     if fork is not None and not SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     ask = Path(ask_file).expanduser().read_text()
-    info = herdr('pane', 'get', pane)['pane'] if pane else None
-    # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
-    repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
+    try:  # the first words with Herdr: when it is not there, say so before anything is made, and name Core if it answers
+        info = herdr('pane', 'get', pane)['pane'] if pane else None
+        # herdr 0.9.4's `workspace get` has no cwd: the workspace's first pane holds the project folder
+        repo = Path(info['cwd'] if info else herdr('pane', 'list', '--workspace', workspace)['panes'][0]['cwd']).expanduser()
+    except HerdrError as error:
+        if error.code != 'server_not_running':
+            raise
+        raise HerdrError(line(error) + core_hint(), error.code) from None
+    except ValueError as error:  # no herdr on PATH, or one that gave no answer
+        raise ValueError(line(error) + core_hint()) from None
     ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
     owner = starter(ws_id)
     if front and owner:
@@ -2245,13 +2674,15 @@ def core_repo(cwd):
     return repo
 
 
-def new_core(ask_file, name, review, fork, cwd):
+def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False):
     """A whole job on Herdr Core. The record first (folder, backend, key, owner and its tag, marker, the lead's row), then
     the follower, then the lead with its brief pointer as the first prompt. Only a confirmed failure (the relay or the lead
-    never ran, or its terminal already finished) takes the start back; a live lead that is not ready stays one job."""
+    never ran, or its terminal already finished) takes the start back; a live lead that is not ready stays one job.
+    kind: the lead's CLI; a Codex lead runs without its daemon, as a Codex worker does. app: the job's lead and workers
+    carry the Herdr app's labels (<job>/app-space holds the space id)."""
     if fork is not None and not SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
-    repo, claude = core_repo(cwd), cli('claude')
+    repo, program = core_repo(cwd), cli(kind)
     ask = Path(ask_file).expanduser().read_text()
     owner = starter(os.environ.get('HERDR_WORKSPACE_ID'))
     job = repo / ('.herdr-' + (name or slug(ask)))
@@ -2272,10 +2703,13 @@ def new_core(ask_file, name, review, fork, cwd):
     target(job)
     brief = job / 'briefs' / (lead + '.md')
     brief.parent.mkdir()
-    brief.write_text(lead_brief(job, lead, owner, review, fork, key))
-    args = cli_args(job, lead, 'claude', *lead_model('claude'), [], lead=True)
-    session = str(uuid.uuid4())
-    record(job, lead, 'claude', brief, args, session)  # the fork stays out: a reopen resumes the lead's own session
+    if app:
+        (job / 'app-space').write_text('stampede-' + key[3:] + '\n')
+    brief.write_text(lead_brief(job, lead, owner, review, fork, key, kind=kind))
+    args = cli_args(job, lead, kind, *lead_model(kind), [], lead=True)
+    args += ['--no-daemon'] if kind == 'codex' else []  # else Codex runs its commands outside the terminal
+    session = str(uuid.uuid4()) if kind == 'claude' else ''  # Codex names its own session, at its first turn end
+    record(job, lead, kind, brief, args, session)  # the fork stays out: a reopen resumes the lead's own session
     mark_job(key, job)
     (events_dir() / 'owners' / key).unlink(missing_ok=True)  # a folder used before (same path, same key) had its own
     if owner:
@@ -2291,8 +2725,9 @@ def new_core(ask_file, name, review, fork, cwd):
             snapshot(job)
             return 1
         with launching(job, lead):
-            program = [claude] + (['--resume', fork, '--fork-session'] if fork else []) + args + ['--session-id', session]
-            address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo, session)
+            program = [program] + (['--resume', fork, '--fork-session'] if fork else []) + args + (['--session-id', session] if session else [])
+            address = core_run(job, lead, 'lead', program + [f'You are {lead}. Read {brief} and do everything it says.'], repo,
+                               session or None)
             outcome = core_outcome(job, lead, address, 'lead', brief)
     except CoreUnknown as error:
         snapshot(job)
@@ -2349,7 +2784,9 @@ def main(argv):
     p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
     p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox')
     p.add_argument('--lead', choices=sorted(LEAD), help='the lead\'s CLI: claude (claude-opus-5-5) or codex (gpt-6-astra); default '
-                   '$FLEET_LEAD_KIND, else claude. --fork and --core take claude only')
+                   '$FLEET_LEAD_KIND, else claude. --fork takes claude only')
+    p.add_argument('--app-space', action='store_true', help='with --core: label the lead and workers for the Herdr app '
+                   '(herdr.space, herdr.tab), so it shows the job in a space; the app then keeps those terminals')
     p = sub.add_parser('post'); p.add_argument('job'); p.add_argument('text', nargs='+'); p.add_argument('--file', action='append', default=[])
     p = sub.add_parser('wait'); p.add_argument('job'); p.add_argument('--timeout', type=int, default=3600, help='seconds; exit 3 when nothing came')
     p = start_parser = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind', required=True)
@@ -2401,9 +2838,10 @@ def main(argv):
 def run(a):
     if a.cmd == 'new':
         if a.core:
-            return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead)
+            return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,
+                       app=a.app_space)
         return new(a.file, a.workspace or os.environ.get('HERDR_WORKSPACE_ID'), a.name, a.review, a.pane, a.fork, front=a.front_door,
-                   kind=a.lead)
+                   kind=a.lead, app=a.app_space)
     if a.cmd == 'post':
         return post(a.job, ' '.join(a.text), a.file)
     if a.cmd == 'wait':

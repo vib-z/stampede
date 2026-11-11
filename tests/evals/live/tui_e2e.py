@@ -37,7 +37,8 @@ OTHER = 'b' * 40
 ORDER = ['T01', 'T02', 'T03', 'T04', 'T10', 'T05', 'T06', 'T07', 'T08', 'T09']
 SECTIONS = ('Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked')
 OUTSIDE = '''#!/bin/bash
-# runs "$@" with its ancestry (pid ppid comm, up to pid 1) printed first on stderr, for the record
+# runs "$@" once its parent is pid 1, with its ancestry (pid ppid comm, up to pid 1) printed first on stderr, for the record
+for _ in $(seq 250); do p=$(ps -o ppid= -p $$ 2>/dev/null) || break; [ "${p// /}" = 1 ] && break; sleep 0.02; done
 p=$$; chain=""
 while [ "$p" -gt 0 ]; do
   row=$(ps -o pid=,ppid=,comm= -p "$p" 2>/dev/null) || break
@@ -115,9 +116,23 @@ class Live:
         return self.sh(['herdr', *args], quiet=True)[1]
 
     def outside(self, argv, timeout=120):
-        """A command from outside Herdr, as the bot's own computer runs it: no Herdr or Core variables; its ancestry is logged."""
+        """A command from outside Herdr, as the bot's own computer runs it: no Herdr or Core variables, and its parent is
+        pid 1 (started by a shell that leaves at once), so no Herdr process is above it wherever this runner itself runs,
+        a Herdr pane included. Its ancestry is logged. (exit code, stdout, stderr); 124 when it did not end in time."""
         env = {k: v for k, v in os.environ.items() if k not in HERDR_VARS}
-        return self.sh(['bash', self.scratch / 'outside.sh', *argv], env=env, timeout=timeout)
+        argv = [str(x) for x in argv]
+        self.op += 1
+        box = str(self.scratch / f'outside{self.op}')
+        run = 'bash "$0" "$@" >"$BOX.out" 2>"$BOX.err" </dev/null; echo $? >"$BOX.tmp"; mv "$BOX.tmp" "$BOX.code"'
+        subprocess.run(['/bin/bash', '-c', 'BOX="$0" /bin/bash -c "$1" "${@:2}" >/dev/null 2>&1 &', box, run,
+                        str(self.scratch / 'outside.sh'), *argv], env=env, check=True)
+        ended = self.wait(lambda: Path(box + '.code').exists(), timeout, every=0.05)
+        code = int(Path(box + '.code').read_text()) if ended else 124
+        out, err = (Path(box + ext).read_text() if Path(box + ext).exists() else '' for ext in ('.out', '.err'))
+        err = err if ended else err + f'\ntimed out after {timeout} s'
+        self.ev.cmds.append('(outside Herdr, parent pid 1) ' + shlex.join(argv) + f'  -> exit {code}')
+        self.ev.log.append(f'$ (outside Herdr, parent pid 1) {shlex.join(argv)}\n[{code}] {out.strip()[-1200:]}\n{err.strip()[-600:]}'.rstrip())
+        return code, out, err
 
     def ops_pane(self):
         """A shell pane of the job's workspace for the lead's commands, in a tab named ops (made once per workspace)."""
@@ -367,7 +382,7 @@ class Live:
                   'the lead was told of the yes': bool(told)}
         self.ev.note(f'gate event: {json.dumps(event[0]) if event else "none"}')
         return self.verdict(checks, notes=f'The outside yes ran the gate event\'s approve line as given ({"with" if "--digest" in line else "without"} --digest), '
-                            'from this runner, whose ancestry (ANCESTRY line in the log) holds no herdr process.')
+                            'from a shell whose parent is pid 1, so its ancestry (ANCESTRY line in the log) holds no herdr process.')
 
     def t06(self):
         """Close the workspace; reopen.sh refuses while open, then recreates it with every agent, and the job carries on."""

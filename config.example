@@ -3,7 +3,7 @@
 # profile (add the line: . ~/.config/stampede/config). The Herdr plugin event reads the same file.
 
 # The lead and its questions (fleet-job, also called stampede)
-export FLEET_LEAD_KIND=claude                       # the lead's CLI when stampede new has no --lead: claude, or codex (gpt-6-astra, ultra); --fork and --core take claude
+export FLEET_LEAD_KIND=claude                       # the lead's CLI when stampede new has no --lead: claude, or codex (gpt-6-astra, ultra), on the Herdr TUI and on Herdr Core; --fork takes claude
 export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's model, for the CLI it belongs to: a gpt-... model sets a Codex lead, any other a Claude lead; the other CLI's lead keeps its default
 export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort, for the same CLI as FLEET_LEAD_MODEL (a Codex lead's default is ultra)
 export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this, for a question or a gate, in a job started locally; the question and options are appended
@@ -32,6 +32,7 @@ export HERDR_EVENTS_STALE_MINUTES=30                # a Herdr Core job's followe
 export HC=hc                                        # the Herdr Core binary, 0.1.13 or later
 export HC_SESSION=default                           # Core's own: which core; each name is a separate core with its own terminals
 export HC_SOCKET=                                   # Core's own: that core's socket; empty is Core's default path for the session
+export STAMPEDE_APP_SPACE=0                         # 1: every new --core job labels its lead and workers for the Herdr app (as --app-space)
 
 # The daily check for a newer release (stampede --version, stampede update --check, herdr-doctor)
 export STAMPEDE_NO_UPDATE_CHECK=0                   # 1 turns the check off
