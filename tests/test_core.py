@@ -45,8 +45,9 @@ class CoreCase(unittest.TestCase):
         self.addCleanup(patch.stop)
         xdg = os.environ.pop('XDG_STATE_HOME', None)
         self.addCleanup(lambda: os.environ.__setitem__('XDG_STATE_HOME', xdg) if xdg is not None else None)
+        # XDG_CONFIG_HOME: a host that sets it (a GitHub Linux runner does) would put Core's config.toml outside this HOME
         for name in ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER',
-                     'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET'):
+                     'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'HC_SESSION', 'HC_SOCKET', 'XDG_CONFIG_HOME'):
             os.environ.pop(name, None)
 
     # the fake core
@@ -65,7 +66,7 @@ class CoreCase(unittest.TestCase):
     def add_terminal(self, address, **fields):
         state = self.state()
         state['terminals'][address] = {'address': address, 'state': 'live', 'turn': 0, 'labels': {}, 'sent': [],
-                                       'status': {'state': 'idle'}, **fields}
+                                       'status': {'state': 'idle'}, 'status_ms': 1, **fields}   # at rest since long ago
         state['next'] = max(state['next'], int(address[1:]) + 1)
         (self.core / 'state.json').write_text(json.dumps(state))
 
@@ -353,11 +354,14 @@ class CoreNew(CoreCase):
         self.assertEqual((self.events / 'jobs' / key).read_text().strip(), str(job))
         relay, lead = self.calls('run')
         self.assertEqual(self.option(relay, '--name'), 'relay-' + key[3:])
-        self.assertEqual(self.labels(relay), {'stampede.job': key, 'stampede.agent': 'relay-' + key[3:], 'stampede.role': 'relay'})
+        launch = lambda run: {'stampede.launch': self.entries(self.job)[self.labels(run)['stampede.agent']]['launch']}  # each launch's own
+        self.assertEqual(self.labels(relay), {'stampede.job': key, 'stampede.agent': 'relay-' + key[3:], 'stampede.role': 'relay', **launch(relay)})
         self.assertEqual(self.program(relay)[-2:], [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core'), str(job)])
         session = fj.agent_rows(job)[LEAD]['session']
         self.assertEqual(self.labels(lead), {'stampede.job': key, 'stampede.agent': LEAD, 'stampede.role': 'lead',
-                                             'stampede.session': session})
+                                             'stampede.session': session, **launch(lead)})
+        self.assertRegex(launch(lead)['stampede.launch'], r'^[0-9a-f]{8}$')
+        self.assertNotEqual(launch(lead), launch(relay))
         for run in (relay, lead):
             self.assertIn('--bg', run)
             self.assertIn('--no-parent', run)
@@ -513,7 +517,8 @@ class CoreStart(CoreCase):
         self.assertEqual(self.option(run, '--name'), 'build-api')
         self.assertEqual(self.option(run, '--cwd'), str(self.repo))
         self.assertEqual(self.labels(run), {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker',
-                                            'stampede.session': fj.agent_rows(job)['build-api']['session']})
+                                            'stampede.session': fj.agent_rows(job)['build-api']['session'],
+                                            'stampede.launch': self.entries(job)['build-api']['launch']})
         self.assertIn('--no-parent', run)
         program = self.program(run)
         self.assertEqual(program[0], str(self.bin / 'claude'))

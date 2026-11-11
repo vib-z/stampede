@@ -15,7 +15,7 @@ You are a Grok Bot on the box, OUTSIDE Herdr. Before any Herdr work:
 ## Running from Grok Bot
 
 - Grok Bot runs on a Linux box. Anything that touches the owner's repos, herdr or the Mac runs on the Mac through `ssh <host>` (the SSH alias of the owner's Mac, over Tailscale). If ssh times out, bring Tailscale back up on the box, then retry.
-- herdr on the Mac is `~/.local/bin/herdr` (0.9.4 on both machines when written). Run `herdr --version` on the Mac first and treat the Mac's binary as the authority. Run herdr ON the Mac over ssh, never `herdr --remote` or `--machine` from the box: the Mac has no saved machine profiles.
+- herdr on the Mac is `~/.local/bin/herdr` (0.9.5 when last checked, 2026-11-11). Run `herdr --version` on the Mac first and treat the Mac's binary as the authority. Run herdr ON the Mac over ssh, never `herdr --remote` or `--machine` from the box: the Mac has no saved machine profiles.
 - Never use a work machine. Only the owner's own machines.
 - Questions for the owner go to the owner in chat, never into a herdr pane.
 - Credentials and env files are not part of this skill: never read, copy or print them, on either machine.
@@ -24,7 +24,7 @@ You are a Grok Bot on the box, OUTSIDE Herdr. Before any Herdr work:
 
 ## Hard rules
 - Target ONLY the ssh alias `<host>`: the owner's own Mac with the owner's own Claude, Codex and Cursor subscriptions. Never a machine on work subscriptions unless the owner asks in chat for that job.
-- Run herdr ON the Mac via ssh (0.9.4 on both). Never `herdr --remote`/`--machine` from the box. Never start/stop `herdr server` or the TUI.
+- Run herdr ON the Mac via ssh. Never `herdr --remote`/`--machine` from the box. Never start/stop `herdr server` or the TUI.
 - Never touch workspaces, tabs or panes you didn't create (the owner's own project workspaces above all).
 - Never poll a running job. After the first prompt and one screen check, end your turn and wait. A small job (no job marker) wakes you on its turn end. A stampede job wakes you on blocked, a permission prompt, StopFailure, stale, dead, a question, a gate, or the one done from `fleet-job finish` (source `stampede`). Only then read the pane, once.
 - Always prompt agents with `herdr-send <name-or-pane> "<text>"` (grokbot-herdr/scripts/herdr-send, installed at `~/.local/bin/herdr-send`) or `herdr agent prompt`, never `pane send-text` plus Enter (Codex leaves it unsubmitted). Never send `ctrl+c` to an idle Codex yourself: on an empty prompt it quits Codex (herdr-send clears only typed leftovers). Continue only on `SUBMITTED`; on `FAILED` read the screen before any resend. If Claude kept the text but dropped the Enter (it can while still drawing its screen), herdr-send presses Enter once and says so; it never does that for a slash command.
@@ -46,7 +46,7 @@ The relay scripts live in `scripts/` here and are copied to `~/.local/bin` on th
 Every call: `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '<herdr command>'`. If herdr isn't found, prefix `export PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH;`.
 
 ## Step 2. Health check
-`ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '~/.local/bin/herdr-doctor --relay'` (read only; checks the herdr server and client, the relay plugin, hooks and launchd jobs, the event queue, owner tags, leftover worktrees and disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM).
+`ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '~/.local/bin/herdr-doctor --tui --relay'` (read only; `--tui` keeps a stopped Herdr server a `PROBLEM` on a machine that also runs Herdr Core; checks the herdr server and client, the relay plugin, hooks and launchd jobs, the event queue, owner tags, leftover worktrees and disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM).
 - Exit 0: go on. Mention any `warn` line in your report; never fix it yourself unless it is yours (your own stale tag or worktree).
 - Exit 1: stop and tell the owner the PROBLEM lines (a broken relay means your job's events would never reach you).
 - ssh fails -> bring Tailscale back up on the box, then retry once. Still failing -> stop and tell the owner (usually the Mac is asleep/offline).
@@ -80,4 +80,4 @@ herdr-fleet now handles external callers; follow its **Where are you?** section 
 - https://herdr.dev/docs/cli-reference/
 - https://herdr.dev/docs/agent-automation/
 
-Re-check both, and `herdr <cmd> --help` on the Mac, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (2026-10-16: the docs track 0.9.5, the Mac runs 0.9.4).
+Re-check both, and `herdr <cmd> --help` on the Mac, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (herdr 0.9.5 on 2026-11-11).

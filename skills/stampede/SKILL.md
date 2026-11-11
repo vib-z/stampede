@@ -21,7 +21,7 @@ stampede new --file <ask.md> --pane "$P" --name <job> --front-door   # add --lea
 ```
 
 - Already in a Herdr pane in that project's workspace (`$HERDR_WORKSPACE_ID` is set): run `stampede new --file <ask.md>` without `--front-door`; the owner watches the lead's pane and answers its cards.
-- `--lead codex`: only when the owner asks for a Codex (Astra) lead. It is refused with `--fork` and with `--core`, whose lead is always Claude.
+- `--lead codex`: only when the owner asks for a Codex (Astra) lead. It is refused with `--fork`; with `--core` it runs a Codex lead in a Core terminal.
 - `--fork "$CLAUDE_CODE_SESSION_ID"`: only when the owner worked the plan out with you in this chat and the lead is Claude. The lead starts with this conversation; a Codex lead starts from the ask file.
 - `--review`: only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).
 - `--core`: only when the owner asks for Herdr Core. Then no workspace, no `--pane` and no `--front-door` (a Core job has no pane to relay from; it is refused): `stampede new --core --file <ask.md> --cwd "$R" --name <job>` after `herdr-trust "$R"`. A `BLOCKED` or `NOT READY` line names the lead's terminal: read it with `hc read <address>` ([core.md](../herdr-fleet/references/core.md)).

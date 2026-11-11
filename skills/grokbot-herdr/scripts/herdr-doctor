@@ -1,15 +1,20 @@
 #!/bin/bash
-# herdr-doctor: read-only core health check, plus the optional event relay when installed or --relay.
-# --core: for Herdr Core jobs, hc, the selected core, Claude's and Codex's status support, instead of the Herdr TUI.
-# One line per check:
+# herdr-doctor: read-only health check of this machine for stampede, plus the optional event relay when installed or --relay.
+# It checks each backend that is installed: the Herdr TUI when herdr is on PATH, Herdr Core when hc is. With both, a
+# backend that is not usable is a warn while the other one is, and the last backend line says which a job can run on:
+#   ok backend tui,core
+# --tui or --core checks that one only, and there each gap is a PROBLEM. With neither installed it is a PROBLEM.
+# Herdr Core: hc, the selected core (asked on its socket), Claude's and Codex's status support, and what Herdr Core
+# 0.1.18 to 0.1.20 changed (a core older than the recommended one, terminals older than the core's bundle on macOS, a
+# core started from inside an agent). One line per check:
 #   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
 # Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing, never starts a core; never prints route files or settings values.
-usage(){ echo 'usage: herdr-doctor [--relay] [--core] [-h|--help]'; }
-relay=0; core=0
+usage(){ echo 'usage: herdr-doctor [--relay] [--tui|--core] [-h|--help]'; }
+relay=0; only=""
 for option in "$@"; do
   case "$option" in
     --relay) relay=1;;
-    --core) core=1;;
+    --core|--tui) [ -z "$only" ] || [ "$only" = "${option#--}" ] || { usage >&2; exit 2; }; only=${option#--};;
     -h|--help) usage; exit 0;;
     *) usage >&2; exit 2;;
   esac
@@ -20,42 +25,129 @@ case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(ba
 . "$(dirname "$_src")/herdr-platform"
 bad=0
 HERDR_MIN=0.9.4 HC_MIN=0.1.13 CLAUDE_CORE_MIN=2.1.295   # the minimums; herdr-plugin.toml and the README state the same
+HC_REC=0.1.20   # the Herdr Core this version was checked against; older ones run, with a warn
 ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }
 problem(){ echo "PROBLEM $*"; bad=1; }
+gap(){ echo "GAP $*"; }   # a backend's own gap: a PROBLEM, or a warn while the other backend is usable (see emit)
 
-tools="herdr jq git python3"; [ "$core" = 1 ] && tools="jq git python3"
-for t in $tools; do
+# the backends this run checks: the one asked for, else each one installed (the TUI when neither is, so the line names it)
+tui=0; core=0
+case "$only" in
+  tui) tui=1;; core) core=1;;
+  *) command -v herdr >/dev/null && tui=1; command -v "${HC:-hc}" >/dev/null && core=1; [ "$tui$core" = 00 ] && tui=1;;
+esac
+for t in jq git python3; do
   if command -v "$t" >/dev/null; then ok "$t on PATH"; else problem "$t not on PATH: install it"; fi
 done
 
 # Herdr Core: the CLI, the selected core (asked on its socket, never started), and agents that report OSC 7501 status
 newer(){ python3 -c 'import sys; v=[tuple(int(n) for n in x.split(".")[:3]) for x in sys.argv[1:]]; sys.exit(v[0] < v[1])' "$1" "$2" 2>/dev/null; }
 version_of(){ "$@" --version 2>/dev/null | awk '{print $2}' | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }
-if [ "$core" = 0 ] && command -v herdr >/dev/null; then
+tui_checks(){   # herdr on PATH, its version, and a running server of the same version
+  if ! command -v herdr >/dev/null; then
+    gap "herdr not on PATH: install Herdr $HERDR_MIN or later (or Herdr Core, hc, and run jobs with stampede new --core)"; return
+  fi
+  ok "herdr on PATH"
+  local hv st status_result cv sv
   hv=$(version_of herdr)
-  if [ -z "$hv" ]; then problem "herdr --version printed no version: reinstall Herdr $HERDR_MIN or later"
-  elif ! newer "$hv" "$HERDR_MIN"; then problem "herdr $hv is older than $HERDR_MIN: upgrade Herdr; the owner restarts the server after"
+  if [ -z "$hv" ]; then gap "herdr --version printed no version: reinstall Herdr $HERDR_MIN or later"
+  elif ! newer "$hv" "$HERDR_MIN"; then gap "herdr $hv is older than $HERDR_MIN: upgrade Herdr; the owner restarts the server after"
   else ok "herdr $hv"; fi
-fi
-if [ "$core" = 1 ]; then
+  st=$(herdr status 2>&1); status_result=$?
+  cv=$(awk '/^client:/{c=1} c && /version:/{print $2; exit}' <<<"$st")
+  sv=$(awk '/^server:/{s=1} s && /version:/{print $2; exit}' <<<"$st")
+  if [ "$status_result" != 0 ] || ! grep -q 'status: running' <<<"$st"; then gap "herdr server not running: the owner starts it (bots never do)"
+  elif [ -z "$cv" ] || [ -z "$sv" ] || [ "$cv" != "$sv" ]; then gap "herdr client $cv, server $sv: the owner restarts the server after an upgrade"
+  elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart needed: the owner restarts the server when idle"
+  else ok "herdr client and server $cv"; fi
+}
+core_checks(){   # hc and its version, the selected core, agents that report OSC 7501 status, and what 0.1.18 to 0.1.20 changed
+  local hcv follower cv alive=0
   hcv=$(version_of "${HC:-hc}")
-  if ! command -v "${HC:-hc}" >/dev/null; then problem "hc not on PATH: install Herdr Core $HC_MIN or later (curl -fsSL https://releases.herdr.dev/core/install.sh | sh), or set HC"
-  elif [ -z "$hcv" ]; then problem "hc --version printed no version: reinstall Herdr Core $HC_MIN or later"
-  elif ! newer "$hcv" "$HC_MIN"; then problem "hc $hcv is older than $HC_MIN: hc update"
-  else ok "hc $hcv"; fi
+  if ! command -v "${HC:-hc}" >/dev/null; then gap "hc not on PATH: install Herdr Core $HC_MIN or later (curl -fsSL https://releases.herdr.dev/core/install.sh | sh), or set HC"
+  elif [ -z "$hcv" ]; then gap "hc --version printed no version: reinstall Herdr Core $HC_MIN or later"
+  elif ! newer "$hcv" "$HC_MIN"; then gap "hc $hcv is older than $HC_MIN: hc update"
+  else
+    ok "hc $hcv"
+    newer "$hcv" "$HC_REC" || warn "hc $hcv is older than $HC_REC, which this stampede was checked against: hc update (from $HC_REC Core holds a message while a person is typing in the terminal, which a Codex lead on Core needs, and on macOS quitting an app no longer ends terminals; reopen older job terminals once after it)"
+  fi
   follower=$(python3 -c 'import os,sys; print(os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "herdr-event-core"))' "${BASH_SOURCE[0]}")
-  if "$follower" --alive; then ok "Herdr Core answers (HC_SESSION ${HC_SESSION:-default})"
-  else problem "Herdr Core not running for HC_SESSION ${HC_SESSION:-default}: the owner starts it (hc server start); this check never does"; fi
+  if "$follower" --alive; then ok "Herdr Core answers (HC_SESSION ${HC_SESSION:-default})"; alive=1
+  else gap "Herdr Core not running for HC_SESSION ${HC_SESSION:-default}: the owner starts it (hc server start); this check never does"; fi
   cv=$(claude --version 2>/dev/null | awk '{print $1}')
-  if [ -z "$cv" ]; then problem "claude not on PATH: every lead runs on Claude Code"
+  if [ -z "$cv" ] && command -v codex >/dev/null; then warn "claude not on PATH: a Core job here needs stampede new --core --lead codex, and Codex workers"
+  elif [ -z "$cv" ]; then gap "claude not on PATH, and no codex: a lead runs on Claude Code or Codex"
   elif newer "$cv" "$CLAUDE_CORE_MIN"; then ok "claude $cv reports its status (OSC 7501)"
-  else problem "claude $cv reports no status on Herdr Core (OSC 7501 came in $CLAUDE_CORE_MIN): update Claude Code"; fi
+  else gap "claude $cv reports no status on Herdr Core (OSC 7501 came in $CLAUDE_CORE_MIN): update Claude Code"; fi
   if ! command -v codex >/dev/null; then ok "codex not installed (optional)"
   elif codex --help 2>/dev/null | grep -q -- '--no-daemon'; then ok "codex runs with --no-daemon"
-  else problem "codex has no --no-daemon: update Codex before starting Codex workers on Herdr Core"; fi
+  else gap "codex has no --no-daemon: update Codex before starting Codex agents on Herdr Core"; fi
   if command -v cursor-agent >/dev/null; then warn "cursor-agent runs on the TUI only for stampede: it reports no OSC 7501 status on Herdr Core"; fi
-fi
+  [ "$alive" = 1 ] && core_advice
+  local app=""
+  if command -v herdr-app >/dev/null; then app=$(herdr-app --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  elif [ -f /Applications/Herdr.app/Contents/Info.plist ]; then app=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Herdr.app/Contents/Info.plist 2>/dev/null); fi
+  if [ -n "$app" ]; then ok "Herdr app $app (optional: it shows a Core job started with --app-space)"; fi
+}
+core_advice(){   # read-only looks at a core that answers; every line is a warn, and a look that fails says nothing
+  python3 - "${HC:-hc}" "$HOME/.local/share/herdr-core/current" "$(uname -s)" <<'PY'
+import json, os, subprocess, sys
+hc, bundle, system = sys.argv[1:4]
+def ask(*args):
+    try:
+        return subprocess.run([hc, *args], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+# a core started from inside an agent or a pane hands that environment to every new terminal (names only, never values)
+env = ask('exec', '--', '/usr/bin/env')
+if env and env.returncode == 0:
+    marks = sorted({row.split('=', 1)[0] for row in env.stdout.splitlines()
+                    if row.split('=', 1)[0] in ('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_SANDBOX', 'HERDR_ENV', 'HERDR_PANE_ID', 'HC_TERMINAL_ID')})
+    if marks:
+        print(f"warn Herdr Core was started from inside an agent or a pane (its environment holds {', '.join(marks)}), so new "
+              "terminals inherit that: the owner runs hc server restart --fresh from a terminal outside Herdr (hc 0.1.20 on; programs keep running)")
+# macOS: terminals opened before the core's bundle was installed keep the old holder (local network, microphone, the 0.1.20 fixes)
+if system == 'Darwin' and os.path.lexists(bundle):
+    listed = ask('ls', '--json')
+    try:
+        terminals = json.loads(listed.stdout).get('terminals', []) if listed and listed.returncode == 0 else []
+    except ValueError:
+        terminals = []
+    installed, old = os.lstat(bundle).st_mtime * 1000, []
+    for terminal in terminals[:200]:
+        shown = ask('get', '--json', str(terminal.get('address')))
+        try:
+            created = json.loads(shown.stdout).get('created_ms') if shown and shown.returncode == 0 else None
+        except ValueError:
+            created = None
+        if isinstance(created, (int, float)) and created < installed:
+            old.append(str(terminal.get('name') or terminal.get('address')))
+    if old:
+        print(f"warn {len(old)} terminal(s) were opened before the Herdr Core bundle here was installed ({', '.join(old[:8])}"
+              f"{', ...' if len(old) > 8 else ''}): reopen each once (a job's with its reopen.sh) to get what the update fixed")
+PY
+}
+emit(){   # emit <a backend's lines> <PROBLEM|warn>: its gaps as that
+  local row
+  while IFS= read -r row; do
+    case "$row" in
+      "GAP "*) if [ "$2" = warn ]; then warn "${row#GAP }"; else problem "${row#GAP }"; fi;;
+      "") ;;
+      *) echo "$row";;
+    esac
+  done <<<"$1"
+}
+tui_lines=""; core_lines=""; usable=""
+[ "$tui" = 1 ] && tui_lines=$(tui_checks)
+[ "$core" = 1 ] && core_lines=$(core_checks)
+[ "$tui" = 1 ] && ! grep -q '^GAP ' <<<"$tui_lines" && usable="tui"
+[ "$core" = 1 ] && ! grep -q '^GAP ' <<<"$core_lines" && usable="${usable:+$usable,}core"
+# with both checked, one usable backend is enough to run a job: the other one's gaps are then a warn
+as=PROBLEM; [ "$tui$core" = 11 ] && [ -n "$usable" ] && as=warn
+emit "$tui_lines" "$as"; emit "$core_lines" "$as"
+if [ -n "$usable" ]; then ok "backend $usable"
+elif [ "$tui$core" = 11 ]; then problem "no usable backend: fix the Herdr TUI or the Herdr Core lines above (a job runs on either)"; fi
 
 # stampede must report this checkout's VERSION, including when this helper is a symlink
 if ! command -v stampede >/dev/null; then problem "stampede not on PATH: run install.sh and add ~/.local/bin to PATH"
@@ -91,17 +183,6 @@ if [ -n "$managed" ] && command -v python3 >/dev/null; then
   else ok "stampede and the skills resolve into the plugin checkout"; fi
 fi
 
-# herdr client and server
-if [ "$core" = 0 ]; then
-st=$(herdr status 2>&1); status_result=$?
-cv=$(awk '/^client:/{c=1} c && /version:/{print $2; exit}' <<<"$st")
-sv=$(awk '/^server:/{s=1} s && /version:/{print $2; exit}' <<<"$st")
-if [ "$status_result" != 0 ] || ! grep -q 'status: running' <<<"$st"; then problem "herdr server not running: the owner starts it (bots never do)"
-elif [ -z "$cv" ] || [ -z "$sv" ] || [ "$cv" != "$sv" ]; then problem "herdr client $cv, server $sv: the owner restarts the server after an upgrade"
-elif grep -q 'restart_needed: yes' <<<"$st"; then warn "herdr $cv, restart needed: the owner restarts the server when idle"
-else ok "herdr client and server $cv"; fi
-fi
-
 # relay configuration is the signal, not the helper scripts, and not the Linux timers install.sh starts
 EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"
 R="${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}"
@@ -113,8 +194,10 @@ if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.pl
   || grep -q 'herdr-event-codex-notify' <<<"$codex_notify"; then relay=1; fi
 
 # a clone plus install.sh does not enable the event plugin (the Herdr TUI's; a Core job has its follower instead)
-if [ "$core" = 1 ]; then :
+# with both backends checked and only Herdr Core usable, the TUI's plugin is not what a job here needs: a warn, as its other gaps
+if [ "$tui" = 0 ]; then :
 elif herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled'; then ok "event plugin enabled"
+elif [ "$relay" = 1 ] && [ "$as" = warn ] && [ "${usable#tui}" = "$usable" ]; then warn "event plugin not enabled: the Herdr TUI needs it for a bot's events (herdr plugin link <stampede checkout>, or herdr plugin install vib-z/stampede); a Herdr Core job does not"
 elif [ "$relay" = 1 ]; then problem "event plugin not enabled: herdr plugin link <stampede checkout>, or herdr plugin install vib-z/stampede"
 else warn "event plugin not enabled (optional): needed only for a remote bot's event relay"; fi
 

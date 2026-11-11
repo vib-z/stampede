@@ -118,7 +118,9 @@ class MixedStart(MixedCase):
         for kind in ('cursor', 'hermes', 'kimi'):
             with self.assertRaises(ValueError) as refused:
                 self.hand('build-ui', kind, pane=None)
-            self.assertIn(f'{kind.capitalize()} reports no OSC 7501 status, so Herdr Core cannot run it', str(refused.exception))
+            why = 'reports its status on Herdr Core, but stampede has no turn hook' if kind == 'kimi' else 'reports no OSC 7501 status, so Herdr Core cannot run it'
+            self.assertIn(f'{kind.capitalize()} {why}', str(refused.exception))
+            self.assertIn('hand it to a Herdr TUI pane at its shell prompt with --pane <pane>', str(refused.exception))
             self.assertIn('--pane', str(refused.exception))
         tui = self.repo / '.herdr-tui'
         (tui / 'briefs').mkdir(parents=True)

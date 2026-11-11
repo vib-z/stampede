@@ -202,6 +202,15 @@ class CoreAlive(Shell):
         self.addCleanup(server.shutdown)
         self.assertEqual(self.run_script('herdr-event-core', '--alive', HC_SOCKET=str(path)).returncode, 0)
 
+    def test_the_running_core_names_its_own_version(self):
+        path, server = core_socket(self.home)
+        self.addCleanup(server.shutdown)
+        shown = self.run_script('herdr-event-core', '--core-version', HC_SOCKET=str(path))
+        self.assertEqual((shown.returncode, shown.stdout.strip()), (0, '0.1.13'))
+        down = self.run_script('herdr-event-core', '--core-version', HC_SOCKET=str(self.home / 'none.sock'))
+        self.assertEqual((down.returncode, down.stdout), (1, ''))
+        self.assertFalse((self.home / 'core/calls').exists(), 'never an hc command')
+
     def test_the_socket_is_found_as_core_finds_it(self):
         core = follower_module()
         home = Path('/h')
@@ -267,6 +276,124 @@ class CoreDoctor(Shell):
         self.fake('hc', f'echo "$*" >> "{self.home}/hc-calls"; echo "hc 0.1.13"\n')
         self.doctor(HC_SOCKET=str(self.home / 'none.sock'))
         self.assertEqual((self.home / 'hc-calls').read_text().split(), ['--version'])
+
+    # the default run: each backend that is installed, and one usable backend is enough
+    HERDR = '''case "$1 $2" in
+  "--version ") echo "herdr 0.9.5";;
+  "status ") printf 'client:\\n  version: 0.9.5\\nserver:\\n  status: %s\\n  version: 0.9.5\\n' "${TEST_SERVER_STATE:-running}";;
+  "workspace list") echo '{"result":{"workspaces":[]}}';;
+  *) exit 99;;
+esac
+exit 0
+'''
+
+    def both(self, *flags, **env):
+        self.fake('herdr', self.HERDR)
+        return subprocess.run([str(self.bin / 'herdr-doctor'), *flags], capture_output=True, text=True, timeout=30,
+                              env={**self.env, 'HC_SOCKET': str(self.socket), **env})
+
+    def test_the_default_run_checks_each_backend_installed(self):
+        result = self.both()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        for line in ('ok herdr 0.9.5', 'ok herdr client and server 0.9.5', 'ok hc 0.1.13', 'ok Herdr Core answers', 'ok backend tui,core'):
+            self.assertIn(line, result.stdout)
+        self.assertNotIn('PROBLEM', result.stdout)
+
+    def test_one_usable_backend_is_enough_and_the_other_is_a_warn(self):
+        core_only = self.both(TEST_SERVER_STATE='not running')   # the Herdr TUI is not running, Herdr Core is
+        self.assertEqual(core_only.returncode, 0, core_only.stdout)
+        self.assertIn('warn herdr server not running', core_only.stdout)
+        self.assertIn('ok backend core\n', core_only.stdout)
+        tui_only = self.both(HC_SOCKET=str(self.home / 'none.sock'))
+        self.assertEqual(tui_only.returncode, 0, tui_only.stdout)
+        self.assertIn('warn Herdr Core not running', tui_only.stdout)
+        self.assertIn('ok backend tui\n', tui_only.stdout)
+        for result in (core_only, tui_only):
+            self.assertNotIn('PROBLEM', result.stdout)
+
+    def test_no_usable_backend_is_a_problem(self):
+        result = self.both(TEST_SERVER_STATE='not running', HC_SOCKET=str(self.home / 'none.sock'))
+        self.assertEqual(result.returncode, 1)
+        for line in ('PROBLEM herdr server not running', 'PROBLEM Herdr Core not running', 'PROBLEM no usable backend'):
+            self.assertIn(line, result.stdout)
+        self.assertNotIn('ok backend', result.stdout)
+
+    def test_a_flag_checks_one_backend_and_its_gaps_are_problems(self):
+        tui = self.both('--tui', HC_SOCKET=str(self.home / 'none.sock'))
+        self.assertEqual(tui.returncode, 0, tui.stdout)
+        self.assertNotIn('Herdr Core', tui.stdout)
+        self.assertIn('ok backend tui\n', tui.stdout)
+        core = self.both('--core', TEST_SERVER_STATE='not running')
+        self.assertEqual(core.returncode, 0, core.stdout)
+        self.assertNotIn('herdr server', core.stdout)
+        self.assertIn('ok backend core\n', core.stdout)
+        self.assertEqual(self.both('--tui', TEST_SERVER_STATE='not running').returncode, 1)
+        both = self.both('--tui', '--core')
+        self.assertEqual((both.returncode, both.stdout), (2, ''))
+        self.assertIn('usage: herdr-doctor [--relay] [--tui|--core]', both.stderr)
+
+    def test_a_machine_with_no_herdr_at_all_runs_on_core(self):
+        fixed = '/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin'   # herdr-doctor always searches these
+        if shutil.which('herdr', path=fixed):
+            self.skipTest('herdr is installed in a folder herdr-doctor always searches, so its absence cannot be staged here')
+        result = subprocess.run([str(self.bin / 'herdr-doctor')], capture_output=True, text=True, timeout=30,
+                                env={**self.env, 'HC_SOCKET': str(self.socket)})
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('ok backend core\n', result.stdout)
+        self.assertNotIn('herdr not on PATH', result.stdout)
+
+    def test_the_tui_s_plugin_is_a_warn_where_only_core_can_run_a_job(self):
+        """review-codex R5: with a relay set up, the Herdr TUI down and Herdr Core usable, the TUI's event plugin is no
+        PROBLEM (a Core job does not use it); with --tui, or once the TUI is usable, it is one as before."""
+        (self.events / 'routes').mkdir()
+        (self.events / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        core_only = self.both(TEST_SERVER_STATE='not running')
+        self.assertIn('ok backend core\n', core_only.stdout)
+        self.assertIn('warn event plugin not enabled: the Herdr TUI needs it', core_only.stdout)
+        self.assertNotIn('PROBLEM event plugin', core_only.stdout)
+        for flags, env in ((('--tui',), {'TEST_SERVER_STATE': 'not running'}), ((), {})):
+            with self.subTest(flags=flags):
+                self.assertIn('PROBLEM event plugin not enabled', self.both(*flags, **env).stdout)
+
+    def test_an_older_core_than_the_recommended_one_is_a_warn(self):
+        old = self.doctor(TEST_HC_VERSION='0.1.19')
+        self.assertEqual(old.returncode, 0, old.stdout)
+        self.assertIn('warn hc 0.1.19 is older than 0.1.20', old.stdout)
+        self.assertNotIn('older than 0.1.20', self.doctor(TEST_HC_VERSION='0.1.20').stdout)
+        self.assertNotIn('older than 0.1.20', self.doctor(TEST_HC_VERSION='0.2.0').stdout)
+
+    def test_a_lead_runs_on_claude_or_codex(self):
+        (self.bin / 'claude').unlink()
+        result = self.doctor()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('warn claude not on PATH: a Core job here needs stampede new --core --lead codex', result.stdout)
+        (self.bin / 'codex').unlink()
+        self.assertIn('PROBLEM claude not on PATH, and no codex', self.doctor().stdout)
+
+    def test_a_core_started_inside_an_agent_and_terminals_older_than_its_bundle_are_warns(self):
+        """Read-only looks at a core that answers: names from its environment (never values), and on macOS the
+        terminals opened before the core's bundle was installed."""
+        self.fake('uname', 'echo Darwin\n')
+        self.fake('hc', '''case "$1" in
+  --version) echo "hc 0.1.20";;
+  exec) printf 'HOME=/x\\nCLAUDECODE=1\\nHERDR_PANE_ID=w1:p1\\nAPI_TOKEN=do-not-print\\n';;
+  ls) echo '{"terminals":[{"address":"t1","name":"lead-old"},{"address":"t2","name":"fresh"}]}';;
+  get) if [ "$3" = t1 ]; then echo '{"created_ms": 1000}'; else echo '{"created_ms": 99999999999999}'; fi;;
+esac
+''')
+        bundle = self.home / '.local/share/herdr-core'
+        bundle.mkdir(parents=True)
+        (bundle / 'current').symlink_to(bundle)
+        result = self.doctor()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('warn Herdr Core was started from inside an agent or a pane (its environment holds CLAUDECODE, HERDR_PANE_ID)', result.stdout)
+        self.assertIn('hc server restart --fresh', result.stdout)
+        self.assertNotIn('do-not-print', result.stdout)
+        self.assertIn('warn 1 terminal(s) were opened before the Herdr Core bundle here was installed (lead-old)', result.stdout)
+        self.fake('hc', 'case "$1" in --version) echo "hc 0.1.20";; exec) echo HOME=/x;; ls) echo "{}";; esac\n')
+        clean = self.doctor().stdout
+        self.assertNotIn('started from inside', clean)
+        self.assertNotIn('were opened before', clean)
 
 
 def ev(kind, terminal, data, seq=0):
@@ -898,7 +1025,8 @@ class ReviewWorkspaceGrammar(Shell):
         self.assertEqual(self.log().count('dropped malformed workspace'), 4)
         for good, pane in (('w1', 'w1:p1'), (KEY, f'hc:{KEY}/t3')):
             self.post(source='hc', state='blocked', workspace=good, pane=pane, agent='ok')
-        self.assertEqual([(q['route'], q['payload']['workspace']) for q in self.queued()], [('beta', 'w1'), ('beta', KEY)])
+        self.assertEqual(sorted((q['route'], q['payload']['workspace']) for q in self.queued()), sorted([('beta', 'w1'), ('beta', KEY)]),
+                         'both are routed; the queue\'s file order is not the order they were posted in')
 
 
 

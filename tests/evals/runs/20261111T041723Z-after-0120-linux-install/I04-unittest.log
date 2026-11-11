@@ -1,0 +1,90 @@
+......xxxx.xxx.........ssssssssssss......./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................................................................../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpclpp05kt/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 11136 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpply15hrq/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpayxtqrgq/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmp5mbylpbs/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpefksrjz5/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpx45tbn3t/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpekyz8vk9/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmp7f2oedjc/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpruev1pwo/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpcfuj3kf5/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpdjrx6dsg/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpr_gycdxo/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpcm6p1d7i/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpstc1yb1i/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:621: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  for row in self.stream():
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:624: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:624: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........../tmp/tmpn6t3fhnj~/bin/herdr-event-post: line 142: /tmp/tmpn6t3fhnj/queue/queue/.tmp-20261111T041835Z-14899-10752.json: Not a directory
+........../usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpnj_uvp19/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpk2h9gogc/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......./usr/lib/python3.12/unittest/case.py:669: ResourceWarning: unclosed <socket.socket fd=3, family=1, type=1, proto=0, laddr=/tmp/tmpsqvjlmbz/c.sock>
+  function, args, kwargs = self._cleanups.pop()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.................................../usr/lib/python3.12/threading.py:1014: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  del self._target, self._args, self._kwargs
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+~/unit-suite/tests/test_core_releases.py:853: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='UTF-8'>
+  list(self.f.stream())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........................................../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 20804 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+............................................................................................................................................................................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:624: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........................~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:624: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.~/unit-suite/skills/grokbot-herdr/scripts/herdr-event-core:624: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  return 0
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....................................................
+----------------------------------------------------------------------
+Ran 504 tests in 170.048s
+
+OK (skipped=12, expected failures=7)

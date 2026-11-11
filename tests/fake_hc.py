@@ -9,13 +9,27 @@ State is FAKE_HC/state.json; every call is one JSON line in FAKE_HC/calls. A tes
   get_error {address: kind}      `get` of it fails with this error kind
   ls_error  kind                 every `ls` fails with this error kind
   read_error {address: kind}     `read` of it fails with this error kind
-A terminal's `draft` is what sits typed in its input: `keys` add to it (`ctrl+c` clears it, `enter` submits it), and
-`send` submits the draft with the text after it, as Core pastes after whatever is there; `sent` keeps what arrived.
+  send_slow {address: seconds}   `send` to it answers only after this long, typing nothing before (a hung hc)
+  send_started {address: value}  the `started` a `send` to it answers (true by default; false: it did not go working)
+A terminal's `draft` is what sits typed in its input by `keys` (`ctrl+c` clears it, `enter` submits it): `send` submits
+it with the text after it, as Core pastes after text no person is typing. A terminal's `person` is a person's unsent
+draft, typed through an attach: {"draft": text, "then": "clear" | "send" | "stay", "after": seconds}. As Core 0.1.20
+does, `send` waits `after` seconds for the person, then types the text alone when they cleared the draft, after their
+own message when they sent it, and after the draft when it stayed past the limit; `sent` keeps what arrived. A draft
+that stays holds the send for `after` seconds, by default the state's `draft_wait` (60, Core's own): a send killed
+before that has typed nothing, and the draft is still there.
+  version   string               what `hc --version` prints after "hc " (0.1.20 by default)
+  core_env  {name: value}        added to the core's own environment, which `exec -- /usr/bin/env` prints: HOME and
+                                 XDG_CONFIG_HOME as this fake was called with them, so its config.toml is the test's
+  exec_error kind                `exec` fails with this error kind
+`keep <t> [--off]` and `label <t> k=v...` (`k=` removes) change the terminal as Core's do; a test plays a lost program
+under keep by setting the terminal's argv to a shell's and its status to null, as Core's restarted event leaves it.
   lookup_error kind              after a `run` fails, every `ls` fails with this kind (a lost answer, then no lookup)
   slow      seconds              `run` holds the state lock this long (a launch in progress)
   streams   [[line, ...], ...]   `events`: connection n prints streams[n], one JSON line each, then ends
   hold      [seconds, ...]       `events`: connection n then stays open and quiet this long (the state lock released)
-Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1.
+Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1
+(cancelled, a send Core dropped before typing, among them). tests/test_hc_contract.py holds this fake to hc's own schema.
 Each HC_SESSION other than the default is a core of its own: its state and calls live in FAKE_HC/<session>/."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -83,7 +97,7 @@ def labelled(t, wanted):
 def command(state, argv):
     cmd, args = argv[0], argv[1:]
     if cmd in ('--version', '-V'):
-        return print('hc 0.1.13')
+        return print('hc ' + state.get('version', '0.1.20'))
     if cmd == 'run':
         o, program = options(args, {'--bg', '--no-parent', '--no-notify', '--outlive-parent', '--json', '--rm', '--keep'},
                              {'--name', '--cwd', '--label', '--parent', '--timeout', '--on'})
@@ -97,8 +111,8 @@ def command(state, argv):
             state['ls_error'] = state['lookup_error']
         if error and not state.get('spawn_also'):
             fail(error, f'cannot start {program[:1]}')
-        t = {'address': address, 'name': name, 'cwd': o.get('cwd'), 'argv': program, 'state': 'live', 'turn': 0,
-             'labels': dict(w.split('=', 1) for w in o['label']), 'status': {'state': 'idle'}, 'reported': True,
+        t = {'address': address, 'name': name, 'cwd': o.get('cwd'), 'argv': program, 'state': 'live', 'turn': 0, 'keep': bool(o.get('keep')),
+             'labels': dict(w.split('=', 1) for w in o['label']), 'status': {'state': 'idle'}, 'status_ms': 1, 'reported': True,
              'exit_code': None, 'reason': None, 'parent': None, 'sent': [], **state.get('on_run', {}).get(name, {})}
         state['terminals'][address] = t
         if error:
@@ -111,6 +125,22 @@ def command(state, argv):
         o, _ = options(args, {'--all', '--json'}, {'--label'})
         found = [view(t) for t in state['terminals'].values() if (o.get('all') or t['state'] == 'live') and labelled(t, o['label'])]
         return print(json.dumps({'terminals': found, 'machines': [], 'hidden_finished': 0}))
+    if cmd == 'exec':  # one program without a terminal: only the core's environment is modelled
+        if state.get('exec_error'):
+            fail(state['exec_error'], 'cannot run it')
+        env = {k: os.environ[k] for k in ('HOME', 'XDG_CONFIG_HOME') if os.environ.get(k)}
+        return print('\n'.join(f'{k}={v}' for k, v in {**env, **state.get('core_env', {})}.items()))
+    if cmd == 'keep':
+        o, rest = options(args, {'--json', '--off'}, set())
+        t = find(state, rest[0])
+        t['keep'] = not o.get('off')
+        return print(json.dumps({'terminal': t['address'], 'keep': t['keep']}))
+    if cmd == 'label':
+        o, rest = options(args, {'--json'}, set())
+        t = find(state, rest[0])
+        for k, v in (w.split('=', 1) for w in rest[1:]):
+            t['labels'].pop(k, None) if v == '' else t['labels'].__setitem__(k, v)
+        return print(json.dumps({'terminal': t['address'], 'labels': t['labels']}))
     if cmd in ('get', 'wait', 'kill', 'rm', 'read', 'keys', 'interrupt'):
         o, rest = options(args, {'--json'}, {'--timeout', '--lines', '--children', '--output'})
         t = find(state, rest[0])
@@ -157,8 +187,16 @@ def command(state, argv):
             fail(state['send_error'][t['address']], 'refused')
         if o.get('if') and word(t) != o['if']:
             fail('status_mismatch', f'{t["address"]} is {word(t)}, not {o["if"]}')
+        time.sleep(state.get('send_slow', {}).get(t['address'], 0))  # killed here, nothing was typed
+        person = t.pop('person', None)
+        if person:  # a person's unsent draft holds the send: until they send or clear it, or the limit passes
+            time.sleep(person.get('after', state.get('draft_wait', 60) if person.get('then', 'stay') == 'stay' else 0))
+            if person.get('then') == 'send':
+                t['sent'].append(person['draft'])
+            elif person.get('then') != 'clear':
+                t['draft'] = person['draft'] + t.get('draft', '')
         t['sent'].append(t.pop('draft', '') + rest[1])
-        return print(json.dumps({'started': True, 'status': word(t), 'turn': t['turn']}))
+        return print(json.dumps({'started': state.get('send_started', {}).get(t['address'], True), 'status': word(t), 'turn': t['turn']}))
     if cmd == 'events':
         n = state.get('connections', 0)
         state['connections'] = n + 1

@@ -1,5 +1,5 @@
 """The eval dataset and its recorder: every case well formed and implemented by its runner, and a run scrubbed."""
-import json, re, sys, tempfile, unittest
+import json, re, sys, tempfile, unittest, unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +60,12 @@ class Recorder(unittest.TestCase):
             self.assertNotIn(str(record.ROOT), written)
             self.assertIn('| pass | 1 |', (run.dir / 'summary.md').read_text())
             self.assertEqual([json.loads(r)['id'] for r in (run.dir / 'results.jsonl').read_text().splitlines()], ['G01', 'G02'])
+
+    def test_a_host_name_is_scrubbed_in_any_case_and_a_runner_can_add_one(self):
+        """Herdr Core 0.1.20 prints a core's name, made from the machine's name in lower case: no run may keep it."""
+        host = 'Somebodys-Box'
+        with unittest.mock.patch.object(record, 'HOSTS', [host]):
+            self.assertEqual(record.scrub('{"name":"somebodys-box---home"} on Somebodys-Box'), '{"name":"<host>---home"} on <host>')
 
     def test_a_bad_status_is_refused(self):
         with tempfile.TemporaryDirectory() as out:

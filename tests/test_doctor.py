@@ -28,7 +28,7 @@ class Doctor(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith(('HERDR_', 'FLEET_', 'STAMPEDE_'))}
         self.env.update(HOME=str(self.home), PATH=f'{self.bin}:/opt/homebrew/bin:/usr/bin:/bin',
-                        STAMPEDE_NO_UPDATE_CHECK='1')
+                        STAMPEDE_NO_UPDATE_CHECK='1', HC_SOCKET=str(self.home / 'no-core.sock'))  # never this machine's own core
         self.env.pop('XDG_STATE_HOME', None)
         subprocess.run(['bash', str(ROOT / 'install.sh')], env=self.env, check=True,
                        capture_output=True, timeout=15)
@@ -277,7 +277,7 @@ echo disabled; exit 1
         for flag in ('--help', '-h'):
             result = self.doctor(flag)
             self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, 'usage: herdr-doctor [--relay] [--core] [-h|--help]\n')
+            self.assertEqual(result.stdout, 'usage: herdr-doctor [--relay] [--tui|--core] [-h|--help]\n')
         for args in (('--unknown',), ('relay',), ('--relay', 'extra')):
             result = self.doctor(*args)
             self.assertEqual(result.returncode, 2)

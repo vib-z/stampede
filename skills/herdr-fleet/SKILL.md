@@ -7,7 +7,7 @@ description: The owner's playbook for running a multi-agent fleet in herdr. One 
 
 # herdr fleet
 
-The built-in skill (`herdr --skill`) is the command reference. This is how the owner runs teams on top of it. The installed binary is the authority (herdr 0.9.4 when written, 2026-10-14): check syntax with `herdr agent`, `herdr pane`, `herdr tab`, `herdr workspace`. Never run bare `herdr` (it attaches the TUI).
+The built-in skill (`herdr --skill`) is the command reference. This is how the owner runs teams on top of it. The installed binary is the authority (herdr 0.9.5 when last checked, 2026-11-11): check syntax with `herdr agent`, `herdr pane`, `herdr tab`, `herdr workspace`. Never run bare `herdr` (it attaches the TUI).
 
 > **Strict rule for bots launching jobs from outside Herdr (Grok Bots, executors):** tag the workspace with `herdr-events-owner <ws> <bot-slug>` before any agent starts, then launch and exit. Never poll or wait on a job: no `herdr agent wait` for its result, sleep loops, repeated pane reads or monitoring executors (bounded startup checks, as in grokbot-herdr Step 4, are fine). Stuck events, and one `fleet-job finish` when the job ends, are relayed to the owning bot, which reads the result once. See grokbot-herdr. This rule is for bots only; a lead inside Herdr is woken by hooks instead (The lead, item 6).
 
@@ -47,7 +47,7 @@ Inside a big job, "Panes, not built-in subagents" still applies: subagents there
 
 ## The lead
 
-One lead per workspace, started with its hooks by `fleet-job new --file <ask.md> [--lead claude|codex]`. The lead is Claude `claude-opus-5-5` xhigh unless the owner picks Codex `gpt-6-astra` ultra (`--lead codex`, or `FLEET_LEAD_KIND=codex` as a standing choice): whoever starts the job passes the lead the owner's request names. A `--fork` of a Claude chat and a Herdr Core job take a Claude lead only (a job on Herdr Core, `--core`, which hands Cursor, Hermes or Kimi workers to TUI panes: [references/core.md](references/core.md) says what changes). The lead holds the state and the judgement; each worker gets everything it needs in its brief. A chat the owner started that will open panes hands the job to that hooked lead; a small job runs in a single tagged pane of its own, with no fleet. The lead alone:
+One lead per workspace, started with its hooks by `fleet-job new --file <ask.md> [--lead claude|codex]`. The lead is Claude `claude-opus-5-5` xhigh unless the owner picks Codex `gpt-6-astra` ultra (`--lead codex`, or `FLEET_LEAD_KIND=codex` as a standing choice): whoever starts the job passes the lead the owner's request names. A `--fork` of a Claude chat takes a Claude lead only (a job on Herdr Core, `--core`, takes either lead and hands Cursor, Hermes or Kimi workers to TUI panes: [references/core.md](references/core.md) says what changes). The lead holds the state and the judgement; each worker gets everything it needs in its brief. A chat the owner started that will open panes hands the job to that hooked lead; a small job runs in a single tagged pane of its own, with no fleet. The lead alone:
 
 1. Plans in `<job>/plan.md`: the layout (workspace, tabs, panes with app, model and effort), then the tasks in order with the pane that does each, then any questions with a safe default. Not a fleet (one file or question, steps that each need the last, under about 45 minutes): the lead does it alone. Then it goes; only when the owner explicitly asks to see the plan first, it uses the share-plan skill.
 2. Opens a pane only when it pays: parallel pieces over about 30 minutes each (at most 4), another model or tool, one reviewer on another model, or the same task many times (one pane per item, at most 6 running at once by default, the next starting as one finishes, tabs of up to 6). A sub-lead only for more than 10 items or a workstream with 3+ parallel pieces.
@@ -137,4 +137,4 @@ Integrate, run the gates once, push the work branch and open a DRAFT PR (no need
 - https://herdr.dev/docs/cli-reference/
 - https://herdr.dev/docs/agent-automation/
 
-Re-check both, and `herdr <cmd> --help`, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (2026-10-16: the docs track 0.9.5, the Mac runs 0.9.4).
+Re-check both, and `herdr <cmd> --help`, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (herdr 0.9.5 on 2026-11-11).

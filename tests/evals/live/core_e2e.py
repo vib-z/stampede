@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The core-live evals: the cases in cases.json with backend core-live (C01 to C12), run on a real Herdr Core (hc 0.1.13 or
+"""The core-live evals: the cases in cases.json with backend core-live (C01 to C16 and V03), run on a real Herdr Core (hc 0.1.13 or
 later) in a scratch session of its own, never the machine's own core, through the real `stampede` command installed into
 a scratch HOME by install.sh. Records through record.py; exits 0 when nothing failed or broke.
 
@@ -18,22 +18,25 @@ record if launchd gains anything). The owner's surrogate for approve-gate (C05) 
 and Core variable removed, as tests/clients_run.py's detached() runs a client outside Herdr, and its ancestry is logged; it runs
 the gate event's own approve line as the bot was handed it (with --digest where the product adds one), never a line of its own.
 """
-import argparse, json, os, platform, re, shlex, shutil, signal, subprocess, sys, tempfile, time, traceback, uuid
+import argparse, json, os, platform, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, time, traceback, uuid
 from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 EVALS = HERE.parent
-sys.path.insert(0, str(EVALS))
+sys.path[:0] = [str(EVALS), str(EVALS.parent)]
 import record  # noqa: E402
+import hc_contract  # noqa: E402
 
 ROOT = EVALS.parents[1]
 FOLLOWER = ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core'
 AGENT = HERE / 'core_agent.py'
 DARWIN = platform.system() == 'Darwin'
 BOT = 'evalbot'
-ORDER = ['C01', 'C02', 'C03', 'C04', 'C05', 'C10', 'C11', 'C06', 'C07', 'C08', 'C12', 'C09']  # the job's life, then the guards
-NEEDS = {'C02': 'C01', 'C03': 'C02', 'C04': 'C02', 'C05': 'C01', 'C10': 'C02', 'C11': 'C02', 'C06': 'C02', 'C07': 'C01'}
+# the job's life, then jobs of their own (a Codex lead, the app's labels and a loss under keep), then the guards
+ORDER = ['C01', 'C02', 'C03', 'C13', 'C04', 'C05', 'C10', 'C11', 'C06', 'C07', 'C08', 'C12', 'C14', 'C16', 'C15', 'V03', 'C09']
+NEEDS = {'C02': 'C01', 'C03': 'C02', 'C13': 'C02', 'C04': 'C02', 'C05': 'C01', 'C10': 'C02', 'C11': 'C02', 'C06': 'C02', 'C07': 'C01',
+         'C15': 'C16'}
 HERDR_VARS = ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH')
 BRIEF = """# {agent}: a stand-in worker of the core-live evals
 
@@ -72,6 +75,7 @@ class Skip(Exception):
     """The case does not apply here."""
 
 
+DRAFT_WAIT = 30  # seconds the scratch core holds a send for a person's draft: stampede then stops a send after 20
 RESTART_MARK = 'HC_EVAL_RESTART_MARK'  # set only in the shell that runs hc server restart (C10)
 
 
@@ -281,6 +285,8 @@ class Harness:
         shell(bin_ / 'phone', '#!/bin/bash\n# FLEET_ASK_CMD: a card that never answers, so a background ask stays alive until something ends it\n'
                               'printf "%s\\n" "$*" >> "$(dirname "$0")/phone.log"\nsleep 3600\nexit 4\n')
         shell(home / '.local/bin/herdr-event-flush', '#!/bin/sh\n# no flusher: the bot\'s events stay in the queue and nothing leaves the machine\nexit 0\n')
+        (t / 'config/herdr-core').mkdir(parents=True, exist_ok=True)  # the scratch core's own settings
+        (t / 'config/herdr-core/config.toml').write_text(f'draft_wait = {DRAFT_WAIT}\n')  # a shorter hold than Core's 60 s, for C13
         (t / 'routes' / BOT).write_text('URL=http://127.0.0.1:9/never\nKEY=none\n')
         (t / 'routes' / BOT).chmod(0o600)
         repo = t / 'code/repo'
@@ -309,6 +315,9 @@ class Harness:
         if started.returncode:
             raise Blocked(f'hc server start failed for the scratch session ({started.returncode}): {(started.stderr or started.stdout)[-300:]}')
         self.state['core'] = json.loads(started.stdout or '{}')
+        named = (self.state['core'].get('core') or {}).get('name')  # Core 0.1.20 names a core after the machine
+        if named and named not in record.HOSTS:
+            record.HOSTS.insert(0, named)  # so no run ever records it
         version = subprocess.run([self.real_hc, '--version'], capture_output=True, text=True).stdout.strip()
         self.state['hc_version'] = version
         after = self.launchd()
@@ -343,12 +352,13 @@ class Harness:
             shutil.rmtree(self.t, ignore_errors=True)
 
     # --- the cases -------------------------------------------------------------------------------------------------
-    def new_job(self, name, owner):
+    def new_job(self, name, owner, flags=()):
         ask = self.t / f'ask-{name}.md'
         ask.write_text(f'Eval job {name}: a stand-in lead and stand-in workers on Herdr Core.\n')
         env = {**self.env, **({'HERDR_EVENTS_OWNER': owner} if owner else {})}
-        self.commands.append((f'HERDR_EVENTS_OWNER={owner} ' if owner else '') + f'stampede new --core --file {ask} --cwd {self.repo} --name {name}')
-        made = self.sh(['stampede', 'new', '--core', '--file', str(ask), '--cwd', str(self.repo), '--name', name], env=env, timeout=180, show=False)
+        self.commands.append((f'HERDR_EVENTS_OWNER={owner} ' if owner else '') + shlex.join(['stampede', 'new', '--core', *flags, '--file', str(ask),
+                                                                                             '--cwd', str(self.repo), '--name', name]))
+        made = self.sh(['stampede', 'new', '--core', *flags, '--file', str(ask), '--cwd', str(self.repo), '--name', name], env=env, timeout=180, show=False)
         if made.returncode:
             raise Fail(f'stampede new --core exited {made.returncode}: {made.stdout.strip()[-300:]} {made.stderr.strip()[-300:]}')
         lead, job = made.stdout.strip().splitlines()[-1].split(' ', 1)
@@ -667,6 +677,274 @@ class Harness:
             raise Fail(f'a second finish: exit {again.returncode}: {again.stdout} {again.stderr}; queue {self.queued()}')
         return (f'finish from the lead queued one done event for {BOT}, the follower {relay} exited 0 by itself, the marker is gone, '
                 f'no herdr-event-core or fleet_job.py process of the job is left (the stand-in agents keep running), and a second finish added nothing')
+
+    # --- Herdr Core 0.1.20 and the Herdr app: the draft hold, a Codex lead, keep and the app's labels ---------------
+    def core_version(self):
+        found = re.search(r'(\d+)\.(\d+)\.(\d+)', self.state.get('hc_version', ''))
+        return tuple(int(n) for n in found.groups()) if found else (0, 0, 0)
+
+    def attach(self, address):
+        """A person at a terminal: hc attach on a pty of its own. Returns (pid, fd); keys written to fd are a person's."""
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvpe('hc', ['hc', 'attach', address], self.env)
+        self.pids.append(pid)
+        self.commands.append(f'hc attach {address}   (on a pty: the person)')
+        time.sleep(1.5)
+        self.drain(fd)
+        return pid, fd
+
+    def drain(self, fd):
+        while select.select([fd], [], [], 0.2)[0]:
+            try:
+                if not os.read(fd, 65536):
+                    return
+            except OSError:
+                return
+
+    def detach(self, pid, fd):
+        for step in (lambda: os.write(fd, b'\x1c'), lambda: time.sleep(0.5), lambda: os.kill(pid, signal.SIGTERM), lambda: os.close(fd)):
+            try:
+                step()
+            except OSError:
+                pass
+
+    def rows(self, job):
+        return {row.split('\t')[0]: row.split('\t') for row in (job / 'agents.tsv').read_text().splitlines() if row and not row.startswith('#')}
+
+    def prompts(self, name, job, since, holding):
+        return [r for r in self.standin(name, job)[since:] if r.get('event') == 'prompt' and holding in r.get('text', '')]
+
+    def end_job(self, job, key, summary):
+        """finish a job of this run's own, then end what it still runs (stand-in agents outlive finish, as real ones do)."""
+        done = self.stampede('finish', str(job), summary)
+        if done.returncode or 'FINISHED' not in done.stdout:
+            raise Fail(f'finish of {job.name}: exit {done.returncode}: {done.stdout[-200:]} {done.stderr[-200:]}')
+        for terminal in self.job_terminals(key):
+            self.hc('kill', terminal['address'])
+
+    def c13(self):
+        if self.core_version() < (0, 1, 20):
+            raise Skip(f'{self.state["hc_version"]}: Herdr Core holds a send for a person\'s draft from 0.1.20 on')
+        worker, addr, text = 'worker-b', self.addr['worker-b'], 'note after the draft'
+        self.until('worker-b idle or done', lambda: self.hc('get', addr)[1].get('status', {}).get('state') in ('idle', 'done'), 30)
+        pid, fd = self.attach(addr)
+        try:
+            os.write(fd, b'half a thought')
+            time.sleep(0.5)
+            self.drain(fd)
+            n, started = len(self.standin(worker)), time.time()
+            self.commands.append(f'stampede tell {self.job} {worker} "{text}"   (while the person\'s draft "half a thought" sits unsent)')
+            tell = subprocess.Popen(['stampede', 'tell', str(self.job), worker, text], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            time.sleep(5)
+            held, early = tell.poll() is None, self.prompts(worker, self.job, n, '')
+            os.write(fd, b'\x15')  # the person clears their line (ctrl+u)
+            self.note(f'after 5 s: tell still waiting {held}; prompts the worker got meanwhile {len(early)}; the person then cleared the draft')
+            try:
+                out, err = tell.communicate(timeout=120)
+            except subprocess.TimeoutExpired:
+                tell.kill()
+                raise Fail('tell did not return within 120 s of the person clearing the draft')
+            waited = time.time() - started
+        finally:
+            self.detach(pid, fd)
+        self.note(f'tell: exit {tell.returncode} after {waited:.1f} s: {out.strip()} {err.strip()}')
+        if not held or early:
+            raise Fail(f'the tell did not wait for the person\'s draft: still running after 5 s {held}, prompts meanwhile {early}')
+        if tell.returncode or f'SUBMITTED {worker} ({addr})' not in out:
+            raise Fail(f'tell after the draft was cleared: exit {tell.returncode}: {out} {err}')
+        got = self.until('the tell reached the worker', lambda: self.prompts(worker, self.job, n, text), 20)
+        if [r['text'].strip() for r in self.prompts(worker, self.job, n, '')] != [text] or 'half a thought' in got[0]['text']:
+            raise Fail(f'the worker got {[r["text"] for r in self.prompts(worker, self.job, n, "")]}, not the tell alone')
+        # a draft the person leaves: Core would type the tell after it once its hold (DRAFT_WAIT) ran out
+        self.until('worker-b done with that turn', lambda: self.hc('get', addr)[1].get('status', {}).get('state') in ('idle', 'done'), 30)
+        pid, fd = self.attach(addr)
+        try:
+            os.write(fd, b'left unsent')
+            time.sleep(0.5)
+            self.drain(fd)
+            n, started = len(self.standin(worker)), time.time()
+            left = self.stampede('tell', str(self.job), worker, 'a second note', timeout=DRAFT_WAIT + 60)
+            took = time.time() - started
+            time.sleep(max(0, DRAFT_WAIT + 5 - took))  # past the moment Core's hold ran out
+            after_hold = self.prompts(worker, self.job, n, '')
+            os.write(fd, b'\x15')  # the person clears the draft at last: nothing is waiting to go in
+            time.sleep(5)
+            after_clear = self.prompts(worker, self.job, n, '')
+        finally:
+            self.detach(pid, fd)
+        if left.returncode != 2 or f'FAILED {worker} (hc send: no answer in {DRAFT_WAIT - 10} s' not in left.stdout:
+            raise Fail(f'tell with a draft left alone: exit {left.returncode} after {took:.0f} s: {left.stdout} {left.stderr}')
+        if after_hold or after_clear:
+            raise Fail(f'something was typed after the draft: past the hold {after_hold}, after the person cleared it {after_clear}')
+        return (f'with a person\'s unsent draft in the worker\'s terminal (typed through hc attach), stampede tell waited ({waited:.0f} s in all, '
+                f'still waiting at 5 s, nothing typed meanwhile); once the person cleared the draft it printed SUBMITTED and the worker got '
+                f'the tell alone, never the draft. With a draft left alone, the tell was stopped after {took:.0f} s (FAILED, read before any '
+                f'resend), {DRAFT_WAIT - took:.0f} s before the core\'s {DRAFT_WAIT} s hold ran out, and nothing was typed then, when the hold ran '
+                f'out, or after the person cleared the draft')
+
+    def c14(self):
+        lead, job = self.new_job('ev3', BOT, flags=('--lead', 'codex'))
+        key = (job / 'workspace').read_text().strip()
+        addr, relay = json.loads((job / 'core.json').read_text())[lead]['address'], 'relay-' + key[3:]
+        try:
+            start = self.until('the Codex lead logged its start', lambda: [r for r in self.standin(lead, job) if r.get('event') == 'start'], 30)[0]
+            brief = job / 'briefs' / (lead + '.md')
+            argv = start.get('argv', [])
+            if start.get('kind') != 'codex' or '--no-daemon' not in argv or '--session-id' in argv or not any(a.startswith('notify=') for a in argv):
+                raise Fail(f'the lead is not a Codex lead without its daemon and with its notify hook: {argv}')
+            if start.get('prompt') != f'You are {lead}. Read {brief} and do everything it says.':
+                raise Fail(f'the Codex lead\'s first prompt is {start.get("prompt")!r}, not the brief pointer')
+            text = brief.read_text()
+            if 'fleet-job types each new line of' not in text or 'into this terminal' not in text or 'prints APPROVED' not in text:
+                raise Fail('the lead\'s brief is not a Codex lead\'s on Core')
+            session = self.until('the lead\'s own session in agents.tsv, named by its first turn end', lambda: self.rows(job)[lead][2], 40)
+            if self.rows(job)[lead][1] != 'codex' or not list((self.home / '.codex/sessions').glob(f'*/*/*/rollout-*{session}.jsonl')):
+                raise Fail(f'agents.tsv row for the lead: {self.rows(job)[lead][:3]}')
+            self.until('the lead done with its first turn', lambda: self.hc('get', addr)[1].get('status', {}).get('state') in ('idle', 'done'), 30)
+            n, calls = len(self.standin(lead, job)), len(self.hc_calls())
+            told = self.stampede('tell', str(job), 'lead', 'ANSWER: keep hello in the root')
+            if told.returncode or f'DELIVERED {lead} (inbox file; typed into its terminal once it is idle)' not in told.stdout:
+                raise Fail(f'tell to the Codex lead: exit {told.returncode}: {told.stdout} {told.stderr}')
+            typed = self.until('the answer typed into the lead\'s terminal', lambda: self.prompts(lead, job, n, 'ANSWER: keep hello in the root'), 90)[0]
+            if not typed['text'].startswith(f'[fleet-job inbox for {lead}, not typed by the owner] '):
+                raise Fail(f'the lead got {typed["text"]!r}, without the fleet-job marker')
+            worker = self.start_worker('worker-x', 'claude', job=job)
+            self.until('worker-x done with its brief', lambda: self.hc('get', worker)[1].get('status', {}).get('state') in ('idle', 'done'), 30)
+            self.hc_ok('kill', worker)
+            self.until('the follower\'s GONE line typed into the lead\'s terminal', lambda: self.prompts(lead, job, n, 'inbox.log: GONE worker-x killed'), 90)
+            time.sleep(8)  # a second delivery of either line would show by now
+            twice = {line: len(self.prompts(lead, job, n, line)) for line in ('ANSWER: keep hello in the root', 'GONE worker-x killed')}
+            if any(count != 1 for count in twice.values()):
+                raise Fail(f'each line once, but the lead got {twice}')
+            mine = [row for row in self.hc_calls()[calls:] if f' {addr} ' in row + ' ']
+            if any(' keys ' in row for row in mine) or not any(' send ' in row for row in mine):
+                raise Fail(f'the lead\'s terminal was written to by: {mine}')
+            # the owner leaves text in the lead's prompt: the next line is not typed and the terminal is held; once the
+            # owner sends their own text, the lead is pointed at the line, which itself is never typed
+            self.until('the lead idle or done', lambda: self.hc('get', addr)[1].get('status', {}).get('state') in ('idle', 'done'), 30)
+            log, second = job / 'hooks/deliver.log', 'ANSWER: the second answer'
+            pid, fd = self.attach(addr)
+            try:
+                os.write(fd, b'my own note')
+                time.sleep(0.5)
+                self.drain(fd)
+                n = len(self.standin(lead, job))
+                self.stampede('tell', str(job), 'lead', second)
+                self.until('the deliverer holding the lead\'s terminal', lambda: f'HELD: a send to {lead}' in (log.read_text() if log.is_file() else ''),
+                           DRAFT_WAIT + 40)
+                meanwhile = self.prompts(lead, job, n, '')
+                owed = json.loads((job / 'hooks/deliver-owed.json').read_text())
+                held = [q[2] for q in self.queued() if q[2].get('kind') == 'held' and q[2].get('agent') == lead]
+                os.write(fd, b'\r')  # the owner sends their own text: the lead takes a turn
+                self.until('the owner\'s text as a prompt of its own', lambda: [r for r in self.prompts(lead, job, n, 'my own note')
+                                                                               if r['text'].strip() == 'my own note'], 30)
+                pointer = self.until('the pointer to the line', lambda: self.prompts(lead, job, n, 'may not have reached you'), 90)[0]
+                time.sleep(6)  # a second pointer, or the line itself, would show by now
+            finally:
+                self.detach(pid, fd)
+            if meanwhile or len(held) != 1 or owed != [[str(job / 'inbox' / (lead + '.md')), 2, 2]]:
+                raise Fail(f'while the owner\'s text sat in the prompt: prompts typed {meanwhile}, owed {owed}, held events for the bot {held}')
+            if self.prompts(lead, job, n, second) or len(self.prompts(lead, job, n, 'may not have reached you')) != 1 \
+                    or f'lines 2 to 2 of {job / "inbox" / (lead + ".md")}' not in pointer['text']:
+                raise Fail(f'after the owner sent their text the lead got {[r["text"] for r in self.prompts(lead, job, n, "")]}')
+            if (job / 'hooks/deliver-held.json').exists() or (job / 'hooks/deliver-owed.json').exists():
+                raise Fail('the hold or the owed lines are still recorded after the pointer went in')
+        finally:
+            if key:
+                self.end_job(job, key, 'ev3 done')
+        return (f'new --core --lead codex started {lead} at {addr} as Codex without its daemon, its brief pointer as its first prompt and its own '
+                f'session in agents.tsv after its first turn; an answer for it and the follower\'s GONE worker-x line were each typed into its '
+                f'terminal once by hc send, marked as from fleet-job, with no key pressed. With the owner\'s own text left in its prompt, the next '
+                f'line was not typed: the send was stopped, the terminal held (one blocked event for the bot), and only after the owner sent their '
+                f'text, a turn of its own, was the lead pointed once at the line to read; finish ended the job')
+
+    def c16(self):
+        lead, job = self.new_job('ev4', BOT, flags=('--app-space',))
+        key = (job / 'workspace').read_text().strip()
+        space, relay = 'stampede-' + key[3:], 'relay-' + key[3:]
+        if (job / 'app-space').read_text().strip() != space:
+            raise Fail(f'<job>/app-space holds {(job / "app-space").read_text()!r}')
+        entries = json.loads((job / 'core.json').read_text())
+        worker = self.start_worker('worker-k', 'codex', job=job)
+        self.state['ev4'] = {'lead': lead, 'job': job, 'key': key, 'worker': worker}
+        labels = {name: self.hc_ok('get', address).get('labels') or {} for name, address in
+                  ((lead, entries[lead]['address']), ('worker-k', worker), (relay, entries[relay]['address']))}
+        for name in (lead, 'worker-k'):
+            if labels[name].get('herdr.space') != space or labels[name].get('herdr.tab') != name:
+                raise Fail(f'{name} carries {labels[name]}, not herdr.space={space} and herdr.tab={name}')
+        if any(k.startswith('herdr.') for k in labels[relay]):
+            raise Fail(f'the follower carries the app\'s labels: {labels[relay]}')
+        plain = 'not compared: no job without the flag ran in this run'
+        if self.state.get('key'):
+            others = [self.hc_ok('get', t['address']).get('labels') or {} for t in self.job_terminals(self.state['key'], all=True)]
+            if any(k.startswith('herdr.') for found in others for k in found):
+                raise Fail(f'a job started without --app-space carries the app\'s labels: {others}')
+            plain = f'the {len(others)} terminals of the job started without the flag carry no herdr.* label'
+        return (f'new --core --app-space labelled {lead} and worker-k herdr.space={space} and herdr.tab=<its name> on the real core, and the '
+                f'follower not at all; {plain}')
+
+    def c15(self):
+        ev4 = self.state['ev4']
+        job, key, addr, worker = ev4['job'], ev4['key'], ev4['worker'], 'worker-k'
+        log = lambda: [row for row in (job / 'inbox.log').read_text().splitlines() if row.strip()] if (job / 'inbox.log').is_file() else []
+        sent = lambda: set(json.loads((job / 'relay-state.json').read_text()).get('sent', [])) if (job / 'relay-state.json').is_file() else set()
+        try:
+            self.until('worker-k idle or done', lambda: self.hc('get', addr)[1].get('status', {}).get('state') in ('idle', 'done'), 30)
+            told = self.stampede('tell', str(job), worker, 'sleep 40')
+            if told.returncode:
+                raise Fail(f'tell before the loss: {told.stdout} {told.stderr}')
+            self.until('worker-k working', lambda: self.hc('get', addr)[1].get('status', {}).get('state') == 'working', 15)
+            self.hc_ok('keep', addr)  # as the Herdr app does for a terminal it shows
+            before, pid = sent(), self.hc_ok('get', addr).get('pid')
+            self.commands.append(f'kill -9 {pid}   (the worker\'s own process: a loss, not an exit)')
+            os.kill(int(pid), signal.SIGKILL)
+            want = f'(a shell is in its place at {addr}: restart the agent with bash {job / "reopen.sh"})'
+            self.until('the follower\'s GONE line naming the shell', lambda: [row for row in log() if row.startswith(f'GONE {worker} ') and want in row], 60)
+            shell = self.until('a shell at the same address', lambda: (lambda t: t.get('state') == 'live' and t.get('pid') not in (None, pid)
+                               and not any('STAMPEDE_JOB_KEY' in a for a in t.get('argv') or []) and t)(self.hc('get', addr)[1]), 40)
+            time.sleep(5)  # anything the shell would wrongly cause shows by now
+            gone = [row for row in log() if row.startswith(f'GONE {worker} ')]
+            new = sorted(ident for ident in sent() - before if ident.startswith(addr + '|'))  # the lead's own turns are its own
+            dead = [q[2] for q in self.queued() if q[2].get('pane') == f'hc:{key}/{addr}' and q[2].get('state') == 'dead']
+            if len(gone) != 1 or new != sorted([f'{addr}|finished', f'{addr}|finished lead']) or len(dead) != 1 or dead[0].get('last_state') != 'working':
+                raise Fail(f'GONE lines {gone}; what the follower told after the loss {new}; dead events {dead}')
+            refused = self.stampede('tell', str(job), worker, 'are you there')
+            if refused.returncode != 2 or f'its program was lost and Herdr Core put a shell in its place at {addr}' not in refused.stdout:
+                raise Fail(f'tell to the shell: exit {refused.returncode}: {refused.stdout} {refused.stderr}')
+            reopened = self.sh(['bash', str(job / 'reopen.sh')], timeout=200)
+            started = re.findall(r'^(?:STARTED|RESTARTED) (\S+)', reopened.stdout, re.M)
+            again = json.loads((job / 'core.json').read_text())[worker]['address']
+            still = self.hc_ok('get', addr)
+            if reopened.returncode or started != [worker] or again == addr or still.get('state') != 'live' or still.get('pid') != shell.get('pid'):
+                raise Fail(f'reopen.sh: exit {reopened.returncode}, started {started}, worker-k now at {again}, the shell at {addr} is '
+                           f'{still.get("state")}: {reopened.stdout[-300:]} {reopened.stderr[-200:]}')
+            labels = self.hc_ok('get', again).get('labels') or {}
+            if labels.get('herdr.tab') != worker or labels.get('stampede.agent') != worker:
+                raise Fail(f'the restarted worker carries {labels}')
+        finally:
+            self.end_job(job, key, 'ev4 done')
+        return (f'with keep on, kill -9 of worker-k\'s process made Core put a shell at {addr} (reason {dead[0].get("reason")}); the follower wrote one '
+                f'GONE line naming the shell and one dead event for the bot (last state working), nothing as idle; tell refused the shell by name; '
+                f'reopen.sh started worker-k again at {again} with the job\'s labels and left the shell alone')
+
+    def v03(self):
+        shown = self.sh(['hc', 'schema'], timeout=60)
+        try:
+            live = json.loads(shown.stdout)
+        except ValueError:
+            raise Fail(f'hc schema printed no JSON (exit {shown.returncode}): {shown.stderr[-200:]}')
+        snapshot = hc_contract.snapshot()
+        version = lambda schema: tuple(int(n) for n in schema['info']['version'].split('.')[:3])
+        if version(live) < version(snapshot):
+            raise Skip(f'hc {live["info"]["version"]} is older than the snapshot ({snapshot["info"]["version"]}): it may rightly lack what came since')
+        here, kept = hc_contract.view(live), hc_contract.view(snapshot)
+        if here != kept:
+            differs = {k: (kept.get(k), here.get(k)) for k in sorted(set(here) | set(kept)) if here.get(k) != kept.get(k)}
+            raise Fail(f'hc {live["info"]["version"]} differs from the snapshot in what stampede uses (snapshot, this machine): {differs}')
+        return (f'hc schema {live["info"]["version"]} on this machine holds the {len(hc_contract.USES)} commands stampede uses (each method, '
+                f'parameter, error kind and result field) and the {len(here["event types"])} event types, as the snapshot of '
+                f'{snapshot["info"]["version"]} does')
 
     def c08(self):
         lead, job = self.new_job('ev2', None)
