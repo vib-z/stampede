@@ -50,6 +50,15 @@ class HerdrSend(unittest.TestCase):
         self.assertEqual(out, 'SUBMITTED build-a')
         self.assertNotIn('ctrl+c', calls)
 
+    def test_codex_167_footer_reads_as_empty_and_its_draft_as_typed(self):  # Codex 0.167.1, live 11 Nov 2026
+        out, calls = self.send('idle', '› Improve documentation in @filename\n\n  GPT model · ~/code\n'  # a placeholder no
+                                       '  ← for agents · ? for shortcuts            ⚠ 2 warnings · f2 to view')  # other marker knows
+        self.assertEqual(out, 'SUBMITTED build-a')
+        self.assertNotIn('ctrl+c', calls)
+        out, calls = self.send('idle', '› my half-written draft\n\n  GPT model · ~/code\n            ⚠ 2 warnings · f2 to view')
+        self.assertEqual(out, 'SUBMITTED build-a')
+        self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'))
+
     def test_bare_claude_prompt_gets_no_ctrl_c(self):
         out, calls = self.send('done', '──────\n❯ \n──────')
         self.assertEqual(out, 'SUBMITTED build-a')

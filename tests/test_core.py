@@ -1462,7 +1462,8 @@ class ReviewDraft(CoreCase):
                               'hc read t1, clear it with hc keys t1 ctrl+c when hc get shows idle, then tell again)')
 
     def test_an_empty_prompt_or_an_unreadable_screen_is_sent(self):
-        for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts'):
+        for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts',
+                       '  \u2190 for agents \u00b7 ? for shortcuts'):  # Codex 0.167.1's footer row
             self.terminal('t1', screen=screen, sent=[])
             self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []), screen)
         self.shape(read_error={'t1': 'unavailable'})

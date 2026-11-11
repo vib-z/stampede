@@ -1633,6 +1633,12 @@ class Deliver(unittest.TestCase):
                                     ({'agent_status': 'idle'}, '  Worked for 7s\n› half a reply from the owner\n  GPT-6-Astra ultra\n', False),
                                     ({'agent_status': 'idle'}, '• To get started, ? for shortcuts\n' + draft, False),  # in earlier output
                                     ({'agent_status': 'idle'}, '? for shortcuts\n' + draft, False),    # a footer above the prompt
+                                    ({'agent_status': 'idle'}, CODEX_167_EMPTY, True),              # Codex 0.167.1, live 11 Nov 2026
+                                    ({'agent_status': 'done'}, CODEX_167_EMPTY, True),
+                                    ({'agent_status': 'idle'}, CODEX_167_DRAFT, False),             # its draft hides the whole row
+                                    ({'agent_status': 'idle'}, CODEX_167_FOOTER + '\n' + CODEX_167_DRAFT, False),  # above the prompt
+                                    ({'agent_status': 'idle', 'focused': True}, CODEX_167_EMPTY, False),
+                                    ({'agent_status': 'working'}, CODEX_167_EMPTY, False),
                                     ({'agent_status': 'idle'}, '', False)):                         # nothing readable
             with self.subTest(shown=shown, screen=screen), mock.patch.object(fj, 'herdr', return_value={'agent': shown}), \
                     mock.patch.object(fj, 'screen_of', return_value=screen):
@@ -1678,3 +1684,12 @@ class Deliver(unittest.TestCase):
 
 
 REAL_READY, REAL_SEND = fj.ready, fj.herdr_send  # Deliver's setUp mocks both
+
+# Codex 0.167.1's screen as Herdr read it live on 11 Nov 2026 (path shortened): its footer row starts with an arrow,
+# and a draft hides that whole row.
+CODEX_167_FOOTER = '  ← for agents · ? for shortcuts                                       ⚠ 2 warnings · f2 to view'
+CODEX_167_TOP = ('     ~/repo\n\n⚠ Heads up, you have less than 25% of your weekly limit left. Run /status for a breakdown.\n'
+                 + '\n' * 30 + '                                                  ⚠ weekly limit: 19% left · /status\n\n')
+CODEX_167_EMPTY = CODEX_167_TOP + '› Ask Codex to do anything\n\n  GPT-6.1-Sol default · ~/repo\n' + CODEX_167_FOOTER + '\n'
+CODEX_167_DRAFT = (CODEX_167_TOP + '› Explain how to get started\n\n  GPT-6.1-Sol default · ~/repo\n'
+                   '                                                         ⚠ 2 warnings · f2 to view\n')
