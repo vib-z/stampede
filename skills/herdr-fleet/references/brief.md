@@ -15,7 +15,7 @@ Write for an agent that has seen nothing else: not the ask, the plan or your lea
 <Rules and anti-goals: what not to change, scope to stay out of, commands to avoid; use the ownership rules in collaboration.md or your job's _common.md.>
 
 ## Done when
-<A checklist you can verify yourself: commands that pass, files that exist and behaviour to show.>
+<A checklist you can verify yourself: commands that pass, files that exist and behaviour to show. For a builder, name the cheap tests to run after this step.>
 
 ## Report back
 <Your report's absolute path and shape: Status: DONE (a review: PASS or FINDINGS) in the first 10 lines; what changed, files touched, not verified and decisions, under 60 lines.>
