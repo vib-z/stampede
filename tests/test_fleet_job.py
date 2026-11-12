@@ -753,6 +753,7 @@ class Gates(unittest.TestCase):
             self.assertEqual((job / 'owner').read_text().strip() if (job / 'owner').exists() else '', owner)
             self.assertIn('gate-ok', brief)
             self.assertIn('goes back to alpha' if owner else 'your own question card', brief)
+            self.assertEqual('fleet-job post ' + str(job) in brief and 'it goes to alpha' in brief, bool(owner))
 
     def test_new_marks_the_workspace_and_tells_the_lead_to_finish(self):
         home = Path(tempfile.mkdtemp())
@@ -843,6 +844,48 @@ class Gates(unittest.TestCase):
         self.assertFalse((self.job / 'asks').exists(), 'no phone card in a bot-started job')
         with self.assertRaises(ValueError):
             fj.cancel(self.job, first['ask'])  # nothing to cancel on the phone: one plain refusal
+
+    def test_a_post_in_a_bot_started_job_goes_to_the_bot(self):
+        self.bot_job()
+        shot = Path(tempfile.mkdtemp()) / 'after.png'
+        shot.write_bytes(b'png')
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'post', str(self.job), 'PLAN READY: two lanes', '--file', str(shot)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.job.absolute() / 'outbox/001.md'
+        self.assertEqual(result.stdout.strip(), f'POSTED 001 to alpha (and {item})')
+        self.assertEqual((self.job / 'outbox/001/after.png').read_bytes(), b'png')  # the outbox stays the record
+        self.assertEqual((self.job / 'outbox.log').read_text().splitlines(), ['001 post PLAN READY: two lanes'])
+        queued = [json.loads(p.read_text()) for p in (self.home / 'events/queue').glob('*.json')]
+        self.assertEqual(len(queued), 1)
+        event = queued[0]['payload']
+        self.assertEqual(queued[0]['route'], 'alpha')
+        self.assertEqual((event['source'], event['state'], event['owner'], event['text'], event['outbox'], event['item']),
+                         ('stampede', 'post', 'alpha', 'PLAN READY: two lanes', '001', str(item)))
+        self.assertEqual(event['files'], [str(self.job.absolute() / 'outbox/001/after.png')])
+        self.assertNotIn('pane', event)  # the flusher keeps only a pane's newest event; a post must never be dropped
+        self.quiet(fj.post, self.job, 'Report ready', [])  # a second post is its own event, never de-duped
+        self.assertEqual(len(list((self.home / 'events/queue').glob('*.json'))), 2)
+
+    def test_a_post_the_relay_refuses_fails_loudly(self):
+        (self.job / 'owner').write_text('beta\n')  # no route of its own: the strict relay refuses, never the default route
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'post', str(self.job), 'Report ready'], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('POSTED', result.stdout)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+        for part in ('outbox 001', 'beta never heard it', 'herdr-doctor --relay', 'post again'):
+            self.assertIn(part, result.stderr)
+        self.assertTrue((self.job / 'outbox/001.md').is_file())  # the item stays
+        queue = self.home / 'events/queue'
+        self.assertEqual(list(queue.glob('*.json')) if queue.is_dir() else [], [])
+
+    def test_a_post_in_a_local_or_front_door_job_sends_no_event(self):
+        self.assertIn('POSTED 001 for the front door to relay', self.quiet(fj.post, self.job, 'local', []))
+        self.bot_job()
+        (self.job / 'front-door').write_text('relay\n')  # a front door relays the outbox itself
+        self.assertIn('POSTED 002 for the front door to relay', self.quiet(fj.post, self.job, 'front', []))
+        queue = self.home / 'events/queue'
+        self.assertEqual(list(queue.glob('*.json')) if queue.is_dir() else [], [])
 
     def test_the_owners_yes_is_recorded_and_matched_to_the_commit(self):
         self.bot_job()
@@ -1096,6 +1139,46 @@ class Gates(unittest.TestCase):
         last = (self.job / 'inbox.log').read_text().splitlines()[-1]
         self.assertTrue(last.startswith('UNDELIVERED gate ') and 'after 24 h' in last, last)
         self.assertEqual(len(list((self.home / 'events/dead').glob('*.json'))), 1)
+
+    def test_a_held_post_tells_its_lead_once_and_goes_out_when_the_route_comes_back(self):
+        self.bot_job()
+        post = [str(SCRIPTS / 'fleet-job'), 'post', str(self.job)]
+        self.assertEqual(subprocess.run(post + ['PLAN READY: two lanes'], capture_output=True, text=True).returncode, 0)
+        (self.home / 'routes/alpha').unlink()  # the owner rotates the route after the post was queued
+        flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
+        for _ in range(2):  # every flush holds it; the lead hears it once
+            subprocess.run(flush, check=True, timeout=30)
+        self.assertEqual([json.loads(p.read_text())['payload']['state'] for p in queue.glob('*.json')], ['post'])
+        self.assertIn('held (route alpha has no URL)', (self.home / 'events/flush.log').read_text())
+        told = (self.job / 'inbox.log').read_text().splitlines()
+        self.assertEqual(len(told), 1, told)
+        self.assertTrue(told[0].startswith('UNDELIVERED post outbox 001 for alpha held: '), told[0])
+        self.assertIn('do not post it again', told[0])  # it goes out by itself: a second post would be heard twice
+        curl = self.home / '.local/bin/curl'
+        curl.parent.mkdir(parents=True)
+        curl.write_text('#!/bin/sh\ncat >/dev/null; printf 200\n')
+        curl.chmod(0o755)
+        (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
+        subprocess.run(flush, check=True, timeout=30)
+        self.assertEqual((list(queue.glob('*.json')), list((self.home / 'events/held').iterdir())), ([], []))
+        self.assertEqual(len((self.job / 'inbox.log').read_text().splitlines()), 1, 'sent: the lead hears nothing more')
+
+    def test_a_post_dead_after_24_h_tells_its_lead_to_post_again(self):
+        self.bot_job()
+        result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'post', str(self.job), 'Report ready'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (self.home / 'routes/alpha').unlink()
+        flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
+        subprocess.run(flush, check=True, timeout=30)
+        for path in queue.glob('*.json'):
+            os.utime(path, (time.time() - 86460,) * 2)
+        subprocess.run(flush, check=True, timeout=30)
+        told = (self.job / 'inbox.log').read_text().splitlines()
+        self.assertEqual(len(told), 2, told)  # held once, then dead once
+        self.assertTrue(told[-1].startswith('UNDELIVERED post outbox 001 for alpha after 24 h'), told[-1])
+        self.assertIn('the bot never heard it', told[-1])
+        self.assertIn('post again', told[-1])
+        self.assertEqual((list(queue.glob('*.json')), len(list((self.home / 'events/dead').glob('*.json')))), ([], 1))
 
     def test_r2_a_route_with_no_effective_url_or_no_queue_is_a_refusal(self):
         self.bot_job()

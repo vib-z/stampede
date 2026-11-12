@@ -40,11 +40,11 @@ REFUSED = {kind: kind + ' runs only as a handed agent of a Herdr Core job' for k
 # backend that does not take a kind refuses it
 UNHANDED = 'hand it to a Herdr TUI pane at its shell prompt with --pane'
 OUTCOMES = {
-    'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question', 'O5': 'gate',
+    'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question and post', 'O5': 'gate',
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
 }
 
-from clients_run import ANSWER, BOT_SCRIPTS, GATE, LEAD_MODEL, OTHER_SHA, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
+from clients_run import ANSWER, BOT_SCRIPTS, GATE, LEAD_MODEL, OTHER_SHA, POST, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
 from test_core import FAKE_HC  # noqa: E402
 from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 import test_doctor  # noqa: E402
@@ -271,6 +271,17 @@ class Outcomes(unittest.TestCase):
                 self.assertIn(f'--option {ANSWER} --option no -- {QUESTION}', job.asked())
                 self.assertIn(f'ANSWER {QUESTION}: {ANSWER}', job.inbox())
                 self.assertEqual(self.events(job, 'question'), [])
+            item = job.job.absolute() / 'outbox/001.md'
+            self.assertIn(POST, item.read_text(), 'the outbox stays the record')
+            if job.bot:
+                self.ok(job, 'post', f'POSTED 001 to {job.bot} (and {item})')
+                (event,) = self.events(job, 'post')
+                self.assertEqual((event['route'], event['payload']['owner'], event['payload']['text'], event['payload']['outbox']),
+                                 (job.bot, job.bot, POST, '001'))
+                self.assertNotIn('pane', event['payload'])
+            else:
+                self.ok(job, 'post', 'POSTED 001 for the front door to relay')
+                self.assertEqual(self.events(job, 'post'), [])
             self.assertEqual(job.moshi(), '', 'no card went to the real phone command')
         self.outcome('O4', check)
 
@@ -366,9 +377,9 @@ class Outcomes(unittest.TestCase):
             self.assertEqual(job.queue_after_turn_end, job.queue_before, 'a plain turn end of an open job never wakes the bot')
             self.assertIn('job-skip', job.relay_log())
             asked = [q['payload'] for q in job.queued() if q['payload'].get('source') == 'stampede']
-            self.assertEqual(sorted(e['state'] for e in asked), ['done', 'gate', 'question'])
+            self.assertEqual(sorted(e['state'] for e in asked), ['done', 'gate', 'post', 'question'])
             for event in asked:  # each carries what the bot does next, so it never reads the job to find out
-                self.assertTrue(event.get('answer') or event.get('approve') or event.get('summary'), event)
+                self.assertTrue(event.get('answer') or event.get('approve') or event.get('summary') or event.get('text'), event)
             if job.backend == 'tui' and job.row['owner_from'] == 'env':
                 return  # finding F2: the lead's block never reaches this bot (test_f2_an_owner_set_by_env_hears_its_panes)
             self.assertEqual([(q['route'], q['payload']['state']) for q in job.queued() if q['payload'].get('source') != 'stampede'],
