@@ -298,12 +298,15 @@ def screen_of(agent):
 
 
 def composer_empty(screen):
-    """True when a Codex screen's prompt holds no draft: below its last prompt line (», ›, ❯ or >) Codex shows its
-    '? for shortcuts' footer, which it hides while anything is typed (checked live with Codex on GPT-6 Astra, 3 Nov 2026).
-    Text in the prompt line is never read, since a placeholder and a real draft look alike; any other screen is a draft."""
+    """True when a Codex screen's prompt holds no draft: below its last prompt line (», ›, ❯ or >) Codex's last row is
+    a footer holding '? for shortcuts', which it hides while anything is typed. The row began with it on 3 Nov 2026 and
+    reads '← for agents · ? for shortcuts' on Codex 0.167.1 (both checked live, the second on 11 Nov 2026), so the
+    row need only contain it. Only the last row counts: a draft's own lines sit above Codex's status rows, so a draft
+    that holds the phrase is still a draft. Text in the prompt line is never read, since a placeholder and a real
+    draft look alike; any other screen is a draft."""
     rows = [row for row in screen.splitlines() if row.strip()][-8:]
     prompts = [i for i, row in enumerate(rows) if re.match(r' *[»›❯>]( |$)', row)]
-    return bool(prompts) and any(row.strip().startswith('? for shortcuts') for row in rows[prompts[-1] + 1:])
+    return bool(prompts) and prompts[-1] < len(rows) - 1 and '? for shortcuts' in rows[-1]
 
 
 def ready(agent):
