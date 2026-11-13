@@ -30,6 +30,8 @@ under keep by setting the terminal's argv to a shell's and its status to null, a
   hold      [seconds, ...]       `events`: connection n then stays open and quiet this long (the state lock released)
 Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1
 (cancelled, a send Core dropped before typing, among them). tests/test_hc_contract.py holds this fake to hc's own schema.
+`run` takes its parent from --parent, else HC_TERMINAL_ID, unless --no-parent; `kill` ends the branch under it that
+does not outlive its parent; `connect` answers terminal.list lines with full records, as the API does.
 Each HC_SESSION other than the default is a core of its own: its state and calls live in FAKE_HC/<session>/."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -53,6 +55,17 @@ def view(t):
     """`hc ls`: the CLI view, status as one word."""
     return {**{k: t.get(k) for k in ('address', 'name', 'cwd', 'state', 'turn', 'parent', 'exit_code', 'reason', 'labels')},
             'status': word(t)}
+
+
+PRIVATE = ('sent', 'keys', 'draft', 'person')  # the fake's own records, never in an answer of Core's
+
+
+def end(state, t, reason):
+    """A terminal's program ends, and with it each live child that dies with its parent, as Core ends a branch."""
+    t.update(state='finished', reason=reason, status=None, signal=1)
+    for child in state['terminals'].values():
+        if child.get('parent') == t['address'] and child['state'] == 'live' and child.get('die_with_parent'):
+            end(state, child, reason)  # Core 0.1.21 says killed for the child too
 
 
 def find(state, ref):
@@ -111,9 +124,12 @@ def command(state, argv):
             state['ls_error'] = state['lookup_error']
         if error and not state.get('spawn_also'):
             fail(error, f'cannot start {program[:1]}')
+        parent = None if o.get('no-parent') else o.get('parent') or os.environ.get('HC_TERMINAL_ID')
+        parent = parent and find(state, parent)['address']
         t = {'address': address, 'name': name, 'cwd': o.get('cwd'), 'argv': program, 'state': 'live', 'turn': 0, 'keep': bool(o.get('keep')),
              'labels': dict(w.split('=', 1) for w in o['label']), 'status': {'state': 'idle'}, 'status_ms': 1, 'reported': True,
-             'exit_code': None, 'reason': None, 'parent': None, 'sent': [], **state.get('on_run', {}).get(name, {})}
+             'exit_code': None, 'reason': None, 'parent': parent,
+             'die_with_parent': bool(parent) and not o.get('outlive-parent'), 'sent': [], **state.get('on_run', {}).get(name, {})}
         state['terminals'][address] = t
         if error:
             fail(error, 'timed out, but it started')
@@ -155,7 +171,7 @@ def command(state, argv):
             return print(json.dumps({'terminal': t['address'], 'ended': True, 'reason': ended, 'status': word(t),
                                      'exit_code': t.get('exit_code'), 'turn': t['turn']}))
         if cmd == 'kill':
-            t.update(state='finished', reason='killed', status=None, signal=1)
+            end(state, t, 'killed')
             return print(json.dumps(t))
         if cmd == 'rm':
             if t['state'] == 'live':
@@ -197,6 +213,17 @@ def command(state, argv):
                 t['draft'] = person['draft'] + t.get('draft', '')
         t['sent'].append(t.pop('draft', '') + rest[1])
         return print(json.dumps({'started': state.get('send_started', {}).get(t['address'], True), 'status': word(t), 'turn': t['turn']}))
+    if cmd == 'connect':  # the API over stdin: terminal.list answers full records, as Core's does
+        for row in sys.stdin.read().splitlines():
+            request = json.loads(row)
+            if state.get('ls_error'):
+                print(json.dumps({'id': request.get('id'), 'jsonrpc': '2.0', 'error': {'code': -32000, 'message': 'no answer',
+                                                                                       'data': {'kind': state['ls_error']}}}))
+                continue
+            every = (request.get('params') or {}).get('all')
+            found = [{k: v for k, v in t.items() if k not in PRIVATE} for t in state['terminals'].values() if every or t['state'] == 'live']
+            print(json.dumps({'id': request.get('id'), 'jsonrpc': '2.0', 'result': {'terminals': found, 'machines': [], 'hidden_finished': 0}}))
+        return
     if cmd == 'events':
         n = state.get('connections', 0)
         state['connections'] = n + 1

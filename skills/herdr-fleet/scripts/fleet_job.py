@@ -54,7 +54,17 @@ def lead_kind(job):
     return people.get(lead, 'claude')
 
 
+def native():
+    """The Core-native job module beside this file (python3 -I puts no script folder on sys.path)."""
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    import core_native
+    return core_native
+
+
 def tell(job, name, text):
+    if backend(job) == 'native':
+        return native().tell(job, name, text)
     people, lead = roster(job)
     name = lead if name == 'lead' else name
     if not NAME.fullmatch(name or '') or name not in people:
@@ -107,6 +117,8 @@ def type_pointer(job, agent, who, brief, pointer):
 
 def notify_lead(job, text):
     """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed."""
+    if backend(job) == 'native':
+        return native().notify_lead(job, text)
     append(Path(job) / 'inbox.log', text)
     if lead_kind(job) == 'codex':
         deliver_soon(job)
@@ -557,6 +569,8 @@ def agent_card(name):
 
 def lead_alive(job):
     """False only when Herdr says the lead's agent is gone (agent_not_found); any other failure counts as alive."""
+    if backend(job) == 'native':
+        return native().lead_alive(job)
     lead = roster(job)[1]
     try:
         out = subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'get', lead], capture_output=True, text=True, timeout=10)
@@ -792,7 +806,7 @@ def record_yes(job, ident, sha, by, asked=None):
 def pane_yes(job):
     """True when a yes typed in the lead's pane can only be the owner's: a Claude lead on the Herdr TUI. fleet-job types
     inbox lines into a Codex lead's pane, and on Herdr Core anything can type, so there only gate-ok's recorded yes counts."""
-    return backend(job) != 'core' and lead_kind(job) == 'claude'
+    return backend(job) == 'tui' and lead_kind(job) == 'claude'
 
 
 CORE_TERMINAL = ('HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE')  # set by Herdr Core in each of its terminals
@@ -832,7 +846,7 @@ def inside_herdr(env=None, pid=None):
 def approve_gate(job, ident, sha, by, digest=None):
     """The starting bot's command, run outside Herdr: the owner said yes in its chat to this gate at this commit.
     digest: the gate as the bot was handed it (its approve command carries it); a gate changed since then takes no yes."""
-    core = backend(job) == 'core'
+    core = backend(job) != 'tui'
     if inside_herdr():
         if core:
             raise PermissionError('approve-gate runs only outside Herdr and Herdr Core (over plain ssh, never hc exec), from '
@@ -1217,9 +1231,11 @@ def lead_folders(job):
 
 
 def backend(job):
-    """'core' for a job stampede new --core made; 'tui' for every other job, those made before Core included."""
+    """'native' for a job stampede new --core made, 'core' for one new --core --relay made; 'tui' for every other job,
+    those made before Core included."""
     path = Path(job) / 'backend'
-    return 'core' if path.is_file() and path.read_text().strip() == 'core' else 'tui'
+    found = path.read_text().strip() if path.is_file() else ''
+    return found if found in ('native', 'core') else 'tui'
 
 
 def job_key(job):
@@ -1473,7 +1489,7 @@ def launching(job, agent):
 CONFIG_KEYS = ('FLEET_LEAD_KIND', 'FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_TRUST_ROOT', 'FLEET_JOBS_ROOT', 'FLEET_WATCH_INTERVAL',
                'FLEET_WATCH_PASSES', 'FLEET_WATCH_NOTIFY', 'HERDR_EVENTS_MACHINE', 'HERDR_EVENTS_HOME', 'HERDR_EVENTS_ROUTES_DIR',
                'HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_DIR', 'HERDR_EVENTS_STALE_MINUTES', 'HC', 'HC_SESSION', 'HC_SOCKET',
-               'STAMPEDE_NO_UPDATE_CHECK', 'STAMPEDE_APP_SPACE',
+               'STAMPEDE_NO_UPDATE_CHECK', 'STAMPEDE_APP_SPACE', 'STAMPEDE_MAX_HELPERS', 'STAMPEDE_TAB_PANES',
                'STAMPEDE_UPDATE_URL')  # every key in config.example; a test keeps them equal
 HERDR_IDS = ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_EVENTS_OWNER')
 
@@ -1524,9 +1540,14 @@ def launch(agent, kind, pane, args):
     return ready.get('agent', {}).get('agent_status') == 'blocked'
 
 
-def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None):
+def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
+          outlive=False, program=()):
     """Start one agent and record it: in an existing pane at its shell prompt, then send its brief pointer (TUI); or in a
-    Herdr Core terminal with its brief pointer as the first prompt (a Core job)."""
+    Herdr Core terminal with its brief pointer as the first prompt (a Core job). A native job: core_native.start."""
+    if backend(job) == 'native':
+        return native().start(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, tab, parent, outlive, program)
+    if tab or parent or outlive or program:
+        raise ValueError('--tab, --parent, --outlive-parent and a program after -- are for a native job (new --core)')
     require_approval(job)
     if not NAME.fullmatch(agent):
         raise ValueError('agent names are <role>-<scope>, lowercase')
@@ -2386,6 +2407,8 @@ def acknowledged(job, lead):
 def caller_ids(job):
     """Where a job's event comes from: on the TUI, the caller's Herdr workspace and pane; on Core, the job's key and its
     lead's terminal, never the caller's environment (a TUI pane may run a Core job's command)."""
+    if backend(job) == 'native':
+        return native().caller_ids(job)
     if backend(job) != 'core':
         return {key: os.environ[name] for key, name in (('workspace', 'HERDR_WORKSPACE_ID'), ('lead_pane', 'HERDR_PANE_ID'))
                 if os.environ.get(name)}
@@ -2601,7 +2624,8 @@ def core_hint():
     return '; Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
 
 
-def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False, kind=None, app=False):
+def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False, kind=None, app=False,
+        relay=False, space=None, max_helpers=None):
     """Front door: make the job, start its lead with its hooks, print the lead's name.
     kind: the lead's CLI, claude (on claude-opus-5-5) or codex (on gpt-6-astra); with none, FLEET_LEAD_KIND, else claude.
     A fork of a Claude chat takes a Claude lead only.
@@ -2610,7 +2634,11 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     fork: a Claude session id (the chat that planned the job); the lead starts as a fork of it and keeps that conversation.
     core: the whole job runs on Herdr Core, in cwd (default: the git root here). app: its lead and workers also carry
     the Herdr app's space and tab labels, so the app shows them (STAMPEDE_APP_SPACE=1 is the standing choice).
-    front: the chat that runs this, outside Herdr, stays the owner's only contact; the lead posts to <job>/outbox for it."""
+    front: the chat that runs this, outside Herdr, stays the owner's only contact; the lead posts to <job>/outbox for it.
+    relay: a core job of the earlier kind (follower, inbox, hooks); else a core job is native (core_native.new), where
+    space and max_helpers apply."""
+    if (space or max_helpers) and (relay or not core):
+        raise ValueError('--space and --max-helpers are for a native job: new --core without --relay')
     kind = kind or os.environ.get('FLEET_LEAD_KIND') or 'claude'
     if kind not in LEAD:
         raise ValueError(f'the lead runs on claude or codex, not {kind!r} (--lead, or FLEET_LEAD_KIND)')
@@ -2623,6 +2651,8 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
         if front:
             raise ValueError('--front-door is for a Herdr TUI job: the front door reads the lead\'s pane, and a Herdr Core job has none')
+        if not relay:
+            return native().new(ask_file, name, review, fork, cwd, kind, space, max_helpers)
         return new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1')
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
@@ -2804,16 +2834,26 @@ def main(argv):
     p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox')
     p.add_argument('--lead', choices=sorted(LEAD), help='the lead\'s CLI: claude (claude-opus-5-5) or codex (gpt-6-astra); default '
                    '$FLEET_LEAD_KIND, else claude. --fork takes claude only')
-    p.add_argument('--app-space', action='store_true', help='with --core: label the lead and workers for the Herdr app '
-                   '(herdr.space, herdr.tab), so it shows the job in a space; the app then keeps those terminals')
+    p.add_argument('--app-space', action='store_true', help='with --core --relay: label the lead and workers for the Herdr app '
+                   '(herdr.space, herdr.tab), so it shows the job in a space; a native job always carries them')
+    p.add_argument('--relay', action='store_true', help='with --core: the earlier Core job (a follower, inbox files, hooks)')
+    p.add_argument('--space', help='with --core: the space\'s name (default: the job\'s name)')
+    p.add_argument('--max-helpers', type=int, help=f'with --core: helpers running at once (default $STAMPEDE_MAX_HELPERS, else 12)')
     p = sub.add_parser('post'); p.add_argument('job'); p.add_argument('text', nargs='+'); p.add_argument('--file', action='append', default=[])
     p = sub.add_parser('wait'); p.add_argument('job'); p.add_argument('--timeout', type=int, default=3600, help='seconds; exit 3 when nothing came')
-    p = start_parser = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind', required=True)
+    p = start_parser = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind')
     p.add_argument('--pane', help='the Herdr TUI pane (required on the TUI; in a Core job, the pane a cursor, hermes or kimi '
-                   'agent is handed to)'); p.add_argument('--brief', required=True)
+                   'agent is handed to)'); p.add_argument('--brief')
+    p.add_argument('--tab', help='a native job: the workstream tab (default main)')
+    p.add_argument('--parent', help='a native job: the agent it runs under (default: the caller, else the lead)')
+    p.add_argument('--outlive-parent', action='store_true', help='a native job: keep it running when its parent ends')
+    p.add_argument('program', nargs='*', help='a native job: after --, a program to run in place of --kind and --brief')
     p.add_argument('--cwd', help='a Herdr Core job: the folder an agent Core runs starts in (default: the repo)')
     p.add_argument('--model'); p.add_argument('--effort')
     p.add_argument('--report', action='append', default=[]); p.add_argument('--yolo-in', help='a worker in its own git worktree: no-checks mode')
+    for verb in ('next', 'snapshot', 'reopen', 'close'):
+        sub.add_parser(verb, help='a native job').add_argument('job')
+    p = sub.add_parser('tree', help='a native job: its tree as Core holds it'); p.add_argument('job'); p.add_argument('--json', action='store_true')
     p = sub.add_parser('tell'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('text', nargs='+')
     p = sub.add_parser('ask'); p.add_argument('job'); p.add_argument('--option', action='append', default=[]); p.add_argument('question', nargs='+')
     p.add_argument('--gate', action='store_true', help='a gate: one exact action at one commit, yes or no')
@@ -2840,8 +2880,11 @@ def main(argv):
     a = parser.parse_args(argv)
     if a.cmd == 'new' and a.cwd and not a.core:
         parser.error('--cwd is for new --core')
-    if a.cmd == 'start' and not a.pane and backend(a.job) != 'core':
-        start_parser.error('the following arguments are required: --pane')
+    if a.cmd == 'start' and backend(a.job) != 'native':
+        missing = [flag for flag, value in (('--kind', a.kind), ('--brief', a.brief), ('--pane', a.pane or backend(a.job) == 'core'))
+                   if not value]
+        if missing:
+            start_parser.error('the following arguments are required: ' + ', '.join(missing))
     try:
         return run(a)
     except (ValueError, PermissionError) as error:
@@ -2854,19 +2897,38 @@ def main(argv):
         return 1
 
 
+NATIVE_ONLY = ('next', 'tree', 'snapshot', 'reopen', 'close')
+
+
 def run(a):
     if a.cmd == 'new':
         if a.core:
             return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,
-                       app=a.app_space)
+                       app=a.app_space, relay=a.relay, space=a.space, max_helpers=a.max_helpers)
+        if a.relay:
+            raise ValueError('--relay is for new --core')
         return new(a.file, a.workspace or os.environ.get('HERDR_WORKSPACE_ID'), a.name, a.review, a.pane, a.fork, front=a.front_door,
-                   kind=a.lead, app=a.app_space)
+                   kind=a.lead, app=a.app_space, space=a.space, max_helpers=a.max_helpers)
+    job = getattr(a, 'job', None)
+    if a.cmd in NATIVE_ONLY and backend(job) != 'native':
+        raise ValueError(f'{a.cmd} is for a native job (new --core); {job} is a {backend(job)} job')
+    if a.cmd in ('hook', '_deliver', '_wake') and backend(job) == 'native':
+        return 0  # no hooks, no inbox and no deliverer on a native job: Core carries every message
+    if a.cmd == '_reopen' and backend(job) == 'native':
+        raise ValueError('_reopen is for a relay job; a native job reopens with stampede reopen')
+    if a.cmd == 'next':
+        return native().next_(job)
+    if a.cmd == 'tree':
+        return native().tree(job, a.json)
+    if a.cmd in NATIVE_ONLY:
+        raise ValueError(f'{a.cmd} on a native job is not built yet')
     if a.cmd == 'post':
         return post(a.job, ' '.join(a.text), a.file)
     if a.cmd == 'wait':
         return wait(a.job, a.timeout)
     if a.cmd == 'start':
-        return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in, a.cwd)
+        return start(a.job, a.agent, a.kind, a.pane, a.brief, a.model, a.effort, a.report, a.yolo_in, a.cwd, a.tab, a.parent,
+                     a.outlive_parent, a.program)
     if a.cmd == 'tell':
         return tell(a.job, a.agent, ' '.join(a.text)) or 0
     if a.cmd == 'ask' and a.gate:

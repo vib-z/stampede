@@ -10,10 +10,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / 'tests/fixtures/hc-schema-0.1.20.json'
-TERMINAL = ('address', 'argv', 'exit_code', 'keep', 'labels', 'name', 'reason', 'state', 'status', 'status_ms', 'turn')
+TERMINAL = ('address', 'argv', 'die_with_parent', 'exit_code', 'keep', 'labels', 'name', 'parent', 'reason', 'state', 'status', 'status_ms',
+            'turn')
 USES = {
-    'run': ('terminal.run', ('argv', 'cwd', 'keep', 'labels', 'name', 'no_notify', 'no_parent'), ('name_taken', 'spawn_failed'), ('address', 'name')),
+    'run': ('terminal.run', ('argv', 'cwd', 'keep', 'labels', 'name', 'no_notify', 'no_parent', 'outlive_parent', 'parent'),
+            ('name_taken', 'spawn_failed'), ('address', 'name')),
     'ls': ('terminal.list', ('all', 'labels'), (), ('terminals',)),
+    'connect': ('terminal.list', ('all',), (), ('terminals',)),  # one full listing: the API's records, which hc ls --json leaves short
     'get': ('terminal.get', ('terminal',), ('not_found',), TERMINAL),
     'send': ('terminal.send', ('force', 'if', 'terminal', 'text'), ('blocked', 'cancelled', 'finished', 'not_found', 'status_mismatch'),
              ('started', 'status', 'turn')),

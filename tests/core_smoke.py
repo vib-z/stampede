@@ -75,7 +75,7 @@ def stampede_core():
     ask = T / 'ask.md'
     ask.write_text('Smoke test the Core path\n')
     stampede = [str(SRC / 'scripts/stampede')]
-    made = subprocess.run(stampede + ['new', '--core', '--file', str(ask), '--cwd', str(repo)], capture_output=True, text=True,
+    made = subprocess.run(stampede + ['new', '--core', '--relay', '--file', str(ask), '--cwd', str(repo)], capture_output=True, text=True,
                           env=env, timeout=120)
     if made.returncode:
         fail(f'stampede new --core: exit {made.returncode}: {made.stdout} {made.stderr}')

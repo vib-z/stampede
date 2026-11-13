@@ -244,7 +244,7 @@ class Job:
         ask.write_text(f'Write hello-{self.client}-{self.backend}.txt with one worker.\n')
         lead = ('--lead', self.lead_kind) if self.lead_kind else ()
         if self.backend == 'core':
-            self.front('new', 'new', '--core', '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
+            self.front('new', 'new', '--core', '--relay', '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
             return
         if self.row['where'] == 'inside':  # a chat in a Herdr pane: the lead gets a lead tab in this workspace
             self.front('new', 'new', '--file', ask, '--name', self.NAME, *lead)

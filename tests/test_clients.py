@@ -397,7 +397,7 @@ class Outcomes(unittest.TestCase):
         job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1', WORKERS, HANDED)
         (job.root / 'ask.md').write_text('Write hello.txt\n')
         env = {k: v for k, v in job.client_env().items() if k != 'HERDR_EVENTS_OWNER'}  # the guide's command as written
-        code, out, err = job.run('new', (ROOT / 'scripts/stampede', 'new', '--core', '--file', job.root / 'ask.md', '--cwd',
+        code, out, err = job.run('new', (ROOT / 'scripts/stampede', 'new', '--core', '--relay', '--file', job.root / 'ask.md', '--cwd',
                                          job.repo, '--name', Job.NAME), env, 'sshd')
         self.assertEqual(code, 0, out + err)
         self.assertFalse((job.job / 'owner').is_file(), 'proof: run as written, the job is local')

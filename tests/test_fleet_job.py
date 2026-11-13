@@ -1502,7 +1502,7 @@ class LeadChoice(unittest.TestCase):
         # typing_unsafe asks the machine's own Herdr Core for its version and hold: not this test's subject, and no test's to ask
         with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(fj, 'new_core', return_value=0) as core, \
                 mock.patch.object(fj, 'typing_unsafe', return_value=''):
-            self.assertEqual(fj.new('ask.md', None, core=True), 0)
+            self.assertEqual(fj.new('ask.md', None, core=True, relay=True), 0)
         self.assertEqual(core.call_args.args[5], 'codex')   # the standing choice is the lead of a Core job too
 
     def test_its_sandbox_reaches_the_network_git_and_the_worktrees_and_a_workers_does_not(self):

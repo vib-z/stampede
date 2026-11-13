@@ -12,7 +12,7 @@ This page is the contract. A client that draws a job (a sidebar, a phone app, a 
 - **A plain child counts too.** A terminal a lead or helper started with a bare `hc run` (a CI wait, a build, a watcher) carries no stampede label. It is in the tree by its parent link alone.
 - **Core ends a branch with its parent.** A child ends when its parent's program ends, unless it was started with `--outlive-parent` (`die_with_parent` in its record says which).
 
-Read the tree from Core, never from stampede's files: one full listing (the API's `terminal.list`, or `hc ls` then `hc get` each), then follow `parent` from the lead's address.
+Read the tree from Core, never from stampede's files: one full listing, then follow `parent` from the lead's address. `hc ls --json` shows `parent` but no labels, so stampede sends one `terminal.list` line to `hc connect`, which answers full records (or run `hc ls`, then `hc get` each).
 
 ## Labels
 
@@ -74,9 +74,9 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `endpoint` | the core the job was made on (`HC_SESSION`, `HC_SOCKET`) |
 | `lead`, `space`, `workdir` | the lead's name, the space's name, the repo |
 | `max-helpers` | the cap, only when the owner set one |
-| `tree.json` | the reopen record: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, how to start it again, and its last seen state |
+| `tree.json` | the reopen record, `{"space", "key", "nodes": {<name>: node}}`: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, `argv` (how to start it again), `outlive`, `address` and its last seen `state` |
 | `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree |
-| `queue/` | helper starts waiting for a free place under the cap |
+| `queue/` | helper starts waiting for a free place under the cap, one `<time>-<name>.json` each, oldest first; `queue/dropped/` holds those whose parent was gone |
 | `ask.md`, `plan.md`, `briefs/`, `reports/` | the ask, the lead's plan, each helper's brief, each helper's result |
 
 ## Commands
@@ -84,10 +84,10 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | command | does | prints |
 |---|---|---|
 | `stampede new --core --file <ask.md> [--cwd <repo>] [--name <slug>] [--space <name>] [--lead claude\|codex] [--max-helpers <n>]` | makes the job folder, writes the marker and the owner tag, starts the lead as a root with the space's name, writes the reopen record | `<lead> <job dir>` |
-| `stampede start <job> <name> --kind claude\|codex --brief <file> [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent]` | starts one helper as a Core child of the caller's terminal (from outside Core: of the lead); over the cap it queues the start | `STARTED <name> (<address>) under <parent>` or `QUEUED <name> (<n> running, cap <c>)` |
+| `stampede start <job> <name> --kind claude\|codex --brief <file> [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent] [--yolo-in <worktree>]` | starts one helper as a Core child of the caller's terminal (from outside Core, or from a terminal that is not the job's: of the lead); over the cap it queues the start. The name `lead` and a name a live terminal or a queued start of the job holds are refused | `STARTED <name> (<address>) under <parent>` or `QUEUED <name> (<n> running, cap <c>)`; `FAILED <name> (<why>)`, exit 1, when Core refuses the run |
 | `stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--outlive-parent] -- <program> [args]` | the same for any program (kind `program`) | the same |
-| `stampede next <job>` | starts queued helpers, oldest first, while fewer than the cap run | one `STARTED` line each, else `NOTHING QUEUED` or `WAITING <k> queued (<n> running, cap <c>)` |
-| `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | one line per terminal, indented by depth |
+| `stampede next <job>` | starts queued helpers, oldest first, while fewer than the cap run | one `STARTED` line each (`DROPPED <name>: its parent <p> is gone` for one whose parent ended), then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED` when nothing started or waits |
+| `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child: role `plain`, kind and tab `-`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes: [{depth, name, address, parent, role, kind, status, state, tab}], queue}` |
 | `stampede tell <job> <agent> "<text>"` | `hc send` to that agent's terminal | `SUBMITTED <agent>` or `FAILED <agent> (<why>)` |
 | `stampede snapshot <job>` | rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree | the record's path |
 | `stampede reopen <job> [--fresh] [--prompt] [--rerun-programs]` | starts what is not live, parents first, each child under its parent's new address | `LIVE`, `STARTED` or `SKIPPED` per node |
@@ -100,7 +100,7 @@ At most 12 helpers run at once in one lead's tree, at any depth. The owner chang
 
 A helper counts while Core would call it working: its terminal is live and it has not yet gone `idle` or `done` after its task. A plain program counts while it lives. The lead and plain children never count.
 
-A start over the cap is queued, not refused. The lead runs `stampede next <job>` when a child's note arrives; every `stampede start` drains the queue first too.
+A start over the cap is queued, not refused. The lead runs `stampede next <job>` when a child's note arrives; every `stampede start` drains the queue first too. Core takes a finished terminal as `--parent` (hc 0.1.21), so the drain itself checks that a queued start's parent is live and drops it otherwise.
 
 ### Reopen and close
 
