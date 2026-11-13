@@ -7,7 +7,7 @@ You talk to a Claude Code session on your machine from the Claude app or claude.
 - Open it from the phone and type the ask.
 - The session reads stampede's entry file and starts the job; the lead plans and goes unless you ask to see the plan first.
 - Ask it for status whenever you like; it reads the job, it does not guess.
-- It passes on only your plan approval and your ordinary answers, word for word. Every gate (merge, push to main, deploy, publish, send, spend, close) is your own tap on the lead's card, never relayed.
+- It passes on only your plan approval and your ordinary answers, word for word. Every gate ([the list](../skills/herdr-fleet/references/gates.md)) is your own tap on the lead's card, never relayed.
 - For pushes while you are away, pair Moshi too.
 
 ## Run
@@ -41,4 +41,4 @@ stampede new --file <ask.md> --pane "$P" --front-door --fork "$CLAUDE_CODE_SESSI
 - `reopen.sh` resumes the lead's own session, never the planning chat.
 - A fork is a Claude lead: `--fork` with `--lead codex` exits 2. For a Codex lead, start without `--fork`; the ask file carries the plan.
 - **The desktop chat stays your contact** (`--front-door`): you never need to watch the lead's pane. The lead posts its plan, questions, gates, screenshots and report to `<job>/outbox/`; the chat waits on it with `stampede wait <job>` in the background, sends you each item and passes your answers back. Its loop: [skills/stampede](../skills/stampede/SKILL.md#relay-a---front-door-job).
-- **On Herdr Core:** no workspace; the chat runs `stampede new --core --file <ask.md> --cwd <repo> --fork "$CLAUDE_CODE_SESSION_ID"` (no `--front-door` on Core). The lead is a root Core terminal and its helpers are its Core children; read any of them with `hc read <address>`, never type into one ([core.md](../skills/herdr-fleet/references/core.md)).
+- **On Herdr Core:** no workspace; the chat runs `stampede new --core --file <ask.md> --cwd <repo> --fork "$CLAUDE_CODE_SESSION_ID"` ([no `--front-door` on Core](../docs/CORE-NATIVE.md#not-in-a-core-native-job)). The lead is a root Core terminal and its helpers are its Core children; read any of them with `hc read <address>`, never type into one ([core.md](../skills/herdr-fleet/references/core.md)).

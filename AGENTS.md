@@ -1,8 +1,10 @@
 # Rules for agents working on stampede
 
-These rules apply to every agent that edits this repo: Claude, Codex, Cursor, Hermes, Grok Bot or any other. The rules for *running* a job with stampede are not here: they live in [SKILL.md](SKILL.md) and the skills it names.
+To run a job with stampede, read [USING.md](USING.md); the rules below are for changing this repo.
 
-The design is in [docs/superpowers/specs/2026-10-21-stampede-lean-design.md](docs/superpowers/specs/2026-10-21-stampede-lean-design.md). Read it before your first change.
+These rules apply to every agent that edits this repo: Claude, Codex, Cursor, Hermes, Grok Bot or any other.
+
+The current contract is the [README](README.md) and [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The original design, kept as history, is [docs/superpowers/specs/2026-10-21-stampede-lean-design.md](docs/superpowers/specs/2026-10-21-stampede-lean-design.md).
 
 ## 1. The README is the product's front page. Keep it current at every step
 

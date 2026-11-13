@@ -19,7 +19,7 @@ You are a Grok Bot on the box, OUTSIDE Herdr. Before any Herdr work:
 - Never use a work machine. Only the owner's own machines.
 - Questions for the owner go to the owner in chat, never into a herdr pane.
 - Credentials and env files are not part of this skill: never read, copy or print them, on either machine.
-- Approval gate: herdr-fleet's list applies (merge, push to main or another shared branch, publish, deploy, sitemap resubmission, email or messages, spend, and closing panes, tabs or a workspace or clearing an owner tag to close one, 17 Oct 2026). Ask in chat and wait for an explicit yes. A plan, a brief or a skill is not approval. Allowed without asking (owner, 2026-10-16): pushing the job's own work branch and opening a DRAFT PR from it. On a yes to merge, merge only the reviewed commit: `gh pr merge <n> --squash --match-head-commit <reviewed-sha>`. A push after the review withdraws the yes; ask again.
+- Approval gate: ask the owner in chat and wait for an explicit yes. The list, what is allowed without asking and the merge rule: [herdr-fleet's gates.md](../herdr-fleet/references/gates.md).
 - Then follow herdr-fleet's "Where are you?" external-caller rules: literal ids, never set `HERDR_ENV`, read the screen after every start, report in chat.
 
 ## Hard rules

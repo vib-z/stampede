@@ -69,6 +69,8 @@ Either way:
 
 ## Quick start
 
+**An agent told to run a job with stampede:** start at [USING.md](USING.md), one short page.
+
 On a Mac or a Linux machine with [Herdr](https://herdr.dev/docs/install/) 0.9.4 or later, Claude Code signed in, Python 3.9 or later, git, jq and curl:
 
 ```bash
@@ -590,7 +592,7 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 
 ## Safety
 
-- **Your own yes, every time:** a merge to main, a push to main or another shared branch, a deploy, publishing, sending email or messages, any spend, and closing panes, tabs, a workspace or a Core job (`stampede close`). Pushing the job's own work branch and opening a draft PR need no ask.
+- **Your own yes, every time:** a merge to main, a push to main or another shared branch, a deploy, publishing, sending email or messages, resubmitting a sitemap, any spend, and closing panes, tabs, a workspace or a Core job (`stampede close`). Pushing the job's own work branch and opening a draft PR need no ask. The one list, and what never counts as a yes: [gates.md](skills/herdr-fleet/references/gates.md).
 - **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`:
   - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.
   - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
@@ -834,7 +836,8 @@ tests/evals/            the evals: cases.json, run.py, record.py, live/, linux/,
 |---|---|
 | [docs/SETUP.md](docs/SETUP.md) | the full setup: installer, unattended agents, the event relay, uninstall |
 | [docs/LINUX.md](docs/LINUX.md) | stampede on Linux: what was verified and how, the install, the timers, what differs from macOS, the gaps |
-| [SKILL.md](SKILL.md) | the entry point an agent reads to run a job |
+| [USING.md](USING.md) | the one page an agent reads first to run a job: start it, the commands that follow, the job folder, the gates |
+| [SKILL.md](SKILL.md) | the skill entry point, routing each role to its skill |
 | [skills/herdr-fleet](skills/herdr-fleet/SKILL.md) | the lead's playbook, with [failure modes](skills/herdr-fleet/references/failure-modes.md) [a job on Herdr Core](skills/herdr-fleet/references/core.md) and [the earlier `--core --relay` path](skills/herdr-fleet/references/core-relay.md) |
 | [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md) | the shape of a Core job: the tree, labels, messages, events, the job folder and the commands, for a client that draws one |
 | [remote/](remote/README.md) | one guide per front door, Moshi and the event relay |
@@ -910,7 +913,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 - On Linux: the systemd user timers on a real user manager, x86_64 live (CI covers it with fakes and a Core smoke run), a signed-in Claude and Codex, Moshi paired, and a bot over SSH.
 - A Herdr server restart: `reopen.sh` into the workspace Herdr restores, starting the agents in its plain shells, instead of asking to close it first.
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
-- On Herdr Core, planned: workers on a second machine (`hc run --on`; a job is local to one machine today), a bot front door over `hc`, a look at an `--app-space` job in the Herdr app and a name for its space set through the app, Kimi as a Core agent (Kimi 2.5.3 reports its status on Herdr Core 0.1.20) once a signed-in run shows its turns and its empty prompt, Hermes and Kimi workers on a TUI-only job, and Hermes's empty prompt, so a handed one is briefed and told without a hand.
+- On Herdr Core, planned: workers on a second machine (`hc run --on`; a job is local to one machine today), a native front door for a Core job, from a chat or a bot over `hc` (today `new --core` refuses `--front-door`: [what is true today](docs/CORE-NATIVE.md#not-in-a-core-native-job)), a look at an `--app-space` job in the Herdr app and a name for its space set through the app, Kimi as a Core agent (Kimi 2.5.3 reports its status on Herdr Core 0.1.20) once a signed-in run shows its turns and its empty prompt, Hermes and Kimi workers on a TUI-only job, and Hermes's empty prompt, so a handed one is briefed and told without a hand.
 - Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.
 - Workers on a second machine over Tailscale.
 - Cursor as the lead, and a signed-in Codex leading a live Herdr Core job.

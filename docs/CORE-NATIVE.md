@@ -135,6 +135,7 @@ A start over the cap is queued, not refused. The lead runs `stampede next <job>`
 
 ## Not in a Core-native job
 
+- No `--front-door`: `stampede new --core` refuses it (exit 2), since the front door reads the lead's pane and a Core job has none. The chat that starts a Core job passes the owner's words with `stampede tell <job> lead "..."`, records a gate's yes with `approve-gate`, and reads the lead with `hc read <address>`; the owner hears questions, gates, posts and done as the events above. A native front door for a Core job is planned.
 - No `--pane`: a Core-native job hands nothing to a Herdr TUI pane. Run another CLI as a program (`stampede start <job> <name> -- <cli> ...`).
 - No follower terminal (`relay-<key>`), `inbox.log`, `inbox/`, `hooks/`, `core.json` or `agents.tsv`.
 - The earlier Core path, with those parts, is `stampede new --core --relay`. It is kept for one release.
