@@ -242,6 +242,103 @@ class Tabs(NativeCase):
         self.assertEqual((self.tab('h0'), self.tab('h1')), ('main', 'main-2'))
 
 
+class Layout(NativeCase):
+    """The owner's split order: the lead top left, then right of it, down of that, down of the lead; 4 a tab."""
+    def setUp(self):
+        super().setUp()
+        self.started()
+
+    def places(self, *names):
+        tags = {t['labels'].get('stampede.agent'): t['labels'] for t in self.state()['terminals'].values() if t['state'] == 'live'}
+        return [(tags[n]['herdr.tab'], tags[n]['stampede.pane'], tags[n].get('stampede.split'), tags[n].get('stampede.beside'))
+                for n in names]
+
+    def test_the_lead_and_three_helpers_then_four_a_tab(self):
+        for n in range(1, 8):
+            self.start(f'h{n}')
+        self.assertEqual(self.places(LEAD, 'h1', 'h2', 'h3'), [('main', '1', None, None), ('main', '2', 'right', LEAD),
+                                                              ('main', '3', 'down', 'h1'), ('main', '4', 'down', LEAD)])
+        self.assertEqual(self.places('h4', 'h5', 'h6', 'h7'), [('main-2', '1', None, None), ('main-2', '2', 'right', 'h4'),
+                                                              ('main-2', '3', 'down', 'h5'), ('main-2', '4', 'down', 'h4')])
+
+    def test_a_workstream_tab_and_a_nested_level(self):
+        for n in range(1, 4):
+            self.start(f'w{n}', tab='ci')
+        with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': self.addresses()['w1']}):
+            self.start('w1-sub', tab='ci')
+            self.start('deep')
+        self.assertEqual(self.places('w1', 'w2', 'w3', 'w1-sub', 'deep'),
+                         [('ci', '1', None, None), ('ci', '2', 'right', 'w1'), ('ci', '3', 'down', 'w2'), ('ci', '4', 'down', 'w1'),
+                          ('main', '2', 'right', LEAD)])
+
+    def test_a_freed_place_is_taken_again_lowest_first_with_the_fall_back(self):
+        for n in range(1, 4):
+            self.start(f'h{n}')
+        fj.hc('kill', self.addresses()['h1'])
+        fj.hc('kill', self.addresses()['h2'])
+        self.start('a')
+        self.start('b')
+        self.assertEqual(self.places('a', 'b'), [('main', '2', 'right', LEAD), ('main', '3', 'down', 'a')])
+        fj.hc('kill', self.addresses()['a'])
+        self.start('c')   # pane 2 again; then pane 3's split target gone: it would split the lead right
+        fj.hc('kill', self.addresses()['c'])
+        fj.hc('kill', self.addresses()['b'])
+        self.start('d')
+        self.start('e')
+        self.assertEqual(self.places('d', 'e'), [('main', '2', 'right', LEAD), ('main', '3', 'down', 'd')])
+        fj.hc('kill', self.addresses()['d'])
+        self.terminal(self.addresses()['e'], labels={**self.state()['terminals'][self.addresses()['e']]['labels'], 'stampede.pane': '9'})
+        self.start('f')
+        self.assertEqual(self.places('f'), [('main', '2', 'right', LEAD)])
+
+    def test_the_fall_back_when_the_split_target_is_free(self):
+        self.start('h1')
+        self.start('h2')
+        fj.hc('kill', self.addresses()['h1'])
+        self.terminal(self.addresses()['h2'], labels={**self.state()['terminals'][self.addresses()['h2']]['labels'], 'stampede.pane': '3'})
+        self.start('h3')
+        self.start('h4')
+        self.assertEqual(self.places('h3', 'h4'), [('main', '2', 'right', LEAD), ('main', '4', 'down', LEAD)])
+        state = self.state()
+        state['terminals']['t1']['labels'].pop('stampede.pane')
+        (self.core / 'state.json').write_text(json.dumps(state))
+        fj.hc('kill', self.addresses()['h3'])
+        self.start('h5')   # the lead holds a place but no number: pane 1 is free, so no split
+        self.assertEqual(self.places('h5'), [('main', '1', None, None)])
+
+    def test_the_setting_at_6(self):
+        with mock.patch.dict(os.environ, {'STAMPEDE_TAB_PANES': '6'}):
+            for n in range(1, 7):
+                self.start(f'h{n}')
+        self.assertEqual([p[1:] for p in self.places('h4', 'h5', 'h6')], [('5', 'right', 'h3'), ('6', 'right', 'h4'), ('1', None, None)])
+        self.assertEqual(self.places('h6')[0][0], 'main-2')
+
+    def test_a_second_job_has_its_own_main(self):
+        ask = self.root / 'ask2.md'
+        ask.write_text('Another job\n')
+        code, out = self.quiet(fj.new, str(ask), None, name='other', core=True, cwd=str(self.repo))
+        self.assertEqual(code, 0, out)
+        other = fj.job_key(self.repo / '.herdr-other')
+        lead = next(t for t in self.state()['terminals'].values() if t['labels'].get('stampede.job') == other)
+        self.assertEqual((lead['labels']['herdr.tab'], lead['labels']['stampede.pane']), ('main', '1'))
+
+    def test_reopen_keeps_places_and_tree_shows_them(self):
+        for n in range(1, 4):
+            self.start(f'h{n}', kind='codex')
+        fj.hc('kill', 't1')
+        self.quiet(fj.native().reopen, self.job, True, False, False)
+        self.assertEqual(self.places(LEAD, 'h1', 'h2', 'h3'), [('main', '1', None, None), ('main', '2', 'right', LEAD),
+                                                              ('main', '3', 'down', 'h1'), ('main', '4', 'down', LEAD)])
+        nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
+        self.assertEqual((nodes['h2']['pane'], nodes['h2']['split'], nodes['h2']['beside']), (3, 'down', 'h1'))
+        _, out = self.quiet(fj.native().tree, self.job)
+        self.assertIn('h3 (t', out)
+        self.assertTrue(any(line.endswith('tab main pane 4') and 'h3' in line for line in out.splitlines()), out)
+        _, out = self.quiet(fj.native().tree, self.job, True)
+        row = next(r for r in json.loads(out)['nodes'] if r['name'] == 'h1')
+        self.assertEqual((row['tab'], row['pane'], row['split'], row['beside']), ('main', 2, 'right', LEAD))
+
+
 class TreeTell(NativeCase):
     def setUp(self):
         super().setUp()
@@ -255,7 +352,7 @@ class TreeTell(NativeCase):
         code, out = self.quiet(fj.native().tree, self.job)
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines(), ['space fix-login-bug (' + fj.job_key(self.job) + ')',
-                                            f'  {LEAD} (t1) lead claude idle tab main', '    build-api (t2) helper claude idle tab main',
+                                            f'  {LEAD} (t1) lead claude idle tab main pane 1', '    build-api (t2) helper claude idle tab main pane 2',
                                             '      ci-wait (t3) plain - live tab -', f'  queued later under {LEAD} (claude)'])
         shown = json.loads(self.quiet(fj.native().tree, self.job, True)[1])
         self.assertEqual([(n['name'], n['depth'], n['parent']) for n in shown['nodes']], [(LEAD, 0, None), ('build-api', 1, 't1'), ('ci-wait', 2, 't2')])
@@ -721,7 +818,7 @@ class Outlived(NativeCase):
     def test_tree_snapshot_the_cap_and_close_take_it(self):
         self.assertEqual(self.state()['terminals']['t2']['parent'], 't1')
         _, out = self.quiet(fj.native().tree, self.job)
-        self.assertIn(f'    keeper (t2) helper program idle tab main outlived {LEAD}', out.splitlines())
+        self.assertIn(f'    keeper (t2) helper program idle tab main pane 2 outlived {LEAD}', out.splitlines())
         self.assertIn('      keeper-log (t3) plain - live tab -', out.splitlines())
         shown = json.loads(self.quiet(fj.native().tree, self.job, True)[1])
         self.assertEqual([(n['name'], n['depth'], n['outlived']) for n in shown['nodes']][1:],

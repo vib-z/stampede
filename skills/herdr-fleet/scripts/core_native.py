@@ -2,7 +2,6 @@
 lead, the owner tag, the reopen record, the owner's gates, a cap on helpers and the layout labels. docs/CORE-NATIVE.md
 is the contract."""
 import contextlib, fcntl, json, os, shlex, subprocess, time, uuid
-from collections import Counter
 from pathlib import Path
 
 import fleet_job as fj
@@ -118,13 +117,49 @@ def cap(job):
     return setting(job, 'max-helpers', 'STAMPEDE_MAX_HELPERS', CAP)
 
 
-def tab(key, terminals, base):
-    """The first of base, base-2, base-3 ... that holds fewer than STAMPEDE_TAB_PANES live terminals of the job."""
-    panes, held = setting(None, None, 'STAMPEDE_TAB_PANES', PANES), Counter(labels(t).get('herdr.tab') for t in live(key, terminals))
-    n = 1
-    while held[base if n == 1 else f'{base}-{n}'] >= panes:
-        n += 1
-    return base if n == 1 else f'{base}-{n}'
+SPLITS = {2: (1, 'right'), 3: (2, 'down'), 4: (1, 'down')}  # the owner's 2x2: 1 top left, 2 top right, 3 bottom right, 4 bottom left
+
+
+def place(key, terminals, base, want=None):
+    """A terminal's place: (tab, pane, labels). The tab is the first of base, base-2, ... that holds fewer than
+    STAMPEDE_TAB_PANES live terminals of the job; the pane is the lowest number none of them holds (want, a recorded
+    (tab, pane), when that place is still free). Pane 2 splits pane 1 right, 3 splits 2 down, 4 splits 1 down, and each
+    from 5 the one before it right; when that pane is free, panes 2 and 3 split pane 1 right and 4 splits it down."""
+    panes, mine = setting(None, None, 'STAMPEDE_TAB_PANES', PANES), live(key, terminals)
+
+    def held(name):
+        on = [t for t in mine if labels(t).get('herdr.tab') == name]
+        return len(on), {int(labels(t)['stampede.pane']): labels(t).get('stampede.agent') for t in on
+                         if (labels(t).get('stampede.pane') or '').isdigit()}
+    count, numbered = held(want[0]) if want else (panes, {})
+    if want and count < panes and want[1] not in numbered:
+        name, pane = want
+    else:
+        n = 1
+        while held(base if n == 1 else f'{base}-{n}')[0] >= panes:
+            n += 1
+        name = base if n == 1 else f'{base}-{n}'
+        numbered = held(name)[1]
+        pane = min(set(range(1, panes + 1)) - set(numbered))
+    target, how = SPLITS.get(pane, (pane - 1, 'right'))
+    if target not in numbered:
+        target, how = 1, 'down' if pane == 4 else 'right'
+    tags = {'herdr.tab': name, 'stampede.pane': str(pane)}
+    if pane > 1 and target in numbered:
+        tags.update({'stampede.split': how, 'stampede.beside': numbered[target]})
+    return name, pane, tags
+
+
+def where_of(tags):
+    """The place a node records: tab, pane, split and beside, from its labels."""
+    return dict(tab=tags.get('herdr.tab'), pane=int(tags['stampede.pane']) if (tags.get('stampede.pane') or '').isdigit() else None,
+                split=tags.get('stampede.split'), beside=tags.get('stampede.beside'))
+
+
+def place_tags(node):
+    """A node's recorded place as labels."""
+    return {'herdr.tab': node.get('tab') or 'main', **({'stampede.pane': str(node['pane'])} if node.get('pane') else {}),
+            **({'stampede.split': node['split'], 'stampede.beside': node['beside']} if node.get('beside') else {})}
 
 
 def read(job, name):
@@ -298,9 +333,9 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None):
              + [f'You are {lead}. Read {brief} and do everything it says.'])  # the fork stays out: a reopen resumes its own session
     argv = again[:1] + (['--resume', fork, '--fork-session'] if fork else []) + again[1:]
     tags = {'stampede.job': key, 'stampede.role': 'lead', 'stampede.agent': lead, 'stampede.space': space, 'stampede.kind': kind,
-            **({'stampede.session': session} if session else {}), 'herdr.space': space, 'herdr.tab': 'main'}
+            **({'stampede.session': session} if session else {}), 'herdr.space': space, 'herdr.tab': 'main', 'stampede.pane': '1'}
     node = dict(role='lead', parent=None, kind=kind, model=model, effort=effort, session=session, brief=str(brief), report=None,
-                cwd=str(repo), tab='main', argv=again)
+                cwd=str(repo), tab='main', pane=1, split=None, beside=None, argv=again)
     record(job, lead, **node, state='starting')
     try:
         address = run(job, lead, tags, repo, argv)['address']
@@ -442,7 +477,7 @@ def adopt(job, request, terminal, argv):
     tags, name = labels(terminal), request['name']
     record(job, name, role='helper', parent=request['parent'], kind=request['kind'], model=request['model'],
            effort=request['effort'], session=tags.get('stampede.session') or '', brief=request['brief'], report=request['report'],
-           cwd=request['cwd'], tab=tags.get('herdr.tab'), outlive=request['outlive'], argv=argv, address=terminal['address'],
+           cwd=request['cwd'], base=request['tab'], **where_of(tags), outlive=request['outlive'], argv=argv, address=terminal['address'],
            state='live')
     print(f'STARTED {name} ({terminal["address"]}) under {request["parent"]}')
 
@@ -452,10 +487,12 @@ def launch(job, key, request, parent, terminals, existing=None):
     earlier start whose answer was lost) adopted: the record Core would list for it, None when it failed, or 'unknown'
     when Core stopped answering before its outcome was known."""
     name, kind = request['name'], request['kind']
-    where, report = tab(key, terminals, request['tab'] or 'main'), request['report']
+    want = (request['place'][0], request['place'][1]) if request.get('place') else None
+    _, _, spot = place(key, terminals, request['tab'] or 'main', want)
+    report = request['report']
     session = labels(existing).get('stampede.session') or '' if existing else str(uuid.uuid4()) if kind == 'claude' else ''
     tags = {'stampede.job': key, 'stampede.role': 'helper', 'stampede.agent': name, 'stampede.kind': kind,
-            **({'stampede.session': session} if session else {}), 'herdr.space': read(job, 'space'), 'herdr.tab': where}
+            **({'stampede.session': session} if session else {}), 'herdr.space': read(job, 'space'), **spot}
     argv = request['program']
     try:
         if kind != 'program':
@@ -516,14 +553,14 @@ def tree(job, as_json=False):
         rows.append({'depth': depth, 'name': name_of(t), 'address': t['address'], 'parent': t.get('parent'),
                      'role': tags.get('stampede.role') or 'plain', 'kind': tags.get('stampede.kind') or '-',
                      'status': fj.core_status(t) or t.get('state'), 'state': t.get('state'), 'tab': tags.get('herdr.tab') or '-',
-                     'outlived': outlived})
+                     'outlived': outlived, **{k: v for k, v in where_of(tags).items() if k != 'tab'}})
     waiting = [{k: r[k] for k in ('name', 'parent', 'kind', 'tab')} for _, r in queued(job)]
     if as_json:
         print(json.dumps({'space': read(job, 'space'), 'key': key, 'nodes': rows, 'queue': waiting}, indent=1))
     else:
         print(f'space {read(job, "space")} ({key})')
         for r in rows:
-            print('  ' * (r['depth'] + 1) + f'{r["name"]} ({r["address"]}) {r["role"]} {r["kind"]} {r["status"]} tab {r["tab"]}'
+            print('  ' * (r['depth'] + 1) + f'{r["name"]} ({r["address"]}) {r["role"]} {r["kind"]} {r["status"]} tab {r["tab"]}' + (f' pane {r["pane"]}' if r['pane'] else '')
                   + (f' outlived {r["outlived"]}' if r['outlived'] else ''))
         for r in waiting:
             print(f'  queued {r["name"]} under {r["parent"]} ({r["kind"]})')
@@ -601,8 +638,9 @@ def refresh(job):
         for name, t, parent in branch(key, listing()):
             tags, node = labels(t), tree['nodes'].setdefault(name, {'name': name})
             seen.add(name)
-            node.update(address=t['address'], terminal=t.get('name'), state=t.get('state'), parent=parent, cwd=t.get('cwd'),
-                        tab=tags.get('herdr.tab') or node.get('tab'))
+            node.update(address=t['address'], terminal=t.get('name'), state=t.get('state'), parent=parent, cwd=t.get('cwd'))
+            if tags.get('herdr.tab'):
+                node.update(where_of(tags))
             if t.get('state') != 'live':
                 node.update(exit_code=t.get('exit_code'), reason=t.get('reason'))
             if not tags.get('stampede.role'):
@@ -694,7 +732,8 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
             if node['role'] == 'helper' and not resume:  # a brief starts again: through the queue and the cap
                 yolo = kind != 'program' and fj.YOLO[kind][0] in (node.get('argv') or [])
                 enqueue(queue, dict(name=name, kind=kind, brief=node.get('brief'), model=node.get('model'), effort=node.get('effort'),
-                                    cwd=node.get('cwd') or str(job.parent), tab=node.get('tab'), parent=parent,
+                                    cwd=node.get('cwd') or str(job.parent), tab=node.get('base') or node.get('tab'), parent=parent,
+                                    place=[node['tab'], node['pane']] if node.get('tab') and node.get('pane') else None,
                                     outlive=bool(node.get('outlive')), program=list(node.get('argv') or []) if kind == 'program' else [],
                                     yolo=yolo, report=node.get('report') or str(job / 'reports' / (name + '.md'))))
                 later.add(name)
@@ -708,7 +747,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                 argv = base + (['--session-id', session] if session else []) + argv[-1:]
             tags = {'stampede.job': key, 'stampede.role': node['role'], 'stampede.agent': name, 'stampede.kind': kind,
                     **({'stampede.space': space} if node['role'] == 'lead' else {}), **({'stampede.session': session} if session else {}),
-                    **({'stampede.resumed': '1'} if resume else {}), 'herdr.space': space, 'herdr.tab': node.get('tab') or 'main'}
+                    **({'stampede.resumed': '1'} if resume else {}), 'herdr.space': space, **place_tags(node)}
             under = now[parent]['address'] if parent else None
             try:
                 shown = run(job, name, tags, node.get('cwd') or job.parent, argv, under, node.get('outlive'))

@@ -28,6 +28,9 @@ Read the tree from Core, never from stampede's files: one full listing, then fol
 | `stampede.resumed` | an agent `stampede reopen` resumed | `1`: while it is `idle` it holds no place under the cap, whatever its turn |
 | `herdr.space` | lead, helpers | the space's id in the Herdr app: the same value as `stampede.space` |
 | `herdr.tab` | lead, helpers | its tab's id in the app's view (below) |
+| `stampede.pane` | lead, helpers | its place in its tab, from 1 (below) |
+| `stampede.split` | lead, helpers, not pane 1 | `right` or `down`: how its pane is made |
+| `stampede.beside` | lead, helpers, not pane 1 | the `stampede.agent` of the terminal whose pane it splits |
 
 - Identity is the terminal's address. A name another terminal holds gets a suffix; `stampede.agent` stays the name the job uses.
 - Status is Core's own: `idle`, `working`, `done`, `blocked`, `error` from the program's reports, and `live` or `finished` for the terminal. A plain program reports none.
@@ -37,9 +40,21 @@ Read the tree from Core, never from stampede's files: one full listing, then fol
 
 Labels only. Core stays the source of truth, and the tree above never depends on them.
 
-- The lead is the first terminal of tab `main`.
-- A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job. `STAMPEDE_TAB_PANES` changes the 4.
+- The lead is pane 1 of tab `main`.
+- A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job, at the lowest pane number none of them holds. `STAMPEDE_TAB_PANES` changes the 4. A terminal without `stampede.pane` holds a place but no number.
 - `stampede start --tab <label>` names a workstream tab instead; it overflows to `<label>-2`, `<label>-3` by the same rule.
+- Pane 2 splits pane 1 right. Pane 3 splits pane 2 down. Pane 4 splits pane 1 down. Each pane from 5 on splits the pane before it right.
+- When the pane a split names is not live, panes 2 and 3 split pane 1 right and pane 4 splits it down; with pane 1 free too, a pane has no split labels.
+- A reopen keeps each node's recorded tab and pane; one that goes through the queue keeps its place while that place is free, else takes one by these rules.
+
+| pane | corner | made by |
+|---|---|---|
+| 1 | top left | the lead on `main`; the first helper on any other tab |
+| 2 | top right | splitting pane 1 right |
+| 3 | bottom right | splitting pane 2 down |
+| 4 | bottom left | splitting pane 1 down |
+
+- The Herdr app itself reads only `herdr.space` and `herdr.tab` and adds each terminal to the tab's row, so a client draws the places from these labels.
 - All of a job's tabs carry the one `herdr.space`.
 - To the Herdr app both values are ids, not names. It shows a space it was not told a name for by the folder of its first terminal, and a tab by its place (1, 2 and so on), until someone renames it in the app. The space's name of record is the lead's `stampede.space`.
 
@@ -77,7 +92,7 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `endpoint` | the core the job was made on (`HC_SESSION`, `HC_SOCKET`) |
 | `lead`, `space`, `workdir` | the lead's name, the space's name, the repo |
 | `max-helpers` | the cap, only when the owner set one |
-| `tree.json` | the reopen record, `{"space", "key", "nodes": {<name>: node}}`: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, `argv` (how to start it again), `outlive`, `address` and its last seen `state` |
+| `tree.json` | the reopen record, `{"space", "key", "nodes": {<name>: node}}`: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, pane, split, beside, `argv` (how to start it again), `outlive`, `address` and its last seen `state` |
 | `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree (`fleet-job reopen <job> "$@"` of this checkout, else `stampede reopen`); both are rendered from `tree.json` alone each time it changes |
 | `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog raises no alarm for a lead closed on purpose |
 | `queue/` | helper starts waiting for a free place under the cap, one `<time>-<name>.json` each, oldest first; `queue/dropped/` holds those whose parent was gone |
@@ -91,7 +106,7 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `stampede start <job> <name> --kind claude\|codex --brief <file> [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent] [--yolo-in <worktree>]` | starts one helper as a Core child of the caller's terminal (from outside Core, or from a terminal that is not the job's: of the lead); over the cap it queues the start. The name `lead` and a name a live terminal or a queued start of the job holds are refused | `STARTED <name> (<address>) under <parent>` or `QUEUED <name> (<n> running, cap <c>)`; `FAILED <name> (<why>)`, exit 1, when Core refuses the run |
 | `stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--outlive-parent] -- <program> [args]` | the same for any program (kind `program`) | the same |
 | `stampede next <job>` | starts queued helpers, oldest first, while fewer than the cap run; a live terminal of the job that already carries a queued name is adopted, not started again | one `STARTED` line each (`DROPPED <name>: its parent <p> is gone` for one whose parent is neither live nor queued; `UNKNOWN <name>: <why>; run stampede next once Herdr Core answers`, exit 1, when Core stopped answering after a failed run: the request stays and the drain stops), then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED` when nothing started or waits |
-| `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child: role `plain`, kind and tab `-`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes: [{depth, name, address, parent, role, kind, status, state, tab}], queue}` |
+| `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab> pane <n>` per terminal, indented by depth (a plain child: role `plain`, kind and tab `-`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes: [{depth, name, address, parent, role, kind, status, state, tab, pane, split, beside, outlived}], queue}` |
 | `stampede tell <job> <agent> "<text>"` | `hc send` to that agent's terminal | `SUBMITTED <agent>` or `FAILED <agent> (<why>)` |
 | `stampede snapshot <job>` | rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree: address, Core name, state (`live`, `finished` with exit code and reason, `gone` when Core no longer lists it), parent, cwd, tab; a plain child becomes a node of role `plain` with its argv. What only the start knew is kept | the record's path; `FAILED snapshot (<why>)`, exit 1, when Core does not answer |
 | `stampede reopen <job> [--fresh] [--prompt] [--rerun-programs]` | brings back what is not live, parents first, each child under its parent's new address. It never hands out work by itself: a resumed Claude session comes back idle, and a helper that would start its brief again is queued under the cap. On a finished job `--fresh` and `--rerun-programs` are refused (exit 2) | per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (the lead: no `under`), `QUEUED <name> (<n> running, cap <c>)`, `SKIPPED <name> (codex keeps no session to resume: ...)`, `SKIPPED <name>: its parent <p> is not running`, `SKIPPED <name> (a plain child: ...)`, `SKIPPED <name> (a program: ...)`, `DONE <name> (exited 0)`, `DONE <name> (closed)` or `FAILED <name> (<why>)`, exit 1; `NOT TOLD <name> (<why>)` when a line to it could not go |
