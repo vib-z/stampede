@@ -382,6 +382,7 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
     fj.require_approval(job)
     job = Path(job).absolute()
     fj.target(job)
+    unfinished(job)
     if name == 'lead':
         raise ValueError('lead names the job\'s lead: give the helper another name')
     if not fj.NAME.fullmatch(name):
@@ -529,9 +530,15 @@ def first_prompt(name, parent, address, brief, report):
             'your parent.')
 
 
+def unfinished(job):
+    if (Path(job) / 'finished').is_file():
+        raise ValueError('the job is finished: it starts no helper (stampede reopen brings it back for reading)')
+
+
 def next_(job):
     """stampede next: start what waits, oldest first, while the cap allows."""
     fj.target(job)
+    unfinished(job)
     with locked(job):
         started, failed, count, limit = drain(job, listing())
         left = len(queued(job))
@@ -693,7 +700,9 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
         (job / 'closed').unlink(missing_ok=True)
         now, nodes = {}, json.loads((job / 'tree.json').read_text())['nodes']
         waiting = {r['name'] for _, r in queued(job)}
-        later = set(waiting)  # what goes through the queue: started, or left waiting, by the drain after the walk
+        later = set() if finished else set(waiting)  # what the drain after the walk starts, or leaves waiting
+        for name in sorted(waiting) if finished else ():  # a finished job starts nothing: its queue stays, inert
+            print(f'SKIPPED {name} (the job is finished: its queued start stays in the queue)')
         for node in parents_first(nodes):
             name, parent, kind = node['name'], node.get('parent'), node.get('kind')
             running_now = agent(key, terminals, name) if node.get('role') != 'plain' else None

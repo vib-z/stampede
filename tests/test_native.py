@@ -676,6 +676,23 @@ class NoWorkByItself(NativeCase):
             self.assertEqual(done.returncode, 2, done.stderr)
             self.assertIn('reopens for reading only', done.stderr)
 
+    def test_r5_a_finished_job_never_runs_its_queue(self):
+        self.started(max_helpers=1)
+        self.start('a', kind='codex')
+        self.start('b', kind='codex')
+        self.quiet(fj.finish, self.job, 'accepted')
+        self.terminal('t2', status={'state': 'done'}, turn=1)
+        before = len(self.runs())
+        code, out = self.reopen()
+        self.assertEqual((code, len(self.runs()), self.waiting()), (0, before, ['b']))
+        self.assertEqual(out.splitlines(), ['SKIPPED b (the job is finished: its queued start stays in the queue)',
+                                            f'LIVE {LEAD} (t1)', 'LIVE a (t2)'])
+        for verb in (('next', self.job), ('start', self.job, 'c', '--kind', 'claude')):
+            done = self.cli(*verb)
+            self.assertEqual(done.returncode, 2, done.stderr)
+            self.assertIn('the job is finished: it starts no helper', done.stderr)
+        self.assertEqual((len(self.runs()), self.waiting()), (before, ['b']))
+
     def test_fresh_and_rerun_programs_go_through_the_cap(self):
         self.started()
         self.start('build-api')
