@@ -31,7 +31,7 @@ under keep by setting the terminal's argv to a shell's and its status to null, a
 Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1
 (cancelled, a send Core dropped before typing, among them). tests/test_hc_contract.py holds this fake to hc's own schema.
 `run` takes its parent from --parent, else HC_TERMINAL_ID, unless --no-parent; `kill` ends the branch under it that
-does not outlive its parent; a terminal with `leaves` ends at a typed /exit or /quit; `connect` answers terminal.list lines with full records, as the API does.
+does not outlive its parent; a terminal with `leaves` (true, or seconds) ends by itself, exit 0, that long after a typed /exit or /quit; `connect` answers terminal.list lines with full records, as the API does.
 Each HC_SESSION other than the default is a core of its own: its state and calls live in FAKE_HC/<session>/."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -57,7 +57,7 @@ def view(t):
             'status': word(t)}
 
 
-PRIVATE = ('sent', 'keys', 'draft', 'person', 'leaves')  # the fake's own records, never in an answer of Core's
+PRIVATE = ('sent', 'keys', 'draft', 'person', 'leaves', 'leave_at')  # the fake's own records, never in an answer of Core's
 
 
 def end(state, t, reason):
@@ -66,6 +66,14 @@ def end(state, t, reason):
     for child in state['terminals'].values():
         if child.get('parent') == t['address'] and child['state'] == 'live' and child.get('die_with_parent'):
             end(state, child, reason)  # Core 0.1.21 says killed for the child too
+
+
+def leave(state):
+    """An agent asked to leave ends by itself, exit 0, once its `leaves` seconds have passed."""
+    for t in list(state['terminals'].values()):
+        if t.get('leave_at') is not None and t['leave_at'] <= time.time() and t['state'] == 'live':
+            end(state, t, 'exited')
+            t.update(exit_code=0, signal=None, leave_at=None)
 
 
 def find(state, ref):
@@ -190,8 +198,8 @@ def command(state, argv):
                 elif key == 'enter':
                     t['sent'].append(t.pop('draft', ''))
                     if t.get('leaves') and t['sent'][-1] in ('/exit', '/quit'):  # an agent that leaves when asked
-                        end(state, t, 'exited')
-                        t['exit_code'] = 0
+                        t['leave_at'] = time.time() + (0 if t['leaves'] is True else t['leaves'])
+                        leave(state)
                 else:
                     t['draft'] = t.get('draft', '') + (' ' if key == 'space' else key)
         return print(json.dumps({'turn': t['turn'], 'status': word(t)}))
@@ -247,6 +255,7 @@ def main(argv):
         path = HOME / 'state.json'
         state = {'next': 1, 'terminals': {}, **(json.loads(path.read_text()) if path.is_file() else {})}
         try:
+            leave(state)
             command(state, [a for a in argv if a != '--json'] if argv[:1] != ['run'] else argv)
         finally:
             path.write_text(json.dumps(state, indent=1))

@@ -11,6 +11,7 @@ This page is the contract. A client that draws a job (a sidebar, a phone app, a 
 - **A helper is a Core child.** Its `parent` is the terminal that started it: the lead, or another helper. Any depth.
 - **A plain child counts too.** A terminal a lead or helper started with a bare `hc run` (a CI wait, a build, a watcher) carries no stampede label. It is in the tree by its parent link alone.
 - **Core ends a branch with its parent.** A child ends when its parent's program ends, unless it was started with `--outlive-parent` (`die_with_parent` in its record says which).
+- **A child can outlive its lead.** Core sets `parent` once, so an `--outlive-parent` child of a lead that ended still names the old lead after a reopen. The job's terminals are every terminal labelled `stampede.job=<key>` and everything under them; one whose chain no longer reaches the live lead is shown at depth 1 as `outlived <its old parent>`, counts under the cap, stays `live` in a snapshot and is closed with the job.
 
 Read the tree from Core, never from stampede's files: one full listing, then follow `parent` from the lead's address. `hc ls --json` shows `parent` but no labels, so stampede sends one `terminal.list` line to `hc connect`, which answers full records (or run `hc ls`, then `hc get` each).
 
@@ -53,7 +54,7 @@ Everything goes through Core. A Core-native job has no follower terminal, no inb
 | parent waiting | `hc wait --children any` (the next news) or `all` (until none is working) |
 | owner to lead | `stampede tell <job> lead "<the owner's words>"`, which is `hc send` to the lead |
 
-A message arrives in the terminal as `<hc from="t7 name">...</hc>`. It is information, never an owner's approval: a gate needs the recorded yes (`stampede gate-ok`).
+A message from an agent (a terminal that reports a status) arrives in the terminal as `<hc from="t7 name">...</hc>`; a plain program's `hc send` arrives as bare text, with no tag (hc 0.1.21). Either is information, never an owner's approval: a gate needs the recorded yes (`stampede gate-ok`).
 
 ## Events
 
@@ -92,7 +93,7 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child: role `plain`, kind and tab `-`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes: [{depth, name, address, parent, role, kind, status, state, tab}], queue}` |
 | `stampede tell <job> <agent> "<text>"` | `hc send` to that agent's terminal | `SUBMITTED <agent>` or `FAILED <agent> (<why>)` |
 | `stampede snapshot <job>` | rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree: address, Core name, state (`live`, `finished` with exit code and reason, `gone` when Core no longer lists it), parent, cwd, tab; a plain child becomes a node of role `plain` with its argv. What only the start knew is kept | the record's path; `FAILED snapshot (<why>)`, exit 1, when Core does not answer |
-| `stampede reopen <job> [--fresh] [--prompt] [--rerun-programs]` | starts what is not live, parents first, each child under its parent's new address | per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (the lead: no `under`), `SKIPPED <name>: its parent <p> is not running`, `SKIPPED <name> (a plain child: ...)`, `SKIPPED <name> (a program: ...)`, `DONE <name> (exited 0)` or `FAILED <name> (<why>)`, exit 1; `NOT TOLD <name> (<why>)` when a line to it could not go |
+| `stampede reopen <job> [--fresh] [--prompt] [--rerun-programs]` | starts what is not live, parents first, each child under its parent's new address | per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (the lead: no `under`), `SKIPPED <name>: its parent <p> is not running`, `SKIPPED <name> (a plain child: ...)`, `SKIPPED <name> (a program: ...)`, `DONE <name> (exited 0)`, `DONE <name> (closed)` or `FAILED <name> (<why>)`, exit 1; `NOT TOLD <name> (<why>)` when a line to it could not go |
 | `stampede close <job> [<agent>]` | ends that agent's subtree, deepest first; with no agent (or `lead`) the whole job, the lead last. Refused, exit 2, from a terminal in that subtree | `CLOSED <name> (<address>)` per terminal, in order; `FAILED <name> (<why>)`, exit 1, going on with the rest |
 | `stampede ask`, `ask --gate`, `gate-ok`, `approve-gate`, `post`, `finish` | as on every backend | as on every backend |
 
@@ -108,7 +109,7 @@ A start over the cap is queued, not refused. The lead runs `stampede next <job>`
 
 - `tree.json` is written at `new`, at every start, by `stampede snapshot`, `reopen`, `close`, and after `finish`. It is a copy for a rebuild; Core's own tree wins while it lives.
 - `stampede reopen` after a crash or a reboot walks the record parents first. A Claude agent resumes its session by id when Claude's own session file shows it ran, labelled `stampede.resumed=1`; else it starts with that id and its first prompt (`--fresh`: a new id). A Codex agent always starts fresh with its first prompt: a native job records no Codex session. A first prompt names the parent's address as it is now. The restarted lead gets one line saying it was reopened; `--prompt` gives each resumed helper its parent's new address. An unfinished job gets its marker and owner tag back; a finished one is reopened for reading only. A program is never run again unless `--rerun-programs` says so. A terminal still live is left alone.
-- `stampede close` ends an agent politely when it is idle or done (`/exit` for Claude, `/quit` for Codex, typed with `hc keys`, then up to 15 s), else kills its terminal, then removes it (`hc rm`). Children go before their parent. Closing a whole job is the owner's call.
+- `stampede close` ends an agent politely when it is idle or done (`/exit` for Claude, `/quit` for Codex, typed with `hc keys`, then its state is looked at every half second for up to 15 s), else kills its terminal, then removes it (`hc rm`). An agent closed by name keeps the state `closed`, and a reopen leaves it and its branch closed; a whole-job close marks no node `closed`, so a reopen brings back what ran. Children go before their parent. Closing a whole job is the owner's call.
 
 ## Not in a Core-native job
 

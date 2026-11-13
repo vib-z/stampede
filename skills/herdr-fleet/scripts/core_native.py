@@ -65,6 +65,34 @@ def descendants(terminals, address):
     return out
 
 
+def name_of(terminal):
+    """A terminal's name in the job: its stampede.agent, or for a plain child its Core name, else its address."""
+    tags = labels(terminal)
+    return (tags.get('stampede.agent') if tags.get('stampede.role') else None) or terminal.get('name') or terminal['address']
+
+
+def job_tree(key, terminals):
+    """The job's terminals as (depth, terminal, outlived): the lead and everything under it, then each live terminal of
+    the job that its chain no longer joins to the lead (Core sets parent once, so an --outlive-parent child of a dead lead
+    still names it) at depth 1 with its old parent's name, and everything under it. A job's terminal is one labelled
+    stampede.job=<key> or one under such a terminal."""
+    lead = lead_of(key, terminals)
+    rows = ([(0, lead, None)] + [(d, t, None) for d, t in descendants(terminals, lead['address'])]) if lead else []
+    seen, by = {t['address'] for _, t, _ in rows}, {t['address']: t for t in terminals}
+    members = {t['address'] for t in terminals if labels(t).get('stampede.job') == key}
+    for t in terminals:  # the listing is in start order, so a parent comes before its children
+        if t.get('parent') in members:
+            members.add(t['address'])
+    for t in terminals:
+        parent = by.get(t.get('parent'))
+        if t['address'] in members and t['address'] not in seen and t.get('state') == 'live' \
+                and not (parent and parent['address'] in members and parent.get('state') == 'live'):
+            rows.append((1, t, name_of(parent) if parent else t.get('parent')))
+            rows += [(d + 1, c, None) for d, c in descendants(terminals, t['address']) if c['address'] not in seen]
+            seen |= {r[1]['address'] for r in rows}
+    return rows
+
+
 def running(terminal):
     """A helper Core would call working: live, its own program, and not yet idle after a turn or done. A program counts
     while it lives. The lead and plain children never count."""
@@ -317,7 +345,9 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
     fj.require_approval(job)
     job = Path(job).absolute()
     fj.target(job)
-    if not fj.NAME.fullmatch(name) or name == 'lead':
+    if name == 'lead':
+        raise ValueError('lead names the job\'s lead: give the helper another name')
+    if not fj.NAME.fullmatch(name):
         raise ValueError('agent names are <role>-<scope>, lowercase')
     if tab_base is not None and not fj.NAME.fullmatch(tab_base):
         raise ValueError(f'--tab takes a lowercase label, not {tab_base!r}')
@@ -366,7 +396,7 @@ def drain(job, terminals):
     lock and has listed the tree once. (started, failed, running, cap)."""
     key, limit = fj.core_key(job), cap(job)
     lead = lead_of(key, terminals)
-    count, started, failed = sum(running(t) for _, t in descendants(terminals, lead['address'])) if lead else 0, 0, 0
+    count, started, failed = sum(running(t) for _, t, _ in job_tree(key, terminals)), 0, 0
     for path, request in queued(job):
         if count >= limit:
             break
@@ -439,18 +469,20 @@ def tree(job, as_json=False):
     key, terminals = fj.core_key(job), listing()
     lead = lead_of(key, terminals)
     rows = []
-    for depth, t in ([(0, lead)] + descendants(terminals, lead['address'])) if lead else []:
+    for depth, t, outlived in job_tree(key, terminals):
         tags = labels(t)
-        rows.append({'depth': depth, 'name': tags.get('stampede.agent') or t.get('name') or t['address'], 'address': t['address'],
-                     'parent': t.get('parent'), 'role': tags.get('stampede.role') or 'plain', 'kind': tags.get('stampede.kind') or '-',
-                     'status': fj.core_status(t) or t.get('state'), 'state': t.get('state'), 'tab': tags.get('herdr.tab') or '-'})
+        rows.append({'depth': depth, 'name': name_of(t), 'address': t['address'], 'parent': t.get('parent'),
+                     'role': tags.get('stampede.role') or 'plain', 'kind': tags.get('stampede.kind') or '-',
+                     'status': fj.core_status(t) or t.get('state'), 'state': t.get('state'), 'tab': tags.get('herdr.tab') or '-',
+                     'outlived': outlived})
     waiting = [{k: r[k] for k in ('name', 'parent', 'kind', 'tab')} for _, r in queued(job)]
     if as_json:
         print(json.dumps({'space': read(job, 'space'), 'key': key, 'nodes': rows, 'queue': waiting}, indent=1))
     else:
         print(f'space {read(job, "space")} ({key})')
         for r in rows:
-            print('  ' * (r['depth'] + 1) + f'{r["name"]} ({r["address"]}) {r["role"]} {r["kind"]} {r["status"]} tab {r["tab"]}')
+            print('  ' * (r['depth'] + 1) + f'{r["name"]} ({r["address"]}) {r["role"]} {r["kind"]} {r["status"]} tab {r["tab"]}'
+                  + (f' outlived {r["outlived"]}' if r['outlived'] else ''))
         for r in waiting:
             print(f'  queued {r["name"]} under {r["parent"]} ({r["kind"]})')
     if not lead:
@@ -508,15 +540,12 @@ def lead_alive(job):
 def branch(key, terminals):
     """The lead and every terminal under it by Core's parent links: (name, terminal, parent name), the lead first. A
     terminal with no stampede.role is named by its Core name, else its address; of two with one name, the live one."""
-    lead = lead_of(key, terminals)
-    found = ([(0, lead)] + descendants(terminals, lead['address'])) if lead else []
-    names = {t['address']: labels(t).get('stampede.agent') if labels(t).get('stampede.role') else t.get('name') or t['address']
-             for _, t in found}
+    lead, by = lead_of(key, terminals), {t['address']: t for t in terminals}
     chosen = {}
-    for _, t in found:
-        name = names[t['address']]
+    for _, t, _ in job_tree(key, terminals):
+        name, parent = name_of(t), by.get(t.get('parent'))
         if name not in chosen or t.get('state') == 'live' or chosen[name][0].get('state') != 'live':
-            chosen[name] = (t, names.get(t.get('parent')) if t is not lead else None)
+            chosen[name] = (t, (name_of(parent) if parent else t.get('parent')) if t is not lead else None)
     return [(name, t, parent) for name, (t, parent) in chosen.items()]
 
 
@@ -584,6 +613,9 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                 now[name] = running_now
                 print(f'LIVE {name} ({running_now["address"]})')
                 continue
+            if node.get('state') == 'closed':  # closed on purpose by name: it and its branch stay closed
+                print(f'DONE {name} (closed)')
+                continue
             if parent and parent not in now:
                 print(f'SKIPPED {name}: its parent {parent} is not running')
                 continue
@@ -634,6 +666,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
     return 1 if failed else 0
 
 
+LEAVE_FOR = 15  # seconds an idle agent has to leave after /exit or /quit
 LEAVE = {'claude': ['/', 'e', 'x', 'i', 't', 'enter'], 'codex': ['/', 'q', 'u', 'i', 't', 'enter']}
 
 
@@ -648,7 +681,8 @@ def close(job, name=None):
     target = next((t for t in ofname if t.get('state') == 'live'), ofname[-1] if ofname else None)
     if not target:
         raise ValueError(f'no terminal of this job is {name}')
-    under = descendants(terminals, target['address'])
+    whole = name == lead
+    under = [(d, t) for d, t, _ in job_tree(key, terminals)][1:] if whole else descendants(terminals, target['address'])
     if os.environ.get('HC_TERMINAL_ID') in [target['address']] + [t['address'] for _, t in under]:
         raise ValueError(f'close {name} from outside its tree: this terminal is {name} or under it')
     failed, closed = False, []
@@ -659,8 +693,9 @@ def close(job, name=None):
             if t.get('state') == 'live':
                 if tags.get('stampede.kind') in LEAVE and fj.core_status(t) in ('idle', 'done'):
                     fj.hc('keys', address, *LEAVE[tags['stampede.kind']])
-                    with contextlib.suppress(fj.HcError):
-                        fj.hc('wait', address, '--timeout', '15', wait=15)
+                    gone = time.monotonic() + LEAVE_FOR  # hc wait returns at once for an idle terminal: look until it ends
+                    while time.monotonic() < gone and fj.hc('get', address).get('state') == 'live':
+                        time.sleep(0.5)
                 if fj.hc('get', address).get('state') == 'live':
                     fj.hc('kill', address)
                     with contextlib.suppress(fj.HcError):  # until Core has the exit, so rm takes it
@@ -672,12 +707,12 @@ def close(job, name=None):
             continue
         closed.append(shown)
         print(f'CLOSED {shown} ({address})')
-    if name == lead:
+    if whole:  # the job put away: a later reopen brings back what ran, so no node is marked closed
         (job / 'closed').write_text(time.strftime('%Y-%m-%d %H:%M') + '\n')
     with contextlib.suppress(fj.HcError):
         refresh(job)
     with held(job) as tree:
-        for each in closed:
+        for each in [] if whole else closed:
             if each in tree['nodes']:
                 tree['nodes'][each]['state'] = 'closed'
     return 1 if failed else 0

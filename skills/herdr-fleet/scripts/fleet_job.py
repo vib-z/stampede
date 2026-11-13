@@ -468,7 +468,8 @@ def ask_background(job, question, options, command=None, gate=None):
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True)
     (folder / (ident + '.pid')).write_text(str(process.pid) + '\n')
     (folder / (ident + '.txt')).write_text(line(question) + '\n')
-    print('ASKED ' + ident + ' (the answer goes to the lead inbox; cancel with: fleet-job cancel ' + str(job) + ' ' + ident + ')')
+    where = 'Core types the answer into the lead\'s terminal' if backend(job) == 'native' else 'the answer goes to the lead inbox'
+    print('ASKED ' + ident + ' (' + where + '; cancel with: fleet-job cancel ' + str(job) + ' ' + ident + ')')
     return ident
 
 
@@ -733,7 +734,8 @@ def ask(job, question, options):
     post_event(job, owner, {'state': 'question', 'ask': ident, 'question': line(question), 'options': options,
                             'answer': shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead',
                                                   f"ANSWER {ident} {line(question)}: <the owner's words>"])})
-    print(f'ASKED {ident} sent to {owner}, which asks the owner in chat; the answer comes to your inbox')
+    where = 'Core types the answer into your terminal' if backend(job) == 'native' else 'the answer comes to your inbox'
+    print(f'ASKED {ident} sent to {owner}, which asks the owner in chat; {where}')
     return ident
 
 

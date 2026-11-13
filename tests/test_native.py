@@ -505,9 +505,12 @@ class Reopen(NativeCase):
 class Close(NativeCase):
     def setUp(self):
         super().setUp()
-        self.shape(on_run={'build-api': {'leaves': True}, 'deep': {'status': {'state': 'working'}}})
+        self.shape(on_run={'build-api': {'leaves': 1}, 'deep': {'status': {'state': 'working'}}})
+        patch = mock.patch.object(fj.native(), 'LEAVE_FOR', 3)   # the lead stays idle: it is killed after this long
+        patch.start()
+        self.addCleanup(patch.stop)
         self.started()
-        self.start('build-api')                                    # t2, idle, leaves when asked
+        self.start('build-api')                                    # t2, idle, leaves 1 s after /exit
         with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': 't2'}):
             self.start('deep', kind='codex')                       # t3, working
         self.add_terminal('t4', name='ci-wait', parent='t3', labels={}, status=None, die_with_parent=True)
@@ -518,13 +521,34 @@ class Close(NativeCase):
         self.assertEqual(out.splitlines(), ['CLOSED ci-wait (t4)', 'CLOSED deep (t3)', 'CLOSED build-api (t2)', f'CLOSED {LEAD} (t1)'])
         self.assertEqual([c[-1] for c in self.calls('rm')], ['t4', 't3', 't2', 't1'])
         killed = [c[-1] for c in self.calls('kill')]
-        self.assertNotIn('t2', killed)                             # it left on /exit
+        self.assertNotIn('t2', killed)                             # it was given its time and left on /exit
+        self.assertEqual((self.state()['terminals'].get('t2'), [c for c in self.calls('get') if c[-1] == 't2'] != []), (None, True))
         self.assertIn('t3', killed)                                # working: killed
         self.assertIn('t1', killed)                                # idle but stayed: killed after the wait
         self.assertEqual(self.calls('keys')[0][2:], ['t2', '/', 'e', 'x', 'i', 't', 'enter'])
         self.assertTrue((self.job / 'closed').is_file())
         nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
-        self.assertEqual({nodes[n]['state'] for n in (LEAD, 'build-api', 'deep')}, {'closed'})
+        self.assertFalse({nodes[n]['state'] for n in (LEAD, 'build-api', 'deep')} & {'closed'})   # put away, not closed for good
+
+    def test_an_idle_agent_leaves_by_itself_with_exit_0(self):
+        self.terminal('t3', status={'state': 'idle'}, leaves=1)
+        self.quiet(fj.native().close, self.job, 'deep')
+        self.assertNotIn('t3', [c[-1] for c in self.calls('kill')])
+
+    def test_a_helper_closed_by_name_stays_closed_at_reopen_and_a_whole_close_does_not(self):
+        self.quiet(fj.native().close, self.job, 'build-api')
+        nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
+        self.assertEqual((nodes['build-api']['state'], nodes['deep']['state']), ('closed', 'closed'))
+        fj.hc('kill', 't1')
+        before = len(self.calls('run'))
+        code, out = self.quiet(fj.native().reopen, self.job)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines(), [f'STARTED {LEAD} (t5)', 'DONE build-api (closed)', 'DONE deep (closed)'])
+        self.assertEqual(len(self.calls('run')), before + 1)
+        self.quiet(fj.native().close, self.job)
+        _, out = self.quiet(fj.native().reopen, self.job)
+        self.assertIn(f'STARTED {LEAD}', out)
+        self.assertIn('DONE build-api (closed)', out)
 
     def test_a_helper_s_subtree_and_the_refusal_from_inside(self):
         with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': 't3'}), self.assertRaises(ValueError):
@@ -542,6 +566,60 @@ class Close(NativeCase):
         self.assertEqual(code, 1)
         self.assertIn('FAILED deep (', out)
         self.assertIn(f'CLOSED {LEAD} (t1)', out)
+
+
+
+class Outlived(NativeCase):
+    """A terminal that outlived a dead lead (Core sets parent once) is still the job's."""
+
+    def setUp(self):
+        super().setUp()
+        self.started()
+        self.start('keeper', 'sleep', '900', outlive=True)        # t2, under t1, outlives it
+        self.add_terminal('t3', name='keeper-log', parent='t2', labels={}, status=None)
+        fj.hc('kill', 't1')
+        self.quiet(fj.native().reopen, self.job)                  # the lead is t4; keeper still names t1
+
+    def test_tree_snapshot_the_cap_and_close_take_it(self):
+        self.assertEqual(self.state()['terminals']['t2']['parent'], 't1')
+        _, out = self.quiet(fj.native().tree, self.job)
+        self.assertIn(f'    keeper (t2) helper program idle tab main outlived {LEAD}', out.splitlines())
+        self.assertIn('      keeper-log (t3) plain - live tab -', out.splitlines())
+        shown = json.loads(self.quiet(fj.native().tree, self.job, True)[1])
+        self.assertEqual([(n['name'], n['depth'], n['outlived']) for n in shown['nodes']][1:],
+                         [('keeper', 1, LEAD), ('keeper-log', 2, None)])
+        self.quiet(fj.native().snapshot, self.job)
+        nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
+        self.assertEqual((nodes['keeper']['state'], nodes['keeper']['address']), ('live', 't2'))
+        (self.job / 'max-helpers').write_text('1\n')
+        self.assertIn('QUEUED more (1 running, cap 1)', self.start('more', 'sleep', '1')[1])
+        (self.job / 'queue').joinpath('dropped').mkdir(exist_ok=True)
+        for path in (self.job / 'queue').glob('*.json'):
+            path.unlink()
+        _, out = self.quiet(fj.native().close, self.job)
+        self.assertEqual(out.splitlines(), ['CLOSED keeper-log (t3)', 'CLOSED keeper (t2)', f'CLOSED {LEAD} (t4)'])
+
+
+class Wording(NativeCase):
+    def setUp(self):
+        super().setUp()
+        self.started()
+
+    def test_a_helper_named_lead_is_refused_with_its_reason(self):
+        with self.assertRaises(ValueError) as refused:
+            self.start('lead')
+        self.assertIn("lead names the job's lead", str(refused.exception))
+
+    def test_ask_says_core_types_the_answer_into_the_terminal(self):
+        with mock.patch.object(fj.subprocess, 'Popen') as spawned:
+            spawned.return_value.pid = 1
+            _, out = self.quiet(fj.ask, self.job, 'Which db?', [])
+        self.assertNotIn('inbox', out)
+        self.assertIn("Core types the answer into the lead's terminal", out)
+        (self.job / 'owner').write_text('alpha\n')
+        _, out = self.quiet(fj.ask, self.job, 'Which db?', [])
+        self.assertNotIn('inbox', out)
+        self.assertIn('Core types the answer into your terminal', out)
 
 
 if __name__ == '__main__':
