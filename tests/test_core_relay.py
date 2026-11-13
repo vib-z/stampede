@@ -39,9 +39,10 @@ class Shell(unittest.TestCase):
     """The relay's shell scripts in a throwaway HOME, with a fake herdr-event-post that keeps what it is given."""
 
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name).resolve()
+        scratch = tempfile.mkdtemp()
+        # a helper a test started may still be writing its bytecode cache into this HOME: never fail the test on it
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        self.home = Path(scratch).resolve()
         self.bin = self.home / '.local/bin'
         self.bin.mkdir(parents=True)
         self.events = self.home / 'events'
