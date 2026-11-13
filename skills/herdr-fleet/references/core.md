@@ -14,12 +14,12 @@ The earlier Core path (a follower terminal, inbox files, hooks) is `stampede new
 ## Start the job
 
 ```bash
-stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>] [--lead claude|codex] [--max-helpers <n>]
+stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>] [--lead claude|codex] [--max-helpers <n>] [--review] [--fork <session id>]
 ```
 
-- It makes the job folder, writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, and writes the reopen record.
-- It prints `<lead> <job dir>`.
-- `--cwd` is the repo; `--space` names the space (the lead's `stampede.space` label); `--max-helpers` sets this job's cap.
+- It makes the job folder `<repo>/.herdr-<slug>` (git-excluded), writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, and writes the reopen record.
+- `STARTED <lead> (<address>)`, then `<lead> <job dir>`, exit 0. `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN`, exit 1, as on the relay path. A refusal (bad flags, a used folder, Core silent before anything was made), exit 2.
+- `--cwd` is the repo (default: the git root of the current folder). `--space` names the space (lowercase letters, digits, `-` and `_`); the default is the job's slug, with 4 hex of the key added when another job's live space has that name. `--max-helpers` sets this job's cap. `--review` and `--fork` work as on the TUI; `--front-door` is refused.
 
 ## The job folder
 
@@ -32,7 +32,8 @@ stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>
 | `max-helpers` | the cap, only when the owner set one |
 | `tree.json` | the reopen record: every node's name, role, parent, kind, model, effort, session, brief, report, cwd, tab, how to start it again and its last seen state |
 | `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree |
-| `queue/` | helper starts waiting for a free place under the cap |
+| `queue/` | helper starts waiting for a free place under the cap, oldest first; `queue/dropped/` holds those whose parent ended |
+| `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog stays quiet meanwhile |
 | `ask.md`, `plan.md`, `briefs/`, `reports/` | the ask, your plan, each helper's brief, each helper's result |
 
 Core's own tree wins while it lives; `tree.json` is a copy for a rebuild.
@@ -47,14 +48,15 @@ stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--
 - **The parent rule.** A helper is a Core child of the terminal that runs `stampede start`: yours, or a helper's when that helper starts its own. From outside Core its parent is the lead. `--parent <agent>` names another parent in the job.
 - **A branch ends with its parent.** When a parent's program ends, Core ends its children. `--outlive-parent` keeps one running: only for a watcher that must outlive its parent, and only when the brief says so.
 - A helper gets its brief with its start. Write it on the hand-off template, and tell it to write its result to a file and send you the path.
-- `STARTED <name> (<address>) under <parent>`: it runs. `QUEUED <name> (<n> running, cap <c>)`: it waits under the cap ([below](#the-cap-and-the-queue)).
+- `STARTED <name> (<address>) under <parent>`: it runs. `QUEUED <name> (<n> running, cap <c>)`: it waits under the cap ([below](#the-cap-and-the-queue)). Both exit 0. `FAILED <name> (<why>)`, exit 1: Core refused the run. Exit 2: refused before anything ran (the name `lead`, a name a live terminal or a queued start holds, a bad brief or kind, an unknown parent, `--pane`).
+- A helper's report defaults to `<job>/reports/<name>.md`; `--yolo-in <worktree>` runs it in no-checks mode there.
 - A helper may start its own helpers only when its brief gives it that job.
 
 ## The cap and the queue
 
 - At most 12 helpers run at once in your whole tree, at any depth. `--max-helpers` at `new`, or the number in `<job>/max-helpers`, changes it for this job; `STAMPEDE_MAX_HELPERS` changes the default.
 - A helper counts while it works: its terminal is live and it has not yet gone `idle` or `done` after its task. A program counts while it lives. You and plain children never count.
-- A start over the cap is queued, never refused. On each child's note from Core, run `stampede next <job>`: it starts queued helpers, oldest first, while fewer than the cap run, one `STARTED` line each, else `NOTHING QUEUED` or `WAITING <k> queued (<n> running, cap <c>)`. Every `stampede start` drains the queue first too.
+- A start over the cap is queued, never refused. On each child's note from Core, run `stampede next <job>`: it starts queued helpers, oldest first, while fewer than the cap run, one `STARTED` line each (`DROPPED <name>: its parent <p> is gone` for one whose parent ended), then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED`. Exit 0; 1 when a start failed. Every `stampede start` drains the queue first too.
 
 ## Wait
 
@@ -71,7 +73,7 @@ A wait can return before the work is done (a message, a timeout): handle what ca
 
 | from and to | how |
 |---|---|
-| you to a helper | `stampede tell <job> <agent> "<text>"` (it finds the address and runs `hc send`): `SUBMITTED <agent>` or `FAILED <agent> (<why>)` |
+| you to a helper | `stampede tell <job> <agent> "<text>"` (it finds the address and runs `hc send`): `SUBMITTED <agent> (<address>)`, exit 0, or `FAILED <agent> (<why>)`, exit 2, nothing typed |
 | a helper to its parent | `hc send <parent address> "<name>: <one line> <path of the result file>"` |
 | the owner to you | `stampede tell <job> lead "<the owner's words>"`, which is `hc send` to you |
 
@@ -105,7 +107,7 @@ Labels only; Core's tree never depends on them.
 - You and every helper carry `herdr.space=<the space's name>` and `herdr.tab=<its tab>`, so the Herdr app shows the job as one space.
 - You are the first terminal of tab `main`. A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job (`STAMPEDE_TAB_PANES` changes the 4).
 - `--tab <label>` names a workstream tab instead; it overflows to `<label>-2`, `<label>-3` by the same rule.
-- `stampede tree <job> [--json]` prints the tree as Core holds it now, one line per terminal, indented by depth, and the queue.
+- `stampede tree <job> [--json]` prints the tree as Core holds it now: `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child has role `plain`), then `queued <name> under <parent> (<kind>)` for each queued start. `NO LEAD`, exit 1, when Core has no lead for the job.
 
 ## Gates
 
@@ -116,15 +118,15 @@ Labels only; Core's tree never depends on them.
 
 ## Reopen
 
-- `stampede snapshot <job>` rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree; every start writes it too. It prints the record's path.
-- After a crash or a reboot, `stampede reopen <job>` (or `bash <job>/reopen.sh`) walks the record parents first and starts what is not live, each child under its parent's new address. It prints `LIVE`, `STARTED` or `SKIPPED` per node.
-- A Claude agent resumes its session by id. A Codex agent resumes the session it recorded, else starts fresh with its brief. A program is never run again unless `--rerun-programs` says so. A terminal still live is left alone.
-- `--fresh` starts each agent on a new session with its brief; `--prompt` sends a restarted agent its brief.
+- `stampede snapshot <job>` rewrites `tree.json` from Core's tree, and `REOPEN.md` and `reopen.sh` from it; `new`, every start, `reopen`, `close` and `finish` write it too. It prints the record's path; `FAILED snapshot (<why>)`, exit 1, when Core does not answer.
+- After a crash or a reboot, `stampede reopen <job>` (or `bash <job>/reopen.sh`) walks the record parents first and starts what is not live, each child under its parent's new address. Per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (you: no `under`), `SKIPPED <name> ...` (a program, a plain child, or one whose parent is not running), `DONE <name> (exited 0)`, or `FAILED <name> (<why>)`, exit 1. `NOT TOLD <name> (<why>)` when a line to it could not go.
+- A Claude agent resumes its session when Claude's own session file shows it ran, labelled `stampede.resumed=1`; else it starts with that id and its first prompt. A Codex agent always starts fresh with its first prompt. A program runs again only with `--rerun-programs`. A terminal still live is left alone.
+- The restarted lead gets one line saying it was reopened. `--prompt` gives each resumed helper one line with its parent's name and new address, and tells it to read its brief again. `--fresh` starts every Claude agent on a new session.
 
 ## Close
 
-- `stampede close <job> <agent>` ends that agent's subtree, leaves first: politely when idle (`/exit` for Claude, `/quit` for Codex), else by ending its terminal, then removes it. It prints `CLOSED <name>` per terminal, in order.
-- `stampede close <job>` with no agent ends the whole job, you last. That is the owner's call: only on their yes (SKILL.md, Wrap up).
+- `stampede close <job> <agent>` ends that agent's subtree, leaves first: politely when idle or done (`/exit` for Claude, `/quit` for Codex, then up to 15 s), else by killing its terminal, then removes it. It prints `CLOSED <name> (<address>)` per terminal, in order; `FAILED <name> (<why>)`, exit 1, and goes on with the rest. Refused, exit 2, from a terminal inside that subtree.
+- `stampede close <job>` with no agent ends the whole job, you last, and writes `<job>/closed`. That is the owner's call: only on their yes (SKILL.md, Wrap up).
 - `stampede finish <job> "<one line on where it ended>"` once, as on the TUI: one `done` event for the owner.
 
 ## What a Core-native job does not have

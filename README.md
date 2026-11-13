@@ -207,7 +207,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 <details>
 <summary><b>The job folder</b></summary>
 
-`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (`FLEET_JOBS_ROOT` moves the root), never inside your repo, so nothing lands in git; the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
+`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (`FLEET_JOBS_ROOT` moves the root), never inside your repo, so nothing lands in git (a Herdr Core job, on either path, is the one exception: its folder is `<repo>/.herdr-<slug>`, which stampede adds to the repo's git exclude); the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
 
 ```text
 ask.md        your ask, word for word
@@ -228,9 +228,10 @@ endpoint      the Herdr Core a Core job was made on (HC_SESSION, HC_SOCKET);
               every later command uses it
 space         a Core job's space name (the lead's stampede.space label)
 max-helpers   a Core job's cap, only when the owner set one
+closed        a Core job closed whole by stampede close; stampede reopen removes it
 tree.json     a Core job's reopen record: every node, its parent, kind, session, brief,
               and how to start it again
-queue/        a Core job's helper starts waiting under the cap
+queue/        a Core job's helper starts waiting under the cap; dropped/ those whose parent ended
 core.json, locks/, relay-state.json, start-failed, reopen-pending
               the --relay path's record (core-relay.md)
 finished      the one-line summary written by stampede finish
@@ -464,17 +465,18 @@ fleet-job new: herdr pane list: {'code': 'server_not_running', 'message': 'no he
 
 ### One Core job, start to finish
 
-The front door starts the job from the repo. The lead starts as a root terminal labelled with the space's name (`--space`):
+These commands ran against the test suite's fake `hc` in a scratch home (`<repo>` stands for the repo's path, `J` for the job folder). The front door starts the job from the repo. A Core job's folder is `<repo>/.herdr-<slug>`, which stampede keeps out of git. The lead starts as a root terminal labelled with the space's name (`--space`, by default the job's slug):
 
 ```console
 $ stampede new --core --file ask.md --cwd ~/code/my-app --name add-health
-lead-add-health ~/code/herdr-jobs/jobs/2026-11-13-local-add-health
+STARTED lead-add-health (t1)
+lead-add-health <repo>/.herdr-add-health
 ```
 
-The lead writes `plan.md` and starts its helpers, each as its own Core child. A helper over the cap waits in the queue:
+The lead writes `plan.md` and starts its helpers, each as its own Core child. Any CLI runs as a program:
 
 ```console
-$ J=~/code/herdr-jobs/jobs/2026-11-13-local-add-health
+$ J=<repo>/.herdr-add-health
 $ stampede start $J build-health --kind claude --brief $J/briefs/build-health.md --report reports/build-health.md
 STARTED build-health (t2) under lead-add-health
 $ stampede start $J review-health --kind codex --model <another model> --brief $J/briefs/review-health.md
@@ -483,28 +485,67 @@ $ stampede start $J lint -- npm run lint
 STARTED lint (t4) under lead-add-health
 ```
 
-At most 12 helpers work at once in one lead's tree, at any depth (`--max-helpers <n>` at `new`, or `STAMPEDE_MAX_HELPERS`). A start over the cap prints `QUEUED <name> (<n> running, cap <c>)`; the lead runs `stampede next <job>` on each child's note, which starts queued helpers oldest first and prints one `STARTED` line each, else `NOTHING QUEUED` or `WAITING <k> queued (<n> running, cap <c>)`.
+At most 12 helpers work at once in one lead's tree, at any depth (`--max-helpers <n>` at `new`, `<job>/max-helpers`, or `STAMPEDE_MAX_HELPERS`). With this job's cap set to 3, a fourth start waits in the queue, and the lead runs `stampede next` when a child's note says it is done:
 
-The lead waits with Core, never with sleep or a poll: `hc wait --children any` returns on the next child's news or a message, `hc wait --children all` once none is working. A helper reports with `hc send <parent address> "build-health: done reports/build-health.md"`: one line and the path of its result file, which the lead then reads. Core's own notes tell the lead when a child's turn ends, when it is blocked and when it exits. The owner's words reach the lead with `stampede tell $J lead "<their words>"`, which prints `SUBMITTED lead-add-health` or `FAILED lead-add-health (<why>)`.
+```console
+$ stampede start $J docs-health --kind claude --brief $J/briefs/docs-health.md
+QUEUED docs-health (3 running, cap 3)
+$ stampede next $J
+STARTED docs-health (t5) under lead-add-health
+$ stampede next $J
+NOTHING QUEUED
+$ stampede tree $J
+space add-health (hc-2624d97d3775)
+  lead-add-health (t1) lead claude idle tab main
+    build-health (t2) helper claude done tab main
+    review-health (t3) helper codex idle tab main
+    lint (t4) helper program idle tab main
+    docs-health (t5) helper claude idle tab main-2
+```
+
+The layout is labels only: the lead is the first terminal of tab `main`, and helpers fill `main`, `main-2` and so on, 4 live terminals to a tab (`STAMPEDE_TAB_PANES`), or a workstream tab named with `--tab <label>`. The lead and every helper carry `herdr.space` and `herdr.tab`, so the Herdr app can show the job as one space. `stampede tree --json` gives the same to a client.
+
+The lead waits with Core, never with sleep or a poll: `hc wait --children any` returns on the next child's news or a message, `hc wait --children all` once none is working. A helper reports with `hc send <parent address> "build-health: done reports/build-health.md"`: one line and the path of its result file, which the lead then reads. Core's own notes tell the lead when a child's turn ends, when it is blocked and when it exits. The owner's words reach the lead through `tell`:
+
+```console
+$ stampede tell $J lead "The owner says: keep the route at /health"
+SUBMITTED lead-add-health (t1)
+```
 
 A CI wait or a build is a plain child of the lead, `hc run --bg --name wait-ci-<pr> -- gh pr checks <pr> --watch`: it carries no stampede label, never counts against the cap, and its exit comes to the lead as Core's note.
-
-`stampede tree $J` prints the tree as Core holds it now, one line per terminal indented by depth, and the queue (`--json` for a client). The layout is labels only: the lead is the first terminal of tab `main`, and helpers fill `main`, `main-2` and so on, 4 live terminals to a tab (`STAMPEDE_TAB_PANES`), or a workstream tab named with `--tab <label>`. The lead and every helper carry `herdr.space` and `herdr.tab`, so the Herdr app can show the job as one space.
 
 Gates are as everywhere on Core: only the recorded yes counts ([Safety](#safety)). When the job is done the lead runs `stampede finish $J "<summary>"`, and on the owner's yes closes it:
 
 ```console
 $ stampede close $J review-health
-CLOSED review-health
+CLOSED review-health (t3)
 $ stampede close $J
-CLOSED build-health
-CLOSED lint
-CLOSED lead-add-health
+CLOSED build-health (t2)
+CLOSED lint (t4)
+CLOSED docs-health (t5)
+CLOSED lead-add-health (t1)
 ```
 
-`close` ends a subtree leaves first, politely when an agent is idle (`/exit` for Claude, `/quit` for Codex), else by ending its terminal, then removes it. With no agent it ends the whole job, the lead last: that is always the owner's call.
+`close` ends a subtree leaves first, politely when an agent is idle or done (`/exit` for Claude, `/quit` for Codex), else by killing its terminal, then removes it. With no agent it ends the whole job, the lead last, and writes `<job>/closed`, so the watchdog raises no alarm: that is always the owner's call. It is refused from a terminal inside the subtree it would end.
 
-**Reopen.** Every start writes `tree.json`, `REOPEN.md` and `reopen.sh`; `stampede snapshot $J` rewrites them from Core's tree. After a crash or a reboot, `stampede reopen $J` (or `bash $J/reopen.sh`) walks the record parents first and starts what is not live, each child under its parent's new address, one `LIVE`, `STARTED` or `SKIPPED` line per node. A Claude agent resumes its session by id; a Codex agent resumes the session it recorded, else starts fresh with its brief; a program runs again only with `--rerun-programs`; `--fresh` starts every agent on a new session.
+**Reopen.** `new`, every start, `snapshot`, `reopen`, `close` and `finish` write `tree.json`, and `REOPEN.md` and `reopen.sh` from it. After a crash, a reboot or a close, `stampede reopen $J` (or `bash $J/reopen.sh`) walks the record parents first and starts what is not live, each child under its parent's new address, and removes `closed`:
+
+```console
+$ stampede reopen $J
+STARTED lead-add-health (t6)
+STARTED build-health (t7) under lead-add-health
+STARTED review-health (t8) under lead-add-health
+SKIPPED lint (a program: --rerun-programs runs it again)
+STARTED docs-health (t9) under lead-add-health
+$ bash $J/reopen.sh
+LIVE lead-add-health (t6)
+LIVE build-health (t7)
+LIVE review-health (t8)
+SKIPPED lint (a program: --rerun-programs runs it again)
+LIVE docs-health (t9)
+```
+
+A Claude agent resumes its session when Claude's own session file shows it ran (labelled `stampede.resumed=1`), else starts with the same id and its brief; a Codex agent always starts fresh with its brief; a program runs again only with `--rerun-programs`; `--fresh` starts every Claude agent on a new session. The restarted lead gets one line saying it was reopened, and `--prompt` gives each resumed helper its parent's new address.
 
 ### The earlier path: `--core --relay`
 
@@ -566,7 +607,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HERDR_EVENTS_MACHINE` | short hostname (`hostname -s`, else the name before the first dot) | the machine label sent with every event |
 | `HERDR_EVENTS_HOME` | `~/.herdr-events` | the event queue and dead letters |
 | `HERDR_EVENTS_ROUTES_DIR` | `$HERDR_EVENTS_DIR/routes` | one file per route, `URL=` and `KEY=` |
-| `HERDR_EVENTS_STALE_MINUTES` | `30` | a `--core --relay` job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
+| `HERDR_EVENTS_STALE_MINUTES` | `30` | the watchdog's sweep of a Core job's lead, and a `--core --relay` job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
 | `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), handed panes' marks (`handed/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
 | `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
@@ -671,15 +712,15 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | command | flags | does |
 |---|---|---|
 | `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--lead claude\|codex` (default `FLEET_LEAD_KIND`, else `claude`; another value exits 2; `codex` starts the lead on GPT-6 Astra and types its brief pointer at once, `BLOCKED` and exit 1 when that does not go in), `--fork <session id>` (the lead starts as a fork of that Claude chat; a value that is not a UUID exits 2, and so does `--lead codex` with it), `--front-door` (a chat outside Herdr relays for the owner: the lead posts to `<job>/outbox/`; refused in a workspace a bot owns) | makes the job folder, starts the lead with its hooks, marks the workspace so plain turn ends stay on the machine, prints `<lead> <job dir>` |
-| `new --core --file <ask.md>` | `--cwd <repo>`, `--name <slug>`, `--space <name>` (the space's name, the lead's `stampede.space` label), `--lead claude\|codex`, `--max-helpers <n>` (this job's cap; default `STAMPEDE_MAX_HELPERS`, else 12) | a Core job ([Herdr Core](#herdr-core)): makes the job folder (`backend` `native`), writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, writes the reopen record; prints `<lead> <job dir>` |
-| `start <job> <name> --kind claude\|codex --brief <file>` (a Core job) | `--model`, `--effort`, `--cwd <dir>`, `--report <path>`, `--tab <label>` (a workstream tab label), `--parent <agent>` (another parent in the job), `--outlive-parent` (keeps running when its parent ends: a watcher, when its brief says so) | starts one helper as a Core child of the caller's terminal (from outside Core: of the lead), its brief with its start; `STARTED <name> (<address>) under <parent>`, or over the cap `QUEUED <name> (<n> running, cap <c>)` |
+| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root of the current folder, under `FLEET_TRUST_ROOT`), `--name <slug>`, `--space <name>` (lowercase letters, digits, `-` and `_`; default the slug, with 4 hex of the key added when another job's live space has it), `--lead claude\|codex` (a Codex lead needs Core's draft hold, as on the relay path), `--max-helpers <n>` (this job's cap; default `STAMPEDE_MAX_HELPERS`, else 12), `--review`, `--fork <session id>`; `--front-door`, `--pane` or `--workspace` exits 2 | a Core job ([Herdr Core](#herdr-core)): makes `<repo>/.herdr-<slug>` (`backend` `native`), writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, writes the reopen record; prints `STARTED <lead> (<address>)` and `<lead> <job dir>`, or `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN` (exit 1) as the relay path does |
+| `start <job> <name> --kind claude\|codex --brief <file>` (a Core job) | `--model`, `--effort`, `--cwd <dir>`, `--report <path>`, `--tab <label>` (a workstream tab label), `--parent <agent>` (another parent in the job), `--outlive-parent` (keeps running when its parent ends: a watcher, when its brief says so) | starts one helper as a Core child of the caller's terminal (from outside Core, or a terminal not of the job: of the lead), its brief with its start, its report by default `<job>/reports/<name>.md`; `STARTED <name> (<address>) under <parent>`, or over the cap `QUEUED <name> (<n> running, cap <c>)`; `FAILED <name> (<why>)` when Core refuses the run. The name `lead`, or one a live terminal or queued start of the job holds, is refused. `--yolo-in <worktree>` as on the TUI |
 | `start <job> <name> -- <program> [args]` (a Core job) | `--cwd`, `--tab`, `--parent`, `--outlive-parent` | the same for any program (kind `program`), Cursor, Hermes or Kimi among them; it counts against the cap while it lives |
-| `next <job>` (a Core job) | | starts queued helpers, oldest first, while fewer than the cap work: one `STARTED` line each, else `NOTHING QUEUED` or `WAITING <k> queued (<n> running, cap <c>)` |
-| `tree <job>` (a Core job) | `--json` | the tree as Core holds it now, one line per terminal indented by depth, and the queue |
-| `tell <job> <agent> <text>` (a Core job) | `lead` names the lead | `hc send` to that agent's terminal: `SUBMITTED <agent>` or `FAILED <agent> (<why>)` |
-| `snapshot <job>` (a Core job) | | rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree; prints the record's path |
-| `reopen <job>` (a Core job) | `--fresh` (new sessions), `--prompt`, `--rerun-programs` (run programs again) | starts what is not live, parents first, each child under its parent's new address: `LIVE`, `STARTED` or `SKIPPED` per node. `<job>/reopen.sh` runs the same |
-| `close <job> [<agent>]` (a Core job) | | ends that agent's subtree, leaves first (`/exit` or `/quit` when idle, else its terminal), then removes it; with no agent the whole job, the lead last, only on the owner's yes: `CLOSED <name>` per terminal, in order |
+| `next <job>` (a Core job) | | starts queued helpers, oldest first, while fewer than the cap work: one `STARTED` line each (`DROPPED <name>: its parent <p> is gone` for one whose parent ended), then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED` |
+| `tree <job>` (a Core job) | `--json` | the tree as Core holds it now: `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child: role `plain`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes, queue}` ([docs/CORE-NATIVE.md](docs/CORE-NATIVE.md#commands)); `NO LEAD` when Core has none |
+| `tell <job> <agent> <text>` (a Core job) | `lead` names the lead | `hc send` to that agent's terminal, limited as a relay send is: `SUBMITTED <agent> (<address>)`, or `FAILED <agent> (<why>)` with nothing typed |
+| `snapshot <job>` (a Core job) | | rewrites `tree.json` from Core's tree, and `REOPEN.md` and `reopen.sh` from it; prints the record's path, or `FAILED snapshot (<why>)` when Core does not answer |
+| `reopen <job>` (a Core job) | `--fresh` (new Claude sessions), `--prompt` (each resumed helper is told its parent's new address and to read its brief again), `--rerun-programs` (run programs again) | starts what is not live, parents first, each child under its parent's new address, and removes `closed`. Per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (the lead: no `under`), `SKIPPED <name> ...`, `DONE <name> (exited 0)`, `FAILED <name> (<why>)`, `NOT TOLD <name> (<why>)` when a line to it could not go. `<job>/reopen.sh` runs the same |
+| `close <job> [<agent>]` (a Core job) | | ends that agent's subtree, leaves first (`/exit` or `/quit` when idle or done, else it kills the terminal), then removes it; with no agent (or `lead`) the whole job, the lead last, writing `<job>/closed`, only on the owner's yes: `CLOSED <name> (<address>)` per terminal, in order, `FAILED <name> (<why>)` going on with the rest; refused from a terminal inside that subtree |
 | `new --core --relay --file <ask.md>` | `--cwd <repo>` (default: the git root of the current folder; it must sit under `FLEET_TRUST_ROOT`), `--name`, `--review`, `--lead claude\|codex` (default `FLEET_LEAD_KIND`, else `claude`; a Codex lead runs with `--no-daemon`, and is refused, exit 2, on a Herdr Core older than 0.1.20 or with `draft_wait` under 30), `--fork <session id>` (a Claude lead only), `--app-space` (label the lead and workers for the Herdr app; default `STAMPEDE_APP_SPACE`, else off); `--pane` or `--workspace` exits 2 | the earlier Core path ([core-relay.md](skills/herdr-fleet/references/core-relay.md)): writes the job record first (`backend`, the key `hc-<12 hex>` in `workspace`, the marker, the owner tag, the lead's row), starts the job's follower `relay-<12 hex>`, then the lead in its own terminal with its brief as the first prompt; prints `<lead> <job dir>`. A lead that is blocked, at an error or silent after 30 s stays the job's lead: `BLOCKED` or `NOT READY` with the recovery, exit 1. A start that never ran, or a follower that ended at start, is taken back: `FAILED`, `start-failed` in the folder, exit 1. When Core loses an answer, nothing is taken back: `UNKNOWN <agent>`, exit 1, and `reopen.sh` adopts or starts it later |
 | `finish <job> <summary>` | | one `done` event (`source` stampede, with the summary). A job a bot started uses the same strict route as a question; a local job uses the ordinary relay. Then removes the job marker. A second run does not send again. It also cancels every question of the job still waiting on the phone (`CANCELLED <id>`), signalling only a waiter that still runs this job's question |
 | `start <job> <agent> --kind claude\|codex\|cursor --pane <id> --brief <file>` | `--model`, `--effort`, `--report <path>` (repeatable), `--yolo-in <worktree>` | refuses a missing brief or a missing or empty section (exit 2); otherwise starts a worker with hooks and auto mode, records it and sends its brief pointer |
@@ -699,6 +740,21 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | `hook <action> <job> --agent <name>` | actions: `watch-paths`, `wake`, `claude-stop`, `ask-lead`, `send-file`, `codex-notify`, `cursor-stop`, `session-end` | run by the agents' hooks, never by hand |
 
 **Exit codes:** 0 done; 2 a usage error or a refusal (an agent not in the job, a kind other than claude, codex or cursor (hermes and kimi only in a `--relay` job, and there cursor, hermes and kimi only with `--pane`), an agent already running or being started on a `--relay` job, a Codex agent there that is not ready for `tell`, a start before approval, yolo outside a worktree, a gate with no recorded yes or another commit, no route for the bot that started the job, `approve-gate` inside Herdr or Herdr Core, `cancel` of a question that is no phone card), with the reason on stderr; 1 a `--relay` start that did not end with a ready agent (`BLOCKED`, `NOT READY`, `UNKNOWN` or `FAILED <agent> (<reason>)` on stdout), or Herdr Core failed (one `fleet-job <command>: <reason>` line on stderr), or Herdr or the file system failed, with a Python traceback. `tell` exits 3 for `BLOCKED_ON_CARD` (the message is queued) and `wait` exits 3 when nothing came. The `wake` hook exits 2 on purpose: that wakes Claude. `update` exits 0 updated (or already the latest), 1 refused or failed with the reason, 2 a usage error; `update --check` exits 1 only when a newer release is out.
+
+**Exit codes of a Core job's commands** (`<job>/backend` is `native`):
+
+| command | 0 | 1 | 2 |
+|---|---|---|---|
+| `new --core` | the lead started | `BLOCKED`, `NOT READY`, `FAILED`, `UNKNOWN` | bad flags, a used folder, Core silent before anything was made |
+| `start` | `STARTED` or `QUEUED` | a `FAILED` start, during the drain too | a refusal: the name taken, `--pane`, a bad brief or kind, an unknown parent, a job that is not native |
+| `next` | `STARTED`, `WAITING`, `NOTHING QUEUED`, `DROPPED` | a `FAILED` start | not a native job |
+| `tree` | the tree | `NO LEAD` | not a native job |
+| `tell` | `SUBMITTED` | | `FAILED` (nothing typed) |
+| `snapshot` | the record's path | `FAILED snapshot`: Core did not answer | not a native job |
+| `reopen` | only `LIVE`, `STARTED`, `SKIPPED`, `DONE`, `NOT TOLD` | any `FAILED` restart | not a native job |
+| `close` | every `CLOSED` | any `FAILED`; the rest still closed | from inside the subtree, no such agent, not a native job |
+
+`hook`, `_deliver` and `_wake` exit 0 and do nothing on a Core job; `_reopen` exits 2 there and names `stampede reopen`.
 </details>
 
 <details>
@@ -717,7 +773,7 @@ In [skills/grokbot-herdr/scripts/](skills/grokbot-herdr/scripts/):
 | `<job>/reopen.sh` (a `--relay` job) | starts only what is not live, each once: for an open job its marker, owner tag and follower, then the lead (session resumed; a Codex lead by the session its own first turn end recorded, else fresh with its brief) and each worker (Claude resumed; Codex resumed by the session its notify recorded, with `--no-daemon`, else fresh); a kept terminal that is now the shell Core put in a lost agent's place counts as not running, and is left alone; `--lead` only the follower and the lead; `--prompt` sends a restarted Codex worker its brief; `--fresh` starts each on a new session with its recorded flags and brief, nothing resumed. A Claude session is resumed only when it is known to have run (for good, whatever a later attempt does), started fresh when it never ran, and otherwise left alone with an `UNKNOWN` line. A restarted lead must take `REOPENED <lead> <attempt>` through its wake hook (a Codex lead: through its deliverer) in both inbox files, retried every 5 s for 90 s; until both are acknowledged `<job>/reopen-pending` stays, and every later reopen asks again, even with the lead live | 0, 1 a restart was not `STARTED` (each is reported as `start` reports it: `BLOCKED` or `NOT READY` with its recovery, `FAILED`, `UNKNOWN`), 2 another caller is starting one of them, a folder is gone (each named, nothing started) or this shell names another core, 3 the lead did not acknowledge a file (printed, with the line to write by hand) |
 | `herdr-doctor [--relay] [--tui\|--core]` | read-only health check: `ok`, `warn`, `PROBLEM` lines; `-h` prints usage. It checks each backend that is installed: the Herdr TUI when `herdr` is on PATH (0.9.4 or later by `herdr --version`, no readable version is a gap; a running server of the client's version), and Herdr Core when `hc` is (`hc` 0.1.13 or later, the selected core answering on its socket, Claude 2.1.295 or later for its OSC 7501 status or else Codex, Codex's `--no-daemon`). With both checked, one usable backend is enough: the other's gaps are a `warn`, `ok backend tui,core` (or `tui`, or `core`) names where a job can run, and `PROBLEM no usable backend` says neither can. `--tui` or `--core` checks that one only, each gap a `PROBLEM`; both flags together exit 2. On Core it also warns for an `hc` older than 0.1.20, for a core started from inside an agent or a pane (names from its environment through `hc exec`, never values), on macOS for terminals older than the core's bundle (`hc ls`, `hc get`), and that Cursor runs on the TUI only; those looks run only at a core that answers, and it never starts one. The stampede install by default; the event relay too when it is installed, or with `--relay`. For a GitHub-managed plugin, `stampede` or a skill outside the checkout Herdr reports is a `PROBLEM`. A newer stampede release, or no `FLEET_TRUST_ROOT` folder, is a `warn` | 0 ok, 1 a PROBLEM, 2 usage |
 | `herdr-events-owner <ws> [<bot>\|--clear]` | tags a workspace with the bot its events go to; also a Herdr Core job's key `hc-<12 hex>`, while that job is open | 0, or 2 refused |
-| `herdr-event-core --sweep` | run by the machine's watchdog timer (`herdr-event-watchdog`, every 5 minutes): one look at the lead of each open Core job, and one `source` `hc` event per episode (blocked, error, dead, stale) with `pane` `hc:<key>/<address>`, `workspace` `<key>` and `agent` the lead's name | [remote/events.md](remote/events.md) |
+| `herdr-event-core --sweep` | run by the machine's watchdog timer (`herdr-event-watchdog`, every 5 minutes): one look at the lead of each open Core job (a job with `finished` or `closed` is skipped), and one `source` `hc` event per episode (`blocked`, `error`, `stale` after `HERDR_EVENTS_STALE_MINUTES`, `dead`) with `pane` `hc:<key>/<address>`, `workspace` `<key>` and `agent` the lead's name ([remote/events.md](remote/events.md)) | always 0 |
 | `herdr-event-core <job dir>` | the follower of a `--relay` job, started by `stampede new --core --relay` as `relay-<12 hex>`: follows the job's terminals, writes `BLOCKED`, `ERROR`, `GONE`, `WAITED`, `LOST`, `STALE` and `RELAY DOWN` lines for the lead (for a Codex lead it also starts the deliverer that types them) and posts `source` `hc` events for the bot ([remote/events.md](remote/events.md#a-herdr-core-job)); it decides on every event type Herdr Core 0.1.20 sends: a kept terminal's `lost` and `restarted` are one `GONE` naming the shell in its place, never an idle agent, and a stream that sent Core's 15 s heartbeat and then goes silent for 60 s is reopened; reads the job's handed agents from Herdr every 5 s on a thread of its own (`herdr agent list`, a pane read), applies that between Core events, a quiet stream included, and writes their `TURN` (Hermes, Kimi); `--alive` asks the selected core's socket for `hello`, never starting a core; `--core-version` prints the version the running core gives in that hello (what a Codex lead on Core is checked against, since an `hc` on PATH can be newer than the core that runs); `--socket` prints that socket's path | 0 the job finished or never started, 1 relay down; `--alive` and `--core-version`: 0 up, 1 down; 2 usage |
 | `herdr-event-post`, `herdr-event-flush`, `herdr-event-watchdog`, `herdr-event-claude-hook`, `herdr-event-codex-notify` | the event relay to a bot: [remote/events.md](remote/events.md). While a job marker is present, a plain turn end in that workspace exits 0 without sending; while a handed pane's mark is present, every event about that pane but its follower's (`source` `hc`) exits 0 without sending, and the watchdog skips the pane | 0; `herdr-event-post --strict` (a job's questions, gates, and finish when a bot started the job): 3 no route of its own, 4 not queued, 6 a malformed `workspace` (a Core key not `hc-<12 hex>`, or any value with characters outside letters, digits, `_` and `-`; an ordinary event drops it instead and is routed as having none); an event from a Core job's follower (with `event_id`): 5 not queued, so the follower tries again; any event for a Core pane counts as sent only once queued |
 </details>
@@ -774,7 +830,7 @@ tests/evals/            the evals: cases.json, run.py, record.py, live/, linux/,
 
 How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The rules every change follows: [AGENTS.md](AGENTS.md).
 
-- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr or Herdr Core: a fake `herdr` through `HERDR`, and [tests/fake_hc.py](tests/fake_hc.py) through `HC`). [CI](.github/workflows/ci.yml) runs them on macOS and on Linux on every push and pull request. The macOS job then does a real install and `herdr-doctor` against Homebrew Herdr, the relay sample payloads ([test-relay.sh](skills/grokbot-herdr/scripts/test-relay.sh)), and [tests/core_smoke.py](tests/core_smoke.py) on Herdr Core 0.1.20 (downloaded and checked against its pinned checksum) in a scratch `HC_SESSION`, never a machine's own core. The Linux job runs the same unit suite and relay samples, then `install.sh` with the timers left off. `tests/test_native.py` states a Core job's contract ([docs/CORE-NATIVE.md](docs/CORE-NATIVE.md)); the `--relay` path's tests ([test_core.py](tests/test_core.py), [test_core_relay.py](tests/test_core_relay.py), and [test_mixed.py](tests/test_mixed.py) with [tests/fake_herdr.py](tests/fake_herdr.py) for handed agents) state its contract, and [test_core_releases.py](tests/test_core_releases.py) what Herdr Core 0.1.18 to 0.1.20 changed; a test marked as an expected failure is a part not built yet.
+- **Tests:** `python3 -m unittest discover tests` (Python 3.11 or later; all with fakes, nothing touches a live Herdr or Herdr Core: a fake `herdr` through `HERDR`, and [tests/fake_hc.py](tests/fake_hc.py) through `HC`). [CI](.github/workflows/ci.yml) runs them on macOS and on Linux on every push and pull request. The macOS job then does a real install and `herdr-doctor` against Homebrew Herdr, the relay sample payloads ([test-relay.sh](skills/grokbot-herdr/scripts/test-relay.sh)), and [tests/core_smoke.py](tests/core_smoke.py) on Herdr Core 0.1.20 (downloaded and checked against its pinned checksum) in a scratch `HC_SESSION`, never a machine's own core. The Linux job runs the same unit suite and relay samples, then `install.sh` with the timers left off. [test_native.py](tests/test_native.py) and [test_native_events.py](tests/test_native_events.py) state a Core job's contract ([docs/CORE-NATIVE.md](docs/CORE-NATIVE.md)) and the watchdog's sweep; the `--relay` path's tests ([test_core.py](tests/test_core.py), [test_core_relay.py](tests/test_core_relay.py), and [test_mixed.py](tests/test_mixed.py) with [tests/fake_herdr.py](tests/fake_herdr.py) for handed agents) state its contract, and [test_core_releases.py](tests/test_core_releases.py) what Herdr Core 0.1.18 to 0.1.20 changed; a test marked as an expected failure is a part not built yet.
 - **Herdr Core's API, pinned:** [tests/fixtures/hc-schema-0.1.20.json](tests/fixtures/hc-schema-0.1.20.json) is `hc schema` as that release prints it. [tests/hc_contract.py](tests/hc_contract.py) names what stampede uses of it (each `hc` command's method, parameters, error kinds and result fields, and the event types), and [tests/test_hc_contract.py](tests/test_hc_contract.py) holds the product code, the fake `hc` and the follower's decision on every event type to it. When Herdr Core moves on: save `hc schema` as a new fixture, point `SNAPSHOT` at it, and run the unit suite and the live eval V03, which compares the snapshot with `hc schema` on the machine.
 - **The cross-client suite:** `python3 -m unittest tests.test_clients` (about 25 s) plays one job per client (a Herdr chat, Claude, Codex, Cursor, Hermes, a bot over SSH) and backend against the fakes and checks each outcome's command contract, O1 to O9, for each; the agents' own work is left to the live runs. A client is one row in `CLIENTS` in [tests/test_clients.py](tests/test_clients.py) plus one in [docs/CLIENTS.md](docs/CLIENTS.md), which also holds the live runbook and the clients that do worse; a worker kind is one entry in `WORKERS` there, which every client's job then starts.
 - **The evals:** `python3 tests/evals/run.py --label <name>` runs every fixture case (about 90 s on macOS, 40 s on Linux) and records the run in `tests/evals/runs/`; the live runners (`python3 tests/evals/live/core_e2e.py --label <name>` on a real Herdr Core in a scratch session, `tests/evals/live/tui_scratch.sh --label <name>` on a real Herdr TUI in a scratch home, both with stand-in agents) and the Linux container are in [tests/evals/README.md](tests/evals/README.md). CI runs the fixture cases on macOS and on Linux.
@@ -824,7 +880,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **0.1.10, 13 Nov 2026. A Codex lead on Codex 0.167.1, posts that reach a bot, and thinker and doer:** a Codex lead on Codex 0.167.1 gets `tell` text and its inbox lines again, since its new empty-prompt footer (`← for agents · ? for shortcuts`) no longer reads as a draft (checked live on Linux in a Herdr 0.9.5 pane; finding F16 in [docs/CLIENTS.md](docs/CLIENTS.md)). In a job a bot started, `stampede post` also sends that bot a `post` event and exits 2 when the relay refuses it, and a post held for a route with no URL waits like a question; tested with the unit tests and the cross-client suite, not yet with a live bot. The herdr-fleet skill's default shape is thinker and doer: the lead plans once at high effort, workers follow its spec at medium effort, and one review pass on another model loops only for a real bug.
 
-**Unreleased, 13 Nov 2026. A Core job that runs the way Core works:** `stampede new --core` makes the lead a root Core terminal and every helper its real Core child, at any depth; messages go only through Core (`hc send`, Core's notes, `hc wait --children`, results in files); a cap of 12 working helpers with a queue (`stampede next`); layout labels, 4 terminals to a tab; `stampede tree`, `snapshot`, `reopen` and `close` that follow the tree; and a watchdog sweep that tells the owner about a blocked, failed, dead or stalled lead. The shape is [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The earlier Core path stays behind `--core --relay` for one release. Tested with the fake `hc`: to be filled in once the tests land.
+**Unreleased, 13 Nov 2026. A Core job that runs the way Core works:** `stampede new --core` makes the lead a root Core terminal and every helper its real Core child, at any depth; messages go only through Core (`hc send`, Core's notes, `hc wait --children`, results in files); a cap of 12 working helpers with a queue (`stampede next`); layout labels, 4 terminals to a tab; `stampede tree`, `snapshot`, `reopen` and `close` that follow the tree; and a watchdog sweep that tells the owner about a blocked, failed, dead or stalled lead. The shape is [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The earlier Core path stays behind `--core --relay` for one release. Tested with the fake `hc`: 38 unit tests in `tests/test_native.py` (the tree, the cap and queue, the tabs, tell, snapshot, reopen and close) and 16 in `tests/test_native_events.py` (the sweep), and every command in [One Core job, start to finish](#one-core-job-start-to-finish) was run against it in a scratch home. Not run on a real Herdr Core yet.
 
 **Next:**
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.
