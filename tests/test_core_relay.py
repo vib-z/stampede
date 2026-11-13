@@ -1,6 +1,6 @@
 """Herdr Core on the relay side: the owner's relay hooks, herdr-event-post, owner tags, the watchdog, herdr-doctor --core,
 the core check that never starts a core, and the job's follower (herdr-event-core), replayed from fake streams."""
-import importlib.util, json, os, shutil, socket, socketserver, subprocess, sys, tempfile, threading, time, unittest
+import fcntl, importlib.util, json, os, shutil, socket, socketserver, subprocess, sys, tempfile, threading, time, unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
@@ -895,6 +895,19 @@ class ReviewDurable(CoreCase):
     def follower(self, core):
         return core.Follower(self.job_dir)
 
+    def released(self, deadline=60):
+        """Wait until the cut-off post's jq has finished: nothing holds the de-dupe lock any more."""
+        lock, end = self.root / 'home/.local/state/herdr-events/dedupe.lock', time.monotonic() + deadline
+        while True:
+            with open(lock, 'a') as held:
+                try:
+                    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return
+                except OSError:
+                    pass
+            self.assertLess(time.monotonic(), end, 'the cut-off post still holds the de-dupe lock')
+            time.sleep(0.05)
+
     def rows(self):
         record = {'address': 't3', 'name': 'build-api', 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
                   'labels': {'stampede.job': self.key, 'stampede.agent': 'build-api'}}
@@ -920,8 +933,8 @@ class ReviewDurable(CoreCase):
             self.assertEqual(list(json.loads((self.job_dir / 'relay-state.json').read_text())['unsent']), ['t3|blocked|1'])
             self.assertEqual(self.queued(), [])
             self.slow.unlink()
-            time.sleep(2.5)  # the cut-off post's jq finishes and lets go of the de-dupe lock
-            self.settle(core, restart)
+            self.released()
+        self.settle(core, restart)  # the retry gets the real timeout: only the first post is meant to be cut off
 
     def test_a_timeout_before_the_queue_write_is_retried(self):
         self.timeout_before_the_queue(restart=False)

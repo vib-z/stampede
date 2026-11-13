@@ -3,6 +3,7 @@ the watchdog that runs it, flush's UNDELIVERED line through fleet-job tell, and 
 Every script runs for real, against the fake hc and a socket that answers hello like a running core."""
 import json, os, shutil, subprocess, sys, unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, ROOT
@@ -139,6 +140,31 @@ class Sweep(NativeCase):
         self.sweep()
         self.sweep()
         self.assertEqual([(e['state'], e['reason']) for e in self.queued()], [('dead', 'killed')])
+
+    def test_a_lead_lost_before_any_pass_is_dead_once(self):
+        """R4: new, kill and hc rm before the first pass: Core has no row, tree.json has the lead's address."""
+        from test_core import fj
+        ask = self.root / 'ask.md'
+        ask.write_text('Fix the login bug\n')
+        with mock.patch.dict(os.environ, {'HC_SOCKET': str(self.socket)}):
+            code, out = self.quiet(fj.new, str(ask), None, core=True, cwd=str(self.repo))
+            self.assertEqual(code, 0, out)
+            fj.hc('kill', 't1')
+            fj.hc('rm', 't1')
+        (self.job / 'owner').write_text('alpha\n')  # a route of its own, so the post is queued
+        key = (self.job / 'workspace').read_text().strip()
+        self.sweep()
+        self.sweep()
+        self.assertEqual([(e['state'], e['reason'], e['pane'], e['event_id']) for e in self.queued()],
+                         [('dead', 'lost', f'hc:{key}/t1', f'{key}/t1|finished')])
+
+    def test_a_lead_with_no_address_in_tree_json_is_no_news(self):
+        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'lead-x': {'name': 'lead-x', 'role': 'lead', 'state': 'starting'}}}))
+        self.sweep()
+        (self.jd / 'tree.json').write_text('{not json')
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+        self.assertFalse((self.jd / 'sweep-state.json').is_file() and self.sweep_state()['terminals'])
 
     def test_its_own_exit_0_is_no_dead(self):
         self.lead()
