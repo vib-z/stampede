@@ -159,6 +159,15 @@ class Start(NativeCase):
         self.assertEqual(len(result.stderr.strip().splitlines()), 1)
         self.assertIn('run that CLI as a program', result.stderr)
 
+    def test_the_cli_takes_flags_before_the_program(self):
+        """argparse before 3.13 loses a program after -- once a flag stands before it: the CLI cuts at -- itself."""
+        result = self.cli('start', self.job, 'watch-ci', '--tab', 'ci', '--outlive-parent', '--', 'sleep', '--', '60')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        run = self.runs()[-1]
+        self.assertEqual(self.program(run), ['sleep', '--', '60'])
+        self.assertEqual(self.labels(run)['herdr.tab'], 'ci')
+        self.assertIn('--outlive-parent', run)
+
 
 class Cap(NativeCase):
     def setUp(self):

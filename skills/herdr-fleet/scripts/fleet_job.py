@@ -2852,7 +2852,6 @@ def main(argv):
     p.add_argument('--tab', help='a native job: the workstream tab (default main)')
     p.add_argument('--parent', help='a native job: the agent it runs under (default: the caller, else the lead)')
     p.add_argument('--outlive-parent', action='store_true', help='a native job: keep it running when its parent ends')
-    p.add_argument('program', nargs='*', help='a native job: after --, a program to run in place of --kind and --brief')
     p.add_argument('--cwd', help='a Herdr Core job: the folder an agent Core runs starts in (default: the repo)')
     p.add_argument('--model'); p.add_argument('--effort')
     p.add_argument('--report', action='append', default=[]); p.add_argument('--yolo-in', help='a worker in its own git worktree: no-checks mode')
@@ -2888,7 +2887,12 @@ def main(argv):
     p.add_argument('--gate')
     p.add_argument('--ident', help='this question\'s id: names its waiter, so cancel signals only that process')
     p.add_argument('question', nargs='+')
+    program = []
+    if argv[:1] == ['start'] and '--' in argv:  # a native job: a program after --; cut here, since argparse before 3.13
+        cut = argv.index('--')                    # loses it when a flag stands between the name and the --
+        argv, program = argv[:cut], argv[cut + 1:]
     a = parser.parse_args(argv)
+    a.program = program
     if a.cmd == 'new' and a.cwd and not a.core:
         parser.error('--cwd is for new --core')
     if a.cmd == 'start' and backend(a.job) != 'native':
