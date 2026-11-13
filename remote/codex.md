@@ -23,5 +23,5 @@ Approve the plan                               # review jobs only; Codex runs: s
 - **Cloud tasks** run in OpenAI's cloud and cannot reach your Herdr. Use the connected machine.
 - **Events:** a Codex session cannot be woken by another agent, so the lead's questions and gates reach you through Moshi.
 - **A Codex lead:** ask for one ("with a Codex lead"); Codex then adds `--lead codex` to `stampede new` (on the Herdr TUI or on Herdr Core).
-- **On Herdr Core:** ask for it ("on Herdr Core"); Codex then runs `stampede new --core --file <ask.md> --cwd <repo>` ([core.md](../skills/herdr-fleet/references/core.md)).
+- **On Herdr Core:** ask for it ("on Herdr Core"); Codex then runs `stampede new --core --file <ask.md> --cwd <repo>`, and passes the owner's words with `stampede tell <job dir> lead "..."` ([core.md](../skills/herdr-fleet/references/core.md)).
 - The rules every remote follows: [README.md](README.md).
