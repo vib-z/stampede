@@ -557,7 +557,7 @@ SKIPPED lint (a program: --rerun-programs runs it again)
 LIVE docs-health (t8)
 ```
 
-A reopen never hands out work by itself. The lead comes back first (a Claude lead resumes its session when Claude's own session file shows it ran, else starts with the same id and its brief; a Codex lead starts fresh) and gets one line saying it was reopened. A Claude helper whose session ran comes back resumed and idle (labelled `stampede.resumed=1`, outside the cap) and waits for the lead's word; `--prompt` gives it its parent's new address. What would start its work again goes through the queue and the cap: a Claude helper whose session never ran (docs-health here), every helper with `--fresh`, and a program with `--rerun-programs`; what waits prints `QUEUED <name> (<n> running, cap <c>)` for `stampede next`. A Codex helper is `SKIPPED` without `--fresh`, since a native job records no Codex session. A finished job reopens for reading only: only a resumed Claude lead comes back, and `--fresh` or `--rerun-programs` is refused:
+A reopen never hands out work by itself. The lead comes back first (a Claude lead resumes its session when Claude's own session file shows it ran, else starts with the same id and its brief; a Codex lead starts fresh) and gets one line saying it was reopened. A Claude helper whose session ran comes back resumed and idle (labelled `stampede.resumed=1`, outside the cap) and waits for the lead's word; `--prompt` gives it its parent's new address. What would start its work again goes through the queue and the cap: a Claude helper whose session never ran (docs-health here), every helper with `--fresh`, and a program with `--rerun-programs`; what waits prints `QUEUED <name> (<n> running, cap <c>)` for `stampede next`. A Codex helper is `SKIPPED` without `--fresh`, since a native job records no Codex session. A finished job reopens for reading only: only a resumed Claude lead and resumed Claude helpers come back, nothing in its queue starts (each queued start is named `SKIPPED` and stays there), `stampede start` and `stampede next` start no helper on it, and `--fresh` or `--rerun-programs` is refused:
 
 ```console
 $ stampede finish $J "added /health with a test"
@@ -766,8 +766,8 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 | command | 0 | 1 | 2 |
 |---|---|---|---|
 | `new --core` | the lead started | `BLOCKED`, `NOT READY`, `FAILED`, `UNKNOWN` | bad flags, a used folder, Core silent before anything was made |
-| `start` | `STARTED` or `QUEUED` | a `FAILED` start, during the drain too | a refusal: the name taken, `--pane`, a bad brief or kind, an unknown parent, a job that is not native |
-| `next` | `STARTED`, `WAITING`, `NOTHING QUEUED`, `DROPPED` | a `FAILED` start, or `UNKNOWN` | not a native job |
+| `start` | `STARTED` or `QUEUED` | a `FAILED` start, during the drain too | a refusal: the name taken, `--pane`, a bad brief or kind, an unknown parent, a finished job, a job that is not native |
+| `next` | `STARTED`, `WAITING`, `NOTHING QUEUED`, `DROPPED` | a `FAILED` start, or `UNKNOWN` | a finished job; not a native job |
 | `tree` | the tree | `NO LEAD` | not a native job |
 | `tell` | `SUBMITTED` | | `FAILED` (nothing typed) |
 | `snapshot` | the record's path | `FAILED snapshot`: Core did not answer | not a native job |

@@ -130,7 +130,7 @@ Labels only; Core's tree never depends on them.
 - You come back first: a Claude lead resumes its session when Claude's own session file shows it ran, else starts with that id and its brief; a Codex lead starts fresh with its brief. You get one line saying you were reopened.
 - A Claude helper whose session ran comes back resumed and idle (`stampede.resumed=1`, outside the cap) and waits for your word. `--prompt` gives it one line with its parent's new address and tells it to read its brief again.
 - Anything that would start its work again goes through the queue and the cap: a Claude helper whose session never ran, every helper with `--fresh`, a program with `--rerun-programs`. A Codex helper is `SKIPPED` without `--fresh`: a native job records no Codex session. A terminal still live is left alone.
-- A finished job reopens for reading only: `--fresh` and `--rerun-programs` are refused (exit 2), only a resumed Claude lead comes back, told to start no work, and nothing is queued.
+- A finished job reopens for reading only: `--fresh` and `--rerun-programs` are refused (exit 2), only resumed Claude sessions come back (the lead, told to start no work, and helpers whose sessions ran), and nothing is queued or started from the queue. `stampede start` and `stampede next` start no helper on a finished job (exit 2).
 
 ## Close
 
