@@ -727,7 +727,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 <details>
 <summary><b><code>stampede</code> commands and exit codes</b></summary>
 
-`stampede` is the same command as `fleet-job` ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py)). `stampede --version` (or `-V`) prints the version from [VERSION](VERSION), then, on stderr, the update line when a newer release is out ([Updating](#updating)). `update` is in [stampede_update.py](scripts/stampede_update.py).
+`stampede` is the same command as `fleet-job` ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), the entry; the commands live in the [stampede package](skills/herdr-fleet/scripts/stampede/)). `stampede --version` (or `-V`) prints the version from [VERSION](VERSION), then, on stderr, the update line when a newer release is out ([Updating](#updating)). `update` is in [stampede_update.py](scripts/stampede_update.py).
 
 | command | flags | does |
 |---|---|---|
@@ -806,7 +806,11 @@ README.md  CHANGELOG.md  CONTRIBUTING.md  RELEASING.md  SECURITY.md  LICENSE  VE
 AGENTS.md  CLAUDE.md  SKILL.md  config.example  install.sh  herdr-plugin.toml
 .github/                issue and pull request templates, workflows/ci.yml (macOS and Linux CI)
 skills/herdr-fleet/     the job: SKILL.md, references/ (core.md: a Core job; core-relay.md: the --relay path),
-                        scripts/fleet-job, fleet_job.py, core_native.py (a Core job), fleet-watch.sh
+                        scripts/fleet-job, fleet_job.py (the entry), fleet-watch.sh, and scripts/stampede/,
+                        the commands, one module per concern: base, job (the job folder), hcapi (Herdr Core),
+                        herdrapi (Herdr), agents (per CLI), owner (questions, gates, tell, finish), hooks, tui,
+                        native (a Core job), relay and handed (the --relay path), cli (the parser);
+                        core_native.py re-exports native for one release
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor,
                         the relay, herdr-event-sweep: the Core sweep and probes,
                         herdr-event-core: a --relay job's follower)
@@ -857,7 +861,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 - **The evals:** `python3 tests/evals/run.py --label <name>` runs every fixture case (about 90 s on macOS, 40 s on Linux) and records the run in `tests/evals/runs/`; the live runners (`python3 tests/evals/live/core_e2e.py --label <name>` on a real Herdr Core in a scratch session, `tests/evals/live/tui_scratch.sh --label <name>` on a real Herdr TUI in a scratch home, both with stand-in agents) and the Linux container are in [tests/evals/README.md](tests/evals/README.md). CI runs the fixture cases on macOS and on Linux.
 - **The four skills are copies** of the maintainer's own skills, scrubbed of anything personal. A pull request that changes `skills/` is welcome; the maintainer carries it to the source first, then copies it back here.
 - **A front door:** a guide in `remote/` that writes the ask and runs `stampede new`, linked from [Front doors](#front-doors).
-- **An agent CLI:** its auto and no-checks flags in `AUTO` and `YOLO`, and its hooks in `cli_args`, in [fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), with a test in `tests/test_fleet_job.py`. In a Core job any CLI already runs as a program (`stampede start <job> <name> -- <cli>`). On the `--relay` path it must also report OSC 7501 status, have a turn hook and a known empty prompt; its Core flags go in `start_core`, with a test in `tests/test_core.py`. A CLI Herdr detects but the `--relay` path does not start on Core goes in `HANDED` (handed to a TUI pane), and in `TURNS` in `herdr-event-core` when it has no turn hook of its own, with a test in `tests/test_mixed.py`.
+- **An agent CLI:** its auto and no-checks flags in `AUTO` and `YOLO`, and its hooks in `cli_args`, in [agents.py](skills/herdr-fleet/scripts/stampede/agents.py), with a test in `tests/test_fleet_job.py`. In a Core job any CLI already runs as a program (`stampede start <job> <name> -- <cli>`). On the `--relay` path it must also report OSC 7501 status, have a turn hook and a known empty prompt; its Core flags go in `start_core` ([relay.py](skills/herdr-fleet/scripts/stampede/relay.py)), with a test in `tests/test_core.py`. A CLI Herdr detects but the `--relay` path does not start on Core goes in `HANDED` ([handed.py](skills/herdr-fleet/scripts/stampede/handed.py), handed to a TUI pane), and in `TURNS` in `herdr-event-core` when it has no turn hook of its own, with a test in `tests/test_mixed.py`.
 
 ## Status and roadmap
 

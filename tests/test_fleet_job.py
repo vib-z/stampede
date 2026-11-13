@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 sys.path.insert(0, str(SCRIPTS))
-import fleet_job as fj
+from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_
 
 
 def job_with(agents):
@@ -22,7 +22,7 @@ def valid_brief(job, agent='build-x', omit=()):
     brief = job / 'briefs' / (agent + '.md')
     brief.parent.mkdir(exist_ok=True)
     brief.write_text('\n'.join('## ' + name + '\nDo the assigned work.\n'
-                              for name in fj.BRIEF_SECTIONS if name not in omit))
+                              for name in agents_.BRIEF_SECTIONS if name not in omit))
     return brief
 
 
@@ -59,18 +59,18 @@ def codex_home(*sessions):
 class Messages(unittest.TestCase):
     def test_tell_claude_appends_one_line_to_its_inbox(self):
         job = job_with([('lead-demo', 'claude'), ('build-api', 'claude')])
-        fj.tell(job, 'build-api', 'first\nsecond')
+        owner_.tell(job, 'build-api', 'first\nsecond')
         self.assertEqual((job / 'inbox/build-api.md').read_text(), 'first second\n')
 
     def test_tell_lead_resolves_the_lead(self):
         job = job_with([('lead-demo', 'claude')])
-        fj.tell(job, 'lead', 'hello')
+        owner_.tell(job, 'lead', 'hello')
         self.assertEqual((job / 'inbox/lead-demo.md').read_text(), 'hello\n')
 
     def test_tell_refuses_an_agent_outside_the_job(self):
         job = job_with([('lead-demo', 'claude')])
         with self.assertRaises(ValueError):
-            fj.tell(job, 'stranger', 'hi')
+            owner_.tell(job, 'stranger', 'hi')
 
 
 class Asks(unittest.TestCase):
@@ -84,27 +84,27 @@ class Asks(unittest.TestCase):
     def test_answer_reaches_the_lead_inbox(self):
         job = job_with([('lead-demo', 'claude')])
         command = self.fake_ask('echo "Yes"')
-        self.assertEqual(fj.ask_now(job, 'Go?', ['Yes', 'No'], command), 0)
+        self.assertEqual(owner_.ask_now(job, 'Go?', ['Yes', 'No'], command), 0)
         self.assertIn('ANSWER Go?: Yes', (job / 'inbox/lead-demo.md').read_text())
 
     def test_exit_3_is_reported_as_failed_with_its_code(self):
         job = job_with([('lead-demo', 'claude')])
         command = self.fake_ask('exit 3')
-        fj.ask_now(job, 'Go?', ['Yes', 'No'], command)
+        owner_.ask_now(job, 'Go?', ['Yes', 'No'], command)
         self.assertIn('ASK FAILED Go?: exit 3', (job / 'inbox/lead-demo.md').read_text())
 
     def test_cancel_stops_the_whole_ask_and_its_child(self):
         job = job_with([('lead-demo', 'claude')])
         marker = Path(tempfile.mkdtemp()) / 'sleep.pid'
         command = self.fake_ask('sleep 300 & echo $! > ' + str(marker) + '; wait')
-        ident = fj.ask_background(job, 'Go?', ['Yes', 'No'], command)
+        ident = owner_.ask_background(job, 'Go?', ['Yes', 'No'], command)
         deadline = time.time() + 10
         while not (marker.is_file() and marker.read_text().strip()):
             self.assertLess(time.time(), deadline, 'the fake ask never started its child')
             time.sleep(0.05)
         child = int(marker.read_text())
         os.kill(child, 0)  # alive before the cancel
-        fj.cancel(job, ident)
+        owner_.cancel(job, ident)
         deadline = time.time() + 10
         while True:
             try:
@@ -119,26 +119,26 @@ class Asks(unittest.TestCase):
 class Approval(unittest.TestCase):
     def test_a_plan_and_go_job_needs_no_approval(self):
         job = job_with([('lead-demo', 'claude')])
-        fj.require_approval(job)  # no review file: no error
+        owner_.require_approval(job)  # no review file: no error
 
     def test_a_review_job_refuses_until_approved(self):
         job = job_with([('lead-demo', 'claude')])
         (job / 'review').write_text('owner asked to see the plan\n')
         (job / 'plan.md').write_text('# Plan: demo\n')
         with self.assertRaises(PermissionError):
-            fj.require_approval(job)
-        fj.approve(job, 'grokbot')
-        fj.require_approval(job)
+            owner_.require_approval(job)
+        owner_.approve(job, 'grokbot')
+        owner_.require_approval(job)
         self.assertIn('Approved by grokbot', (job / 'inbox/lead-demo.md').read_text())
 
     def test_a_changed_plan_needs_a_new_approval(self):
         job = job_with([('lead-demo', 'claude')])
         (job / 'review').write_text('x\n')
         (job / 'plan.md').write_text('v1\n')
-        fj.approve(job, 'owner')
+        owner_.approve(job, 'owner')
         (job / 'plan.md').write_text('v2\n')
         with self.assertRaises(PermissionError):
-            fj.require_approval(job)
+            owner_.require_approval(job)
 
 
 class Hooks(unittest.TestCase):
@@ -148,7 +148,7 @@ class Hooks(unittest.TestCase):
         (self.job / 'hooks/build-api.json').write_text(json.dumps({'reports': ['reports/api.md']}))
 
     def stop(self, active=False):
-        return fj.claude_stop(self.job, 'build-api', {'hook_event_name': 'Stop', 'stop_hook_active': active})
+        return hooks_.claude_stop(self.job, 'build-api', {'hook_event_name': 'Stop', 'stop_hook_active': active})
 
     def test_no_report_sends_the_worker_back_once(self):
         out = self.stop()
@@ -168,25 +168,25 @@ class Hooks(unittest.TestCase):
         self.assertEqual(log.count('REPORT reports/api.md'), 2)
 
     def test_wake_returns_new_inbox_lines_once(self):
-        fj.tell(self.job, 'lead', 'one')
+        owner_.tell(self.job, 'lead', 'one')
         path = str(self.job / 'inbox/lead-demo.md')
-        self.assertEqual(fj.wake(self.job, 'lead-demo', {'file_path': path}), ['one'])
-        self.assertEqual(fj.wake(self.job, 'lead-demo', {'file_path': path}), [])
+        self.assertEqual(hooks_.wake(self.job, 'lead-demo', {'file_path': path}), ['one'])
+        self.assertEqual(hooks_.wake(self.job, 'lead-demo', {'file_path': path}), [])
 
     def test_a_worker_question_becomes_a_file_and_a_line(self):
-        out = fj.ask_lead(self.job, 'build-api', {'tool_input': {'questions': [{'question': 'Which DB?'}]}})
+        out = hooks_.ask_lead(self.job, 'build-api', {'tool_input': {'questions': [{'question': 'Which DB?'}]}})
         self.assertEqual(json.loads(out)['hookSpecificOutput']['permissionDecision'], 'deny')
         self.assertIn('Which DB?', (self.job / 'questions/build-api.md').read_text())
         self.assertIn('QUESTION build-api: Which DB?', (self.job / 'inbox.log').read_text())
 
     def test_the_lead_may_ask_its_own_card(self):
-        self.assertEqual(fj.ask_lead(self.job, 'lead-demo', {'tool_input': {'questions': []}}), '{}')
+        self.assertEqual(hooks_.ask_lead(self.job, 'lead-demo', {'tool_input': {'questions': []}}), '{}')
 
     def test_codex_and_cursor_turns_reach_the_lead(self):
         from unittest import mock
         with mock.patch.dict(os.environ, {'CODEX_HOME': codex_home(('t-main', {}))}):
-            fj.codex_notify(self.job, 'build-api', {'type': 'agent-turn-complete', 'thread-id': 't-main', 'last-assistant-message': 'done'})
-        fj.cursor_stop(self.job, 'build-api', {'status': 'completed'})
+            hooks_.codex_notify(self.job, 'build-api', {'type': 'agent-turn-complete', 'thread-id': 't-main', 'last-assistant-message': 'done'})
+        hooks_.cursor_stop(self.job, 'build-api', {'status': 'completed'})
         log = (self.job / 'inbox.log').read_text()
         self.assertIn('TURN build-api done', log)
         self.assertEqual(log.count('TURN build-api'), 2)
@@ -195,7 +195,7 @@ class Hooks(unittest.TestCase):
 class Start(unittest.TestCase):
     def test_claude_gets_auto_mode_and_its_hook_settings(self):
         job = job_with([('lead-demo', 'claude')])
-        args = fj.cli_args(job, 'build-api', 'claude', 'claude-opus-5-5', 'xhigh', ['reports/api.md'])
+        args = agents_.cli_args(job, 'build-api', 'claude', 'claude-opus-5-5', 'xhigh', ['reports/api.md'])
         self.assertEqual(args[:2], ['--permission-mode', 'auto'])
         settings = json.loads(Path(args[args.index('--settings') + 1]).read_text())
         self.assertIn('Stop', settings['hooks'])
@@ -204,13 +204,13 @@ class Start(unittest.TestCase):
 
     def test_the_lead_has_no_stop_hook(self):
         job = job_with([('lead-demo', 'claude')])
-        args = fj.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True)
+        args = agents_.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True)
         settings = json.loads(Path(args[args.index('--settings') + 1]).read_text())
         self.assertNotIn('Stop', settings['hooks'])
 
     def test_codex_gets_approve_for_me_notify_and_the_job_dir(self):
         job = job_with([('lead-demo', 'claude')])
-        args = fj.cli_args(job, 'build-ui', 'codex', 'gpt-6.1-sol', 'xhigh', [])
+        args = agents_.cli_args(job, 'build-ui', 'codex', 'gpt-6.1-sol', 'xhigh', [])
         self.assertIn('--approve-for-me', args)
         self.assertIn('--add-dir', args)
         self.assertTrue(any(a.startswith('notify=') for a in args))
@@ -223,17 +223,17 @@ class Start(unittest.TestCase):
         subprocess.run(['git', '-C', str(repo), 'commit', '-q', '--allow-empty', '-m', 'base'], check=True,
                        env={**os.environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t'})
         with self.assertRaises(PermissionError):
-            fj.cli_args(job, 'build-api', 'codex', None, None, [], yolo_in=repo)
+            agents_.cli_args(job, 'build-api', 'codex', None, None, [], yolo_in=repo)
         tree = repo.parent / (repo.name + '-wt')
         subprocess.run(['git', '-C', str(repo), 'worktree', 'add', '-q', str(tree)], check=True)
-        self.assertIn('--yolo', fj.cli_args(job, 'build-api', 'codex', None, None, [], yolo_in=tree))
-        self.assertIn('--dangerously-skip-permissions', fj.cli_args(job, 'build-ui', 'claude', None, None, [], yolo_in=tree))
+        self.assertIn('--yolo', agents_.cli_args(job, 'build-api', 'codex', None, None, [], yolo_in=tree))
+        self.assertIn('--dangerously-skip-permissions', agents_.cli_args(job, 'build-ui', 'claude', None, None, [], yolo_in=tree))
         with self.assertRaises(PermissionError):
-            fj.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True, yolo_in=tree)
+            agents_.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True, yolo_in=tree)
 
     def test_cursor_gets_auto_review_and_a_stop_plugin(self):
         job = job_with([('lead-demo', 'claude')])
-        args = fj.cli_args(job, 'qa-ui', 'cursor', 'auto', None, [])
+        args = agents_.cli_args(job, 'qa-ui', 'cursor', 'auto', None, [])
         self.assertIn('--auto-review', args)
         plugin = Path(args[args.index('--plugin-dir') + 1])
         self.assertIn('cursor-stop', (plugin / 'hooks/hooks.json').read_text())
@@ -254,16 +254,16 @@ class Briefs(unittest.TestCase):
                 argv = ['start', str(job), 'build-x', '--kind', kind, '--pane', 'w9:p3', '--brief', str(brief)]
                 with mock.patch.dict(os.environ, {'HERDR': herdr}):
                     with self.assertRaises(ValueError) as refused:
-                        fj.start(job, 'build-x', kind, 'w9:p3', brief, yolo_in=job.parent)
+                        cli_.start(job, 'build-x', kind, 'w9:p3', brief, yolo_in=job.parent)
                     self.assertEqual(str(refused.exception), message)
                     stderr = io.StringIO()
                     with contextlib.redirect_stderr(stderr):
-                        self.assertEqual(fj.main(argv), 2)
+                        self.assertEqual(cli_.main(argv), 2)
                 self.assertEqual(stderr.getvalue(), 'fleet-job start: ' + message + '\n')
                 self.assertFalse(log.exists(), 'not even a Herdr read should run')
                 self.assertFalse((job / 'hooks').exists())
                 self.assertEqual((job / 'agents.tsv').read_bytes(), before)
-                self.assertNotIn('build-x', fj.roster(job)[0])
+                self.assertNotIn('build-x', job_.roster(job)[0])
 
     def test_stampede_start_missing_done_when_exits_2_and_starts_nothing(self):
         job = job_with([('lead-demo', 'claude')])
@@ -278,7 +278,7 @@ class Briefs(unittest.TestCase):
                          'fill them in on skills/herdr-fleet/references/brief.md and start again\n')
         self.assertFalse(log.exists())
         self.assertFalse((job / 'hooks/build-x.json').exists())
-        self.assertNotIn('build-x', fj.roster(job)[0])
+        self.assertNotIn('build-x', job_.roster(job)[0])
 
     def test_an_empty_section_is_missing_before_any_level_heading(self):
         job = job_with([('lead-demo', 'claude')])
@@ -286,8 +286,8 @@ class Briefs(unittest.TestCase):
         for next_heading in ('# Notes', '###### Notes'):
             with self.subTest(next_heading=next_heading):
                 empty = text.replace('## Goal\nDo the assigned work.\n', '## Goal\n \t\n' + next_heading + '\nOther context.\n')
-                self.assertEqual(fj.missing_sections(empty), ['Goal'])
-        self.assertEqual(fj.missing_sections(text.replace('## If blocked\nDo the assigned work.\n', '## If blocked\n \t\n')),
+                self.assertEqual(agents_.missing_sections(empty), ['Goal'])
+        self.assertEqual(agents_.missing_sections(text.replace('## If blocked\nDo the assigned work.\n', '## If blocked\n \t\n')),
                          ['If blocked'])
 
     def test_heading_levels_case_and_title_suffixes_are_accepted(self):
@@ -295,9 +295,9 @@ class Briefs(unittest.TestCase):
         text = valid_brief(job).read_text().replace('## Constraints', '## Constraints and anti-goals')
         for level in range(1, 7):
             with self.subTest(level=level):
-                self.assertEqual(fj.missing_sections(text.replace('## ', '#' * level + ' ').upper()), [])
-        self.assertEqual(fj.missing_sections(text.replace('## Goal', '####### Goal')), ['Goal'])
-        self.assertEqual(fj.missing_sections(text.replace('## Goal', 'Goal:')), ['Goal'])
+                self.assertEqual(agents_.missing_sections(text.replace('## ', '#' * level + ' ').upper()), [])
+        self.assertEqual(agents_.missing_sections(text.replace('## Goal', '####### Goal')), ['Goal'])
+        self.assertEqual(agents_.missing_sections(text.replace('## Goal', 'Goal:')), ['Goal'])
 
     def test_a_missing_brief_file_is_refused_without_side_effects(self):
         from unittest import mock
@@ -306,7 +306,7 @@ class Briefs(unittest.TestCase):
         before = (job / 'agents.tsv').read_bytes()
         herdr, log = fake_herdr(job.parent)
         with mock.patch.dict(os.environ, {'HERDR': herdr}), self.assertRaises(ValueError) as refused:
-            fj.start(job, 'build-x', 'claude', 'w9:p3', brief)
+            cli_.start(job, 'build-x', 'claude', 'w9:p3', brief)
         self.assertEqual(str(refused.exception), f'brief {brief} does not exist')
         self.assertFalse(log.exists())
         self.assertFalse((job / 'hooks').exists())
@@ -314,9 +314,9 @@ class Briefs(unittest.TestCase):
 
     def test_a_restarted_lead_accepts_its_generated_one_paragraph_brief(self):
         out, job, _ = Fixes.run_new(self, 'idle')
-        lead = fj.roster(job)[1]
+        lead = job_.roster(job)[1]
         brief = job / 'briefs' / (lead + '.md')
-        self.assertEqual(fj.missing_sections(brief.read_text()), list(fj.BRIEF_SECTIONS))
+        self.assertEqual(agents_.missing_sections(brief.read_text()), list(agents_.BRIEF_SECTIONS))
         error, log = ReviewRound1.start(self, job, lead, job.parent)
         self.assertIsNone(error)
         self.assertIn('agent start ' + lead, log)
@@ -325,14 +325,14 @@ class Briefs(unittest.TestCase):
     def test_the_template_matches_the_required_sections_and_is_complete(self):
         import re
         template = (SCRIPTS.parent / 'references/brief.md').read_text()
-        self.assertEqual(tuple(re.findall(r'^## (.+)$', template, re.M)), fj.BRIEF_SECTIONS)
-        self.assertEqual(fj.missing_sections(template), [])
+        self.assertEqual(tuple(re.findall(r'^## (.+)$', template, re.M)), agents_.BRIEF_SECTIONS)
+        self.assertEqual(agents_.missing_sections(template), [])
 
 
 class Command(unittest.TestCase):
     def test_hook_wake_exits_2_with_the_new_lines(self):
         job = job_with([('lead-demo', 'claude')])
-        fj.tell(job, 'lead', 'REPORT reports/api.md')
+        owner_.tell(job, 'lead', 'REPORT reports/api.md')
         payload = json.dumps({'file_path': str(job / 'inbox/lead-demo.md')})
         result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'hook', 'wake', str(job), '--agent', 'lead-demo'],
                                 input=payload, capture_output=True, text=True)
@@ -340,7 +340,7 @@ class Command(unittest.TestCase):
         self.assertIn('REPORT reports/api.md', result.stderr)
 
     def test_new_job_folder_name(self):
-        self.assertEqual(fj.slug('Fix the login bug on the billing page, please'), 'fix-login-bug-billing')
+        self.assertEqual(job_.slug('Fix the login bug on the billing page, please'), 'fix-login-bug-billing')
 
 
 class Fixes(unittest.TestCase):
@@ -359,7 +359,7 @@ class Fixes(unittest.TestCase):
         root = Path(extra.get('FLEET_JOBS_ROOT', repo.parent / 'herdr-jobs'))
         out = io.StringIO()
         with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': str(root), **extra}), contextlib.redirect_stdout(out):
-            self.code = fj.new(ask, 'w9', **kw)
+            self.code = cli_.new(ask, 'w9', **kw)
         return out.getvalue(), max((root / 'jobs').iterdir(), key=lambda j: j.stat().st_mtime_ns), log.read_text()
 
     def test_new_puts_the_job_under_the_jobs_root_and_keeps_the_repo_as_cwd(self):
@@ -376,9 +376,9 @@ class Fixes(unittest.TestCase):
     def test_the_jobs_root_defaults_to_code_herdr_jobs(self):
         from unittest import mock
         with mock.patch.dict(os.environ, {'FLEET_JOBS_ROOT': ''}):
-            self.assertEqual(fj.jobs_root(), Path.home() / 'code/herdr-jobs')
+            self.assertEqual(job_.jobs_root(), Path.home() / 'code/herdr-jobs')
         with mock.patch.dict(os.environ, {'FLEET_JOBS_ROOT': '~/elsewhere'}):
-            self.assertEqual(fj.jobs_root(), Path.home() / 'elsewhere')
+            self.assertEqual(job_.jobs_root(), Path.home() / 'elsewhere')
 
     def test_the_same_ask_twice_the_same_day_gets_its_own_job_and_a_valid_lead(self):
         root = Path(tempfile.mkdtemp())
@@ -392,12 +392,12 @@ class Fixes(unittest.TestCase):
         self.run_new('idle', {'FLEET_JOBS_ROOT': str(root)}, name=name)
         leads = sorted((j / 'lead').read_text().strip() for j in (root / 'jobs').iterdir())
         self.assertEqual(leads, ['lead-' + 'a' * 25 + '-2', 'lead-' + name])
-        self.assertTrue(all(fj.NAME.fullmatch(l) for l in leads))
+        self.assertTrue(all(base_.NAME.fullmatch(l) for l in leads))
 
     def test_claude_and_cursor_workers_may_write_the_job_folder(self):
         job = Path(tempfile.mkdtemp()) / 'job'
         for kind in ('claude', 'cursor'):
-            args = fj.cli_args(job, 'build-x', kind, None, None, [])
+            args = agents_.cli_args(job, 'build-x', kind, None, None, [])
             self.assertEqual(args[args.index('--add-dir') + 1], str(job.absolute()), kind)
 
     def test_new_starts_the_lead_on_the_table_model(self):
@@ -437,12 +437,12 @@ class Fixes(unittest.TestCase):
     def test_a_worker_that_ends_reaches_the_lead_as_gone(self):
         job = job_with([('lead-demo', 'claude'), ('build-api', 'claude')])
         settings = lambda args: json.loads(Path(args[args.index('--settings') + 1]).read_text())
-        worker = settings(fj.cli_args(job, 'build-api', 'claude', None, None, []))
-        lead = settings(fj.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True))
+        worker = settings(agents_.cli_args(job, 'build-api', 'claude', None, None, []))
+        lead = settings(agents_.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True))
         self.assertIn('SessionEnd', worker['hooks'])
         self.assertNotIn('SessionEnd', lead['hooks'])
-        fj.session_end(job, 'build-api', {'reason': 'other'})
-        fj.session_end(job, 'lead-demo', {'reason': 'other'})
+        hooks_.session_end(job, 'build-api', {'reason': 'other'})
+        hooks_.session_end(job, 'lead-demo', {'reason': 'other'})
         log = (job / 'inbox.log').read_text()
         self.assertIn('GONE build-api', log)
         self.assertNotIn('GONE lead-demo', log)
@@ -463,12 +463,12 @@ class ReviewRound1(unittest.TestCase):
         from unittest import mock
         herdr, log = fake_herdr(pane_cwd, foreground=foreground)
         brief = job / 'briefs' / (agent + '.md')
-        if agent != fj.roster(job)[1]:
+        if agent != job_.roster(job)[1]:
             brief = valid_brief(job, agent)
         error = None
         with mock.patch.dict(os.environ, {'HERDR': herdr}), contextlib.redirect_stdout(io.StringIO()):
             try:
-                fj.start(job, agent, 'claude', 'w9:p3', str(brief), **kw)
+                cli_.start(job, agent, 'claude', 'w9:p3', str(brief), **kw)
             except PermissionError as refused:
                 error = refused
         return error, log.read_text() if log.exists() else ''
@@ -503,7 +503,7 @@ class ReviewRound1(unittest.TestCase):
 
     def test_r2_codex_notify_takes_its_payload_as_the_last_argument(self):
         job = job_with([('lead-demo', 'claude'), ('build-ui', 'codex')])
-        args = fj.cli_args(job, 'build-ui', 'codex', None, None, [])
+        args = agents_.cli_args(job, 'build-ui', 'codex', None, None, [])
         notify = json.loads(next(a for a in args if a.startswith('notify='))[len('notify='):])
         payload = json.dumps({'type': 'agent-turn-complete', 'thread-id': 't-main', 'last-assistant-message': 'shipped'})
         result = subprocess.run(notify + [payload], stdin=subprocess.DEVNULL, capture_output=True, text=True,
@@ -513,18 +513,18 @@ class ReviewRound1(unittest.TestCase):
 
     def test_r3_consuming_the_inbox_never_touches_it(self):
         job = job_with([('lead-demo', 'claude')])
-        paths = fj.watch_paths(job, 'lead-demo', True)
-        fj.tell(job, 'lead', 'one')
+        paths = hooks_.watch_paths(job, 'lead-demo', True)
+        owner_.tell(job, 'lead', 'one')
         before = [os.stat(path).st_mtime_ns for path in paths]
         time.sleep(0.05)
-        self.assertEqual(fj.wake(job, 'lead-demo', {'file_path': paths[0]}), ['one'])
-        self.assertEqual(fj.wake(job, 'lead-demo', {'file_path': paths[0]}), [])
-        self.assertEqual(fj.watch_paths(job, 'lead-demo', True), paths)
+        self.assertEqual(hooks_.wake(job, 'lead-demo', {'file_path': paths[0]}), ['one'])
+        self.assertEqual(hooks_.wake(job, 'lead-demo', {'file_path': paths[0]}), [])
+        self.assertEqual(hooks_.watch_paths(job, 'lead-demo', True), paths)
         self.assertEqual([os.stat(path).st_mtime_ns for path in paths], before)
 
     def test_r6_every_cursor_stop_reaches_the_lead_with_its_status(self):
         job = job_with([('lead-demo', 'claude'), ('qa-ui', 'cursor')])
-        args = fj.cli_args(job, 'qa-ui', 'cursor', None, None, [])
+        args = agents_.cli_args(job, 'qa-ui', 'cursor', None, None, [])
         plugin = Path(args[args.index('--plugin-dir') + 1])
         command = json.loads((plugin / 'hooks/hooks.json').read_text())['hooks']['stop'][0]['command']
         for status in ('completed', 'error', 'aborted'):
@@ -541,7 +541,7 @@ class ReviewRound1(unittest.TestCase):
         (job / 'reports').mkdir()
         for verdict in ('FINDINGS', 'PASS'):
             (job / 'reports/review.md').write_text('# review\nStatus: ' + verdict + '\n')
-            self.assertEqual(fj.claude_stop(job, 'review-api', {'hook_event_name': 'Stop'}), '')
+            self.assertEqual(hooks_.claude_stop(job, 'review-api', {'hook_event_name': 'Stop'}), '')
         self.assertEqual((job / 'inbox.log').read_text().count('REPORT reports/review.md'), 2)
 
     def test_r9_new_uses_a_given_empty_pane_and_renames_its_tab(self):
@@ -579,7 +579,7 @@ class LiveFixes(unittest.TestCase):
         brief = valid_brief(job, agent)
         out = io.StringIO()
         with mock.patch.dict(os.environ, {'HERDR': herdr}), contextlib.redirect_stdout(out):
-            fj.start(job, agent, 'claude', 'w9:p3', str(brief))
+            cli_.start(job, agent, 'claude', 'w9:p3', str(brief))
         return out.getvalue()
 
     def test_a_startup_dialog_at_start_is_blocked_not_a_crash(self):
@@ -587,28 +587,28 @@ class LiveFixes(unittest.TestCase):
         out = self.run_start(job, 'build-x', 'agent_not_ready')
         self.assertIn('BLOCKED build-x: clear the startup dialog, then fleet-job tell ' + str(job) + ' build-x "Read '
                       + str(job / 'briefs/build-x.md') + '"', out)
-        self.assertIn('build-x', fj.roster(job)[0])  # the reopen record was written
+        self.assertIn('build-x', job_.roster(job)[0])  # the reopen record was written
         self.assertFalse((job / 'inbox/build-x.md').exists())
 
     def test_a_startup_dialog_at_new_is_blocked_not_a_crash(self):
         out, job, log = Fixes.run_new(self, 'idle', start_error='agent_not_ready')
         self.assertIn('BLOCKED lead-fix-login-bug: clear the startup dialog, then fleet-job tell ' + str(job) + ' lead "Read '
                       + str(job / 'briefs/lead-fix-login-bug.md') + '"', out)
-        self.assertIn('lead-fix-login-bug', fj.roster(job)[0])
+        self.assertIn('lead-fix-login-bug', job_.roster(job)[0])
         self.assertFalse((job / 'inbox/lead-fix-login-bug.md').exists())
 
     def test_any_other_herdr_error_still_fails(self):
         job = job_with([('lead-demo', 'claude')])
         with self.assertRaises(RuntimeError):
             self.run_start(job, 'build-x', 'agent_pane_not_found')
-        self.assertNotIn('build-x', fj.roster(job)[0])
+        self.assertNotIn('build-x', job_.roster(job)[0])
 
     def test_codex_background_turns_never_wake_the_lead(self):
         from unittest import mock
         job = job_with([('lead-demo', 'claude'), ('review-hello', 'codex')])
         home = codex_home(('t-main', {}), ('t-sub', {'source': {'subagent': 'thread_spawn'}}),
                           ('t-child', {'parent_thread_id': 't-main'}))
-        turn = lambda thread, text, **extra: fj.codex_notify(job, 'review-hello', {
+        turn = lambda thread, text, **extra: hooks_.codex_notify(job, 'review-hello', {
             'type': 'agent-turn-complete', 'thread-id': thread, 'last-assistant-message': text, **extra})
         with mock.patch.dict(os.environ, {'CODEX_HOME': home}):
             turn('t-sub', '{"title":"Review hello brief"}')
@@ -737,9 +737,9 @@ class Gates(unittest.TestCase):
 
     def approve(self, ident, sha):
         from unittest import mock
-        with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            return self.quiet(fj.approve_gate, self.job, ident, sha, 'owner in Grok Bot chat',
-                              fj.gate_digest(fj.load_gate(self.job, ident)))
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            return self.quiet(owner_.approve_gate, self.job, ident, sha, 'owner in Grok Bot chat',
+                              owner_.gate_digest(owner_.load_gate(self.job, ident)))
 
     def test_new_records_the_bot_that_started_the_job(self):
         tag = self.home / '.config/herdr-events/owners/w9'
@@ -803,8 +803,8 @@ class Gates(unittest.TestCase):
 
     def test_a_bot_started_gate_posts_a_gate_event(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
-        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)  # a second gate at once is its own event
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Push the docs branch', self.SHA)  # a second gate at once is its own event
         queued = [json.loads(p.read_text()) for p in sorted((self.home / 'events/queue').glob('*.json'))]
         self.assertEqual(len(queued), 2)
         event = next(q['payload'] for q in queued if q['payload']['pr'] == 12)
@@ -819,8 +819,8 @@ class Gates(unittest.TestCase):
 
     def test_a_queued_gate_survives_a_later_turn_end_from_the_lead_pane(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
-        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Push the docs branch', self.SHA)
         tag = self.home / '.config/herdr-events/owners/w9'  # the bot tagged the workspace, so the lead's turn ends go to it too
         tag.parent.mkdir(parents=True)
         tag.write_text('owner=alpha\n')
@@ -834,8 +834,8 @@ class Gates(unittest.TestCase):
 
     def test_a_question_in_a_bot_started_job_goes_to_the_bot(self):
         self.bot_job()
-        self.quiet(fj.ask, self.job, 'Keep the file in the repo root?', ['Yes', 'No'])
-        self.quiet(fj.ask, self.job, 'And the second one?', [])  # a second question at once is its own event
+        self.quiet(owner_.ask, self.job, 'Keep the file in the repo root?', ['Yes', 'No'])
+        self.quiet(owner_.ask, self.job, 'And the second one?', [])  # a second question at once is its own event
         events = [json.loads(p.read_text())['payload'] for p in sorted((self.home / 'events/queue').glob('*.json'))]
         self.assertEqual([e['state'] for e in events], ['question', 'question'])
         first = next(e for e in events if e['options'])
@@ -843,7 +843,7 @@ class Gates(unittest.TestCase):
         self.assertIn('tell ' + str(self.job.absolute()) + ' lead', first['answer'])
         self.assertFalse((self.job / 'asks').exists(), 'no phone card in a bot-started job')
         with self.assertRaises(ValueError):
-            fj.cancel(self.job, first['ask'])  # nothing to cancel on the phone: one plain refusal
+            owner_.cancel(self.job, first['ask'])  # nothing to cancel on the phone: one plain refusal
 
     def test_a_post_in_a_bot_started_job_goes_to_the_bot(self):
         self.bot_job()
@@ -864,7 +864,7 @@ class Gates(unittest.TestCase):
                          ('stampede', 'post', 'alpha', 'PLAN READY: two lanes', '001', str(item)))
         self.assertEqual(event['files'], [str(self.job.absolute() / 'outbox/001/after.png')])
         self.assertNotIn('pane', event)  # the flusher keeps only a pane's newest event; a post must never be dropped
-        self.quiet(fj.post, self.job, 'Report ready', [])  # a second post is its own event, never de-duped
+        self.quiet(owner_.post, self.job, 'Report ready', [])  # a second post is its own event, never de-duped
         self.assertEqual(len(list((self.home / 'events/queue').glob('*.json'))), 2)
 
     def test_a_post_the_relay_refuses_fails_loudly(self):
@@ -880,42 +880,42 @@ class Gates(unittest.TestCase):
         self.assertEqual(list(queue.glob('*.json')) if queue.is_dir() else [], [])
 
     def test_a_post_in_a_local_or_front_door_job_sends_no_event(self):
-        self.assertIn('POSTED 001 for the front door to relay', self.quiet(fj.post, self.job, 'local', []))
+        self.assertIn('POSTED 001 for the front door to relay', self.quiet(owner_.post, self.job, 'local', []))
         self.bot_job()
         (self.job / 'front-door').write_text('relay\n')  # a front door relays the outbox itself
-        self.assertIn('POSTED 002 for the front door to relay', self.quiet(fj.post, self.job, 'front', []))
+        self.assertIn('POSTED 002 for the front door to relay', self.quiet(owner_.post, self.job, 'front', []))
         queue = self.home / 'events/queue'
         self.assertEqual(list(queue.glob('*.json')) if queue.is_dir() else [], [])
 
     def test_the_owners_yes_is_recorded_and_matched_to_the_commit(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         ident = self.gate_ids()[0]
         with self.assertRaises(PermissionError):
-            fj.gate_ok(self.job, ident, self.SHA)  # nothing recorded yet
+            owner_.gate_ok(self.job, ident, self.SHA)  # nothing recorded yet
         self.approve(ident, self.SHA)
-        self.assertIn('APPROVED ' + ident + ' by owner in Grok Bot chat', self.quiet(fj.gate_ok, self.job, ident, self.SHA))
+        self.assertIn('APPROVED ' + ident + ' by owner in Grok Bot chat', self.quiet(owner_.gate_ok, self.job, ident, self.SHA))
         self.assertIn('GATE ' + ident + ' APPROVED by owner in Grok Bot chat', (self.job / 'inbox/lead-demo.md').read_text())
 
     def test_a_stale_commit_is_refused(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         ident = self.gate_ids()[0]
         with self.assertRaises(PermissionError):
             self.approve(ident, 'b' * 40)  # the bot's yes was for another commit
         self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
         self.approve(ident, self.SHA)
         with self.assertRaises(PermissionError):
-            fj.gate_ok(self.job, ident, 'c' * 40)  # a push after the yes withdraws it
+            owner_.gate_ok(self.job, ident, 'c' * 40)  # a push after the yes withdraws it
         with self.assertRaises(ValueError):
-            fj.ask_gate(self.job, 'Merge', 'abc123')  # a short sha could match more than one commit
+            owner_.ask_gate(self.job, 'Merge', 'abc123')  # a short sha could match more than one commit
 
     def test_an_agents_own_yes_is_refused(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         ident = self.gate_ids()[0]
         with self.assertRaises(PermissionError):  # HERDR_PANE_ID is set: a command from a Herdr pane
-            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
+            owner_.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
         env = {k: v for k, v in os.environ.items() if not k.startswith('HERDR_')}
         result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'approve-gate', str(self.job), ident, '--sha', self.SHA, '--by', 'me'],
                                 env={**env, 'HERDR_ENV': '1'}, capture_output=True, text=True)
@@ -933,20 +933,20 @@ class Gates(unittest.TestCase):
             time.sleep(0.05)
         child = int(subprocess.run(['pgrep', '-P', str(server.pid)], capture_output=True, text=True).stdout.split()[0])
         self.addCleanup(lambda: subprocess.run(['kill', str(child)], capture_output=True))
-        self.assertTrue(fj.inside_herdr({}, child))
-        self.assertFalse(fj.inside_herdr({}, 1))
+        self.assertTrue(herdrapi_.inside_herdr({}, child))
+        self.assertFalse(herdrapi_.inside_herdr({}, 1))
 
     def test_a_local_gate_refuses_approve_gate_and_ignores_a_swapped_command(self):
         from unittest import mock
-        with mock.patch.object(fj, 'ask_background'):
-            self.quiet(fj.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
+        with mock.patch.object(owner_, 'ask_background'):
+            self.quiet(owner_.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
         ident = self.gate_ids()[0]
-        with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
-            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
+            owner_.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
         no = Asks.fake_ask(self, 'exit 1')
         yes = Asks.fake_ask(self, 'echo yes')
-        with mock.patch.object(fj, 'ASK_CMD', no):
-            fj.ask_now(self.job, 'Gate?', [], yes, ident)  # a hidden _ask with its own --command never opens a gate
+        with mock.patch.object(owner_, 'ASK_CMD', no):
+            owner_.ask_now(self.job, 'Gate?', [], yes, ident)  # a hidden _ask with its own --command never opens a gate
         self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
 
     def test_a_local_job_asks_fleet_ask_cmd(self):
@@ -962,7 +962,7 @@ class Gates(unittest.TestCase):
             self.assertLess(time.time(), deadline, 'the local gate never recorded the yes')
             time.sleep(0.05)
         self.assertIn('Gate ' + ident + ': Merge PR #3 into main (PR #3) at ' + self.SHA[:12] + '?', args.read_text())
-        self.assertIn('by owner, through fake-ask', self.quiet(fj.gate_ok, self.job, ident, self.SHA))
+        self.assertIn('by owner, through fake-ask', self.quiet(owner_.gate_ok, self.job, ident, self.SHA))
         refused = subprocess.run([str(SCRIPTS / 'fleet-job'), 'ask', str(self.job), '--gate', '--sha', self.SHA, '--option', 'a',
                                   '--option', 'b', 'Merge'], env=env, capture_output=True, text=True)
         self.assertEqual(refused.returncode, 2)
@@ -971,32 +971,32 @@ class Gates(unittest.TestCase):
 
     def test_p1_a_hidden_ask_asks_the_gates_own_question_and_never_a_bot_gate(self):
         from unittest import mock
-        with mock.patch.object(fj, 'ask_background'):
-            self.quiet(fj.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
+        with mock.patch.object(owner_, 'ask_background'):
+            self.quiet(owner_.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
         ident = self.gate_ids()[0]
         args = Path(tempfile.mkdtemp()) / 'args'
         fake = Asks.fake_ask(self, 'printf "%s\\n" "$@" > ' + str(args) + '; echo yes')
-        with mock.patch.object(fj, 'ASK_CMD', fake):
-            fj.ask_now(self.job, 'Continue the read-only review?', ['Sure'], None, ident)
+        with mock.patch.object(owner_, 'ASK_CMD', fake):
+            owner_.ask_now(self.job, 'Continue the read-only review?', ['Sure'], None, ident)
         self.assertIn('Gate ' + ident + ': Merge PR #3 into main (PR #3) at', args.read_text())
         self.assertNotIn('read-only review', args.read_text())
         self.assertNotIn('Sure', args.read_text())
-        (self.job / 'gates' / (ident + '.json')).write_text(json.dumps({**fj.load_gate(self.job, ident), 'route': 'alpha'}))
+        (self.job / 'gates' / (ident + '.json')).write_text(json.dumps({**owner_.load_gate(self.job, ident), 'route': 'alpha'}))
         args.unlink()
-        with mock.patch.object(fj, 'ASK_CMD', fake), self.assertRaises(PermissionError):
-            fj.ask_now(self.job, 'Merge?', [], None, ident)  # a bot's gate never goes to the phone
+        with mock.patch.object(owner_, 'ASK_CMD', fake), self.assertRaises(PermissionError):
+            owner_.ask_now(self.job, 'Merge?', [], None, ident)  # a bot's gate never goes to the phone
         self.assertFalse(args.exists())
 
     def test_p1_a_gate_changed_while_asked_is_not_recorded(self):
         from unittest import mock
-        with mock.patch.object(fj, 'ask_background'):
-            self.quiet(fj.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
+        with mock.patch.object(owner_, 'ask_background'):
+            self.quiet(owner_.ask_gate, self.job, 'Merge PR #3 into main', self.SHA, 3)
         ident = self.gate_ids()[0]
         record = self.job / 'gates' / (ident + '.json')
-        swap = json.dumps({**fj.load_gate(self.job, ident), 'action': 'Deploy to production'})
+        swap = json.dumps({**owner_.load_gate(self.job, ident), 'action': 'Deploy to production'})
         fake = Asks.fake_ask(self, "printf '%s' " + shlex.quote(swap) + ' > ' + str(record) + '; echo yes')
-        with mock.patch.object(fj, 'ASK_CMD', fake):
-            fj.ask_now(self.job, '', [], None, ident)
+        with mock.patch.object(owner_, 'ASK_CMD', fake):
+            owner_.ask_now(self.job, '', [], None, ident)
         self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
         self.assertIn('GATE NOT RECORDED', (self.job / 'inbox/lead-demo.md').read_text())
 
@@ -1005,55 +1005,55 @@ class Gates(unittest.TestCase):
         (self.home / 'routes/alpha').unlink()
         (self.home / 'routes/default').write_text('URL=http://127.0.0.1:9/another-bot\n')  # never a fallback
         with self.assertRaises(ValueError):
-            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+            owner_.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
         with self.assertRaises(ValueError):
-            fj.ask(self.job, 'Keep it?', [])
+            owner_.ask(self.job, 'Keep it?', [])
         self.assertFalse((self.job / 'gates').exists() and any((self.job / 'gates').iterdir()))
         self.assertFalse((self.home / 'events/queue').exists() and any((self.home / 'events/queue').iterdir()))
 
     def test_p2_gate_ok_needs_the_record_of_that_very_gate(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
-        self.quiet(fj.ask_gate, self.job, 'Send a draft to the owner', self.SHA)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Send a draft to the owner', self.SHA)
         first, second = self.gate_ids()
         self.approve(first, self.SHA)
         (self.job / 'gates' / (second + '.approved')).write_text((self.job / 'gates' / (first + '.approved')).read_text())
         with self.assertRaises(PermissionError):
-            fj.gate_ok(self.job, second, self.SHA)
+            owner_.gate_ok(self.job, second, self.SHA)
 
     def test_e17_a_yes_covers_only_the_gate_as_asked(self):
         """eval G17, G18: the yes is bound to the gate's action, PR, commit and route, not only its id and commit."""
         import shlex
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         (ident,) = self.gate_ids()
         command = shlex.split(json.loads(next((self.home / 'events/queue').glob('*.json')).read_text())['payload']['approve'])
         digest = command[command.index('--digest') + 1]
-        self.assertEqual(digest, fj.gate_digest(fj.load_gate(self.job, ident)))  # the bot is handed the gate as asked
+        self.assertEqual(digest, owner_.gate_digest(owner_.load_gate(self.job, ident)))  # the bot is handed the gate as asked
         path = self.job / 'gates' / (ident + '.json')
         asked = path.read_text()
         path.write_text(asked.replace('Merge PR #12 into main', 'Delete the production database'))
         from unittest import mock
-        with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
-            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat', digest)
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
+            owner_.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat', digest)
         self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
         path.write_text(asked)
-        with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            self.quiet(fj.approve_gate, self.job, ident, self.SHA, 'owner in Grok Bot chat', digest)
-        self.quiet(fj.gate_ok, self.job, ident, self.SHA)
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            self.quiet(owner_.approve_gate, self.job, ident, self.SHA, 'owner in Grok Bot chat', digest)
+        self.quiet(owner_.gate_ok, self.job, ident, self.SHA)
         path.write_text(asked.replace('"pr": 12', '"pr": 13'))
         with self.assertRaises(PermissionError) as refused:
-            fj.gate_ok(self.job, ident, self.SHA)
+            owner_.gate_ok(self.job, ident, self.SHA)
         self.assertIn('changed after the yes', str(refused.exception))
 
     def test_e17b_approve_gate_without_the_digest_is_refused(self):
         """review round 2, R1: leaving --digest out is no way around the check."""
         from unittest import mock
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         (ident,) = self.gate_ids()
-        with mock.patch.object(fj, 'inside_herdr', return_value=False), self.assertRaises(PermissionError) as refused:
-            fj.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False), self.assertRaises(PermissionError) as refused:
+            owner_.approve_gate(self.job, ident, self.SHA, 'owner in Grok Bot chat')
         self.assertIn('--digest', str(refused.exception))
         self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
 
@@ -1066,32 +1066,32 @@ class Gates(unittest.TestCase):
                  f'python3 fleet_job.py _ask {job} --ident 000000000000 --command c -- q': False,
                  'sleep 60': False}
         for args, mine in cases.items():
-            with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, args + '\n', '')):
-                self.assertEqual(fj.own_waiter(self.job, 4242, 'abcdefabcdef'), mine, args)
+            with mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, args + '\n', '')):
+                self.assertEqual(owner_.own_waiter(self.job, 4242, 'abcdefabcdef'), mine, args)
 
     def test_e20_a_yes_recorded_before_the_digest_or_cut_short_is_refused(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         (ident,) = self.gate_ids()
         record = self.job / 'gates' / (ident + '.approved')
         for old in ({'gate': ident, 'sha': self.SHA, 'by': 'owner', 'at': 'then'}, {'gate': ident, 'sha': self.SHA}):
             record.write_text(json.dumps(old) + '\n')
             with self.assertRaises(PermissionError):
-                fj.gate_ok(self.job, ident, self.SHA)
+                owner_.gate_ok(self.job, ident, self.SHA)
 
     def test_e21_a_process_table_that_does_not_show_this_command_cannot_approve(self):
         from unittest import mock
         for answer in (subprocess.CompletedProcess([], 0, '', ''), subprocess.CompletedProcess([], 0, '  1     0 launchd\n', '')):
-            with mock.patch.object(fj.subprocess, 'run', return_value=answer):
-                self.assertTrue(fj.inside_herdr({}, 4242))
-        with mock.patch.object(fj.subprocess, 'run', side_effect=FileNotFoundError('ps')):
-            self.assertTrue(fj.inside_herdr({}))
+            with mock.patch.object(subprocess, 'run', return_value=answer):
+                self.assertTrue(herdrapi_.inside_herdr({}, 4242))
+        with mock.patch.object(subprocess, 'run', side_effect=FileNotFoundError('ps')):
+            self.assertTrue(herdrapi_.inside_herdr({}))
         for rows in ('4242  4141 python3\n', '  1     0 launchd\n 4242  4141 python3\n 4141  4242 bash\n'):
-            with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
-                self.assertTrue(fj.inside_herdr({}, 4242))  # an ancestor not shown, or a loop (review round 2, R7)
+            with mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
+                self.assertTrue(herdrapi_.inside_herdr({}, 4242))  # an ancestor not shown, or a loop (review round 2, R7)
         rows = '  1     0 launchd\n 4242     1 bash\n'
-        with mock.patch.object(fj.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
-            self.assertFalse(fj.inside_herdr({}, 4242))  # shown, with no Herdr above it: outside
+        with mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, rows, '')):
+            self.assertFalse(herdrapi_.inside_herdr({}, 4242))  # shown, with no Herdr above it: outside
 
     def test_p2_a_malformed_starter_is_refused_before_any_job_exists(self):
         tag = self.home / '.config/herdr-events/owners/w9'
@@ -1106,7 +1106,7 @@ class Gates(unittest.TestCase):
     # review-codex, round 2
     def test_r2_a_queued_gate_waits_out_a_route_that_loses_its_url(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
         (self.home / 'routes/alpha').unlink()  # the owner rotates the route while the gate waits
         subprocess.run([str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], check=True, timeout=30)
         self.assertEqual([json.loads(p.read_text())['payload']['state'] for p in (self.home / 'events/queue').glob('*.json')], ['gate'])
@@ -1114,8 +1114,8 @@ class Gates(unittest.TestCase):
     # review-codex, round 3
     def test_r3_a_held_or_expired_question_or_gate_tells_its_lead_once(self):
         self.bot_job()
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
-        self.quiet(fj.ask, self.job, 'Keep it?', [])
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #12 into main', self.SHA, 12)
+        self.quiet(owner_.ask, self.job, 'Keep it?', [])
         (self.home / 'routes/alpha').unlink()
         flush, queue = [str(ROOT / 'skills/grokbot-herdr/scripts/herdr-event-flush')], self.home / 'events/queue'
         for _ in range(2):  # every flush holds them; the lead hears it once
@@ -1130,7 +1130,7 @@ class Gates(unittest.TestCase):
         (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
         subprocess.run(flush, check=True, timeout=30)
         self.assertEqual((list(queue.glob('*.json')), list((self.home / 'events/held').iterdir())), ([], []))
-        self.quiet(fj.ask_gate, self.job, 'Push the docs branch', self.SHA)
+        self.quiet(owner_.ask_gate, self.job, 'Push the docs branch', self.SHA)
         (self.home / 'routes/alpha').unlink()
         subprocess.run(flush, check=True, timeout=30)
         for path in queue.glob('*.json'):
@@ -1184,21 +1184,21 @@ class Gates(unittest.TestCase):
         self.bot_job()
         (self.home / 'routes/alpha').write_text('URL="" # disabled during route rotation\n')
         with self.assertRaises(ValueError):
-            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+            owner_.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
         (self.home / 'routes/alpha').write_text('URL=http://127.0.0.1:9/never\n')
         blocked = self.home / 'not-a-folder'
         blocked.write_text('a file where the queue should be')
         from unittest import mock
         with mock.patch.dict(os.environ, {'HERDR_EVENTS_HOME': str(blocked)}), self.assertRaises(ValueError):
-            fj.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
+            owner_.ask_gate(self.job, 'Merge PR #12 into main', self.SHA, 12)
         with mock.patch.dict(os.environ, {'HERDR_EVENTS_HOME': str(blocked)}), self.assertRaises(ValueError):
-            fj.ask(self.job, 'Keep it?', [])
+            owner_.ask(self.job, 'Keep it?', [])
         self.assertEqual(self.gate_ids(), [], 'a gate its bot never hears is taken back')
 
     def test_r2_each_answer_names_its_question(self):
         self.bot_job()
-        self.quiet(fj.ask, self.job, 'Keep the first file?', ['Yes', 'No'])
-        self.quiet(fj.ask, self.job, 'Keep the second file?', ['Yes', 'No'])
+        self.quiet(owner_.ask, self.job, 'Keep the first file?', ['Yes', 'No'])
+        self.quiet(owner_.ask, self.job, 'Keep the second file?', ['Yes', 'No'])
         events = [json.loads(p.read_text())['payload'] for p in (self.home / 'events/queue').glob('*.json')]
         for event in events:
             self.assertIn('ANSWER ' + event['ask'] + ' ' + event['question'] + ': ', event['answer'])
@@ -1241,44 +1241,44 @@ class FrontDoor(unittest.TestCase):
     def test_post_numbers_items_copies_files_and_logs_one_line(self):
         shot = Path(tempfile.mkdtemp()) / 'after.png'
         shot.write_bytes(b'png')
-        _, out = self.quiet(fj.post, self.job, 'Screens for the nudge', [str(shot)])
+        _, out = self.quiet(owner_.post, self.job, 'Screens for the nudge', [str(shot)])
         self.assertIn('POSTED 001', out)
         self.assertEqual((self.job / 'outbox/001/after.png').read_bytes(), b'png')
         self.assertIn(str(self.job.absolute() / 'outbox/001/after.png'), (self.job / 'outbox/001.md').read_text())
-        self.quiet(fj.post, self.job, 'Report ready', [])
+        self.quiet(owner_.post, self.job, 'Report ready', [])
         self.assertEqual((self.job / 'outbox.log').read_text().splitlines(),
                          ['001 post Screens for the nudge', '002 post Report ready'])
         with self.assertRaises(ValueError):
-            fj.post(self.job, 'missing', ['/nonexistent/file.png'])
+            owner_.post(self.job, 'missing', ['/nonexistent/file.png'])
 
     def test_wait_prints_unseen_items_once_then_times_out(self):
-        self.quiet(fj.post, self.job, 'PLAN READY: two lanes', [])
-        code, out = self.quiet(fj.wait, self.job, 5, 0)
+        self.quiet(owner_.post, self.job, 'PLAN READY: two lanes', [])
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
         self.assertEqual(code, 0)
         self.assertIn('# 001 post', out)
         self.assertIn('PLAN READY: two lanes', out)
-        code, out = self.quiet(fj.wait, self.job, 0, 0)
+        code, out = self.quiet(owner_.wait, self.job, 0, 0)
         self.assertEqual(code, 3)
         self.assertIn('TIMEOUT', out)
 
     def test_wait_and_tell_see_a_lead_held_at_a_card(self):
         from unittest import mock
         with mock.patch.dict(os.environ, {'HERDR': screen_herdr(CARD)}):
-            code, out = self.quiet(fj.wait, self.job, 5, 0)
+            code, out = self.quiet(owner_.wait, self.job, 5, 0)
             self.assertEqual(code, 0)
             self.assertIn('BLOCKED_ON_CARD lead-demo', out)
             self.assertIn('Which nudge copy?', out)
-            code, out = self.quiet(fj.tell, self.job, 'lead', 'ANSWER: option B')
+            code, out = self.quiet(owner_.tell, self.job, 'lead', 'ANSWER: option B')
         self.assertEqual(code, 3)
         self.assertIn('BLOCKED_ON_CARD lead-demo', out)
         self.assertNotIn('DELIVERED', out)
         self.assertIn('ANSWER: option B', (self.job / 'inbox/lead-demo.md').read_text())  # still queued for after the card
-        code, out = self.quiet(fj.tell, self.job, 'lead', 'next')
+        code, out = self.quiet(owner_.tell, self.job, 'lead', 'next')
         self.assertIsNone(code)
         self.assertIn('DELIVERED lead-demo', out)
 
     def test_a_question_goes_to_the_outbox_not_the_phone(self):
-        ident, out = self.quiet(fj.ask, self.job, 'Customer.io copy too?', ['yes', 'no'])
+        ident, out = self.quiet(owner_.ask, self.job, 'Customer.io copy too?', ['yes', 'no'])
         self.assertIn('posted to the front door as outbox 001', out)
         item = (self.job / 'outbox/001.md').read_text()
         self.assertIn('Customer.io copy too?\n- yes\n- no', item)
@@ -1288,83 +1288,83 @@ class FrontDoor(unittest.TestCase):
     def test_a_gate_goes_to_the_outbox_and_the_front_door_records_the_quoted_yes(self):
         from unittest import mock
         sha = 'a' * 40
-        _, out = self.quiet(fj.ask_gate, self.job, 'mark PR #444 ready for review', sha, 444)
+        _, out = self.quiet(owner_.ask_gate, self.job, 'mark PR #444 ready for review', sha, 444)
         ident = next((self.job / 'gates').glob('*.json')).stem
         item = (self.job / 'outbox/001.md').read_text()
         self.assertIn(f'# 001 gate', item)
         self.assertIn(f'approve-gate {self.job.absolute()} {ident} --sha {sha}', item)
-        self.assertEqual(fj.load_gate(self.job, ident)['route'], 'front-door')
-        with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            self.quiet(fj.approve_gate, self.job, ident, sha, "owner in desktop chat: 'push the PR'", fj.gate_digest(fj.load_gate(self.job, ident)))
-        _, out = self.quiet(fj.gate_ok, self.job, ident, sha)
+        self.assertEqual(owner_.load_gate(self.job, ident)['route'], 'front-door')
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            self.quiet(owner_.approve_gate, self.job, ident, sha, "owner in desktop chat: 'push the PR'", owner_.gate_digest(owner_.load_gate(self.job, ident)))
+        _, out = self.quiet(owner_.gate_ok, self.job, ident, sha)
         self.assertIn("APPROVED " + ident + " by owner in desktop chat: 'push the PR'", out)
-        with mock.patch.object(fj, 'inside_herdr', return_value=True), self.assertRaises(PermissionError):
-            fj.approve_gate(self.job, ident, sha, 'the lead itself')
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=True), self.assertRaises(PermissionError):
+            owner_.approve_gate(self.job, ident, sha, 'the lead itself')
 
     def test_the_leads_own_card_and_files_become_posts(self):
         card = {'tool_input': {'questions': [{'question': 'Ready + DM?', 'options': [{'label': 'Yes', 'description': 'both'}]}]}}
-        decision = json.loads(fj.ask_lead(self.job, 'lead-demo', card))['hookSpecificOutput']
+        decision = json.loads(hooks_.ask_lead(self.job, 'lead-demo', card))['hookSpecificOutput']
         self.assertEqual(decision['permissionDecision'], 'deny')
         self.assertIn('outbox 001', decision['permissionDecisionReason'])
         self.assertIn('Ready + DM?\n- Yes: both', (self.job / 'outbox/001.md').read_text())
         shot = Path(tempfile.mkdtemp()) / 'plan.md'
         shot.write_text('the plan')
-        decision = json.loads(fj.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)], 'caption': 'The plan'}}))
+        decision = json.loads(hooks_.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)], 'caption': 'The plan'}}))
         self.assertEqual(decision['hookSpecificOutput']['permissionDecision'], 'deny')
         self.assertEqual((self.job / 'outbox/002/plan.md').read_text(), 'the plan')
-        self.assertEqual(fj.send_file(self.job, 'build-x', {'tool_input': {'files': [str(shot)]}}), '{}')  # only the lead's
+        self.assertEqual(hooks_.send_file(self.job, 'build-x', {'tool_input': {'files': [str(shot)]}}), '{}')  # only the lead's
         (self.job / 'front-door').unlink()
-        self.assertEqual(fj.ask_lead(self.job, 'lead-demo', card), '{}')   # a job without a front door: the card goes ahead
-        self.assertEqual(fj.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)]}}), '{}')
+        self.assertEqual(hooks_.ask_lead(self.job, 'lead-demo', card), '{}')   # a job without a front door: the card goes ahead
+        self.assertEqual(hooks_.send_file(self.job, 'lead-demo', {'tool_input': {'files': [str(shot)]}}), '{}')
 
     def test_a_plan_is_approved_only_once_it_was_posted_as_it_stands(self):
         from unittest import mock
-        patch = mock.patch.object(fj, 'inside_herdr', return_value=False)
+        patch = mock.patch.object(herdrapi_, 'inside_herdr', return_value=False)
         patch.start()
         self.addCleanup(patch.stop)
         plan = self.job / 'plan.md'
         plan.write_text('Size: big\n# Plan v1\n')
         with self.assertRaises(PermissionError) as refused:
-            fj.approve(self.job, "owner in desktop chat: 'ok - lets go'")
+            owner_.approve(self.job, "owner in desktop chat: 'ok - lets go'")
         self.assertIn('has not been shown this plan', str(refused.exception))
-        self.quiet(fj.post, self.job, 'PLAN READY', [str(plan)])
+        self.quiet(owner_.post, self.job, 'PLAN READY', [str(plan)])
         with self.assertRaises(PermissionError) as refused:   # posted, but the front door has not received it yet
-            fj.approve(self.job, "owner in desktop chat: 'ok - lets go'")
+            owner_.approve(self.job, "owner in desktop chat: 'ok - lets go'")
         self.assertIn('has not received this plan.md yet', str(refused.exception))
-        self.quiet(fj.wait, self.job, 5, 0)
-        self.quiet(fj.approve, self.job, "owner in desktop chat: 'approve as written'")
+        self.quiet(owner_.wait, self.job, 5, 0)
+        self.quiet(owner_.approve, self.job, "owner in desktop chat: 'approve as written'")
         self.assertIn('approve as written', (self.job / 'approved').read_text())
         plan.write_text('Size: big\n# Plan v2\n')   # changed after the owner saw it
         with self.assertRaises(PermissionError):
-            fj.approve(self.job, 'owner')
+            owner_.approve(self.job, 'owner')
         plan.write_text('Size: big\n# Plan v1\n')
         (self.job / 'fleet-plan.md').write_text('layout, never posted')   # the detailed plan counts too
         with self.assertRaises(PermissionError) as refused:
-            fj.approve(self.job, 'owner')
+            owner_.approve(self.job, 'owner')
         self.assertIn('fleet-plan.md', str(refused.exception))
 
     def test_the_lead_cannot_approve_its_own_plan_in_a_front_door_job(self):
         from unittest import mock
         (self.job / 'plan.md').write_text('Size: big\n')
-        self.quiet(fj.post, self.job, 'PLAN READY', [str(self.job / 'plan.md')])
-        with mock.patch.object(fj, 'inside_herdr', return_value=True), self.assertRaises(PermissionError) as refused:
-            fj.approve(self.job, 'the lead itself')
+        self.quiet(owner_.post, self.job, 'PLAN READY', [str(self.job / 'plan.md')])
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=True), self.assertRaises(PermissionError) as refused:
+            owner_.approve(self.job, 'the lead itself')
         self.assertIn('outside Herdr', str(refused.exception))
         self.assertFalse((self.job / 'approved').exists())
 
     def test_finish_posts_to_the_outbox_and_wait_notices_a_lead_that_is_gone(self):
         from unittest import mock
-        code, out = self.quiet(fj.wait, self.job, 5, 0)   # nothing posted, lead alive: times out
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)   # nothing posted, lead alive: times out
         self.assertEqual(code, 3)
-        self.quiet(fj.finish, self.job, 'all merged')
+        self.quiet(owner_.finish, self.job, 'all merged')
         self.assertIn('# 001 done', (self.job / 'outbox/001.md').read_text())
-        code, out = self.quiet(fj.wait, self.job, 5, 0)
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
         self.assertEqual((code, '# 001 done' in out), (0, True))
         gone = Path(tempfile.mkdtemp()) / 'herdr'
         gone.write_text('#!/bin/sh\necho \'{"error":{"code":"agent_not_found"}}\'; exit 1\n')
         gone.chmod(0o755)
         with mock.patch.dict(os.environ, {'HERDR': str(gone)}):
-            code, out = self.quiet(fj.wait, self.job, 5, 0)
+            code, out = self.quiet(owner_.wait, self.job, 5, 0)
         self.assertEqual(code, 0)
         self.assertIn('LEAD_GONE lead-demo', out)
 
@@ -1395,9 +1395,9 @@ class LeadChoice(unittest.TestCase):
         send = folder / 'herdr-send'
         send.write_text('#!/bin/bash\nprintf "%s %s\\n" "$1" "$2" >> "$(dirname "$0")/sent"\necho "SUBMITTED $1"\n')
         send.chmod(0o755)
-        mock.patch.object(fj, 'HERDR_SEND', send).start()
+        mock.patch.object(tui_, 'HERDR_SEND', send).start()
         mock.patch.dict(os.environ, {'HERDR_EVENTS_DIR': str(folder / 'events'), 'HERDR_EVENTS_HOME': str(folder / 'queue')}).start()
-        self.kick = mock.patch.object(fj, 'deliver_soon').start()
+        self.kick = mock.patch.object(tui_, 'deliver_soon').start()
         self.addCleanup(mock.patch.stopall)
         self.job = job_with([('lead-demo', 'codex'), ('build-x', 'claude')])
 
@@ -1417,7 +1417,7 @@ class LeadChoice(unittest.TestCase):
             self.assertIn('hooks wake you', brief.read_text())
             self.assertIn("yes typed in your pane or card", brief.read_text())
             self.assertFalse(self.sent.exists())
-            self.assertEqual(fj.lead_kind(job), 'claude')
+            self.assertEqual(job_.lead_kind(job), 'claude')
         same = [log.replace(str(job.parents[2]), 'TMP') for _, job, log in runs]
         self.assertEqual(same[0], same[1])
         texts = [(job / 'briefs/lead-fix-login-bug.md').read_text().replace(str(job.parents[2]), 'TMP') for _, job, _ in runs]
@@ -1429,7 +1429,7 @@ class LeadChoice(unittest.TestCase):
             with self.subTest(env=env, kw=kw):
                 _, job, log = self.new(env, **kw)
                 self.assertIn('agent start lead-fix-login-bug --kind ' + cli + ' ', log)
-                self.assertEqual(fj.lead_kind(job), cli)
+                self.assertEqual(job_.lead_kind(job), cli)
 
     def test_lead_codex_starts_hooked_on_astra_and_its_pointer_is_typed_now(self):
         out, job, log = self.new(kind='codex')
@@ -1439,7 +1439,7 @@ class LeadChoice(unittest.TestCase):
         self.assertIn('"hook", "--agent", "lead-fix-login-bug", "codex-notify"', log)
         self.assertIn('-c sandbox_workspace_write.network_access=true', log)
         self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra"', log)
-        self.assertEqual(fj.roster(job), ({'lead-fix-login-bug': 'codex'}, 'lead-fix-login-bug'))
+        self.assertEqual(job_.roster(job), ({'lead-fix-login-bug': 'codex'}, 'lead-fix-login-bug'))
         self.assertEqual(self.sent.read_text(), f'lead-fix-login-bug You are lead-fix-login-bug. Read {brief} and do everything it says.\n')
         self.assertFalse((job / 'inbox/lead-fix-login-bug.md').exists())   # typed now, never left for a deliverer
         self.assertTrue(out.endswith('SUBMITTED lead-fix-login-bug\nlead-fix-login-bug ' + str(job) + '\n'))
@@ -1464,7 +1464,7 @@ class LeadChoice(unittest.TestCase):
 
     def test_a_codex_lead_whose_pointer_does_not_go_in_is_blocked_with_the_tell_to_resend(self):
         from unittest import mock
-        with mock.patch.object(fj, 'herdr_send', return_value=(False, 'FAILED lead-fix-login-bug focused: the owner is in that pane')):
+        with mock.patch.object(tui_, 'herdr_send', return_value=(False, 'FAILED lead-fix-login-bug focused: the owner is in that pane')):
             out, job, _ = self.new(kind='codex')
         self.assertEqual(self.code, 1)
         self.assertEqual(out, 'BLOCKED lead-fix-login-bug: its brief pointer did not go in (FAILED lead-fix-login-bug focused: the owner '
@@ -1500,9 +1500,9 @@ class LeadChoice(unittest.TestCase):
         _, job, log = self.new({'FLEET_LEAD_KIND': 'codex'}, kind='claude', fork=sid)   # --lead claude forks as before
         self.assertIn(f'--kind claude --pane w9:p2 --timeout 90000 -- --resume {sid} --fork-session', log)
         # typing_unsafe asks the machine's own Herdr Core for its version and hold: not this test's subject, and no test's to ask
-        with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(fj, 'new_core', return_value=0) as core, \
-                mock.patch.object(fj, 'typing_unsafe', return_value=''):
-            self.assertEqual(fj.new('ask.md', None, core=True, relay=True), 0)
+        with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(relay_, 'new_core', return_value=0) as core, \
+                mock.patch.object(hcapi_, 'typing_unsafe', return_value=''):
+            self.assertEqual(cli_.new('ask.md', None, core=True, relay=True), 0)
         self.assertEqual(core.call_args.args[5], 'codex')   # the standing choice is the lead of a Core job too
 
     def test_its_sandbox_reaches_the_network_git_and_the_worktrees_and_a_workers_does_not(self):
@@ -1512,8 +1512,8 @@ class LeadChoice(unittest.TestCase):
         (self.job / 'workdir').write_text(str(repo) + '\n')
         root = Path(tempfile.mkdtemp())
         with mock.patch.dict(os.environ, {'FLEET_JOBS_ROOT': str(root)}):
-            lead = fj.cli_args(self.job, 'lead-demo', 'codex', 'gpt-6-astra', 'ultra', [], lead=True)
-            worker = fj.cli_args(self.job, 'build-ui', 'codex', 'gpt-6-astra', 'ultra', [])
+            lead = agents_.cli_args(self.job, 'lead-demo', 'codex', 'gpt-6-astra', 'ultra', [], lead=True)
+            worker = agents_.cli_args(self.job, 'build-ui', 'codex', 'gpt-6-astra', 'ultra', [])
         dirs = [lead[i + 1] for i, a in enumerate(lead) if a == '--add-dir']
         self.assertEqual(dirs, [str(self.job.absolute()), str(root.absolute() / 'worktrees'), str(repo / '.git')])
         self.assertIn('sandbox_workspace_write.network_access=true', lead)
@@ -1530,9 +1530,9 @@ class LeadChoice(unittest.TestCase):
                 ({'FLEET_LEAD_EFFORT': 'high'}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'high')),
                 ({'FLEET_LEAD_MODEL': 'gpt-6.1-sol', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.1-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh'))):
             with self.subTest(env=env), mock.patch.dict(os.environ, {'FLEET_LEAD_MODEL': '', 'FLEET_LEAD_EFFORT': '', **env}):
-                self.assertEqual(fj.lead_model('codex'), codex)
-                self.assertEqual(fj.lead_model('claude'), claude)
-                self.assertEqual(fj.lead_model('codex', 'gpt-6-luna', 'low'), ('gpt-6-luna', 'low'))
+                self.assertEqual(agents_.lead_model('codex'), codex)
+                self.assertEqual(agents_.lead_model('claude'), claude)
+                self.assertEqual(agents_.lead_model('codex', 'gpt-6-luna', 'low'), ('gpt-6-luna', 'low'))
 
     def test_a_restarted_lead_keeps_the_lead_model_of_its_cli_and_gets_a_brief_for_it(self):
         import contextlib, io
@@ -1540,13 +1540,13 @@ class LeadChoice(unittest.TestCase):
         job = job_with([('lead-demo', 'claude')])
         brief = job / 'briefs/lead-demo.md'
         brief.parent.mkdir()
-        brief.write_text(fj.lead_brief(job.absolute(), 'lead-demo', '', False, None))
+        brief.write_text(agents_.lead_brief(job.absolute(), 'lead-demo', '', False, None))
         for kind, want in (('codex', '-m gpt-6-astra -c model_reasoning_effort="ultra"'), ('claude', '--model claude-opus-5-5 --effort xhigh')):
             herdr, log = fake_herdr(job.parent)
             with self.subTest(kind=kind), mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp(),
                                                                        'FLEET_LEAD_MODEL': '', 'FLEET_LEAD_EFFORT': ''}), \
                     contextlib.redirect_stdout(io.StringIO()):
-                fj.start(job, 'lead-demo', kind, 'w9:p1', str(brief))
+                cli_.start(job, 'lead-demo', kind, 'w9:p1', str(brief))
             self.assertIn(want, log.read_text())
             self.assertEqual('typed in your pane' in brief.read_text(), kind == 'claude')   # rewritten for each CLI it moved to
         self.assertIn('lead-demo You are lead-demo in a herdr fleet', self.sent.read_text())   # the Codex restart's pointer, typed
@@ -1554,7 +1554,7 @@ class LeadChoice(unittest.TestCase):
         (core / 'backend').write_text('core\n')
         for folder in (job, core):  # no backend runs a lead on another CLI
             with self.subTest(job=folder.name), self.assertRaises(ValueError) as refused:
-                fj.start(folder, 'lead-demo', 'cursor', None, '-')
+                cli_.start(folder, 'lead-demo', 'cursor', None, '-')
             self.assertIn('the lead runs on claude or codex', str(refused.exception))
 
     def test_a_refused_or_failed_switch_never_leaves_a_lead_the_other_clis_brief(self):
@@ -1563,22 +1563,22 @@ class LeadChoice(unittest.TestCase):
         job = job_with([('lead-demo', 'codex')])
         brief = job / 'briefs/lead-demo.md'
         brief.parent.mkdir()
-        brief.write_text(fj.lead_brief(job.absolute(), 'lead-demo', '', False, None, kind='codex'))
+        brief.write_text(agents_.lead_brief(job.absolute(), 'lead-demo', '', False, None, kind='codex'))
         codex_text = brief.read_text()
         with self.assertRaises(ValueError):   # refused after the kind checks: --cwd is for a Core job
-            fj.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief), cwd='/tmp')
+            cli_.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief), cwd='/tmp')
         self.assertEqual(brief.read_text(), codex_text)
         herdr, _ = fake_herdr(job.parent, start_error='agent_start_failed')
         with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp()}), \
-                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(fj.HerdrError):
-            fj.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief))   # the switch to Claude fails at launch
-        self.assertEqual(fj.lead_kind(job), 'codex')                    # the roster, and so reopen.sh, still say Codex
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(herdrapi_.HerdrError):
+            cli_.start(job, 'lead-demo', 'claude', 'w9:p1', str(brief))   # the switch to Claude fails at launch
+        self.assertEqual(job_.lead_kind(job), 'codex')                    # the roster, and so reopen.sh, still say Codex
         self.assertEqual(brief.read_text(), codex_text)                 # and so does the brief again
-        brief.write_text(fj.lead_brief(job.absolute(), 'lead-demo', '', False, None))   # a Claude brief left by an older copy
+        brief.write_text(agents_.lead_brief(job.absolute(), 'lead-demo', '', False, None))   # a Claude brief left by an older copy
         herdr, _ = fake_herdr(job.parent)
         with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp()}), \
                 contextlib.redirect_stdout(io.StringIO()):
-            fj.start(job, 'lead-demo', 'codex', 'w9:p1', str(brief))   # the retry on Codex puts it right
+            cli_.start(job, 'lead-demo', 'codex', 'w9:p1', str(brief))   # the retry on Codex puts it right
         self.assertNotIn('typed in your pane', brief.read_text())
         self.assertIn('Act only after fleet-job gate-ok', brief.read_text())
 
@@ -1586,21 +1586,21 @@ class LeadChoice(unittest.TestCase):
         import contextlib, io
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            fj.tell(self.job, 'lead', 'ANSWER yes')
+            owner_.tell(self.job, 'lead', 'ANSWER yes')
         self.assertEqual(out.getvalue(), 'DELIVERED lead-demo (inbox file; typed into its pane once it is idle)\n')
         self.assertEqual((self.job / 'inbox/lead-demo.md').read_text(), 'ANSWER yes\n')
         self.kick.assert_called_once_with(self.job)
 
     def test_worker_lines_wake_a_codex_lead_and_not_a_claude_one(self):
         import contextlib, io
-        fj.cursor_stop(self.job, 'build-x', {'status': 'completed'})
-        fj.session_end(self.job, 'build-x', {'reason': 'exit'})
+        hooks_.cursor_stop(self.job, 'build-x', {'status': 'completed'})
+        hooks_.session_end(self.job, 'build-x', {'reason': 'exit'})
         self.assertEqual((self.job / 'inbox.log').read_text(), 'TURN build-x completed\nGONE build-x exit\n')
         self.assertEqual(self.kick.call_count, 2)
         claude = job_with([('lead-demo', 'claude'), ('build-x', 'claude')])
-        fj.cursor_stop(claude, 'build-x', {'status': 'completed'})
+        hooks_.cursor_stop(claude, 'build-x', {'status': 'completed'})
         with contextlib.redirect_stdout(io.StringIO()):
-            fj.tell(claude, 'lead', 'hi')
+            owner_.tell(claude, 'lead', 'hi')
         self.assertEqual(self.kick.call_count, 2)
 
     def test_its_own_turn_goes_to_the_relay_and_never_to_inbox_log(self):
@@ -1610,8 +1610,8 @@ class LeadChoice(unittest.TestCase):
         relay.write_text('#!/bin/bash\nprintf "%s" "$1" > ' + str(folder / 'got') + '\n')
         relay.chmod(0o755)
         payload = {'type': 'agent-turn-complete', 'thread-id': 't-main', 'last-assistant-message': 'planned'}
-        with mock.patch.object(fj, 'RELAY_CODEX', relay):
-            fj.codex_notify(self.job, 'lead-demo', payload)
+        with mock.patch.object(hooks_, 'RELAY_CODEX', relay):
+            hooks_.codex_notify(self.job, 'lead-demo', payload)
         self.assertEqual(json.loads((folder / 'got').read_text()), payload)
         self.assertFalse((self.job / 'inbox.log').exists())
         self.kick.assert_called_once_with(self.job)
@@ -1619,19 +1619,19 @@ class LeadChoice(unittest.TestCase):
     def test_gates_count_only_the_recorded_yes(self):
         from unittest import mock
         claude = job_with([('lead-demo', 'claude')])
-        self.assertFalse(fj.pane_yes(self.job))
-        self.assertTrue(fj.pane_yes(claude))
+        self.assertFalse(owner_.pane_yes(self.job))
+        self.assertTrue(owner_.pane_yes(claude))
         (claude / 'backend').write_text('core\n')
-        self.assertFalse(fj.pane_yes(claude))
+        self.assertFalse(owner_.pane_yes(claude))
         (self.job / 'gates').mkdir()
         (self.job / 'gates/0123456789ab.json').write_text(json.dumps({'gate': '0123456789ab', 'sha': 'a' * 40, 'route': 'stompy'}))
         with self.assertRaises(PermissionError) as refused:
-            fj.gate_ok(self.job, '0123456789ab', 'a' * 40)
+            owner_.gate_ok(self.job, '0123456789ab', 'a' * 40)
         self.assertEqual(str(refused.exception), 'gate 0123456789ab has no recorded yes: wait for it')
         with mock.patch.dict(os.environ, {'HERDR_ENV': '1'}), self.assertRaises(PermissionError) as refused:
-            fj.approve_gate(self.job, '0123456789ab', 'a' * 40, 'owner')
+            owner_.approve_gate(self.job, '0123456789ab', 'a' * 40, 'owner')
         self.assertNotIn('pane', str(refused.exception))
-        local = fj.lead_brief(self.job, 'lead-demo', '', False, None, kind='codex')
+        local = agents_.lead_brief(self.job, 'lead-demo', '', False, None, kind='codex')
         self.assertIn(f'ask it with fleet-job ask {self.job} --gate', local)
         self.assertNotIn('card', local.split('(a phone card)')[0])
 
@@ -1643,17 +1643,17 @@ class Deliver(unittest.TestCase):
         from unittest import mock
         self.job = job_with([('lead-demo', 'codex'), ('build-x', 'claude')])
         (self.job / 'hooks').mkdir()
-        fj.append(self.job / 'inbox.log', 'REPORT reports/build-x.md')
-        fj.append(self.job / 'inbox/lead-demo.md', 'GATE 0123456789ab APPROVED by owner')
-        mock.patch.object(fj, 'DELIVER_EVERY', 0).start()
-        self.ready = mock.patch.object(fj, 'ready', return_value=True).start()
-        self.send = mock.patch.object(fj, 'herdr_send', return_value=(True, 'SUBMITTED lead-demo')).start()
+        base_.append(self.job / 'inbox.log', 'REPORT reports/build-x.md')
+        base_.append(self.job / 'inbox/lead-demo.md', 'GATE 0123456789ab APPROVED by owner')
+        mock.patch.object(tui_, 'DELIVER_EVERY', 0).start()
+        self.ready = mock.patch.object(tui_, 'ready', return_value=True).start()
+        self.send = mock.patch.object(tui_, 'herdr_send', return_value=(True, 'SUBMITTED lead-demo')).start()
         self.addCleanup(mock.patch.stopall)
 
     def deliver(self):
         import contextlib, io
         with contextlib.redirect_stdout(io.StringIO()):
-            return fj.deliver(self.job)
+            return tui_.deliver(self.job)
 
     def test_both_files_in_one_marked_prompt_and_never_twice(self):
         self.assertEqual(self.deliver(), 0)
@@ -1663,7 +1663,7 @@ class Deliver(unittest.TestCase):
         self.assertIn('lead-demo.md: GATE 0123456789ab APPROVED by owner', text)
         self.assertEqual(self.deliver(), 0)
         self.assertEqual(self.send.call_count, 1)
-        fj.append(self.job / 'inbox.log', 'TURN build-x done')
+        base_.append(self.job / 'inbox.log', 'TURN build-x done')
         self.deliver()
         self.assertEqual(self.send.call_args.args[2], '[fleet-job inbox for lead-demo, not typed by the owner] inbox.log: TURN build-x done')
 
@@ -1672,15 +1672,15 @@ class Deliver(unittest.TestCase):
         self.assertEqual(self.deliver(), 0)
         self.assertEqual(self.send.call_count, 2)
         self.assertEqual(self.send.call_args_list[0], self.send.call_args_list[1])
-        self.assertEqual(fj.unread(self.job, 'lead-demo'), [])
+        self.assertEqual(tui_.unread(self.job, 'lead-demo'), [])
 
     def test_a_busy_lead_keeps_its_lines_until_the_deadline(self):
         from unittest import mock
         self.ready.return_value = False
-        with mock.patch.object(fj, 'DELIVER_FOR', 0.05):
+        with mock.patch.object(tui_, 'DELIVER_FOR', 0.05):
             self.assertEqual(self.deliver(), 3)
         self.send.assert_not_called()
-        self.assertEqual(len(fj.unread(self.job, 'lead-demo')), 2)
+        self.assertEqual(len(tui_.unread(self.job, 'lead-demo')), 2)
 
     def test_a_second_deliverer_leaves_it_to_the_first(self):
         with (self.job / 'hooks/.deliver.lock').open('a') as lock:
@@ -1697,10 +1697,10 @@ class Deliver(unittest.TestCase):
         self.assertFalse((self.job / 'hooks/deliver.log').exists())
 
     def test_a_long_inbox_is_cut_with_where_to_read_the_rest(self):
-        fj.append(self.job / 'inbox.log', 'TURN build-x ' + 'x' * 3000)
+        base_.append(self.job / 'inbox.log', 'TURN build-x ' + 'x' * 3000)
         self.deliver()
         text = self.send.call_args.args[2]
-        self.assertLessEqual(len(text), fj.DELIVER_MAX + 200)
+        self.assertLessEqual(len(text), tui_.DELIVER_MAX + 200)
         self.assertIn('(cut: read the rest at the end of ' + str(self.job / 'inbox' / 'lead-demo.md'), text)
 
     def test_ready_means_idle_or_done_unfocused_and_no_draft(self):
@@ -1726,10 +1726,10 @@ class Deliver(unittest.TestCase):
                                     ({'agent_status': 'idle'}, CODEX_167_EMPTY + '  something below the footer\n', False),
                                     ({'agent_status': 'idle'}, '› \n' + CODEX_167_FOOTER.strip() + '\n› \n', False),  # last row a prompt
                                     ({'agent_status': 'idle'}, '', False)):                         # nothing readable
-            with self.subTest(shown=shown, screen=screen), mock.patch.object(fj, 'herdr', return_value={'agent': shown}), \
-                    mock.patch.object(fj, 'screen_of', return_value=screen):
+            with self.subTest(shown=shown, screen=screen), mock.patch.object(herdrapi_, 'herdr', return_value={'agent': shown}), \
+                    mock.patch.object(tui_, 'screen_of', return_value=screen):
                 self.assertEqual(REAL_READY('lead-demo'), want)
-        with mock.patch.object(fj, 'herdr', side_effect=fj.HerdrError('gone', 'agent_not_found')):
+        with mock.patch.object(herdrapi_, 'herdr', side_effect=herdrapi_.HerdrError('gone', 'agent_not_found')):
             self.assertFalse(REAL_READY('lead-demo'))
 
     def test_a_stalled_herdr_or_herdr_send_never_holds_the_lock(self):
@@ -1738,14 +1738,14 @@ class Deliver(unittest.TestCase):
         stall = folder / 'stall'
         stall.write_text('#!/bin/bash\necho $$ >> "$(dirname "$0")/pids"\nsleep 30\n')
         stall.chmod(0o755)
-        with mock.patch.object(fj, 'ready', REAL_READY), mock.patch.object(fj, 'DELIVER_CALL', 0.3), \
+        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'DELIVER_CALL', 0.3), \
                 mock.patch.dict(os.environ, {'HERDR': str(stall)}):
             started = time.monotonic()
             self.assertEqual(self.deliver(), 4)          # agent get hangs: the deliverer lets go at once
             self.assertLess(time.monotonic() - started, 5)
         self.send.assert_not_called()
-        self.assertEqual(len(fj.unread(self.job, 'lead-demo')), 2)   # nothing marked read
-        with mock.patch.object(fj, 'HERDR_SEND', stall), mock.patch.object(fj, 'DELIVER_SEND', 0.3):
+        self.assertEqual(len(tui_.unread(self.job, 'lead-demo')), 2)   # nothing marked read
+        with mock.patch.object(tui_, 'HERDR_SEND', stall), mock.patch.object(tui_, 'DELIVER_SEND', 0.3):
             started = time.monotonic()
             self.assertEqual(REAL_SEND(self.job, 'lead-demo', 'hi'), (False, 'FAILED lead-demo: herdr-send did not finish in 0.3 s'))
             self.assertLess(time.monotonic() - started, 5)
@@ -1764,12 +1764,12 @@ class Deliver(unittest.TestCase):
         self.send.assert_called_once()
 
     def test_control_characters_never_become_keys(self):
-        fj.append(self.job / 'inbox.log', 'TURN build-x done\x1b[2J\x07')
+        base_.append(self.job / 'inbox.log', 'TURN build-x done\x1b[2J\x07')
         self.deliver()
         self.assertNotRegex(self.send.call_args.args[2], r'[\x00-\x1f\x7f-\x9f]')
 
 
-REAL_READY, REAL_SEND = fj.ready, fj.herdr_send  # Deliver's setUp mocks both
+REAL_READY, REAL_SEND = tui_.ready, tui_.herdr_send  # Deliver's setUp mocks both
 
 # Codex 0.167.1's screen as Herdr read it live on 11 Nov 2026 (path shortened): its footer row starts with an arrow,
 # and a draft hides that whole row.

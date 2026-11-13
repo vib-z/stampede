@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_core import CoreCase, LEAD, ROOT, SCRIPTS, SHA, fj, git
+from test_core import CoreCase, LEAD, ROOT, SCRIPTS, SHA, git
+from stampede import job as job_, herdrapi as herdrapi_, agents as agents_, owner as owner_, relay as relay_, handed as handed_, cli as cli_
 from events_log import events_log
 from test_core_relay import RELAY, Shell, follower_module, status
 
@@ -63,7 +64,7 @@ class MixedCase(CoreCase):
 
     def hand(self, agent='build-ui', kind='hermes', pane=PANE, job=None, **kw):
         job = job or self.job_dir
-        return self.quiet(fj.start, job, agent, kind, pane, str(self.brief(job, agent)), **kw)
+        return self.quiet(cli_.start, job, agent, kind, pane, str(self.brief(job, agent)), **kw)
 
     def mark(self, pane=PANE):
         """The job a pane's handed mark names, else None."""
@@ -74,7 +75,7 @@ class MixedCase(CoreCase):
         """The job finished, its lead live: a reopen then looks only at the agents."""
         (self.job_dir / 'finished').write_text('x\n')
         self.add_terminal('t1', name='lead-demo', labels={'stampede.job': self.key, 'stampede.agent': 'lead-demo'})
-        fj.bind(self.job_dir, 'lead-demo', {'state': 'live', 'address': 't1', 'role': 'lead'})
+        job_.bind(self.job_dir, 'lead-demo', {'state': 'live', 'address': 't1', 'role': 'lead'})
 
 
 class MixedStart(MixedCase):
@@ -91,7 +92,7 @@ class MixedStart(MixedCase):
                              {'state': 'live', 'role': 'worker', 'backend': 'tui', 'pane': pane, 'kind': kind,
                               'completion': None, 'briefed': True})
             self.assertRegex(entry['launch'], r'^[0-9a-f]{12}$')
-            self.assertEqual(fj.agent_rows(self.job_dir)[agent]['kind'], kind)
+            self.assertEqual(job_.agent_rows(self.job_dir)[agent]['kind'], kind)
             self.assertEqual((self.events / 'handed' / pane).read_text(), f'{self.job_dir}\n{entry["launch"]}\n')
             started = self.herdr_state()['panes'][pane]
             self.assertEqual((started['label'], started['agent']['agent']), (agent, kind))
@@ -132,7 +133,7 @@ class MixedStart(MixedCase):
         self.assertEqual((self.herdr_calls(), self.calls('run')), ([], []))
 
     def test_one_live_launch_per_agent_across_core_and_the_tui(self):
-        with fj.launching(self.job_dir, 'build-ui'), self.assertRaises(ValueError) as refused:
+        with job_.launching(self.job_dir, 'build-ui'), self.assertRaises(ValueError) as refused:
             self.hand()
         self.assertIn('being started by another caller', str(refused.exception))
         self.assertEqual(self.hand()[0], 0)
@@ -141,7 +142,7 @@ class MixedStart(MixedCase):
             self.hand(pane='w9:p4')
         self.assertIn(f'build-ui is already running in pane {PANE}', str(refused.exception))
         with self.assertRaises(ValueError) as refused:  # a Core start of that name
-            self.quiet(fj.start, self.job_dir, 'build-ui', 'claude', None, str(self.brief(self.job_dir, 'build-ui')))
+            self.quiet(cli_.start, self.job_dir, 'build-ui', 'claude', None, str(self.brief(self.job_dir, 'build-ui')))
         self.assertIn(f'already running in pane {PANE}', str(refused.exception))
         self.agent(agent='cursor')  # its name runs in its pane, but not as this launch
         with self.assertRaises(ValueError) as refused:
@@ -199,14 +200,14 @@ class MixedStart(MixedCase):
         self.assertIn('already running in pane w9:p4', str(refused.exception))
         self.assertEqual(len(self.herdr_calls('agent start')), 2)
         self.settled()
-        code, out = self.quiet(fj.reopen, self.job_dir)  # R1-8: settled live, but never briefed: no success, and no typing
+        code, out = self.quiet(relay_.reopen, self.job_dir)  # R1-8: settled live, but never briefed: no success, and no typing
         self.assertIn('NOT BRIEFED build-db (pane w9:p4): it runs, but its brief was never confirmed sent', out)
         self.assertEqual((code, self.entries(self.job_dir)['build-db']['state']), (1, 'live'))
         self.assertEqual(self.herdr_state()['panes']['w9:p4']['agent']['prompts'], [])
         tell = shlex.split(out.split('only if it has not got it: ')[1].splitlines()[0])
         self.assertEqual(tell[:4], ['fleet-job', 'tell', str(self.job_dir), 'build-db'])
-        self.quiet(fj.tell, self.job_dir, 'build-db', tell[4])
-        code, out = self.quiet(fj.reopen, self.job_dir)
+        self.quiet(owner_.tell, self.job_dir, 'build-db', tell[4])
+        code, out = self.quiet(relay_.reopen, self.job_dir)
         self.assertIn('LIVE build-db (pane w9:p4)', out)
         self.assertEqual(code, 0)
 
@@ -225,14 +226,14 @@ class MixedKinds(MixedCase):
     """Design item 2: cli_args knows Hermes and Kimi: auto mode by default, their unattended flags only with --yolo-in."""
 
     def test_hermes_and_kimi_flags(self):
-        self.assertEqual(fj.cli_args(self.job_dir, 'a', 'hermes', 'm1', 'high', []), ['-m', 'm1', '--reasoning', 'high'])
-        self.assertEqual(fj.cli_args(self.job_dir, 'b', 'kimi', 'k2', None, []), ['-y', '-m', 'k2'])
+        self.assertEqual(agents_.cli_args(self.job_dir, 'a', 'hermes', 'm1', 'high', []), ['-m', 'm1', '--reasoning', 'high'])
+        self.assertEqual(agents_.cli_args(self.job_dir, 'b', 'kimi', 'k2', None, []), ['-y', '-m', 'k2'])
         git('init', '-q', '.', cwd=self.repo)
         git('commit', '-q', '--allow-empty', '-m', 'base', cwd=self.repo)
         tree = self.root / 'code/repo-wt'
         git('worktree', 'add', '-q', str(tree), cwd=self.repo)
-        self.assertEqual(fj.cli_args(self.job_dir, 'a', 'hermes', None, None, [], yolo_in=tree), ['--yolo'])
-        self.assertEqual(fj.cli_args(self.job_dir, 'b', 'kimi', None, None, [], yolo_in=tree), ['-y'])
+        self.assertEqual(agents_.cli_args(self.job_dir, 'a', 'hermes', None, None, [], yolo_in=tree), ['--yolo'])
+        self.assertEqual(agents_.cli_args(self.job_dir, 'b', 'kimi', None, None, [], yolo_in=tree), ['-y'])
         self.assertEqual(sorted(p.name for p in (self.job_dir / 'hooks').iterdir()), ['a.json', 'b.json'])
 
 
@@ -375,7 +376,7 @@ class MixedFollower(FollowerCase):
         self.agent(agent_session={'kind': 'id', 'value': 's2'})  # a new process under its name
         self.look(f)
         self.assertEqual(self.inbox(), ['GONE build-ui replaced'])
-        fj.bind(self.job_dir, 'build-db', {'state': 'starting', 'backend': 'tui', 'pane': 'w9:p8', 'kind': 'kimi',
+        job_.bind(self.job_dir, 'build-db', {'state': 'starting', 'backend': 'tui', 'pane': 'w9:p8', 'kind': 'kimi',
                                            'launch': 'a' * 12}, fresh=True)
         self.look(f)
         self.assertEqual(len(self.inbox()), 1)
@@ -392,10 +393,10 @@ class MixedFollower(FollowerCase):
             self.look(f)
             f.stalls()
         self.settled()
-        self.quiet(fj.reopen, self.job_dir)  # LIVE for both
+        self.quiet(relay_.reopen, self.job_dir)  # LIVE for both
         self.agent(agent=None)
         self.look(f)
-        self.quiet(fj.reopen, self.job_dir)  # NOT RUNNING for build-ui
+        self.quiet(relay_.reopen, self.job_dir)  # NOT RUNNING for build-ui
         self.assertEqual(self.inbox()[-1], 'GONE build-ui exited')
         self.assertIn('STALE build-ui no new output for 38m', self.inbox())
         self.assertEqual((len(self.herdr_calls('agent prompt')), self.herdr_calls('agent send-keys')), (typed, []))
@@ -454,7 +455,7 @@ class MixedMarks(MixedCase):
     def test_finish_clears_only_this_jobs_marks(self):
         self.hand()
         (self.events / 'handed/w9:p8').write_text('/another/job\nffffffffffff\n')
-        self.quiet(fj.finish, self.job_dir, 'shipped')
+        self.quiet(owner_.finish, self.job_dir, 'shipped')
         self.assertEqual((self.mark(), self.mark('w9:p8')), (None, '/another/job'))
 
 
@@ -492,7 +493,7 @@ class MixedTell(MixedCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             try:
-                fj.tell(self.job_dir, 'build-ui', text)
+                owner_.tell(self.job_dir, 'build-ui', text)
                 code = 0
             except SystemExit as stop:
                 code = stop.code
@@ -507,7 +508,7 @@ class MixedTell(MixedCase):
                             ({'focused': False, 'name': 'someone-else'}, f'pane {PANE} runs someone-else, not build-ui'),
                             ({'name': 'build-ui', 'agent_session': {'kind': 'id', 'value': 's2'}},
                              f'pane {PANE} runs build-ui, but not as the launch this job recorded')):
-            fj.bind(self.job_dir, 'build-ui', {'session': 's1'})
+            job_.bind(self.job_dir, 'build-ui', {'session': 's1'})
             self.agent(**fields)
             self.assertEqual(self.told(), (f'FAILED build-ui ({why})', 2))
         self.agent(agent_session={'kind': 'id', 'value': 's1'})
@@ -521,9 +522,9 @@ class MixedTell(MixedCase):
             self.assertEqual(self.told(), (f'SUBMITTED build-ui (pane {PANE})', 0))
         self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'], pointer + ['Fix the nit', 'Fix the nit'])
         self.assertEqual(self.herdr_calls('agent prompt')[-1][4:], ['--wait', '--until', 'working', '--until', 'blocked', '--timeout', '15000'])
-        fj.bind(self.job_dir, 'build-ui', {'state': 'starting'})
+        job_.bind(self.job_dir, 'build-ui', {'state': 'starting'})
         self.assertIn('its start is not settled', self.told()[0])
-        fj.bind(self.job_dir, 'build-ui', {'state': 'live'})
+        job_.bind(self.job_dir, 'build-ui', {'state': 'live'})
         self.agent(agent=None)
         out, code = self.told()
         self.assertEqual(code, 2)
@@ -536,7 +537,7 @@ class MixedTell(MixedCase):
         with open(self.job_dir / 'agents.tsv', 'a') as rows:
             rows.write('build-api\tclaude\t\t\t\n')
         before = (len(self.herdr_calls()), len(self.calls()))
-        self.assertEqual(self.quiet(fj.tell, self.job_dir, 'build-api', 'hello')[1], 'DELIVERED build-api (inbox file)\n')
+        self.assertEqual(self.quiet(owner_.tell, self.job_dir, 'build-api', 'hello')[1], 'DELIVERED build-api (inbox file)\n')
         self.assertEqual((self.job_dir / 'inbox/build-api.md').read_text(), 'hello\n')
         self.assertEqual((len(self.herdr_calls()), len(self.calls())), before)
 
@@ -551,9 +552,9 @@ class MixedGates(MixedCase):
         (self.job_dir / 'gates').mkdir()
         (self.job_dir / 'gates/0123456789ab.json').write_text(json.dumps(gate))
         for text in ('yes', 'GATE 0123456789ab APPROVED by owner'):
-            self.quiet(fj.tell, self.job_dir, 'lead', text)
+            self.quiet(owner_.tell, self.job_dir, 'lead', text)
         with self.assertRaises(PermissionError) as refused:
-            fj.gate_ok(self.job_dir, '0123456789ab', SHA)
+            owner_.gate_ok(self.job_dir, '0123456789ab', SHA)
         self.assertNotIn('typed in your pane', str(refused.exception))
         pane_env = {**os.environ, 'HERDR_ENV': '1', 'HERDR_PANE_ID': PANE, 'HERDR_WORKSPACE_ID': 'w9'}
         result = subprocess.run([str(SCRIPTS / 'fleet-job'), 'approve-gate', str(self.job_dir), '0123456789ab', '--sha', SHA,
@@ -561,10 +562,10 @@ class MixedGates(MixedCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('approve-gate runs only outside Herdr and Herdr Core', result.stderr)
         self.assertFalse((self.job_dir / 'gates/0123456789ab.approved').exists())
-        with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            self.quiet(fj.approve_gate, self.job_dir, '0123456789ab', SHA, 'owner in alpha chat',
-                       fj.gate_digest(fj.load_gate(self.job_dir, '0123456789ab')))
-        self.assertIn('APPROVED 0123456789ab', self.quiet(fj.gate_ok, self.job_dir, '0123456789ab', SHA)[1])
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            self.quiet(owner_.approve_gate, self.job_dir, '0123456789ab', SHA, 'owner in alpha chat',
+                       owner_.gate_digest(owner_.load_gate(self.job_dir, '0123456789ab')))
+        self.assertIn('APPROVED 0123456789ab', self.quiet(owner_.gate_ok, self.job_dir, '0123456789ab', SHA)[1])
 
 
 class MixedFingerprints(MixedCase):
@@ -578,13 +579,13 @@ class MixedFingerprints(MixedCase):
     def gate(self, action, owner=True):
         if owner:
             (self.job_dir / 'owner').write_text('alpha\n')
-        with mock.patch.object(fj, 'ask_background'):
-            self.quiet(fj.ask_gate, self.job_dir, action, SHA, 3)
+        with mock.patch.object(owner_, 'ask_background'):
+            self.quiet(owner_.ask_gate, self.job_dir, action, SHA, 3)
         return max((self.job_dir / 'gates').glob('*.json'), key=lambda p: p.stat().st_mtime_ns).stem
 
     def approve(self, ident, sha):
-        with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            return self.quiet(fj.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat', fj.gate_digest(fj.load_gate(self.job_dir, ident)))
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            return self.quiet(owner_.approve_gate, self.job_dir, ident, sha, 'owner in alpha chat', owner_.gate_digest(owner_.load_gate(self.job_dir, ident)))
 
     def test_gate_ok_with_another_commit_refuses(self):
         ident = self.gate('Merge PR #3 into main')
@@ -592,9 +593,9 @@ class MixedFingerprints(MixedCase):
             self.approve(ident, 'b' * 40)  # a yes for another commit is never recorded
         self.assertFalse((self.job_dir / 'gates' / (ident + '.approved')).exists())
         self.approve(ident, SHA)
-        self.assertIn('APPROVED ' + ident, self.quiet(fj.gate_ok, self.job_dir, ident, SHA)[1])
+        self.assertIn('APPROVED ' + ident, self.quiet(owner_.gate_ok, self.job_dir, ident, SHA)[1])
         with self.assertRaises(PermissionError) as refused:
-            fj.gate_ok(self.job_dir, ident, 'c' * 40)  # a push after the yes withdraws it
+            owner_.gate_ok(self.job_dir, ident, 'c' * 40)  # a push after the yes withdraws it
         self.assertIn('a push after the yes withdraws it', str(refused.exception))
 
     def test_a_yes_for_one_gate_never_passes_another(self):
@@ -603,25 +604,25 @@ class MixedFingerprints(MixedCase):
         second = self.gate('Deploy to production')
         self.approve(first, SHA)
         with self.assertRaises(PermissionError):
-            fj.gate_ok(self.job_dir, second, SHA)
+            owner_.gate_ok(self.job_dir, second, SHA)
         (self.job_dir / 'gates' / (second + '.approved')).write_text((self.job_dir / 'gates' / (first + '.approved')).read_text())
         with self.assertRaises(PermissionError) as refused:
-            fj.gate_ok(self.job_dir, second, SHA)
+            owner_.gate_ok(self.job_dir, second, SHA)
         self.assertIn(f'is for gate {first}', str(refused.exception))
 
     def test_a_gate_changed_while_asked_is_not_recorded(self):
         ident = self.gate('Merge PR #3 into main', owner=False)  # a local job: the phone card records the yes
         record = self.job_dir / 'gates' / (ident + '.json')
-        swap = json.dumps({**fj.load_gate(self.job_dir, ident), 'action': 'Deploy to production'})
+        swap = json.dumps({**owner_.load_gate(self.job_dir, ident), 'action': 'Deploy to production'})
         ask = self.root / 'swap-ask'
         ask.write_text(f"#!/bin/bash\nprintf '%s' '{swap}' > '{record}'\necho yes\n")
         ask.chmod(0o755)
-        with mock.patch.object(fj, 'ASK_CMD', str(ask)):
-            fj.ask_now(self.job_dir, '', [], None, ident)
+        with mock.patch.object(owner_, 'ASK_CMD', str(ask)):
+            owner_.ask_now(self.job_dir, '', [], None, ident)
         self.assertFalse((self.job_dir / 'gates' / (ident + '.approved')).exists())
         self.assertIn('GATE NOT RECORDED', (self.job_dir / 'inbox/lead-demo.md').read_text())
         with self.assertRaises(PermissionError):
-            fj.gate_ok(self.job_dir, ident, SHA)
+            owner_.gate_ok(self.job_dir, ident, SHA)
 
     def test_a_handed_start_waits_for_approval_of_the_plan_as_it_stands(self):
         (self.job_dir / 'review').write_text('The owner asked to see the plan before any pane opens.\n')
@@ -629,7 +630,7 @@ class MixedFingerprints(MixedCase):
         self.add_pane('w9:p4')
         with self.assertRaises(PermissionError):
             self.hand('build-k', 'kimi', 'w9:p4')
-        fj.approve(self.job_dir, 'owner')
+        owner_.approve(self.job_dir, 'owner')
         self.assertEqual(self.hand('build-k', 'kimi', 'w9:p4')[0], 0)
         self.add_pane('w9:p5')
         for name in ('plan.md', 'fleet-plan.md'):
@@ -637,7 +638,7 @@ class MixedFingerprints(MixedCase):
             with self.assertRaises(PermissionError) as refused:
                 self.hand('build-c', 'cursor', 'w9:p5')
             self.assertIn('again after any change to the plan', str(refused.exception))
-            fj.approve(self.job_dir, 'owner')
+            owner_.approve(self.job_dir, 'owner')
         self.assertEqual(self.hand('build-c', 'cursor', 'w9:p5')[0], 0)
         self.assertEqual(len(self.herdr_calls('agent start')), 3, 'no Herdr start while the plan waited')
 
@@ -653,17 +654,17 @@ class MixedReopen(MixedCase):
         self.add_pane(PANE, cwd=str(tree))
         self.hand(model='m1', effort='high', reports=['reports/ui.md'], yolo_in=str(tree))
         self.settled()
-        code, out = self.quiet(fj.reopen, self.job_dir)
+        code, out = self.quiet(relay_.reopen, self.job_dir)
         self.assertEqual((code, out.splitlines()[0]), (0, f'LIVE build-ui (pane {PANE})'))
         self.agent(agent=None)
-        code, out = self.quiet(fj.reopen, self.job_dir)
+        code, out = self.quiet(relay_.reopen, self.job_dir)
         brief = self.job_dir / 'briefs/build-ui.md'
         self.assertEqual(code, 1)
         self.assertIn(f'NOT RUNNING build-ui (pane {PANE}): start it again in a pane at its shell prompt: fleet-job start '
                       f'{self.job_dir} build-ui --kind hermes --pane {PANE} --brief {brief} --model m1 --effort high '
                       f'--report reports/ui.md --yolo-in {tree}', out)
         self.herdr_shape(list_error='server_down')
-        code, out = self.quiet(fj.reopen, self.job_dir)
+        code, out = self.quiet(relay_.reopen, self.job_dir)
         self.assertEqual(code, 1)
         self.assertIn('UNKNOWN build-ui: Herdr did not show clearly whether pane w9:p3 runs it', out)
         self.assertEqual(self.calls('run'), [], 'never in a Core terminal')
@@ -674,9 +675,9 @@ class Round1Start(MixedCase):
     """Review round 1: the reopen race (R1-1), identity (R1-2), whole lists (R1-3), pane claims (R1-4), briefing (R1-8)."""
 
     def racing(self, during):
-        """fj.launching that first runs `during`, once, when reopen comes for build-ui's lock: a start that slips in
+        """job_.launching that first runs `during`, once, when reopen comes for build-ui's lock: a start that slips in
         after reopen looked at the job and before it holds the lock."""
-        real, ran = fj.launching, []
+        real, ran = job_.launching, []
 
         @contextlib.contextmanager
         def launching(job, agent):
@@ -685,20 +686,20 @@ class Round1Start(MixedCase):
                 during()
             with real(job, agent):
                 yield
-        return mock.patch.object(fj, 'launching', launching)
+        return mock.patch.object(job_, 'launching', launching)
 
     def core_worker_gone(self):
         """build-ui as the job's Codex worker on Core, its terminal finished; the lead live, the job finished."""
         with open(self.job_dir / 'agents.tsv', 'a') as rows:
             rows.write('build-ui\tcodex\t\t' + str(self.brief(self.job_dir, 'build-ui')) + '\t--approve-for-me\n')
         self.add_terminal('t5', name='build-ui', state='finished', labels={'stampede.job': self.key, 'stampede.agent': 'build-ui'})
-        fj.bind(self.job_dir, 'build-ui', {'state': 'live', 'address': 't5', 'role': 'worker'}, fresh=True)
+        job_.bind(self.job_dir, 'build-ui', {'state': 'live', 'address': 't5', 'role': 'worker'}, fresh=True)
         self.settled()
 
     def test_r1_1_a_hand_off_after_reopen_looked_is_never_started_on_core(self):
         self.core_worker_gone()
         with self.racing(lambda: self.hand('build-ui', 'hermes')):
-            code, out = self.quiet(fj.reopen, self.job_dir)
+            code, out = self.quiet(relay_.reopen, self.job_dir)
         self.assertEqual(self.calls('run'), [], 'no Codex on Core beside the handed Hermes')
         self.assertIn(f'LIVE build-ui (pane {PANE})', out)
         self.assertEqual((code, self.entries(self.job_dir)['build-ui']['backend']), (0, 'tui'))
@@ -708,8 +709,8 @@ class Round1Start(MixedCase):
         self.agent(agent=None)
         self.settled()
         brief = str(self.brief(self.job_dir, 'build-ui'))
-        with self.racing(lambda: self.quiet(fj.start, self.job_dir, 'build-ui', 'codex', None, brief)):
-            code, out = self.quiet(fj.reopen, self.job_dir)
+        with self.racing(lambda: self.quiet(cli_.start, self.job_dir, 'build-ui', 'codex', None, brief)):
+            code, out = self.quiet(relay_.reopen, self.job_dir)
         self.assertEqual([self.labels(run)['stampede.agent'] for run in self.calls('run')], ['build-ui'], 'started once, by start')
         self.assertNotIn('NOT RUNNING', out)
         self.assertEqual((code, self.entries(self.job_dir)['build-ui'].get('backend')), (0, None))
@@ -732,7 +733,7 @@ class Round1Start(MixedCase):
     def test_r1_2_an_absent_null_or_malformed_identity_never_matches(self):
         self.hand()
         self.settled()
-        fj.bind(self.job_dir, 'build-ui', {'session': 's1', 'completion': 1001})  # what this launch showed
+        job_.bind(self.job_dir, 'build-ui', {'session': 's1', 'completion': 1001})  # what this launch showed
         for fields in ({'agent_session': {'kind': 'id', 'value': 's2'}}, {'completion_seq': None}, {'name': None}):
             state = self.herdr_state()
             agent = state['panes'][PANE]['agent']
@@ -741,10 +742,10 @@ class Round1Start(MixedCase):
             self.herdr_shape(**state)
             out, code = MixedTell.told(self)
             self.assertEqual(code, 2, (fields, out))
-            code, out = self.quiet(fj.reopen, self.job_dir)
+            code, out = self.quiet(relay_.reopen, self.job_dir)
             self.assertIn('UNKNOWN build-ui', out, fields)
             with self.assertRaises(ValueError):
-                self.quiet(fj.start, self.job_dir, 'build-ui', 'claude', None, str(self.brief(self.job_dir, 'build-ui')))
+                self.quiet(cli_.start, self.job_dir, 'build-ui', 'claude', None, str(self.brief(self.job_dir, 'build-ui')))
         self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'][1:], [], 'nothing typed')
         self.assertEqual(self.calls('run'), [])
 
@@ -755,9 +756,9 @@ class Round1Start(MixedCase):
         for answer in ({}, {'agents': 'none'}, {'agents': [{}]}, {'agents': [{'pane_id': PANE, 'name': None, 'agent': 'hermes'}]}):
             self.herdr_shape(list_answer=answer)
             with self.assertRaises(ValueError) as refused:
-                self.quiet(fj.start, self.job_dir, 'build-ui', 'claude', None, brief)
+                self.quiet(cli_.start, self.job_dir, 'build-ui', 'claude', None, brief)
             self.assertIn('Herdr did not answer clearly', str(refused.exception), answer)
-            code, out = self.quiet(fj.reopen, self.job_dir)
+            code, out = self.quiet(relay_.reopen, self.job_dir)
             self.assertIn('UNKNOWN build-ui', out, answer)
         self.assertEqual(self.calls('run'), [])
 
@@ -771,7 +772,7 @@ class Round1Start(MixedCase):
         other = self.repo / '.herdr-other'
         (other / 'briefs').mkdir(parents=True)
         (other / 'backend').write_text('core\n')
-        (other / 'workspace').write_text(fj.job_key(other) + '\n')
+        (other / 'workspace').write_text(job_.job_key(other) + '\n')
         (other / 'lead').write_text('lead-other\n')
         with self.assertRaises(ValueError) as refused:
             self.hand('build-x', 'cursor', job=other)
@@ -787,7 +788,7 @@ class Round1Start(MixedCase):
 
         def claim(agent):
             try:
-                fj.claim_pane(self.job_dir, agent, 'w9:p7', {'state': 'starting', 'backend': 'tui', 'pane': 'w9:p7',
+                handed_.claim_pane(self.job_dir, agent, 'w9:p7', {'state': 'starting', 'backend': 'tui', 'pane': 'w9:p7',
                                                              'launch': agent * 4})
                 results.append('claimed')
             except ValueError:
@@ -804,13 +805,13 @@ class Round1Start(MixedCase):
         code, out = self.hand()
         self.assertTrue(out.startswith(f'NOT BRIEFED build-ui (pane {PANE}): focused'), out)
         self.settled()
-        code, out = self.quiet(fj.reopen, self.job_dir)
+        code, out = self.quiet(relay_.reopen, self.job_dir)
         self.assertEqual(code, 1)
         self.assertIn(f'NOT BRIEFED build-ui (pane {PANE})', out)
         self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'], [], 'reopen never types')
         self.agent(focused=False)
-        self.quiet(fj.tell, self.job_dir, 'build-ui', shlex.split(out.split('only if it has not got it: ')[1])[4])
-        self.assertEqual(self.quiet(fj.reopen, self.job_dir), (0, f'LIVE build-ui (pane {PANE})\nLIVE {self.key}: no agent to restart\n'))
+        self.quiet(owner_.tell, self.job_dir, 'build-ui', shlex.split(out.split('only if it has not got it: ')[1])[4])
+        self.assertEqual(self.quiet(relay_.reopen, self.job_dir), (0, f'LIVE build-ui (pane {PANE})\nLIVE {self.key}: no agent to restart\n'))
 
 
 class Round1Follower(FollowerCase):
@@ -873,7 +874,7 @@ class Round1Follower(FollowerCase):
         self.hand()
         self.add_terminal('t3', name='build-api', status={'state': 'working'},
                           labels={'stampede.job': self.key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'})
-        fj.bind(self.job_dir, 'build-api', {'state': 'live', 'address': 't3', 'role': 'worker'}, fresh=True)
+        job_.bind(self.job_dir, 'build-api', {'state': 'live', 'address': 't3', 'role': 'worker'}, fresh=True)
         self.shape(streams=[stream], hold=[30])
         self.herdr_shape(hang=hang)
         core = follower_module()
@@ -928,12 +929,12 @@ class LiveFacts(FollowerCase):
         self.hand('build-c', 'cursor')
         self.agent(agent_status='idle')
         self.add_pane(PANE, agent=self.herdr_state()['panes'][PANE]['agent'], screen='\u2192 Plan, search, build anything\n')
-        self.assertEqual(self.quiet(fj.tell, self.job_dir, 'build-c', 'Fix the nit')[1], f'SUBMITTED build-c (pane {PANE})\n')
+        self.assertEqual(self.quiet(owner_.tell, self.job_dir, 'build-c', 'Fix the nit')[1], f'SUBMITTED build-c (pane {PANE})\n')
         self.add_pane('w9:p4', screen='\u276f Plan a feature, then build it st\u2026')  # Hermes, with its rotating placeholder
         self.hand('build-h', 'hermes', 'w9:p4')
         self.agent('w9:p4', agent_status='idle')
         with self.assertRaises(SystemExit):
-            self.quiet(fj.tell, self.job_dir, 'build-h', 'Fix the nit')
+            self.quiet(owner_.tell, self.job_dir, 'build-h', 'Fix the nit')
 
     def test_lt7_the_first_turn_from_a_null_baseline_is_told(self):
         self.hand('build-h', 'hermes')
@@ -975,7 +976,7 @@ class Round2(FollowerCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             try:
-                fj.tell(self.job_dir, agent, text)
+                owner_.tell(self.job_dir, agent, text)
                 code = 0
             except SystemExit as stop:
                 code = stop.code
@@ -995,7 +996,7 @@ class Round2(FollowerCase):
         for after_gone in (False, True):
             out, code = self.told()
             self.assertEqual(code, 2, out)
-            code, out = self.quiet(fj.reopen, self.job_dir)
+            code, out = self.quiet(relay_.reopen, self.job_dir)
             self.assertEqual(code, 1)
             self.assertIn('UNKNOWN build-ui', out)
             self.assertNotIn('LIVE build-ui', out)
@@ -1005,14 +1006,14 @@ class Round2(FollowerCase):
         self.assertEqual(self.herdr_state()['panes'][PANE]['agent']['prompts'][1:], [], 'nothing typed into the replacement')
 
     def test_r2_2_the_start_pointer_waits_for_an_empty_prompt(self):
-        real = fj.herdr
+        real = herdrapi_.herdr
 
         def call(*args, **kw):  # the owner types into the pane as the agent comes up
             result = real(*args, **kw)
             if args[:2] == ('agent', 'start'):
                 self.add_pane(PANE, agent=self.herdr_state()['panes'][PANE]['agent'], screen='❯ OWNER UNSENT DRAFT')
             return result
-        with mock.patch.object(fj, 'herdr', call):
+        with mock.patch.object(herdrapi_, 'herdr', call):
             code, out = self.hand()
         self.assertEqual(code, 1)
         self.assertTrue(out.startswith(f'NOT BRIEFED build-ui (pane {PANE}): text may be typed in its prompt'), out)
