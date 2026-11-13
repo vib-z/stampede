@@ -694,6 +694,9 @@ def finish(job, summary):
         clear_job_marker((job / 'workspace').read_text().strip(), job)
     unmark_handed(job)
     print('FINISHED ' + str(job))
+    if backend(job) == 'native':
+        with contextlib.suppress(Exception):  # the record is a copy: a refresh that fails never fails finish
+            native().refresh(job)
 
 
 def post_event(job, owner, fields, refused=None):
@@ -2851,8 +2854,14 @@ def main(argv):
     p.add_argument('--cwd', help='a Herdr Core job: the folder an agent Core runs starts in (default: the repo)')
     p.add_argument('--model'); p.add_argument('--effort')
     p.add_argument('--report', action='append', default=[]); p.add_argument('--yolo-in', help='a worker in its own git worktree: no-checks mode')
-    for verb in ('next', 'snapshot', 'reopen', 'close'):
+    for verb in ('next', 'snapshot'):
         sub.add_parser(verb, help='a native job').add_argument('job')
+    p = sub.add_parser('reopen', help='a native job: start what is not live, parents first'); p.add_argument('job')
+    p.add_argument('--fresh', action='store_true', help='every Claude agent starts a new session with its brief')
+    p.add_argument('--prompt', action='store_true', help='each resumed helper is told its parent\'s new address')
+    p.add_argument('--rerun-programs', action='store_true', help='run programs that did not exit 0 again')
+    p = sub.add_parser('close', help='a native job: end an agent\'s subtree, or the whole job'); p.add_argument('job')
+    p.add_argument('agent', nargs='?')
     p = sub.add_parser('tree', help='a native job: its tree as Core holds it'); p.add_argument('job'); p.add_argument('--json', action='store_true')
     p = sub.add_parser('tell'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('text', nargs='+')
     p = sub.add_parser('ask'); p.add_argument('job'); p.add_argument('--option', action='append', default=[]); p.add_argument('question', nargs='+')
@@ -2920,8 +2929,12 @@ def run(a):
         return native().next_(job)
     if a.cmd == 'tree':
         return native().tree(job, a.json)
-    if a.cmd in NATIVE_ONLY:
-        raise ValueError(f'{a.cmd} on a native job is not built yet')
+    if a.cmd == 'snapshot':
+        return native().snapshot(job)
+    if a.cmd == 'reopen':
+        return native().reopen(job, a.fresh, a.prompt, a.rerun_programs)
+    if a.cmd == 'close':
+        return native().close(job, a.agent)
     if a.cmd == 'post':
         return post(a.job, ' '.join(a.text), a.file)
     if a.cmd == 'wait':

@@ -31,7 +31,7 @@ under keep by setting the terminal's argv to a shell's and its status to null, a
 Exit codes and error shapes are Core's: usage 2, not_found 3, blocked 9, status_mismatch 10, finished 11, else 1
 (cancelled, a send Core dropped before typing, among them). tests/test_hc_contract.py holds this fake to hc's own schema.
 `run` takes its parent from --parent, else HC_TERMINAL_ID, unless --no-parent; `kill` ends the branch under it that
-does not outlive its parent; `connect` answers terminal.list lines with full records, as the API does.
+does not outlive its parent; a terminal with `leaves` ends at a typed /exit or /quit; `connect` answers terminal.list lines with full records, as the API does.
 Each HC_SESSION other than the default is a core of its own: its state and calls live in FAKE_HC/<session>/."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -57,7 +57,7 @@ def view(t):
             'status': word(t)}
 
 
-PRIVATE = ('sent', 'keys', 'draft', 'person')  # the fake's own records, never in an answer of Core's
+PRIVATE = ('sent', 'keys', 'draft', 'person', 'leaves')  # the fake's own records, never in an answer of Core's
 
 
 def end(state, t, reason):
@@ -189,6 +189,9 @@ def command(state, argv):
                     t['draft'] = ''
                 elif key == 'enter':
                     t['sent'].append(t.pop('draft', ''))
+                    if t.get('leaves') and t['sent'][-1] in ('/exit', '/quit'):  # an agent that leaves when asked
+                        end(state, t, 'exited')
+                        t['exit_code'] = 0
                 else:
                     t['draft'] = t.get('draft', '') + (' ' if key == 'space' else key)
         return print(json.dumps({'turn': t['turn'], 'status': word(t)}))

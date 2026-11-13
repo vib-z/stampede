@@ -1,7 +1,7 @@
 """A Core-native job (stampede new --core): Herdr Core holds the tree of terminals. stampede adds the space's name, the
 lead, the owner tag, the reopen record, the owner's gates, a cap on helpers and the layout labels. docs/CORE-NATIVE.md
 is the contract."""
-import contextlib, fcntl, json, os, subprocess, time, uuid
+import contextlib, fcntl, json, os, shlex, subprocess, time, uuid
 from collections import Counter
 from pathlib import Path
 
@@ -71,6 +71,8 @@ def running(terminal):
     if labels(terminal).get('stampede.role') != 'helper' or terminal.get('state') != 'live' or fj.shelled(terminal):
         return False
     word = fj.core_status(terminal)
+    if word == 'idle' and labels(terminal).get('stampede.resumed') == '1':  # a resumed agent waits at turn 0
+        return False
     return word != 'done' and not (word == 'idle' and (terminal.get('turn') or 0) >= 1)
 
 
@@ -117,17 +119,44 @@ def queued(job):
     return [(p, json.loads(p.read_text())) for p in sorted(folder.glob('*.json'))] if folder.is_dir() else []
 
 
-def record(job, name, **node):
-    """One node of the reopen record <job>/tree.json, under its lock, by a temporary file and os.replace."""
+@contextlib.contextmanager
+def held(job):
+    """The reopen record <job>/tree.json under its lock; written back by a temporary file and os.replace, then its two
+    views rendered from it."""
     job = Path(job)
     with (job / 'tree.json.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         path = job / 'tree.json'
         tree = json.loads(path.read_text()) if path.is_file() else {'space': read(job, 'space'), 'key': read(job, 'workspace'), 'nodes': {}}
-        tree['nodes'][name] = {**tree['nodes'].get(name, {}), 'name': name, **node}
+        yield tree
         temporary = job / f'.tree.json.{os.getpid()}'
         temporary.write_text(json.dumps(tree, indent=1) + '\n')
         os.replace(temporary, path)
+        render(job, tree)
+
+
+def record(job, name, **node):
+    """One node of the reopen record."""
+    with held(job) as tree:
+        tree['nodes'][name] = {**tree['nodes'].get(name, {}), 'name': name, **node}
+
+
+def render(job, tree):
+    """REOPEN.md and reopen.sh from tree.json alone, with no Core call."""
+    job, cols = Path(job).absolute(), ('name', 'role', 'parent', 'kind', 'model', 'effort', 'session', 'address', 'state', 'brief')
+    rows = ['| ' + ' | '.join(str(n.get(c) or '-').replace('|', '/') for c in cols) + ' |' for n in tree['nodes'].values()]
+    (job / 'REOPEN.md').write_text('\n'.join([
+        f'# Reopen {job.name}', '', f'Space {tree.get("space")}, key {tree.get("key")}. Written from tree.json; Core\'s own tree wins while it lives.', '',
+        '| name | role | parent | kind | model | effort | session | terminal | state | brief |', '|' + ' --- |' * len(cols), *rows, '',
+        f'- `bash {job / "reopen.sh"}` starts what is not live, parents first, each child under its parent\'s new address.',
+        '- A Claude agent resumes its session; a Codex agent starts fresh with its brief; a program runs again only with `--rerun-programs`.',
+        '- `--fresh` starts every Claude agent on a new session; `--prompt` tells each resumed helper its parent\'s new address.', '']))
+    script = job / 'reopen.sh'
+    fleet = fj.SCRIPTS / 'fleet-job'
+    script.write_text(f'#!/bin/sh\n# reopen.sh: rebuild the native job {job.name} from tree.json.\n'
+                      f'if [ -x {shlex.quote(str(fleet))} ]; then exec {shlex.quote(str(fleet))} reopen {shlex.quote(str(job))} "$@"; fi\n'
+                      f'exec stampede reopen {shlex.quote(str(job))} "$@"\n')
+    script.chmod(0o755)
 
 
 def agent_args(job, name, kind, model, effort, lead=False, yolo=False):
@@ -235,13 +264,14 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None):
     brief.write_text(lead_brief(job, lead, owner, review, fork, key, space, cap(job)))
     model, effort = fj.lead_model(kind)
     session = str(uuid.uuid4()) if kind == 'claude' else ''
-    argv = ([program] + (['--resume', fork, '--fork-session'] if fork else []) + agent_args(job, lead, kind, model, effort, lead=True)
-            + (['--session-id', session] if session else []) + [f'You are {lead}. Read {brief} and do everything it says.'])
+    again = ([program] + agent_args(job, lead, kind, model, effort, lead=True) + (['--session-id', session] if session else [])
+             + [f'You are {lead}. Read {brief} and do everything it says.'])  # the fork stays out: a reopen resumes its own session
+    argv = again[:1] + (['--resume', fork, '--fork-session'] if fork else []) + again[1:]
     tags = {'stampede.job': key, 'stampede.role': 'lead', 'stampede.agent': lead, 'stampede.space': space, 'stampede.kind': kind,
             **({'stampede.session': session} if session else {}), 'herdr.space': space, 'herdr.tab': 'main'}
     node = dict(role='lead', parent=None, kind=kind, model=model, effort=effort, session=session, brief=str(brief), report=None,
-                cwd=str(repo), tab='main', argv=[a for a in argv if a not in (['--resume', fork, '--fork-session'] if fork else [])])
-    record(job, lead, **node, state='starting')  # the fork stays out: a reopen resumes the lead's own session
+                cwd=str(repo), tab='main', argv=again)
+    record(job, lead, **node, state='starting')
     try:
         address = run(job, lead, tags, repo, argv)['address']
     except fj.HcError as error:
@@ -367,11 +397,7 @@ def launch(job, key, request, parent, terminals):
         if kind == 'program':
             argv = request['program']
         else:
-            back = parent['address']
-            prompt = (f'You are {name}, a helper in a stampede job on Herdr Core. Your parent is '
-                      f'{labels(parent).get("stampede.agent")} at {back}. Read {request["brief"]} and do everything it says. '
-                      f'Write your result to {report}. When you are done or stuck, send your parent one line with that path: '
-                      f'hc send {back} "{name}: <one line> {report}". If that address is gone, hc get $HC_TERMINAL_ID shows your parent.')
+            prompt = first_prompt(name, labels(parent).get('stampede.agent'), parent['address'], request['brief'], report)
             argv = ([fj.cli(kind)] + agent_args(job, name, kind, request['model'], request['effort'], yolo=request['yolo'])
                     + (['--session-id', session] if session else []) + [prompt])
         shown = run(job, name, tags, request['cwd'], argv, parent['address'], request['outlive'])
@@ -385,6 +411,13 @@ def launch(job, key, request, parent, terminals):
     print(f'STARTED {name} ({shown["address"]}) under {labels(parent).get("stampede.agent")}')
     return {'address': shown['address'], 'state': 'live', 'labels': tags, 'parent': parent['address'], 'status': None, 'turn': 0,
             'argv': ['STAMPEDE_JOB_KEY=' + key]}
+
+
+def first_prompt(name, parent, address, brief, report):
+    return (f'You are {name}, a helper in a stampede job on Herdr Core. Your parent is {parent} at {address}. Read {brief} and '
+            f'do everything it says. Write your result to {report}. When you are done or stuck, send your parent one line with '
+            f'that path: hc send {address} "{name}: <one line> {report}". If that address is gone, hc get $HC_TERMINAL_ID shows '
+            'your parent.')
 
 
 def next_(job):
@@ -470,3 +503,181 @@ def lead_alive(job):
     except (fj.HcError, ValueError):
         return True
     return bool(lead) and lead.get('state') == 'live'
+
+
+def branch(key, terminals):
+    """The lead and every terminal under it by Core's parent links: (name, terminal, parent name), the lead first. A
+    terminal with no stampede.role is named by its Core name, else its address; of two with one name, the live one."""
+    lead = lead_of(key, terminals)
+    found = ([(0, lead)] + descendants(terminals, lead['address'])) if lead else []
+    names = {t['address']: labels(t).get('stampede.agent') if labels(t).get('stampede.role') else t.get('name') or t['address']
+             for _, t in found}
+    chosen = {}
+    for _, t in found:
+        name = names[t['address']]
+        if name not in chosen or t.get('state') == 'live' or chosen[name][0].get('state') != 'live':
+            chosen[name] = (t, names.get(t.get('parent')) if t is not lead else None)
+    return [(name, t, parent) for name, (t, parent) in chosen.items()]
+
+
+def refresh(job):
+    """Write the record from Core's tree now (snapshot): HcError when Core does not answer."""
+    job = Path(job).absolute()
+    fj.target(job)
+    key = fj.core_key(job)
+    with held(job) as tree:
+        seen = set()
+        for name, t, parent in branch(key, listing()):
+            tags, node = labels(t), tree['nodes'].setdefault(name, {'name': name})
+            seen.add(name)
+            node.update(address=t['address'], terminal=t.get('name'), state=t.get('state'), parent=parent, cwd=t.get('cwd'),
+                        tab=tags.get('herdr.tab') or node.get('tab'))
+            if t.get('state') != 'live':
+                node.update(exit_code=t.get('exit_code'), reason=t.get('reason'))
+            if not tags.get('stampede.role'):
+                node.update(role='plain', argv=t.get('argv'))
+            else:  # what only the start knew stays as the start wrote it
+                node.setdefault('role', tags['stampede.role'])
+                node.setdefault('kind', tags.get('stampede.kind'))
+        for name, node in tree['nodes'].items():
+            if name not in seen and node.get('state') != 'closed':
+                node['state'] = 'gone'
+    return job / 'tree.json'
+
+
+def snapshot(job):
+    try:
+        print(refresh(job))
+    except fj.HcError as error:
+        print(f'FAILED snapshot ({fj.line(error)})')
+        return 1
+    return 0
+
+
+def parents_first(nodes):
+    order, left = [], list(nodes.values())
+    while left:
+        ready = [n for n in left if not n.get('parent') or n['parent'] in {o['name'] for o in order}] or left
+        order.append(ready[0])
+        left.remove(ready[0])
+    return order
+
+
+def reopen(job, fresh=False, prompt=False, rerun=False):
+    """stampede reopen: start what is not live, parents first, each child under its parent's new address."""
+    job = Path(job).absolute()
+    fj.target(job)
+    key, lead, space, failed, told = fj.core_key(job), read(job, 'lead'), read(job, 'space'), False, []
+    with locked(job):
+        terminals = listing()
+        if not (job / 'finished').is_file():  # an unfinished job is open again; a finished one is reopened for reading only
+            fj.mark_job(key, job)
+            owner = fj.job_owner(job)
+            if owner:
+                fj.tag_owner(job, key, owner)
+        (job / 'closed').unlink(missing_ok=True)
+        now, nodes = {}, json.loads((job / 'tree.json').read_text())['nodes']
+        for node in parents_first(nodes):
+            name, parent = node['name'], node.get('parent')
+            running_now = agent(key, terminals, name) if node.get('role') != 'plain' else None
+            if running_now:
+                now[name] = running_now
+                print(f'LIVE {name} ({running_now["address"]})')
+                continue
+            if parent and parent not in now:
+                print(f'SKIPPED {name}: its parent {parent} is not running')
+                continue
+            if node.get('role') == 'plain':
+                print(f'SKIPPED {name} (a plain child: run it again if still needed: {shlex.join(node.get("argv") or [])})')
+                continue
+            kind, argv, resumed, session = node.get('kind'), list(node.get('argv') or []), False, node.get('session') or ''
+            if kind == 'program':
+                if node.get('state') == 'finished' and node.get('exit_code') == 0:
+                    print(f'DONE {name} (exited 0)')
+                    continue
+                if not rerun:
+                    print(f'SKIPPED {name} (a program: --rerun-programs runs it again)')
+                    continue
+            else:
+                base = [a for i, a in enumerate(argv[:-1]) if '--session-id' not in argv[i - 1:i + 1]]
+                first = argv[-1] if node.get('role') == 'lead' else first_prompt(name, parent, now[parent]['address'], node['brief'],
+                                                                                     node['report'])
+                if kind == 'claude' and not fresh and session and fj.claude_session_file(session):
+                    argv, resumed = base[:1] + ['--resume', session] + base[1:], True
+                else:
+                    session = str(uuid.uuid4()) if kind == 'claude' and (fresh or not session) else session if kind == 'claude' else ''
+                    argv = base + (['--session-id', session] if session else []) + [first]
+            tags = {'stampede.job': key, 'stampede.role': node['role'], 'stampede.agent': name, 'stampede.kind': kind,
+                    **({'stampede.space': space} if node['role'] == 'lead' else {}), **({'stampede.session': session} if session else {}),
+                    **({'stampede.resumed': '1'} if resumed else {}), 'herdr.space': space, 'herdr.tab': node.get('tab') or 'main'}
+            under = now[parent]['address'] if parent else None
+            try:
+                shown = run(job, name, tags, node.get('cwd') or job.parent, argv, under, node.get('outlive'))
+            except (fj.HcError, ValueError) as error:
+                failed = True
+                print(f'FAILED {name} ({fj.line(error)})')
+                continue
+            now[name] = {'address': shown['address']}
+            record(job, name, address=shown['address'], state='live', session=session, exit_code=None, reason=None)
+            print(f'STARTED {name} ({shown["address"]})' + (f' under {parent}' if parent else ''))
+            if name == lead:
+                told.append((name, shown['address'], f'[stampede] You were reopened: your tree was rebuilt from {job / "tree.json"}; '
+                                                     f'stampede tree {job} shows it. Restarted helpers wait for your word.'))
+            elif resumed and prompt:
+                told.append((name, shown['address'], f'[stampede] You were reopened. Your parent is {parent} at {under}: read '
+                                                     f'{node["brief"]} again and carry on.'))
+    for name, address, text in told:
+        try:
+            fj.hc('send', '--', address, text, limit=fj.send_limit())
+        except fj.HcError as error:
+            print(f'NOT TOLD {name} ({fj.line(error)})')
+    return 1 if failed else 0
+
+
+LEAVE = {'claude': ['/', 'e', 'x', 'i', 't', 'enter'], 'codex': ['/', 'q', 'u', 'i', 't', 'enter']}
+
+
+def close(job, name=None):
+    """stampede close: end the agent's subtree (the whole job when none is named), deepest first, then the agent."""
+    job = Path(job).absolute()
+    fj.target(job)
+    key, lead = fj.core_key(job), read(job, 'lead')
+    name = lead if name in (None, 'lead') else name
+    terminals = listing()
+    ofname = [t for t in terminals if labels(t).get('stampede.job') == key and labels(t).get('stampede.agent') == name]
+    target = next((t for t in ofname if t.get('state') == 'live'), ofname[-1] if ofname else None)
+    if not target:
+        raise ValueError(f'no terminal of this job is {name}')
+    under = descendants(terminals, target['address'])
+    if os.environ.get('HC_TERMINAL_ID') in [target['address']] + [t['address'] for _, t in under]:
+        raise ValueError(f'close {name} from outside its tree: this terminal is {name} or under it')
+    failed, closed = False, []
+    for _, t in sorted(under, key=lambda pair: -pair[0]) + [(0, target)]:
+        tags, address = labels(t), t['address']
+        shown = (tags.get('stampede.agent') if tags.get('stampede.role') else None) or t.get('name') or address
+        try:
+            if t.get('state') == 'live':
+                if tags.get('stampede.kind') in LEAVE and fj.core_status(t) in ('idle', 'done'):
+                    fj.hc('keys', address, *LEAVE[tags['stampede.kind']])
+                    with contextlib.suppress(fj.HcError):
+                        fj.hc('wait', address, '--timeout', '15', wait=15)
+                if fj.hc('get', address).get('state') == 'live':
+                    fj.hc('kill', address)
+                    with contextlib.suppress(fj.HcError):  # until Core has the exit, so rm takes it
+                        fj.hc('wait', address, '--timeout', '5', wait=5)
+            fj.hc('rm', address)
+        except fj.HcError as error:
+            failed = True
+            print(f'FAILED {shown} ({fj.line(error)})')
+            continue
+        closed.append(shown)
+        print(f'CLOSED {shown} ({address})')
+    if name == lead:
+        (job / 'closed').write_text(time.strftime('%Y-%m-%d %H:%M') + '\n')
+    with contextlib.suppress(fj.HcError):
+        refresh(job)
+    with held(job) as tree:
+        for each in closed:
+            if each in tree['nodes']:
+                tree['nodes'][each]['state'] = 'closed'
+    return 1 if failed else 0

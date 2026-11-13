@@ -24,6 +24,7 @@ Read the tree from Core, never from stampede's files: one full listing, then fol
 | `stampede.space` | lead only | the space's name |
 | `stampede.kind` | lead, helpers | `claude`, `codex` or `program` |
 | `stampede.session` | a Claude lead or helper | its Claude session id |
+| `stampede.resumed` | an agent `stampede reopen` resumed | `1`: while it is `idle` it holds no place under the cap, whatever its turn |
 | `herdr.space` | lead, helpers | the space's name again, for the Herdr app |
 | `herdr.tab` | lead, helpers | its tab in the app's view (below) |
 
@@ -75,7 +76,8 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `lead`, `space`, `workdir` | the lead's name, the space's name, the repo |
 | `max-helpers` | the cap, only when the owner set one |
 | `tree.json` | the reopen record, `{"space", "key", "nodes": {<name>: node}}`: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, `argv` (how to start it again), `outlive`, `address` and its last seen `state` |
-| `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree |
+| `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree (`fleet-job reopen <job> "$@"` of this checkout, else `stampede reopen`); both are rendered from `tree.json` alone each time it changes |
+| `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog raises no alarm for a lead closed on purpose |
 | `queue/` | helper starts waiting for a free place under the cap, one `<time>-<name>.json` each, oldest first; `queue/dropped/` holds those whose parent was gone |
 | `ask.md`, `plan.md`, `briefs/`, `reports/` | the ask, the lead's plan, each helper's brief, each helper's result |
 
@@ -89,9 +91,9 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `stampede next <job>` | starts queued helpers, oldest first, while fewer than the cap run | one `STARTED` line each (`DROPPED <name>: its parent <p> is gone` for one whose parent ended), then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED` when nothing started or waits |
 | `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child: role `plain`, kind and tab `-`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes: [{depth, name, address, parent, role, kind, status, state, tab}], queue}` |
 | `stampede tell <job> <agent> "<text>"` | `hc send` to that agent's terminal | `SUBMITTED <agent>` or `FAILED <agent> (<why>)` |
-| `stampede snapshot <job>` | rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree | the record's path |
-| `stampede reopen <job> [--fresh] [--prompt] [--rerun-programs]` | starts what is not live, parents first, each child under its parent's new address | `LIVE`, `STARTED` or `SKIPPED` per node |
-| `stampede close <job> [<agent>]` | ends that agent's subtree, leaves first; with no agent the whole job, the lead last | `CLOSED <name>` per terminal, in order |
+| `stampede snapshot <job>` | rewrites `tree.json`, `REOPEN.md` and `reopen.sh` from Core's tree: address, Core name, state (`live`, `finished` with exit code and reason, `gone` when Core no longer lists it), parent, cwd, tab; a plain child becomes a node of role `plain` with its argv. What only the start knew is kept | the record's path; `FAILED snapshot (<why>)`, exit 1, when Core does not answer |
+| `stampede reopen <job> [--fresh] [--prompt] [--rerun-programs]` | starts what is not live, parents first, each child under its parent's new address | per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (the lead: no `under`), `SKIPPED <name>: its parent <p> is not running`, `SKIPPED <name> (a plain child: ...)`, `SKIPPED <name> (a program: ...)`, `DONE <name> (exited 0)` or `FAILED <name> (<why>)`, exit 1; `NOT TOLD <name> (<why>)` when a line to it could not go |
+| `stampede close <job> [<agent>]` | ends that agent's subtree, deepest first; with no agent (or `lead`) the whole job, the lead last. Refused, exit 2, from a terminal in that subtree | `CLOSED <name> (<address>)` per terminal, in order; `FAILED <name> (<why>)`, exit 1, going on with the rest |
 | `stampede ask`, `ask --gate`, `gate-ok`, `approve-gate`, `post`, `finish` | as on every backend | as on every backend |
 
 ### The cap
@@ -104,9 +106,9 @@ A start over the cap is queued, not refused. The lead runs `stampede next <job>`
 
 ### Reopen and close
 
-- `tree.json` is written at every start and by `stampede snapshot`. It is a copy for a rebuild; Core's own tree wins while it lives.
-- `stampede reopen` after a crash or a reboot walks the record parents first. A Claude agent resumes its session by id. A Codex agent resumes the session it recorded, else starts fresh with its brief. A program is never run again unless `--rerun-programs` says so. A terminal still live is left alone.
-- `stampede close` ends an agent politely when it is idle (`/exit` for Claude, `/quit` for Codex), else ends its terminal, then removes it. Children go before their parent. Closing a whole job is the owner's call.
+- `tree.json` is written at `new`, at every start, by `stampede snapshot`, `reopen`, `close`, and after `finish`. It is a copy for a rebuild; Core's own tree wins while it lives.
+- `stampede reopen` after a crash or a reboot walks the record parents first. A Claude agent resumes its session by id when Claude's own session file shows it ran, labelled `stampede.resumed=1`; else it starts with that id and its first prompt (`--fresh`: a new id). A Codex agent always starts fresh with its first prompt: a native job records no Codex session. A first prompt names the parent's address as it is now. The restarted lead gets one line saying it was reopened; `--prompt` gives each resumed helper its parent's new address. An unfinished job gets its marker and owner tag back; a finished one is reopened for reading only. A program is never run again unless `--rerun-programs` says so. A terminal still live is left alone.
+- `stampede close` ends an agent politely when it is idle or done (`/exit` for Claude, `/quit` for Codex, typed with `hc keys`, then up to 15 s), else kills its terminal, then removes it (`hc rm`). Children go before their parent. Closing a whole job is the owner's call.
 
 ## Not in a Core-native job
 
