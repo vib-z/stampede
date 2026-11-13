@@ -675,7 +675,9 @@ class Sweep(Follower):
             ended = {row['address']: row for row in rows if row.get('address')}
             ended.update({t['address']: {'reason': 'lost'} for t in live})  # a shell in its place
             if not ended and not self.terminals:  # Core has no row at all: a lead that started and was removed is lost
-                ended = {a: {'reason': 'lost'} for a in [started(self.job)] if a}
+                node = started(self.job)
+                ended = {node['address']: {'reason': 'lost'} if node.get('state') != 'finished' else
+                         {'reason': node.get('reason'), 'exit_code': node.get('exit_code')}} if node else {}
             if not any(not r['finished'] for r in self.terminals.values()) and ended:
                 newest = list(ended)[-1]  # a lead that ended before any pass saw it
                 if newest not in self.terminals:
@@ -696,10 +698,11 @@ class Sweep(Follower):
 
 
 def started(job):
-    """The lead's address in <job>/tree.json once its start went through, else None (it never started, or is starting)."""
+    """The lead's node in <job>/tree.json (address, saved state, exit_code, reason) once its start went through, else None
+    (it never started, or is starting)."""
     try:
         nodes = json.loads((job / 'tree.json').read_text()).get('nodes') or {}
-        return next((n.get('address') for n in nodes.values() if isinstance(n, dict) and n.get('role') == 'lead'), None) or None
+        return next((n for n in nodes.values() if isinstance(n, dict) and n.get('role') == 'lead' and n.get('address')), None)
     except (OSError, ValueError, AttributeError):
         return None
 

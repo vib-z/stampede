@@ -158,6 +158,24 @@ class Sweep(NativeCase):
         self.assertEqual([(e['state'], e['reason'], e['pane'], e['event_id']) for e in self.queued()],
                          [('dead', 'lost', f'hc:{key}/t1', f'{key}/t1|finished')])
 
+    def test_a_lead_saved_as_exited_0_then_removed_is_no_dead(self):
+        """R6: the lead left by itself with exit 0, a snapshot saved it, then its record was removed: no alarm."""
+        from test_core import fj
+        ask = self.root / 'ask.md'
+        ask.write_text('Fix the login bug\n')
+        with mock.patch.dict(os.environ, {'HC_SOCKET': str(self.socket)}):
+            code, out = self.quiet(fj.new, str(ask), None, core=True, cwd=str(self.repo))
+            self.assertEqual(code, 0, out)
+            self.terminal('t1', state='finished', status=None, exit_code=0, reason='exited')
+            self.quiet(fj.native().snapshot, self.job)
+            fj.hc('rm', 't1')
+        (self.job / 'owner').write_text('alpha\n')
+        node = next(n for n in json.loads((self.job / 'tree.json').read_text())['nodes'].values() if n.get('role') == 'lead')
+        self.assertEqual((node.get('state'), node.get('exit_code'), node.get('reason')), ('finished', 0, 'exited'))
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+
     def test_a_lead_with_no_address_in_tree_json_is_no_news(self):
         (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'lead-x': {'name': 'lead-x', 'role': 'lead', 'state': 'starting'}}}))
         self.sweep()
