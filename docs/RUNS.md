@@ -9,6 +9,7 @@ Each run here really happened. Times are local, names are the real agent and tab
 - [Run 4: a landlord app's competitors, features and site, by a fresh tester](#run-4-a-landlord-apps-competitors-features-and-site-by-a-fresh-tester)
 - [Run 5: a property-data research and build job, by a fresh tester](#run-5-a-property-data-research-and-build-job-by-a-fresh-tester)
 - [Core-native sandbox fleet test, 13 Nov 2026](#core-native-sandbox-fleet-test-13-nov-2026)
+- [0.2.0 release check, 13 Nov 2026](#020-release-check-13-nov-2026)
 
 ## Run 1: the fleet that built stampede v0
 
@@ -324,3 +325,22 @@ What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folder
 **A flake, explained.** One earlier run failed the fan-out check once. The check then ran `stampede next` whenever its own poll saw a helper end, so an end that an earlier `next` had already filled looked like a new free place, and `next` rightly answered `WAITING 1 queued (12 running, cap 12)`. The check now waits on Core's news as a lead does, and checks only that a `WAITING` line never shows a free place.
 
 **`hc wait --children any` and a message.** In [tests/evals/live/wait_probe.py](../tests/evals/live/wait_probe.py), a stand-in lead ran `hc wait --children any --timeout 120` from inside its own terminal while its child sent it one line and then idled, 3 s later: in 5 runs of 5, and once more with the child exiting, the wait returned 0.0 s after the send with `reason` `message` and `from` the child. A wait that did not return in a real job's lead was not reproduced here.
+
+## 0.2.0 release check, 13 Nov 2026
+
+**13 Nov 2026, macOS 27.2 arm64, Herdr Core 0.1.21, Herdr 0.9.5, Codex 0.167.2, Claude Code 2.1.323, Python 3.14.7.** The checks run before 0.2.0 was published, at commit `0a935ec` on the release branch: the version bump on top of the Core-native jobs. Every check passed. Each scratch run had a home folder of its own and none of the running job's Core variables, and the machine's own core showed the same terminals before and after each live check.
+
+| # | check | result | seconds | what it showed |
+|---|---|---|---|---|
+| 1 | unit suite | PASS | 503 | `python3 -m unittest discover tests`: 590 tests OK, 25 skipped, 7 expected failures |
+| 2 | install | PASS | 1 | `./install.sh --dry-run` in a scratch home: 24 `would link` lines and nothing written (every entry's times the same before and after); then `./install.sh`: 24 links, and `stampede --version` from its bin printed `0.2.0`; `herdr-doctor` passed every link check (its PROBLEM lines name the Herdr and Core sockets a scratch home does not have) |
+| 3 | CI's Core smoke run | PASS | 24 | [tests/core_smoke.py](../tests/core_smoke.py) in a scratch session, with the scratch install first on PATH: the relay path, and the native path (`new --core`, a program helper, `tree`, `close`, `finish`) |
+| 4 | fixture evals | PASS | 117 | `tests/evals/run.py`: 57 pass, 0 fail, 2 blocked (D01 and D04 cannot be staged beside Homebrew's `herdr` and the system `jq`), 1 gap (G15, the documented ceiling), as on macOS before |
+| 5 | update from 0.1.9 | PASS | 1 | a clone of `v0.1.9` on `main`, installed in a scratch home, with a local release reply for `v0.2.0`: `--version` printed `0.1.9` and `stampede 0.2.0 is out, this is 0.1.9: run stampede update`, and `update --check` exited 1; with the release commit on its remote's `main`, `stampede update` fast-forwarded, ran `install.sh` again and printed `stampede 0.1.9 -> 0.2.0`; then `--version` printed `0.2.0`, `update --check` exited 0, and all 23 links pointed into the clone. A clone with an untracked file, and one on another branch, were refused with every file the same |
+| 6 | a Core job opened on 0.1.9 | PASS | - | a job that 0.1.9's `stampede new --core` made (against the fake `hc`) still says `backend` `core` after the update: `tell` delivered it by the earlier path, and `tree` said it is for a native job |
+| 7 | Core-native sandbox fleet test | PASS | 60 | [tests/evals/live/native_fleet.py](../tests/evals/live/native_fleet.py): all ten checks, each within 0.3 s of the [table above](#core-native-sandbox-fleet-test-13-nov-2026) |
+| 8 | one real Core-native job | PASS | 80 | below |
+
+**One real Core-native job (check 8).** On the machine's own core, from this checkout's `scripts/stampede`: `stampede new --core --lead claude --space smoke-0200`, with a Claude Sonnet 5.5 lead at medium effort, asked to start one Codex helper, also at medium effort, that writes a one-line file and sends its path back, then to check the file and finish, asking the owner nothing. `new` took 1 s. The lead was a root terminal labelled `stampede.space=smoke-0200`, pane 1 of tab `main`; the helper `build-hello` was its Core child (its `parent` the lead, ending with it), pane 2, split right beside the lead. The helper's `hc send` reached the lead's screen as `<hc from="... build-hello">build-hello: done <job>/out/hello.txt</hc>`, the file held its line, and the lead wrote `Status: DONE` and ran `finish` 55 s after `new`. `stampede tree` showed the space, the lead and the helper, both done, and `stampede snapshot` wrote `tree.json` with both and their places. `stampede close` ended the helper, then the lead, in 3 s; afterwards Core listed no terminal of that job, and every other terminal was as before.
+
+**Not run here:** `herdr plugin update stampede --yes`, which needs the published release (the unit tests cover a plugin update's links), the full fleet test on Linux, and the native path from a live client.
