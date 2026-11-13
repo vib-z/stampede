@@ -268,7 +268,7 @@ class CoreDoctor(Shell):
         self.fake('codex', 'echo "--yolo"\n')
         self.assertIn('PROBLEM codex has no --no-daemon', self.doctor().stdout)
         self.fake('cursor-agent', 'exit 0\n')
-        self.assertIn('warn cursor-agent runs on the TUI only', self.doctor().stdout)
+        self.assertIn('warn cursor-agent reports no OSC 7501 status on Herdr Core: a Core-native job runs it as a program', self.doctor().stdout)
         (self.bin / 'hc').unlink()
         self.assertIn('PROBLEM hc not on PATH', self.doctor().stdout)
 

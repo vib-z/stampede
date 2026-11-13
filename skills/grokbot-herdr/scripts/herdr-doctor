@@ -83,7 +83,7 @@ core_checks(){   # hc and its version, the selected core, agents that report OSC
   if ! command -v codex >/dev/null; then ok "codex not installed (optional)"
   elif codex --help 2>/dev/null | grep -q -- '--no-daemon'; then ok "codex runs with --no-daemon"
   else gap "codex has no --no-daemon: update Codex before starting Codex agents on Herdr Core"; fi
-  if command -v cursor-agent >/dev/null; then warn "cursor-agent runs on the TUI only for stampede: it reports no OSC 7501 status on Herdr Core"; fi
+  if command -v cursor-agent >/dev/null; then warn "cursor-agent reports no OSC 7501 status on Herdr Core: a Core-native job runs it as a program (stampede start <job> <name> -- cursor-agent ...), a --core --relay job hands it to a Herdr TUI pane"; fi
   [ "$alive" = 1 ] && core_advice
   local app=""
   if command -v herdr-app >/dev/null; then app=$(herdr-app --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
