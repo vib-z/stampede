@@ -237,28 +237,49 @@ def cap(f, s):
     return f'3 STARTED, 2 QUEUED (3 running, cap 3); sampled {counts}'
 
 
+def grid(tab, names):
+    """The owner's order for the names of one tab, in start order: 1 the first; 2 splits 1 right; 3 splits 2 down; 4
+    splits 1 down. {name: (tab, pane, split, beside)}."""
+    splits = {2: ('right', 0), 3: ('down', 1), 4: ('down', 0)}
+    return {n: (tab, i + 1, *((splits[i + 1][0], names[splits[i + 1][1]]) if i else (None, None))) for i, n in enumerate(names)}
+
+
+def placed(labels):
+    return (labels.get('herdr.tab'), int(labels.get('stampede.pane') or 0), labels.get('stampede.split'), labels.get('stampede.beside'))
+
+
 def layout(f, s):
     if 'layout' not in s:
         raise Fail('needs fanout')
     lead, job, key = f.jobs['fan']
-    tabs = {n: l.get('herdr.tab') for n, l in s['layout'].items()}
-    want = {lead: 'main', **{f'fan-{i:02}': ['main', 'main-2', 'main-3', 'main-4'][i // 4] for i in range(1, 13)}}
-    spaces = {l.get('herdr.space') for l in s['layout'].values()}
-    if tabs != want or spaces != {'fan'}:
-        raise Fail(f'tabs {tabs}, spaces {spaces}')
-    lead, job, key = f.jobs['tree']
+    fan = [f'fan-{i:02}' for i in range(1, 13)]
+    want = {**grid('main', [lead, *fan[:3]]), **grid('main-2', fan[3:7]), **grid('main-3', fan[7:11]), **grid('main-4', fan[11:])}
+    got = {n: placed(l) for n, l in s['layout'].items()}
+    problems = [f'fan: {n} at {got.get(n)}, not {w}' for n, w in want.items() if got.get(n) != w]
+    problems += [f'spaces {spaces}'] if (spaces := {l.get('herdr.space') for l in s['layout'].values()}) != {'fan'} else []
+    lead, job, key = f.jobs['tree']  # its subs were started by help-a and help-b: a nested level takes its place by the same rule
+    want = {**grid('main', [lead, 'help-a', 'help-b', 'sub-a1']), **grid('main-2', ['sub-a2', 'sub-b1', 'sub-b2'])}
     for i in range(1, 6):
         f.start(job, f'ci-{i}', '--tab', 'ci', '--', 'sleep', '900')
-    named = f.by_name(key)
-    got = [named[f'ci-{i}']['labels'].get('herdr.tab') for i in range(1, 6)]
-    for i in range(1, 6):  # the product's way out, so the record says closed and no reopen starts them again
-        closed = f.stampede('close', job, f'ci-{i}')
-        if closed.returncode or not closed.stdout.startswith(f'CLOSED ci-{i}'):
-            raise Fail(f'stampede close ci-{i}: exit {closed.returncode}: {(closed.stdout + closed.stderr).strip()[-300:]}')
-    s['closed'] = [f'ci-{i}' for i in range(1, 6)]
-    if got != ['ci'] * 4 + ['ci-2']:
-        raise Fail(f'--tab ci gave {got}')
-    return 'lead and fan-01..03 in main, then 4 each in main-2, main-3, fan-12 in main-4, one herdr.space; --tab ci: 4 in ci, the 5th in ci-2'
+    want.update({**grid('ci', [f'ci-{i}' for i in range(1, 5)]), **grid('ci-2', ['ci-5'])})
+    got = {n: placed(t['labels']) for n, t in f.by_name(key).items()}
+    problems += [f'tree: {n} at {got.get(n)}, not {w}' for n, w in want.items() if got.get(n) != w]
+    shown = {n['name']: (n.get('tab'), n.get('pane'), n.get('split'), n.get('beside')) for n in json.loads(f.stampede('tree', job, '--json').stdout)['nodes']}
+    problems += [f'tree --json: {n} at {shown.get(n)}, Core labels {g}' for n, g in got.items() if shown.get(n) != g]
+    close = lambda name: (lambda done: None if not done.returncode and done.stdout.startswith(f'CLOSED {name}') else problems.append(
+        f'stampede close {name}: exit {done.returncode}: {(done.stdout + done.stderr).strip()[-300:]}'))(f.stampede('close', job, name))
+    close('ci-2')  # the product's way out, so the record says closed and no reopen starts them again
+    f.start(job, 'ci-6', '--tab', 'ci', '--', 'sleep', '900')
+    freed = placed(f.by_name(key)['ci-6']['labels'])
+    problems += [f'ci-6 took {freed}, not the freed ci pane 2'] if freed != ('ci', 2, 'right', 'ci-1') else []
+    for name in ('ci-1', 'ci-3', 'ci-4', 'ci-5', 'ci-6'):
+        close(name)
+    s['closed'] = [f'ci-{i}' for i in range(1, 7)]
+    if problems:
+        raise Fail('; '.join(problems))
+    return ('fan: lead, fan-01..03 as panes 1 to 4 of main (none; right of lead; down of fan-01; down of lead), the same 2x2 on '
+            'main-2 and main-3, fan-12 pane 1 of main-4; tree: the subs of help-a and help-b by the same rule; --tab ci: 4 as '
+            'panes 1 to 4, the 5th pane 1 of ci-2; ci-6 took the freed pane 2; tree --json shows pane, split, beside')
 
 
 def blocked(f, s):
@@ -325,38 +346,79 @@ def rebuild(f, s):
     snap = f.stampede('snapshot', job)
     if snap.returncode or not Path(snap.stdout.strip().splitlines()[-1]).is_file():
         raise Fail(f'stampede snapshot: exit {snap.returncode}: {(snap.stdout + snap.stderr).strip()[-300:]}')
-    before = {n: t['address'] for n, t in f.by_name(key).items()}
+    named = f.by_name(key)
+    before = {n: t['address'] for n, t in named.items()}
+    places = {n: placed(t['labels']) for n, t in named.items()}
     f.hc('kill', before[lead])
-    left = f.until('the branch ended with the lead', lambda: (lambda n: n if set(n) == {'keeper'} else None)(f.by_name(key)), 20)
+    f.until('the branch ended with the lead', lambda: (lambda n: n if set(n) == {'keeper'} else None)(f.by_name(key)), 20)
+    helpers, subs = ['help-a', 'help-b'], ['sub-a1', 'sub-a2', 'sub-b1', 'sub-b2']
     began = time.time()
-    first = f.stampede('reopen', job, '--rerun-programs', timeout=300)
+    first = f.stampede('reopen', job, timeout=300)  # no flag: the lead, and the never-ran Claude helpers through the queue
     seconds = time.time() - began
+    lines = first.stdout.strip().splitlines()
+    walk = [i for i, line in enumerate(lines) if re.match(r'(SKIPPED|DONE|LIVE) ', line)]
+    problems = [f'reopen exit {first.returncode}: {first.stderr.strip()[-200:]}'] if first.returncode else []
+    problems += [f'the first reopen started {started}, not the lead then {helpers} under it'] \
+        if (started := re.findall(r'^STARTED (\S+)', first.stdout, re.M)) != [lead, *helpers] else []
+    problems += ['the helpers\' STARTED lines come before the walk ended, not from the drain after it'] \
+        if walk and min(i for i, line in enumerate(lines) if line.startswith('STARTED help-')) < max(walk) else []
+    problems += [f'no SKIPPED (a program) for {n}'] if (n := [p for p in subs if f'SKIPPED {p} (a program: --rerun-programs' not in first.stdout]) else []
+    problems += [f'{n} came back resumed'] if (n := [h for h in helpers if f.by_name(key).get(h, {}).get('labels', {}).get('stampede.resumed')]) else []
+    problems += [f'no DONE line for {n} closed by name'] if (n := [c for c in s.get('closed', []) if f'DONE {c} (closed)' not in first.stdout]) else []
+    problems += ['no LIVE line for keeper'] if not re.search(r'^LIVE keeper ', first.stdout, re.M) else []
+    problems += [f'{n} left in the queue'] if (n := len(list((job / 'queue').glob('*.json')))) else []
     second = f.stampede('reopen', job, '--rerun-programs', timeout=300)
+    problems += [f'reopen --rerun-programs (exit {second.returncode}) started {started}, not {subs}'] \
+        if second.returncode or sorted(started := re.findall(r'^STARTED (\S+)', second.stdout, re.M)) != subs else []
+    third = f.stampede('reopen', job, '--rerun-programs', timeout=300)
+    problems += [f'a third reopen (exit {third.returncode}) started {re.findall(r"^STARTED (\S+)", third.stdout, re.M)}'] \
+        if third.returncode or re.search(r'^STARTED', third.stdout, re.M) else []
     named = f.by_name(key)
     address = {n: t['address'] for n, t in named.items()}
     want = {'help-a': lead, 'help-b': lead, 'sub-a1': 'help-a', 'sub-a2': 'help-a', 'sub-b1': 'help-b', 'sub-b2': 'help-b'}
-    started = re.findall(r'^STARTED (\S+)', first.stdout, re.M)
     wrong = {n: named.get(n, {}).get('parent') for n, p in want.items() if named.get(n, {}).get('parent') != address.get(p)}
-    same = [n for n in want if address.get(n) == before.get(n)] + ([lead] if address.get(lead) == before.get(lead) else [])
+    same = [n for n in [lead, *want] if address.get(n) == before.get(n)]
+    moved = {n: (places[n], placed(named[n]['labels'])) for n in [lead, *want] if n in named and placed(named[n]['labels']) != places[n]}
     count = {n: sum(1 for t in f.of(key) if t['labels'].get('stampede.agent') == n) for n in [lead, *want]}
-    problems = [f'reopen exit {first.returncode}: {first.stderr.strip()[-200:]}'] if first.returncode else []
-    problems += [f'started {sorted(set(started) - {lead, *want})} beyond the branch the kill ended'] if set(started) - {lead, *want} else []
-    problems += [f'did not start {sorted({lead, *want} - set(started))}'] if {lead, *want} - set(started) else []
     problems += [f'Core parents {wrong}'] if wrong else []
     problems += [f'the same address as before for {same}'] if same else []
+    problems += [f'places changed (before, after): {moved}'] if moved else []
     problems += [f'live terminals per name {count}'] if set(count.values()) != {1} else []
-    problems += [f'a second reopen (exit {second.returncode}) started {re.findall(r"^STARTED (\S+)", second.stdout, re.M)}'] \
-        if second.returncode or re.search(r'^STARTED', second.stdout, re.M) else []
-    problems += [f'no DONE line for {n} closed by name'] if (n := [c for c in s.get('closed', []) if f'DONE {c} (closed)' not in first.stdout]) else []
-    problems += ['no LIVE line for keeper'] if not re.search(r'^LIVE keeper ', first.stdout, re.M) else []
     keeper = next((n for n in json.loads(f.stampede('tree', job, '--json').stdout)['nodes'] if n['name'] == 'keeper'), {})
     problems += [f'stampede tree --json shows keeper as {keeper}, not outlived'] if not keeper.get('outlived') else []
+    problems += queued_reopen(f, s)
     if problems:
-        raise Fail('; '.join(problems) + f'. First reopen: {" | ".join(first.stdout.strip().splitlines())}')
+        raise Fail('; '.join(problems) + f'. First reopen: {" | ".join(lines)}')
     s['rebuild'] = seconds
-    return (f'lead killed: its branch ended, keeper (--outlive-parent) lived on; reopen --rerun-programs started the same 7 names '
-            f'under the same parents at new addresses in {seconds:.1f} s, said DONE (closed) for the {len(s.get("closed", []))} '
-            f'closed by name, and left keeper LIVE; tree shows keeper outlived {keeper["outlived"]}; a second reopen started nothing')
+    return (f'lead killed: its branch ended, keeper (--outlive-parent) lived on; a plain reopen in {seconds:.1f} s started the lead, '
+            f'then help-a and help-b (never ran) from the queue, SKIPPED the 4 programs, DONE (closed) for the '
+            f'{len(s.get("closed", []))} closed by name, keeper LIVE and outlived {keeper["outlived"]}; --rerun-programs then started '
+            f'the 4 under their parents; same places, new addresses; a third reopen started nothing; {s["queued"]}')
+
+
+def queued_reopen(f, s):
+    """The cap job (cap 3, 3 running and 2 queued): its lead killed, a reopen --rerun-programs starts the lead and what
+    the cap allows, QUEUED for the rest; each place freed (a helper killed) lets one stampede next start one more."""
+    lead, job, key = f.jobs.get('cap') or (None, None, None)
+    if not job:
+        return ['needs cap']
+    f.hc('kill', f.by_name(key)[lead]['address'])
+    f.until('the cap job\'s branch ended', lambda: not f.of(key), 20)
+    back = f.stampede('reopen', job, '--rerun-programs', timeout=300)
+    queued = re.findall(r'^QUEUED (\S+) \((\d+) running, cap (\d+)\)', back.stdout, re.M)
+    started = re.findall(r'^STARTED (cap-\d)', back.stdout, re.M)
+    problems = [] if not back.returncode and len(started) == 3 and len(queued) == 2 and {q[1:] for q in queued} == {('3', '3')} \
+        else [f'cap reopen: exit {back.returncode}, STARTED {started}, QUEUED {queued}: {" | ".join(back.stdout.strip().splitlines())}']
+    peak, later = f.running(key), []
+    for _ in range(2):
+        f.hc('kill', next(t['address'] for t in f.of(key) if t['labels'].get('stampede.role') == 'helper'))
+        out = f.stampede('next', job).stdout
+        later += re.findall(r'^STARTED (\S+)', out, re.M)
+        peak = max(peak, f.running(key))
+    if later != [q[0] for q in queued] or peak > 3 or list((job / 'queue').glob('*.json')):
+        problems.append(f'cap: next started {later} after two places freed, not {[q[0] for q in queued]}; peak {peak} running')
+    s['queued'] = f'cap 3: reopen STARTED {len(started)}, QUEUED {" ".join(q[0] for q in queued)} (3 running, cap 3); next started each as a place freed, peak {peak}'
+    return problems
 
 
 def teardown(f, s):
@@ -384,8 +446,21 @@ def teardown(f, s):
     end = f.stampede('close', job, timeout=300)
     if end.returncode or [t for t in f.of(key)]:
         raise Fail(f'the last close: exit {end.returncode}, still live {[t["labels"].get("stampede.agent") for t in f.of(key)]}')
+    lead, job, key = f.jobs.get('cap') or (None, None, None)  # a finished job: stampede finish, then the lead killed
+    if not job:
+        raise Fail('needs cap')
+    done = f.stampede('finish', job, 'the fleet test is done with it')
+    f.hc('kill', f.by_name(key)[lead]['address'])
+    refused = f.stampede('reopen', job, '--rerun-programs', timeout=300)
+    said = (refused.stdout + refused.stderr).strip().splitlines()
+    plain = f.stampede('reopen', job, timeout=300)
+    if done.returncode or refused.returncode != 2 or len(said) != 1 or 'the job is finished' not in said[0] \
+            or re.search(r'^(STARTED|QUEUED) ', plain.stdout, re.M) or list((job / 'queue').glob('*.json')):
+        raise Fail(f'finish exit {done.returncode}; reopen --rerun-programs of a finished job: exit {refused.returncode}, said {said}; '
+                   f'a plain reopen: {" | ".join(plain.stdout.strip().splitlines())}')
     return (f'CLOSED {" ".join(order)} (leaves first, keeper the outlived child before the lead, the lead last) in {seconds:.1f} s; '
-            f'nothing of the job was live; reopen then brought back the same {len(again)}, closed-by-name helpers stayed DONE (closed)')
+            f'nothing of the job was live; reopen then brought back the same {len(again)}, closed-by-name helpers stayed DONE (closed); '
+            f'a finished job: reopen --rerun-programs refused in one line, exit 2; a plain reopen started and queued nothing')
 
 
 def watchdog(f, s):
@@ -406,7 +481,18 @@ def watchdog(f, s):
     got = mine()
     if after_block != ['blocked'] or sorted(got) != ['blocked', 'dead']:
         raise Fail(f'events after the block {after_block}, after the kill {got}')
-    return 'two sweeps of a blocked lead queued one blocked event; two sweeps after its kill one dead event'
+    lead, job, key = f.new('lost', owner=BOT)  # a lead killed and removed before any sweep saw it: Core has no row at all
+    address = f.by_name(key)[lead]['address']
+    f.hc('kill', address)
+    f.hc('rm', address)
+    sweep()
+    first = mine()
+    sweep()
+    sweep()
+    if first != ['dead'] or mine() != ['dead']:
+        raise Fail(f'a lead removed before any sweep: events after one sweep {first}, after three {mine()}')
+    return ('two sweeps of a blocked lead queued one blocked event; two sweeps after its kill one dead event; a lead killed and '
+            'removed before any sweep: one dead event, then none in two more sweeps')
 
 
 CHECKS = [('tree', tree), ('fanout', fanout), ('cap', cap), ('layout', layout), ('blocked', blocked), ('waiting', waiting),

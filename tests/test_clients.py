@@ -285,6 +285,10 @@ class Outcomes(unittest.TestCase):
         self.ok(job, 'start program', f'STARTED watch-ci (t', f') under {Job.LEAD}')
         self.assertEqual(job.program(runs['watch-ci']), ['sleep', '60'])
         self.assertEqual((job.labels(runs['watch-ci'])['stampede.kind'], job.option(runs['watch-ci'], '--parent')), ('program', lead))
+        place = lambda name: tuple(job.labels(runs[name]).get(k) for k in ('herdr.tab', 'stampede.pane', 'stampede.split', 'stampede.beside'))
+        self.assertEqual([place(n) for n in (Job.LEAD, 'build-claude', 'build-codex', 'watch-ci')],  # the owner's 2x2 on main
+                         [('main', '1', None, None), ('main', '2', 'right', Job.LEAD), ('main', '3', 'down', 'build-claude'),
+                          ('main', '4', 'down', Job.LEAD)])
 
     def heard(self, job):
         """What reached the lead: its inbox file, or on a native job what Core typed into its terminal."""
@@ -403,7 +407,14 @@ class Outcomes(unittest.TestCase):
                 self.assertEqual(sorted(out.split()[1] for out in out.strip().splitlines()),
                                  sorted([Job.LEAD, 'build-claude', 'build-codex', 'watch-ci']))
                 self.assertTrue(all(row.startswith('LIVE ') for row in out.strip().splitlines()), out)
-                self.assertEqual(len(job.calls('run')), runs, 'nothing started')
+                self.assertEqual(job.after_end, runs, 'nothing started')
+                out = self.ok(job, 'reopen ended')  # the helpers ended: no work handed out by the reopen itself
+                self.assertIn(f'LIVE {Job.LEAD} (', out)
+                self.assertRegex(out, r'(?m)^STARTED build-claude \(t\d+\) under ' + re.escape(Job.LEAD) + '$')
+                self.assertIn('SKIPPED build-codex (codex keeps no session to resume: --fresh starts it again with its brief)', out)
+                self.assertIn('SKIPPED watch-ci (a program: --rerun-programs runs it again)', out)
+                self.assertEqual([job.labels(r)['stampede.agent'] for r in job.calls('run')[job.after_end:]], ['build-claude'])
+                self.assertEqual(job.labels(job.calls('run')[-1]).get('stampede.pane'), '2', 'the place it had')
             elif job.backend == 'core':
                 out = self.ok(job, 'reopen', f'LIVE {job.key}: no agent to restart')
                 self.assertEqual(len(job.calls('run')), runs, 'nothing started')

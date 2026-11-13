@@ -192,10 +192,12 @@ class Job:
         return (self.job / 'workspace').read_text().strip()
 
     def address(self, agent):
-        """An agent's Core address: core.json on the relay path; on a native job, the live terminal Core labels with it."""
+        """An agent's Core address: core.json on the relay path; on a native job, the terminal Core labels with it, the
+        live one first (O8 ends the helpers before O6 reads what was sent to them)."""
         if self.backend == 'native':
-            return next(a for a, t in self.state()['terminals'].items() if t.get('state') == 'live'
-                        and (t.get('labels') or {}).get('stampede.agent') == agent)
+            mine = [(t.get('state') == 'live', i, a) for i, (a, t) in enumerate(self.state()['terminals'].items())
+                    if (t.get('labels') or {}).get('stampede.agent') == agent]
+            return max(mine)[2]
         return json.loads((self.job / 'core.json').read_text())[agent]['address']
 
     def sent(self, agent):
@@ -349,6 +351,11 @@ class Job:
             self.run('snapshot', (BOT_SCRIPTS / 'herdr-reopen-snapshot', self.WS, self.job), self.lead_env())
         self.before_reopen = len(self.calls('run')), len(self.herdr_calls())
         self.front('reopen', 'bash', self.job / 'reopen.sh')
+        if self.backend == 'native':  # the helpers end (the lead lives): a reopen hands out no work by itself
+            for agent in ('build-claude', 'build-codex', 'watch-ci'):
+                self.terminal(self.address(agent), state='finished', reason='killed', status=None, signal=1)
+            self.after_end = len(self.calls('run'))
+            self.front('reopen ended', 'bash', self.job / 'reopen.sh')
 
     def no_poll(self):
         """O9: while the job is open, the lead's plain turn end stays on the machine and its block reaches the job's bot,

@@ -33,8 +33,10 @@ tests/evals/linux/run.sh --label linux                     # all three live runn
 `live/native_fleet.py` is the sandbox fleet test of a Core-native job (`stampede new --core`): ten named checks (the tree, a fan-out of 20 under the cap of 12, the owner's cap, the layout labels, a blocked child, `hc wait --children`, results in files, a crash and rebuild, teardown, the lead's watchdog) on a real Herdr Core in a scratch session, with stand-in agents. It is not in `cases.json`: it prints its own table of checks and seconds, exits 0 only when every check passed, and keeps its scratch folder only with `--keep`. `--only tree,fanout` runs some checks; a check that needs an earlier one fails with `needs <check>`. Its last run is in [docs/RUNS.md](../../docs/RUNS.md#core-native-sandbox-fleet-test-13-nov-2026).
 
 ```bash
-python3 tests/evals/live/native_fleet.py                    # about 60 s
+python3 tests/evals/live/native_fleet.py                    # about 65 s
 ```
+
+`live/wait_probe.py` is a probe of Herdr Core itself, not a test of stampede, on the same kind of scratch core: a stand-in lead runs `hc wait --children any --timeout 120` from inside its own terminal while its stand-in child sends it one line with `hc send`, works 3 s more, then ends its turn idle (a last run: exits). It prints, per run, how long after the send the wait returned and Core's answer. `--runs 5` is the default.
 
 `run.py` exits 0 when no case failed or broke, else 1. A case that cannot run here is `blocked`, never a pass. The live runners never use the machine's own Herdr server or Herdr Core: `core_e2e.py` names a scratch `HC_SESSION` on every `hc` call and refuses any other, and `tui_scratch.sh` checks that Herdr's socket sits under its scratch home before it starts or stops anything.
 
