@@ -105,7 +105,7 @@ It carries no stampede label and is in the tree by its parent link alone. Its ex
 
 Labels only; Core's tree never depends on them.
 
-- You and every helper carry `herdr.space=<the space's name>` and `herdr.tab=<its tab>`, so the Herdr app shows the job as one space.
+- You and every helper carry `herdr.space=<the space's name>` and `herdr.tab=<its tab>`, so the Herdr app shows the job as one space. The app takes both as ids: it shows the space by its first terminal's folder and a tab by its place until someone renames it there.
 - You are the first terminal of tab `main`. A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job (`STAMPEDE_TAB_PANES` changes the 4).
 - `--tab <label>` names a workstream tab instead; it overflows to `<label>-2`, `<label>-3` by the same rule.
 - `stampede tree <job> [--json]` prints the tree as Core holds it now: `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab>` per terminal, indented by depth (a plain child has role `plain`), then `queued <name> under <parent> (<kind>)` for each queued start. `NO LEAD`, exit 1, when Core has no lead for the job.

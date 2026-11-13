@@ -503,7 +503,7 @@ space add-health (hc-814a8527e7ef)
     docs-health (t5) helper claude idle tab main-2
 ```
 
-The layout is labels only: the lead is the first terminal of tab `main`, and helpers fill `main`, `main-2` and so on, 4 live terminals to a tab (`STAMPEDE_TAB_PANES`), or a workstream tab named with `--tab <label>`. The lead and every helper carry `herdr.space` and `herdr.tab`, so the Herdr app can show the job as one space. `stampede tree --json` gives the same to a client.
+The layout is labels only: the lead is the first terminal of tab `main`, and helpers fill `main`, `main-2` and so on, 4 live terminals to a tab (`STAMPEDE_TAB_PANES`), or a workstream tab named with `--tab <label>`. The lead and every helper carry `herdr.space` and `herdr.tab`, so the Herdr app can show the job as one space. The app takes both as ids: it shows the space by its first terminal's folder and a tab by its place until you rename it there (naming it from stampede is planned). `stampede tree --json` gives the same to a client.
 
 The lead waits with Core, never with sleep or a poll: `hc wait --children any` returns on the next child's news or a message, `hc wait --children all` once none is working. A helper reports with `hc send <parent address> "build-health: done reports/build-health.md"`: one line and the path of its result file, which the lead then reads. Core's own notes tell the lead when a child's turn ends, when it is blocked and when it exits. The owner's words reach the lead through `tell`:
 

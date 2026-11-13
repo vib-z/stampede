@@ -26,8 +26,8 @@ Read the tree from Core, never from stampede's files: one full listing, then fol
 | `stampede.kind` | lead, helpers | `claude`, `codex` or `program` |
 | `stampede.session` | a Claude lead or helper | its Claude session id |
 | `stampede.resumed` | an agent `stampede reopen` resumed | `1`: while it is `idle` it holds no place under the cap, whatever its turn |
-| `herdr.space` | lead, helpers | the space's name again, for the Herdr app |
-| `herdr.tab` | lead, helpers | its tab in the app's view (below) |
+| `herdr.space` | lead, helpers | the space's id in the Herdr app: the same value as `stampede.space` |
+| `herdr.tab` | lead, helpers | its tab's id in the app's view (below) |
 
 - Identity is the terminal's address. A name another terminal holds gets a suffix; `stampede.agent` stays the name the job uses.
 - Status is Core's own: `idle`, `working`, `done`, `blocked`, `error` from the program's reports, and `live` or `finished` for the terminal. A plain program reports none.
@@ -41,6 +41,7 @@ Labels only. Core stays the source of truth, and the tree above never depends on
 - A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job. `STAMPEDE_TAB_PANES` changes the 4.
 - `stampede start --tab <label>` names a workstream tab instead; it overflows to `<label>-2`, `<label>-3` by the same rule.
 - All of a job's tabs carry the one `herdr.space`.
+- To the Herdr app both values are ids, not names. It shows a space it was not told a name for by the folder of its first terminal, and a tab by its place (1, 2 and so on), until someone renames it in the app. The space's name of record is the lead's `stampede.space`.
 
 ## Messages
 
