@@ -19,9 +19,12 @@ is_ask(){ jq -e '.payload.source == "stampede" and (.payload.state == "gate" or 
 is_post(){ jq -e '.payload.state == "post"' "$1" >/dev/null 2>&1; }
 # A question, gate or post its bot has not heard is news for the lead: one line in its job's inbox.log wakes it.
 # A post has no ask or gate id: its line names it by its outbox number.
+# A Core-native job (backend native) has no inbox.log: the line goes to its lead with fleet-job tell (hc send).
 tell_lead(){
-  local job; job=$(jq -r '.payload.job // ""' "$1" 2>/dev/null); [ -f "$job/lead" ] || return 0
-  printf 'UNDELIVERED %s %s\n' "$(jq -r '"\(.payload.state) \(if .payload.state == "post" then "outbox \(.payload.outbox)" else (.payload.gate // .payload.ask) end) for \(.payload.owner)"' "$1")" "$2" >>"$job/inbox.log"
+  local job text; job=$(jq -r '.payload.job // ""' "$1" 2>/dev/null); [ -f "$job/lead" ] || return 0
+  text="UNDELIVERED $(jq -r '"\(.payload.state) \(if .payload.state == "post" then "outbox \(.payload.outbox)" else (.payload.gate // .payload.ask) end) for \(.payload.owner)"' "$1") $2"
+  if [ "$(cat "$job/backend" 2>/dev/null)" = native ]; then fleet-job tell "$job" lead "$text" >/dev/null 2>&1 || true; return 0; fi
+  printf '%s\n' "$text" >>"$job/inbox.log"
   fleet-job _wake "$job" >/dev/null 2>&1 || true   # a Codex lead has no file hook: fleet-job types the line once it is idle
 }
 shopt -s nullglob

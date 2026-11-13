@@ -193,7 +193,7 @@ if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.pl
   || grep -q 'herdr-event-claude-hook' "$HOME/.claude/settings.json" 2>/dev/null \
   || grep -q 'herdr-event-codex-notify' <<<"$codex_notify"; then relay=1; fi
 
-# a clone plus install.sh does not enable the event plugin (the Herdr TUI's; a Core job has its follower instead)
+# a clone plus install.sh does not enable the event plugin (the Herdr TUI's; a Core job needs none: a relay job has its follower, a native one the sweep)
 # with both backends checked and only Herdr Core usable, the TUI's plugin is not what a job here needs: a warn, as its other gaps
 if [ "$tui" = 0 ]; then :
 elif herdr plugin list 2>/dev/null | grep -qE '^- (stampede|local\.herdr-events) .*enabled'; then ok "event plugin enabled"

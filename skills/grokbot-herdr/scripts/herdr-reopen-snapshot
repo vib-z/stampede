@@ -7,7 +7,8 @@
   herdr-reopen-snapshot <hc-key> <job dir>
       A Herdr Core job (its key is in <job dir>/workspace): write REOPEN.md and reopen.sh from agents.tsv and core.json,
       with no hc call. reopen.sh runs `fleet-job _reopen`, which starts only what is not live. stampede writes it at
-      every Core start.
+      every Core start. A Core-native job (<job dir>/backend native) hands over to `fleet-job snapshot <job dir>`
+      and exits with its code.
   herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>
       Note how an agent was started (the flags after `herdr agent start ... --`, and its brief) in
       <job dir>/agents.tsv. Herdr knows layout, kinds and session ids, not flags or briefs: record them at every start.
@@ -351,12 +352,24 @@ def snapshot_core(key, job):
     print(f'wrote {job}/REOPEN.md and {sh}: {len(entries)} terminals of {key}')
 
 
+def native(job):
+    """A Core-native job (<job>/backend native): its reopen record is fleet-job's own (tree.json)."""
+    try:
+        return (job / 'backend').read_text().strip() == 'native'
+    except OSError:
+        return False
+
+
 def main(argv):
     if argv[:1] == ['record']:
         return record(argv[1:])
     if len(argv) != 2 or argv[0].startswith('-'):
         sys.exit(__doc__.strip())
     job = Path(argv[1]).expanduser().resolve()
+    if re.fullmatch(r'hc-[0-9a-f]{12}', argv[0]) and native(Path(argv[1]).expanduser()):
+        fleet = HERE.parent.parent / 'herdr-fleet/scripts/fleet-job'
+        fleet = str(fleet) if os.access(fleet, os.X_OK) else 'fleet-job'
+        sys.exit(subprocess.run([fleet, 'snapshot', str(Path(argv[1]).expanduser().absolute())]).returncode)
     if re.fullmatch(r'hc-[0-9a-f]{12}', argv[0]):
         return snapshot_core(argv[0], Path(argv[1]).expanduser().absolute())
     job.mkdir(parents=True, exist_ok=True)
