@@ -159,6 +159,18 @@ class Sweep(NativeCase):
         for job in (self.jd, relay, plain):
             self.assertFalse((job / 'sweep-state.json').exists())
 
+    def test_a_closed_job_is_no_alarm_until_it_is_reopened(self):
+        self.lead()
+        self.sweep()
+        (self.jd / 'closed').write_text('')
+        self.shape(terminals={})
+        self.sweep()
+        self.assertEqual(self.queued(), [], 'closed on purpose: no dead')
+        (self.jd / 'closed').unlink()
+        self.sweep()
+        self.sweep()
+        self.assertEqual([(e['state'], e['event_id']) for e in self.queued()], [('dead', f'{self.key}/t1|finished')])
+
     def test_a_core_that_does_not_answer_is_no_news(self):
         (self.jd / 'endpoint').write_text(json.dumps({'session': '', 'socket': str(self.root / 'none.sock')}))
         self.lead(status={'state': 'blocked', 'kind': 'permission'})

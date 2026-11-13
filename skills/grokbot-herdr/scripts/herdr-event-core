@@ -694,7 +694,7 @@ class Sweep(Follower):
 
 
 def sweep():
-    """Each marker jobs/hc-<12 hex> whose job folder says backend native and is not finished, on that job's own core
+    """Each marker jobs/hc-<12 hex> whose job folder says backend native and is neither finished nor closed, on that job's own core
     (its endpoint); a core that does not answer is no news, and none is ever started. A pass still running for a job
     makes the next one skip it. Exit 0."""
     jobs = Path(os.environ.get('HERDR_EVENTS_DIR') or Path.home() / '.config/herdr-events') / 'jobs'
@@ -706,7 +706,7 @@ def sweep():
             point = json.loads((job / 'endpoint').read_text()) if (job / 'endpoint').is_file() else {}
         except (OSError, IndexError, ValueError):
             continue
-        if not re.fullmatch(r'hc-[0-9a-f]{12}', marker.name) or not native or (job / 'finished').exists():
+        if not re.fullmatch(r'hc-[0-9a-f]{12}', marker.name) or not native or (job / 'finished').exists() or (job / 'closed').exists():
             continue
         for name, key in (('HC_SESSION', 'session'), ('HC_SOCKET', 'socket')):
             value = point.get(key, base[name])
