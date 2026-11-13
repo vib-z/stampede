@@ -1,6 +1,7 @@
 """One stampede job per client and backend, against the repo's fakes, for tests/test_clients.py.
 
-A Job is one client driving one job on the Herdr TUI or on Herdr Core in a scratch folder of its own. play() runs the
+A Job is one client driving one job in a scratch folder of its own, on one backend: the Herdr TUI (`tui`), Herdr Core's
+relay path (`core`, new --core --relay) or a Core-native job (`native`, new --core). play() runs the
 steps behind the outcomes O2 to O9 once, in order, through the real `stampede` command, and keeps what each command
 did in `steps`; test_clients.py asserts them. The client's commands run with its environment and process tree: inside
 Herdr (the pane's ids), outside it (an app's command: no Herdr ids, no Herdr process above it), or over ssh (the same,
@@ -88,7 +89,8 @@ class Job:
     """One client driving one job on one backend. CoreCase's fake-core helpers read self.core, so they work here too."""
     WS, NAME, LEAD = 'w9', 'xc', 'lead-xc'  # the fake Herdr's workspace; new --name xc makes the job xc and its lead (Core: <repo>/.herdr-xc; TUI: <jobs root>/jobs/<date>-<bot or local>-xc)
 
-    state, terminal, calls, labels, program = CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels, CoreCase.program
+    state, terminal, calls, labels, program, option = (CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels,
+                                                       CoreCase.program, CoreCase.option)
 
     def __init__(self, client, row, backend, root, workers, handed=(), lead=None):
         """row: the client's CLIENTS row; workers: WORKERS, the kinds each backend takes; handed: HANDED, the kinds a Core
@@ -97,6 +99,7 @@ class Job:
         lead: the --lead new passes (None: no flag, so the default Claude lead); a job with one plays only its start."""
         self.client, self.row, self.backend, self.bot, self.lead_kind = client, row, backend, row.get('bot'), lead
         self.handed = handed if backend == 'core' else ()
+        self.on_core = backend in ('core', 'native')
         self.kinds, self.takes = tuple(dict.fromkeys(k for kinds in workers.values() for k in kinds)), workers[backend]
         self.worker = 'build-' + next(k for k in self.takes if k != 'claude')  # prompted, where a Claude agent reads its inbox
         self.root = root / (f'{client}-{backend}' + (f'-{lead}-lead' if lead else ''))
@@ -104,7 +107,7 @@ class Job:
         self.home, self.events, self.queue = self.root / 'home', self.root / 'events', self.root / 'queue'
         self.bin = self.home / '.local/bin'
         self.jobs_root = self.root / 'herdr-jobs'
-        self.job = (self.repo / ('.herdr-' + self.NAME) if backend == 'core' else
+        self.job = (self.repo / ('.herdr-' + self.NAME) if self.on_core else
                     self.jobs_root / 'jobs' / f'{datetime.now():%Y-%m-%d}-{self.bot or "local"}-{self.NAME}')
         self.steps, self.error = {}, ''
         for folder in (self.repo, self.core, self.herdr, self.bin, self.events, self.root / 'routes'):
@@ -151,7 +154,7 @@ class Job:
             env.update(HERDR_ENV='1', HERDR_PANE_ID=f'{self.WS}:p9', HERDR_TAB_ID=f'{self.WS}:t9', HERDR_WORKSPACE_ID=self.WS)
         elif where == 'core':  # a program in a Herdr Core terminal, hc exec included
             env.update(HC_TERMINAL_ID='t9', HC_TERMINAL_SOCKET=str(self.root / 't9.sock'), HC_SCOPE='t9')
-        if self.bot and (self.backend == 'core' or self.row['owner_from'] == 'env'):
+        if self.bot and (self.on_core or self.row['owner_from'] == 'env'):
             env['HERDR_EVENTS_OWNER'] = self.bot  # on Core there is no workspace to tag
         return env
 
@@ -189,7 +192,15 @@ class Job:
         return (self.job / 'workspace').read_text().strip()
 
     def address(self, agent):
+        """An agent's Core address: core.json on the relay path; on a native job, the live terminal Core labels with it."""
+        if self.backend == 'native':
+            return next(a for a, t in self.state()['terminals'].items() if t.get('state') == 'live'
+                        and (t.get('labels') or {}).get('stampede.agent') == agent)
         return json.loads((self.job / 'core.json').read_text())[agent]['address']
+
+    def sent(self, agent):
+        """What hc send typed into an agent's terminal (the fake core's record)."""
+        return self.state()['terminals'][self.address(agent)].get('sent', [])
 
     def inbox(self, agent=None):
         path = self.job / 'inbox' / ((agent or self.LEAD) + '.md')
@@ -243,8 +254,9 @@ class Job:
         ask = self.root / 'ask.md'
         ask.write_text(f'Write hello-{self.client}-{self.backend}.txt with one worker.\n')
         lead = ('--lead', self.lead_kind) if self.lead_kind else ()
-        if self.backend == 'core':
-            self.front('new', 'new', '--core', '--relay', '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
+        if self.on_core:
+            relay = ('--relay',) if self.backend == 'core' else ()
+            self.front('new', 'new', '--core', *relay, '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
             return
         if self.row['where'] == 'inside':  # a chat in a Herdr pane: the lead gets a lead tab in this workspace
             self.front('new', 'new', '--file', ask, '--name', self.NAME, *lead)
@@ -257,7 +269,17 @@ class Job:
 
     def workers(self):
         """O3: the lead starts one worker of every kind, each in its pane on the TUI; a kind this backend does not take is
-        refused. On Core a handed kind is first started without --pane (refused), then handed to its pane."""
+        refused. On Core a handed kind is first started without --pane (refused), then handed to its pane. A native job
+        hands nothing: a kind it does not take is refused with or without --pane, and any CLI runs as a program instead."""
+        if self.backend == 'native':
+            for n, kind in enumerate(self.kinds, 2):
+                brief = valid_brief(self.job, 'build-' + kind)
+                self.lead('start ' + kind, 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief)
+                if kind not in self.takes:
+                    self.lead('start ' + kind + ' --pane', 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief,
+                              '--pane', f'{self.WS}:p{n}')
+            self.lead('start program', 'start', self.job, 'watch-ci', '--', 'sleep', '60')
+            return
         for n, kind in enumerate(self.kinds, 2):
             brief = valid_brief(self.job, 'build-' + kind)
             where = ('--pane', f'{self.WS}:p{n}') if self.backend == 'tui' or kind in self.handed else ()
@@ -292,7 +314,7 @@ class Job:
         def closed(after):
             self.closed[after] = self.lead('gate-ok after ' + after, 'gate-ok', self.job, ident, '--sha', SHA)[0], record.exists()
         closed('the ask')
-        if self.backend == 'core':
+        if self.on_core:
             for text in ('yes', 'approve', 'go ahead'):
                 self.front('typed ' + text, 'tell', self.job, 'lead', text)
                 closed('typed ' + text)
@@ -314,7 +336,7 @@ class Job:
         worker again while it is working (refused) and once its turn is done (sent at once)."""
         self.front('tell lead', 'tell', self.job, 'lead', 'Use the repo root')
         self.front('tell worker', 'tell', self.job, self.worker, 'Check the path')
-        if self.backend == 'core':
+        if self.on_core:
             for state, step, text in (('working', 'tell working worker', 'And the error path'),
                                       ('done', 'tell done worker', 'And the docs')):
                 self.terminal(self.address(self.worker), status={'state': state})
@@ -331,8 +353,8 @@ class Job:
     def no_poll(self):
         """O9: while the job is open, the lead's plain turn end stays on the machine and its block reaches the job's bot,
         as the Herdr plugin (TUI) or the job's follower (Core) posts them."""
-        where = f'hc:{self.key}/{self.address(self.LEAD)}' if self.backend == 'core' else f'{self.WS}:p1'
-        source, post = 'hc' if self.backend == 'core' else 'herdr', BOT_SCRIPTS / 'herdr-event-post'
+        where = f'hc:{self.key}/{self.address(self.LEAD)}' if self.on_core else f'{self.WS}:p1'
+        source, post = 'hc' if self.on_core else 'herdr', BOT_SCRIPTS / 'herdr-event-post'
         self.queue_before = len(self.queued())
         self.run('turn end', (post, f'source={source}', 'state=done', f'pane={where}'), self.base)
         self.queue_after_turn_end = len(self.queued())

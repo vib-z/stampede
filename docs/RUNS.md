@@ -8,6 +8,7 @@ Each run here really happened. Times are local, names are the real agent and tab
 - [Run 3: stampede improves itself, by a fresh tester](#run-3-stampede-improves-itself-by-a-fresh-tester)
 - [Run 4: a landlord app's competitors, features and site, by a fresh tester](#run-4-a-landlord-apps-competitors-features-and-site-by-a-fresh-tester)
 - [Run 5: a property-data research and build job, by a fresh tester](#run-5-a-property-data-research-and-build-job-by-a-fresh-tester)
+- [Core-native sandbox fleet test, 13 Nov 2026](#core-native-sandbox-fleet-test-13-nov-2026)
 
 ## Run 1: the fleet that built stampede v0
 
@@ -298,3 +299,28 @@ The tester logged 29 findings. The ones the lean version answers:
 - **A cancelled phone question stayed on the phone**: cancel stopped the wrapper, not its child. `stampede cancel` now stops the whole process group.
 - **Claude's dimmed prompt suggestions read as typed answers**, seven times, once under the merge question. The failure modes now name it: it is not typing, and `herdr agent read <name> --ansi` shows it dim ([failure-modes.md](../skills/herdr-fleet/references/failure-modes.md)).
 - **Nearly every owner answer came through another session**, not the lead or the phone. The lean lead is the one contact, and a relayed yes never passes a gate. Since 23 Oct 2026 a gate in a job a bot started goes back to that bot, which records the owner's yes with `stampede approve-gate`; a yes passed on with `stampede tell` still never counts.
+
+## Core-native sandbox fleet test, 13 Nov 2026
+
+**13 Nov 2026, 14:00, macOS 27.2 arm64, Herdr Core 0.1.21.** One run of [tests/evals/live/native_fleet.py](../tests/evals/live/native_fleet.py) on the branch that adds Core-native jobs ([CORE-NATIVE.md](CORE-NATIVE.md)), before its review.
+
+What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folders under a short `/tmp` folder, started as an ssh start so no launchd job), this checkout's `scripts/stampede`, the job folders, Core's parent links, notes and waits, and `herdr-event-core --sweep`. What stood in: the agents (`core_agent.py` as `claude`: OSC 7501 status, no model) and the helpers' work (`sleep`, a script that reports `blocked`, a script that writes a result file and sends its path). The bot's route was a URL on 127.0.0.1 that was never flushed. The machine's own core showed the same 13 terminals before and after.
+
+| # | check | result | seconds | what it showed |
+|---|---|---|---|---|
+| 1 | tree | PASS | 6.3 | a stand-in lead, 2 helpers, 2 sub-helpers each started from inside their helper; Core's `parent` of every node is its starter, and `stampede tree --json` shows the same 7 |
+| 2 | fan-out | PASS | 23.4 | 20 program helpers: 12 started in 2.1 s, 8 `QUEUED`, never more than 12 live; `stampede next` after each end started the next, oldest first; all 20 done in 23.1 s |
+| 3 | the owner's cap | PASS | 3.2 | `--max-helpers 3`: 3 started, 2 queued, 3 running in every sample |
+| 4 | layout | PASS | 2.0 | the lead and 3 helpers in `main`, then 4 each in `main-2`, `main-3`, one `herdr.space`; `--tab ci` put 4 in `ci` and the 5th in `ci-2` |
+| 5 | a blocked child | PASS | 1.1 | `hc wait --children any <parent>` returned the blocked child, and Core's note was on the parent's screen |
+| 6 | waiting | PASS | 7.9 | `any` returned on the first child (1.8 s), `all` once none worked (7.0 s) |
+| 7 | results in files | PASS | 0.5 | the helper's `<hc from="...">res-1: done <path></hc>` was on the parent's screen, and the file was there |
+| 8 | crash and rebuild | FAIL | 2.2 | the lead killed: its branch ended, an `--outlive-parent` child lived on; `reopen --rerun-programs` rebuilt the 7 under the same parents at new addresses, and a second reopen started nothing; but it also started 5 helpers closed earlier with `stampede close <job> <agent>` |
+| 9 | teardown | FAIL | 1.8 | `stampede close <job>` ended leaves first and the lead last, but the `--outlive-parent` child of the old lead stayed live |
+| 10 | the lead's watchdog | PASS | 3.3 | a blocked lead gave one `blocked` event over two sweeps, and its kill one `dead` event over two more |
+
+What it found:
+- **A closed helper comes back at reopen.** `reopen` restarts a node the record marks `closed`, so a helper the lead ended on purpose runs again (check 8).
+- **An `--outlive-parent` helper of a lead that died is out of the tree.** Its Core parent is the old lead, so after a reopen `stampede tree` does not show it and `stampede close <job>` leaves it running (checks 8 and 9).
+- **Core tags only an agent's message.** On Herdr Core 0.1.21, `hc send` from a terminal that reports no OSC 7501 status arrives with no `<hc from="...">` tag, so a plain program's result line reads like typed text. The stand-in helper of check 7 reports a status, as an agent does.
+

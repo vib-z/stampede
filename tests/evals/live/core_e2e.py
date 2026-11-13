@@ -356,9 +356,9 @@ class Harness:
         ask = self.t / f'ask-{name}.md'
         ask.write_text(f'Eval job {name}: a stand-in lead and stand-in workers on Herdr Core.\n')
         env = {**self.env, **({'HERDR_EVENTS_OWNER': owner} if owner else {})}
-        self.commands.append((f'HERDR_EVENTS_OWNER={owner} ' if owner else '') + shlex.join(['stampede', 'new', '--core', *flags, '--file', str(ask),
+        self.commands.append((f'HERDR_EVENTS_OWNER={owner} ' if owner else '') + shlex.join(['stampede', 'new', '--core', '--relay', *flags, '--file', str(ask),
                                                                                              '--cwd', str(self.repo), '--name', name]))
-        made = self.sh(['stampede', 'new', '--core', *flags, '--file', str(ask), '--cwd', str(self.repo), '--name', name], env=env, timeout=180, show=False)
+        made = self.sh(['stampede', 'new', '--core', '--relay', *flags, '--file', str(ask), '--cwd', str(self.repo), '--name', name], env=env, timeout=180, show=False)
         if made.returncode:
             raise Fail(f'stampede new --core exited {made.returncode}: {made.stdout.strip()[-300:]} {made.stderr.strip()[-300:]}')
         lead, job = made.stdout.strip().splitlines()[-1].split(' ', 1)

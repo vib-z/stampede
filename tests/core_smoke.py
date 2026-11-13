@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """A smoke run on a real Herdr Core (hc 0.1.13 or later; CI pins 0.1.20 on macOS and Linux) in a scratch session of its own (HC_SESSION and XDG folders under a
 temporary folder), never the machine's own core. CI runs it after installing hc; it prints PASS or the first FAIL.
-The stampede part (new --core, tell, finish, the follower's exit) runs once herdr-event-core is in the checkout."""
-import json, os, queue, shutil, subprocess, sys, tempfile, threading, time
+The stampede parts run once herdr-event-core is in the checkout: the relay path (new --core --relay, tell, finish, the
+follower's exit) and the Core-native path (new --core, a program helper, tree, close, finish)."""
+import json, os, queue, re, shutil, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1]
@@ -63,15 +64,21 @@ def core_basics():
     print('ok hc run, wait, send --if idle --wait, events, get')
 
 
-def stampede_core():
-    repo, fake = T / 'code/repo', T / 'bin'
+def scratch_env(name):
+    """A git repo under the scratch trust root, a fake claude on PATH, and the environment stampede runs with."""
+    repo, fake = T / 'code' / name, T / 'bin'
     repo.mkdir(parents=True)
-    fake.mkdir()
+    fake.mkdir(exist_ok=True)
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
     (fake / 'claude').write_text(f'#!/bin/sh\nexec {sys.executable} -I {AGENT}\n')
     (fake / 'claude').chmod(0o755)
     env = {**ENV, 'PATH': f'{fake}:{ENV["PATH"]}', 'FLEET_TRUST_ROOT': str(T / 'code'), 'HERDR_EVENTS_DIR': str(T / 'events'),
            'HERDR_EVENTS_HOME': str(T / 'queue'), 'HERDR_EVENTS_ROUTES_DIR': str(T / 'routes'), 'FLEET_ASK_CMD': 'false'}
+    return repo, env
+
+
+def stampede_core():
+    repo, env = scratch_env('repo')
     ask = T / 'ask.md'
     ask.write_text('Smoke test the Core path\n')
     stampede = [str(SRC / 'scripts/stampede')]
@@ -96,7 +103,35 @@ def stampede_core():
         hc('rm', '--json', terminal['address'], env=env)
     if hc('ls', '--all', '--json', '--label', 'stampede.job=' + key, env=env)['terminals']:
         fail('terminals of the job are left over')
-    print('ok stampede new --core, tell, finish, the follower exits, cleanup')
+    print('ok stampede new --core --relay, tell, finish, the follower exits, cleanup')
+
+
+def stampede_native():
+    """A Core-native job: new --core, one program helper, tree, close (leaves first, the lead last), finish."""
+    repo, env = scratch_env('native')
+    ask = T / 'ask-native.md'
+    ask.write_text('Smoke test the Core-native path\n')
+    run = lambda *args: subprocess.run([str(SRC / 'scripts/stampede'), *args], capture_output=True, text=True, env=env, timeout=120)
+    made = run('new', '--core', '--file', str(ask), '--cwd', str(repo))
+    if made.returncode:
+        fail(f'stampede new --core: exit {made.returncode}: {made.stdout} {made.stderr}')
+    lead, job = made.stdout.strip().splitlines()[-1].split(' ', 1)
+    key = (Path(job) / 'workspace').read_text().strip()
+    started = run('start', job, 'watch-ci', '--', 'sleep', '300')
+    if started.returncode or not started.stdout.startswith('STARTED watch-ci'):
+        fail(f'stampede start watch-ci: exit {started.returncode}: {started.stdout} {started.stderr}')
+    shown = run('tree', job).stdout
+    if not re.search(rf'^  {lead} \(t\d+\) lead claude', shown, re.M) or not re.search(r'^    watch-ci \(t\d+\) helper program', shown, re.M):
+        fail(f'stampede tree shows {shown}')
+    closed = run('close', job)
+    if closed.returncode or re.findall(r'^CLOSED (\S+)', closed.stdout, re.M) != ['watch-ci', lead]:
+        fail(f'stampede close: exit {closed.returncode}: {closed.stdout} {closed.stderr}')
+    finished = run('finish', job, 'smoke done')
+    if finished.returncode:
+        fail(f'stampede finish: exit {finished.returncode}: {finished.stdout} {finished.stderr}')
+    if [t for t in hc('ls', '--all', '--json', '--label', 'stampede.job=' + key, env=env)['terminals'] if t['state'] == 'live']:
+        fail('terminals of the native job still run')
+    print('ok stampede new --core (native), start a program, tree, close, finish')
 
 
 def main():
@@ -104,6 +139,7 @@ def main():
         core_basics()
         if (SRC / 'skills/grokbot-herdr/scripts/herdr-event-core').exists():
             stampede_core()
+            stampede_native()
         print('PASS')
     finally:
         try:
