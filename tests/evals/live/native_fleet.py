@@ -25,7 +25,8 @@ BRIEF = '# {name}\n\n## Goal\nStand in.\n\n## Why\nThe sandbox fleet test.\n\n##
 BLOCKER = '#!/bin/sh\n# a stand-in child that reports blocked and stays so\nprintf \'\\033]7501;state=blocked:app=stand-in\\033\\\\\'\nexec sleep 600\n'
 RESULT = '#!/bin/sh\n# a stand-in helper: writes its result file, sends its parent the path: result <name> <file> <parent address>\n' \
          '# it reports status as an agent does: hc 0.1.21 tags a send <hc from=...> only from a terminal that reports one\n' \
-         'printf \'\\033]7501;state=working:app=stand-in\\033\\\\\'\nmkdir -p "$(dirname "$2")" && echo "Status: DONE" > "$2"\nhc send "$3" "$1: done $2"\nsleep 1\n'
+         'printf \'\\033]7501;state=working:app=stand-in\\033\\\\\'\nexec result-plain "$@"\n'
+PLAIN = '#!/bin/sh\n# a plain program helper: the same, with no status, so its line arrives as bare text\nmkdir -p "$(dirname "$2")" && echo "Status: DONE" > "$2"\nhc send "$3" "$1: done $2"\nsleep 1\n'
 
 
 class Fail(Exception):
@@ -101,6 +102,7 @@ class Fleet:
         (t / 'bin/fleet-job').symlink_to(FLEET_JOB)  # what a stand-in agent runs to start its own children
         write(t / 'bin/blocker', BLOCKER)
         write(t / 'bin/result', RESULT)
+        write(t / 'bin/result-plain', PLAIN)
         write(t / 'h/.local/bin/herdr-event-flush', '#!/bin/sh\n# no flusher: events stay in the scratch queue\nexit 0\n')
         (t / 'routes' / BOT).write_text('URL=http://127.0.0.1:9/never\nKEY=none\n')
         (t / 'routes' / BOT).chmod(0o600)
@@ -200,24 +202,29 @@ def fanout(f, s):
     queue = sorted((job / 'queue').glob('*.json'))
     if len(queue) != 8:
         raise Fail(f'{len(queue)} queued, not 8')
-    peak, ended, order, deadline = 0, set(), [], time.time() + 120
+    # as a lead does: wait for Core's news of a child, then stampede next. Two ends can come as one piece of news, or one
+    # next can fill the place a later end freed, so a next may rightly start nothing; it must never leave a place free
+    # while something waits: WAITING says <n> running, cap <c>, and n is c.
+    address, peak, ended, order, nexts, deadline = f.by_name(key)[lead]['address'], 0, set(), [], 0, time.time() + 120
+    helpers = lambda: [t for t in f.of(key, live=False) if t['labels'].get('stampede.role') == 'helper']
     while len(ended) < 20 and time.time() < deadline:
-        rows = [t for t in f.of(key, live=False) if t['labels'].get('stampede.role') == 'helper']
+        f.hc('wait', '--children', 'any', address, '--timeout', '30', timeout=40)
+        rows = helpers()
         peak = max(peak, sum(t['state'] == 'live' for t in rows))
-        now = {t['labels']['stampede.agent'] for t in rows if t['state'] == 'finished'}
-        if now - ended:
-            ended |= now
-            out = f.stampede('next', job).stdout
-            started = re.findall(r'^STARTED (\S+)', out, re.M)
-            if (job / 'queue').is_dir() and len(order) < 8 and not started and 'WAITING' in out:
-                raise Fail(f'next after an end started nothing: {out}')
-            order += started
-        time.sleep(0.3)
+        ended = {t['labels']['stampede.agent'] for t in rows if t['state'] == 'finished'}
+        out, nexts = f.stampede('next', job).stdout, nexts + 1
+        order += re.findall(r'^STARTED (\S+)', out, re.M)
+        waiting = re.search(r'^WAITING \d+ queued \((\d+) running, cap (\d+)\)', out, re.M)
+        if waiting and waiting.group(1) != waiting.group(2):
+            raise Fail(f'next left a place free while a start waited: {out.strip()}; Core then: '
+                       f'{sorted((t["labels"]["stampede.agent"], t["state"]) for t in rows)}')
+        peak = max(peak, sum(t['state'] == 'live' for t in helpers()))
     total = time.time() - began
     if peak > 12 or len(ended) != 20 or order != names[12:]:
         raise Fail(f'peak {peak} running, {len(ended)} of 20 ran, next started {order}')
     s['fanout'] = (first12, total)
-    return f'peak {peak} running, 8 queued, next started fan-13..fan-20 oldest first; first 12 in {first12:.1f} s, all 20 done in {total:.1f} s'
+    return (f'peak {peak} running, 8 queued; {nexts} next calls, one per piece of Core news, started fan-13..fan-20 oldest first '
+            f'and never left a place free; first 12 in {first12:.1f} s, all 20 done in {total:.1f} s')
 
 
 def cap(f, s):
@@ -248,6 +255,7 @@ def layout(f, s):
         closed = f.stampede('close', job, f'ci-{i}')
         if closed.returncode or not closed.stdout.startswith(f'CLOSED ci-{i}'):
             raise Fail(f'stampede close ci-{i}: exit {closed.returncode}: {(closed.stdout + closed.stderr).strip()[-300:]}')
+    s['closed'] = [f'ci-{i}' for i in range(1, 6)]
     if got != ['ci'] * 4 + ['ci-2']:
         raise Fail(f'--tab ci gave {got}')
     return 'lead and fan-01..03 in main, then 4 each in main-2, main-3, fan-12 in main-4, one herdr.space; --tab ci: 4 in ci, the 5th in ci-2'
@@ -294,14 +302,19 @@ def results(f, s):
     lead, job, key = f.jobs.get('wait') or (None, None, None)
     if not job:
         raise Fail('needs blocked')
-    p, path = s['p'], job / 'reports/res-1.md'
+    p, path, bare = s['p'], job / 'reports/res-1.md', job / 'reports/res-2.md'
+    screen = lambda: f.sh(['hc', 'read', p, '--lines', '80']).stdout.replace('\n', '')
     f.start(job, 'res-1', '--parent', 'parent-p', '--', 'result', 'res-1', path, p)
     shown = f.until('the tagged message on the parent\'s screen',
-                    lambda: re.search(rf'<hc from="t\d+ res-1[^"]*">res-1: done {re.escape(str(path))}</hc>',
-                                      f.sh(['hc', 'read', p, '--lines', '60']).stdout), 20)
-    if not path.read_text().startswith('Status: DONE'):
-        raise Fail(f'{path} holds {path.read_text()!r}')
-    return f'the parent\'s screen shows {shown.group(0)!r} and the file is there'
+                    lambda: re.search(rf'<hc from="\S+ res-1[^"]*">res-1: done {re.escape(str(path))}</hc>', screen()), 20)
+    f.start(job, 'res-2', '--parent', 'parent-p', '--', 'result-plain', 'res-2', bare, p)  # reports no status
+    f.until('the plain program\'s line on the parent\'s screen', lambda: f'res-2: done {bare}' in screen(), 20)
+    if re.search(r'<hc from="\S+ res-2', screen()):
+        raise Fail('a plain program\'s send arrived tagged, which the contract says it does not')
+    for each in (path, bare):
+        if not each.read_text().startswith('Status: DONE'):
+            raise Fail(f'{each} holds {each.read_text()!r}')
+    return f'an agent\'s line arrived tagged ({shown.group(0)!r}), a plain program\'s as bare text; both files are there'
 
 
 def rebuild(f, s):
@@ -334,15 +347,16 @@ def rebuild(f, s):
     problems += [f'live terminals per name {count}'] if set(count.values()) != {1} else []
     problems += [f'a second reopen (exit {second.returncode}) started {re.findall(r"^STARTED (\S+)", second.stdout, re.M)}'] \
         if second.returncode or re.search(r'^STARTED', second.stdout, re.M) else []
+    problems += [f'no DONE line for {n} closed by name'] if (n := [c for c in s.get('closed', []) if f'DONE {c} (closed)' not in first.stdout]) else []
+    problems += ['no LIVE line for keeper'] if not re.search(r'^LIVE keeper ', first.stdout, re.M) else []
+    keeper = next((n for n in json.loads(f.stampede('tree', job, '--json').stdout)['nodes'] if n['name'] == 'keeper'), {})
+    problems += [f'stampede tree --json shows keeper as {keeper}, not outlived'] if not keeper.get('outlived') else []
     if problems:
         raise Fail('; '.join(problems) + f'. First reopen: {" | ".join(first.stdout.strip().splitlines())}')
     s['rebuild'] = seconds
-    keeper = named['keeper']
-    shown = 'keeper' in f.stampede('tree', job).stdout
     return (f'lead killed: its branch ended, keeper (--outlive-parent) lived on; reopen --rerun-programs started the same 7 names '
-            f'under the same parents at new addresses in {seconds:.1f} s; a second reopen started nothing. keeper: '
-            f'{re.search(r"^LIVE keeper.*$", first.stdout, re.M).group(0) if "LIVE keeper" in first.stdout else "no LIVE line"}, '
-            f'its Core parent {keeper.get("parent")} (the old lead {before[lead]}), in stampede tree: {"yes" if shown else "no"}')
+            f'under the same parents at new addresses in {seconds:.1f} s, said DONE (closed) for the {len(s.get("closed", []))} '
+            f'closed by name, and left keeper LIVE; tree shows keeper outlived {keeper["outlived"]}; a second reopen started nothing')
 
 
 def teardown(f, s):
@@ -357,10 +371,21 @@ def teardown(f, s):
     parent = {n['address']: n['name'] for n in shown.values()}
     early = [n for n in order if n in shown and shown[n]['parent'] in parent and order.index(parent[shown[n]['parent']]) < order.index(n)]
     alive = [t['labels'].get('stampede.agent') for t in f.of(key)]
-    if closed.returncode or sorted(order) != sorted(shown) or order[-1:] != [lead] or early or alive or not (job / 'closed').is_file():
+    if closed.returncode or sorted(order) != sorted(shown) or order[-1:] != [lead] or early or alive or not (job / 'closed').is_file() \
+            or ('keeper' in shown) != ('keeper' in order[:-1]):
         raise Fail(f'close exit {closed.returncode}, order {order}, a parent before its child {early}, still live {alive}: '
                    f'{(closed.stdout + closed.stderr).strip()[-300:]}')
-    return f'CLOSED {" ".join(order)} (leaves first, the lead last) in {seconds:.1f} s; nothing of the job is live'
+    back = f.stampede('reopen', job, '--rerun-programs', timeout=300)  # a whole-job close marks no node: reopen brings it back
+    again = set(re.findall(r'^STARTED (\S+)', back.stdout, re.M))
+    kept = [c for c in s.get('closed', []) if f'DONE {c} (closed)' not in back.stdout]
+    if back.returncode or again != set(shown) or kept:
+        raise Fail(f'reopen after the close: exit {back.returncode}, started {sorted(again)}, not {sorted(shown)}; '
+                   f'no DONE (closed) for {kept}: {" | ".join(back.stdout.strip().splitlines())}')
+    end = f.stampede('close', job, timeout=300)
+    if end.returncode or [t for t in f.of(key)]:
+        raise Fail(f'the last close: exit {end.returncode}, still live {[t["labels"].get("stampede.agent") for t in f.of(key)]}')
+    return (f'CLOSED {" ".join(order)} (leaves first, keeper the outlived child before the lead, the lead last) in {seconds:.1f} s; '
+            f'nothing of the job was live; reopen then brought back the same {len(again)}, closed-by-name helpers stayed DONE (closed)')
 
 
 def watchdog(f, s):

@@ -302,25 +302,23 @@ The tester logged 29 findings. The ones the lean version answers:
 
 ## Core-native sandbox fleet test, 13 Nov 2026
 
-**13 Nov 2026, 14:00, macOS 27.2 arm64, Herdr Core 0.1.21.** One run of [tests/evals/live/native_fleet.py](../tests/evals/live/native_fleet.py) on the branch that adds Core-native jobs ([CORE-NATIVE.md](CORE-NATIVE.md)), before its review.
+**13 Nov 2026, 14:51, macOS 27.2 arm64, Herdr Core 0.1.21.** A run of [tests/evals/live/native_fleet.py](../tests/evals/live/native_fleet.py) on the branch that adds Core-native jobs ([CORE-NATIVE.md](CORE-NATIVE.md)), after the fixes its first run asked for. It was the fifth of five full runs in a row, and all five passed every check; the fan-out check alone passed 30 runs out of 30.
 
-What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folders under a short `/tmp` folder, started as an ssh start so no launchd job), this checkout's `scripts/stampede`, the job folders, Core's parent links, notes and waits, and `herdr-event-core --sweep`. What stood in: the agents (`core_agent.py` as `claude`: OSC 7501 status, no model) and the helpers' work (`sleep`, a script that reports `blocked`, a script that writes a result file and sends its path). The bot's route was a URL on 127.0.0.1 that was never flushed. The machine's own core showed the same 13 terminals before and after.
+What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folders under a short `/tmp` folder, started as an ssh start so no launchd job), this checkout's `scripts/stampede`, the job folders, Core's parent links, notes and waits, and `herdr-event-core --sweep`. What stood in: the agents (`core_agent.py` as `claude`: OSC 7501 status, no model) and the helpers' work (`sleep`, a script that reports `blocked`, scripts that write a result file and send its path). The bot's route was a URL on 127.0.0.1 that was never flushed. The machine's own core showed the same 10 terminals before and after each run.
 
 | # | check | result | seconds | what it showed |
 |---|---|---|---|---|
 | 1 | tree | PASS | 6.3 | a stand-in lead, 2 helpers, 2 sub-helpers each started from inside their helper; Core's `parent` of every node is its starter, and `stampede tree --json` shows the same 7 |
-| 2 | fan-out | PASS | 23.4 | 20 program helpers: 12 started in 2.1 s, 8 `QUEUED`, never more than 12 live; `stampede next` after each end started the next, oldest first; all 20 done in 23.1 s |
+| 2 | fan-out | PASS | 22.8 | 20 program helpers: 12 started in 1.8 s, 8 `QUEUED`, never more than 12 live; on each piece of Core's news (`hc wait --children any` on the lead) `stampede next` ran, started fan-13 to fan-20 oldest first and never left a place free; all 20 done in 22.6 s |
 | 3 | the owner's cap | PASS | 3.2 | `--max-helpers 3`: 3 started, 2 queued, 3 running in every sample |
-| 4 | layout | PASS | 2.0 | the lead and 3 helpers in `main`, then 4 each in `main-2`, `main-3`, one `herdr.space`; `--tab ci` put 4 in `ci` and the 5th in `ci-2` |
-| 5 | a blocked child | PASS | 1.1 | `hc wait --children any <parent>` returned the blocked child, and Core's note was on the parent's screen |
-| 6 | waiting | PASS | 7.9 | `any` returned on the first child (1.8 s), `all` once none worked (7.0 s) |
-| 7 | results in files | PASS | 0.5 | the helper's `<hc from="...">res-1: done <path></hc>` was on the parent's screen, and the file was there |
-| 8 | crash and rebuild | FAIL | 2.2 | the lead killed: its branch ended, an `--outlive-parent` child lived on; `reopen --rerun-programs` rebuilt the 7 under the same parents at new addresses, and a second reopen started nothing; but it also started 5 helpers closed earlier with `stampede close <job> <agent>` |
-| 9 | teardown | FAIL | 1.8 | `stampede close <job>` ended leaves first and the lead last, but the `--outlive-parent` child of the old lead stayed live |
-| 10 | the lead's watchdog | PASS | 3.3 | a blocked lead gave one `blocked` event over two sweeps, and its kill one `dead` event over two more |
+| 4 | layout | PASS | 1.9 | the lead and 3 helpers in `main`, then 4 each in `main-2`, `main-3`, one `herdr.space`; `--tab ci` put 4 in `ci` and the 5th in `ci-2` |
+| 5 | a blocked child | PASS | 1.0 | `hc wait --children any <parent>` returned the blocked child, and Core's note was on the parent's screen |
+| 6 | waiting | PASS | 7.9 | `any` returned on the first child (1.9 s), `all` once none worked (7.0 s) |
+| 7 | results in files | PASS | 1.7 | an agent's `<hc from="...">res-1: done <path></hc>` and a plain program's bare `res-2: done <path>` on the parent's screen, and both files there |
+| 8 | crash and rebuild | PASS | 2.4 | the lead killed: its branch ended, an `--outlive-parent` child lived on and `stampede tree` shows it `outlived`; `reopen --rerun-programs` rebuilt the 7 under the same parents at new addresses in 1.5 s, said `DONE <name> (closed)` for 5 helpers closed by name, and a second reopen started nothing |
+| 9 | teardown | PASS | 5.5 | `stampede close <job>` ended leaves first, the outlived child before the lead, the lead last, in 2.3 s, and nothing of the job was live; a reopen then brought the 8 back, the closed-by-name helpers still `DONE` |
+| 10 | the lead's watchdog | PASS | 3.2 | a blocked lead gave one `blocked` event over two sweeps, and its kill one `dead` event over two more |
 
-What it found:
-- **A closed helper comes back at reopen.** `reopen` restarts a node the record marks `closed`, so a helper the lead ended on purpose runs again (check 8).
-- **An `--outlive-parent` helper of a lead that died is out of the tree.** Its Core parent is the old lead, so after a reopen `stampede tree` does not show it and `stampede close <job>` leaves it running (checks 8 and 9).
-- **Core tags only an agent's message.** On Herdr Core 0.1.21, `hc send` from a terminal that reports no OSC 7501 status arrives with no `<hc from="...">` tag, so a plain program's result line reads like typed text. The stand-in helper of check 7 reports a status, as an agent does.
+**The first run, 14:00 the same day,** failed checks 8 and 9: a reopen restarted helpers closed by name, and a helper started with `--outlive-parent` fell out of the tree once its lead died, so `tree` hid it and a whole-job `close` left it running. It also found that `ask` named an inbox a native job does not have, and that Core tags only an agent's message, not a plain program's. All four were fixed in the product and the contract before this run.
 
+**A flake, explained.** One earlier run failed the fan-out check once. The check then ran `stampede next` whenever its own poll saw a helper end, so an end that an earlier `next` had already filled looked like a new free place, and `next` rightly answered `WAITING 1 queued (12 running, cap 12)`. The check now waits on Core's news as a lead does, and checks only that a `WAITING` line never shows a free place.

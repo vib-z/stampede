@@ -468,10 +468,9 @@ class Outcomes(unittest.TestCase):
                 self.assertEqual([q['route'] for q in blocked], [job.bot])
 
 
-    @unittest.expectedFailure
-    def test_f17_a_native_ask_says_where_the_answer_goes(self):
-        """F17: on a native job the answer is typed into the lead's terminal (there is no inbox), but ask still tells the
-        lead the answer goes to, or comes to, its inbox, for a bot and for the phone alike."""
+    def test_f17_a_native_ask_says_where_the_answer_goes(self):  # fixed: ask names the lead's terminal on a native job
+        """F17: on a native job the answer is typed into the lead's terminal (there is no inbox), and ask told the lead the
+        answer goes to, or comes to, its inbox, for a bot and for the phone alike."""
         for job in self.jobs:
             if job.backend == 'native':
                 self.assertNotIn('inbox', self.step(job, 'ask')[1], f'{job.client}/native')
