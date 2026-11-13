@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run every 5 min (launchd on macOS; a systemd user timer or herdr-event-supervise on Linux). Flags agents stuck in working with no output change
-# for 30+ min (stale) and agent panes that vanished without a done/idle state (dead).
+# for 30+ min (stale) and agent panes that vanished without a done/idle state (dead). A Core-native job's lead: the sweep below.
 # A pane a Herdr Core job handed an agent to ($EV/handed/<pane>) is its job's follower's: never tracked here.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
@@ -30,6 +30,9 @@ for f in "$O"/hc-*; do
     rm -f "$f" "$G/$ws"; echo "$(date '+%FT%T%z') watchdog: removed stale owner tag $ws (owner=$ow, Core job finished 24h)" >>"$LOG"
   fi
 done
+# A Core-native job's lead (backend native: no follower terminal) is looked at once per run: blocked, error, dead,
+# stale go to its bot. Before the Herdr TUI part, so a machine with no Herdr TUI gets it; its result never stops this run.
+"$(dirname "$_src")/herdr-event-core" --sweep >/dev/null 2>>"$LOG" || echo "$(date '+%FT%T%z') watchdog: sweep failed" >>"$LOG"
 list=$(herdr agent list 2>/dev/null) || { echo "$(date '+%FT%T%z') watchdog: herdr agent list failed" >>"$LOG"; exit 0; }
 jq -c '.result.agents[]' <<<"$list" > "$S/cur.jsonl"
 : > "$S/seen.new"

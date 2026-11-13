@@ -10,7 +10,7 @@ import hc_contract  # noqa: E402
 
 FAKE_HC = ROOT / 'tests/fake_hc.py'
 PRODUCT = [ROOT / 'skills/herdr-fleet/scripts/fleet_job.py', ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core',
-           ROOT / 'skills/grokbot-herdr/scripts/herdr-event-watchdog']
+           ROOT / 'skills/grokbot-herdr/scripts/herdr-event-watchdog', ROOT / 'skills/herdr-fleet/scripts/core_native.py']
 
 
 def follower():
@@ -68,9 +68,10 @@ class Fake(unittest.TestCase):
         self.schema = hc_contract.snapshot()
         self.methods = {m['name']: m for m in self.schema['methods']}
 
-    def hc(self, *args):
-        env = {k: v for k, v in os.environ.items() if k not in ('HC_SESSION', 'HC_SOCKET')}
-        return subprocess.run([sys.executable, str(FAKE_HC), *args], capture_output=True, text=True, env={**env, 'FAKE_HC': str(self.home)})
+    def hc(self, *args, input=''):
+        env = {k: v for k, v in os.environ.items() if k not in ('HC_SESSION', 'HC_SOCKET', 'HC_TERMINAL_ID')}
+        return subprocess.run([sys.executable, str(FAKE_HC), *args], capture_output=True, text=True, input=input,
+                              env={**env, 'FAKE_HC': str(self.home)})
 
     def state(self, **fields):
         path = self.home / 'state.json'
@@ -91,7 +92,7 @@ class Fake(unittest.TestCase):
         self.run_one()
         calls = {'ls': ['ls'], 'get': ['get', 't1'], 'send': ['send', '--', 't1', 'x'], 'wait': ['wait', 't1'], 'read': ['read', 't1'],
                  'keep': ['keep', 't1'], 'label': ['label', 't1', 'k=v'], 'keys': ['keys', 't1', 'a'], 'events': ['events'],
-                 'exec': ['exec', '--', '/usr/bin/env'], 'kill': ['kill', 't1'], 'rm': ['rm', 't1']}
+                 'exec': ['exec', '--', '/usr/bin/env'], 'kill': ['kill', 't1'], 'rm': ['rm', 't1'], 'connect': ['connect']}
         self.assertEqual(set(calls) | {'run'}, set(hc_contract.USES))
         for command, argv in calls.items():
             done = self.hc(*argv, '--json')
@@ -107,6 +108,9 @@ class Fake(unittest.TestCase):
         self.assertEqual(set(sent) - hc_contract.fields(self.schema, self.methods['terminal.send']), set())
         self.assertIn('started', sent)
         self.assertEqual(set(json.loads(self.hc('read', 't1').stdout)) - hc_contract.fields(self.schema, self.methods['terminal.read']), set())
+        listed = json.loads(self.hc('connect', input='{"jsonrpc":"2.0","id":1,"method":"terminal.list","params":{"all":true}}\n').stdout)
+        self.assertEqual(set(listed['result']) - hc_contract.fields(self.schema, self.methods['terminal.list']), set())
+        self.assertEqual(set(listed['result']['terminals'][0]) - hc_contract.fields(self.schema, self.methods['terminal.get']), set())
 
     def test_the_fake_s_error_kinds_are_the_schema_s(self):
         self.run_one()

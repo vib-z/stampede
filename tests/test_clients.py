@@ -16,29 +16,33 @@ sys.path.insert(0, str(ROOT / 'tests'))
 # name: README front-door row (None: not a README front door yet), where it runs (inside Herdr, outside it, or over ssh),
 # the backends it can start. A bot also names its slug (its route, and the owner of its jobs) and how it makes a TUI job
 # its own: the workspace's owner tag (grokbot-herdr, Step 3) or HERDR_EVENTS_OWNER at new. On Core there is no workspace
-# to tag, so every bot sets HERDR_EVENTS_OWNER there.
+# to tag, so every bot sets HERDR_EVENTS_OWNER there. The backends: tui (the Herdr TUI), core (Herdr Core's relay path,
+# new --core --relay) and native (a Core-native job, new --core: docs/CORE-NATIVE.md).
 CLIENTS = {
-    'herdr-chat': {'readme': 'a chat in Herdr', 'where': 'inside', 'backends': ('tui', 'core')},
-    'claude-code': {'readme': 'Claude desktop or the Claude app', 'where': 'outside', 'backends': ('tui', 'core')},
-    'codex': {'readme': 'Codex desktop or the ChatGPT app', 'where': 'outside', 'backends': ('tui', 'core')},
-    'cursor': {'readme': 'Cursor', 'where': 'outside', 'backends': ('tui', 'core')},
-    'hermes': {'readme': None, 'where': 'outside', 'backends': ('tui', 'core')},
-    'grokbot': {'readme': 'Grok Bot', 'where': 'ssh', 'backends': ('tui', 'core'), 'bot': 'grokbot', 'owner_from': 'tag'},
-    'other-bot': {'readme': 'any other bot', 'where': 'ssh', 'backends': ('tui', 'core'), 'bot': 'other-bot', 'owner_from': 'env'},
-    'remote-computer': {'readme': 'a whole remote computer', 'where': 'inside', 'backends': ('tui', 'core')},
+    'herdr-chat': {'readme': 'a chat in Herdr', 'where': 'inside', 'backends': ('tui', 'core', 'native')},
+    'claude-code': {'readme': 'Claude desktop or the Claude app', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'codex': {'readme': 'Codex desktop or the ChatGPT app', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'cursor': {'readme': 'Cursor', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'hermes': {'readme': None, 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'grokbot': {'readme': 'Grok Bot', 'where': 'ssh', 'backends': ('tui', 'core', 'native'), 'bot': 'grokbot', 'owner_from': 'tag'},
+    'other-bot': {'readme': 'any other bot', 'where': 'ssh', 'backends': ('tui', 'core', 'native'), 'bot': 'other-bot', 'owner_from': 'env'},
+    'remote-computer': {'readme': 'a whole remote computer', 'where': 'inside', 'backends': ('tui', 'core', 'native')},
 }
-# the one worker registry: what start takes on each backend. A Core job runs claude and codex in Core terminals and hands
-# the HANDED kinds, which report no OSC 7501 status, to Herdr TUI panes (start --pane); without --pane Core refuses them
-# with UNHANDED. tests/test_mixed.py covers a handed agent's life after its start (the follower, tell, reopen, marks).
-WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex', 'cursor', 'hermes', 'kimi')}
+# the one worker registry: what start takes on each backend. A Core relay job runs claude and codex in Core terminals and
+# hands the HANDED kinds, which report no OSC 7501 status, to Herdr TUI panes (start --pane); without --pane it refuses
+# them with UNHANDED. tests/test_mixed.py covers a handed agent's life after its start (the follower, tell, reopen, marks).
+# A native job hands nothing: it refuses --pane with NATIVE_PANE, and runs any other CLI as a program (start -- <cli>).
+WORKERS = {'tui': ('claude', 'codex', 'cursor'), 'core': ('claude', 'codex', 'cursor', 'hermes', 'kimi'), 'native': ('claude', 'codex')}
 HANDED = ('cursor', 'hermes', 'kimi')
 # the leads new takes on each backend (--lead; none given is claude): a Core job refuses a Codex lead before making anything
-LEADS = {'tui': ('claude', 'codex'), 'core': ('claude', 'codex')}
+LEADS = {'tui': ('claude', 'codex'), 'core': ('claude', 'codex'), 'native': ('claude', 'codex')}
 LEAD_REFUSED = 'the lead runs on claude or codex'  # no backend refuses either lead today; kept for one that would
 KINDS = tuple(dict.fromkeys(kind for kinds in WORKERS.values() for kind in kinds))  # O3 starts each on every backend
-REFUSED = {kind: kind + ' runs only as a handed agent of a Herdr Core job' for kind in ('hermes', 'kimi')}  # why a
-# backend that does not take a kind refuses it
+REFUSED = {'tui': {kind: kind + ' runs only as a handed agent of a Herdr Core job' for kind in ('hermes', 'kimi')},
+           'native': {kind: f'a native job starts claude or codex helpers; run {kind} as a program' for kind in HANDED}}
+# why a backend that does not take a kind refuses it
 UNHANDED = 'hand it to a Herdr TUI pane at its shell prompt with --pane'
+NATIVE_PANE = 'a native job hands nothing to a Herdr TUI pane: run that CLI as a program'
 OUTCOMES = {
     'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question and post', 'O5': 'gate',
     'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
@@ -87,7 +91,7 @@ class ClientsInSync(unittest.TestCase):
     def test_every_kind_a_backend_does_not_take_says_why(self):
         for backend, kinds in WORKERS.items():
             for kind in set(KINDS) - set(kinds):
-                self.assertIn(kind, REFUSED, f'{backend} does not take {kind}: REFUSED needs the reason start gives')
+                self.assertIn(kind, REFUSED.get(backend, {}), f'{backend} does not take {kind}: REFUSED needs the reason start gives')
 
 
 class Outcomes(unittest.TestCase):
@@ -115,7 +119,7 @@ class Outcomes(unittest.TestCase):
 
     @classmethod
     def doctor_flags(cls, job):
-        return 'core' if job.backend == 'core' else 'tui-bot' if job.bot else 'tui'
+        return 'core' if job.on_core else 'tui-bot' if job.bot else 'tui'
 
     @classmethod
     def run_doctor(cls, flags, env):
@@ -167,7 +171,7 @@ class Outcomes(unittest.TestCase):
         def check(job):
             code, out = self.health[(job.client, job.backend)]
             self.assertEqual((code, out), self.reference[self.doctor_flags(job)], 'the doctor reads the machine, not the client')
-            self.assertIn('ok hc 0.1.20' if job.backend == 'core' else 'ok herdr on PATH', out)
+            self.assertIn('ok hc 0.1.20' if job.on_core else 'ok herdr on PATH', out)
         self.outcome('O1', check)
 
     def test_o2_start(self):
@@ -179,7 +183,7 @@ class Outcomes(unittest.TestCase):
             owner = job.job / 'owner'
             self.assertEqual(owner.read_text().strip() if owner.is_file() else None, job.bot, 'the job is its starter\'s')
             pointer = f'You are {Job.LEAD}. Read {job.job / "briefs" / (Job.LEAD + ".md")}'
-            if job.backend == 'core':
+            if job.on_core:
                 (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
                 self.assertTrue(lead[-1].startswith(pointer), 'the brief pointer is the first prompt')
                 lead = ' '.join(lead)
@@ -203,24 +207,28 @@ class Outcomes(unittest.TestCase):
                 out = self.ok(job, 'new')
                 self.assertEqual(out.strip().splitlines()[-1], f'{Job.LEAD} {job.job}')
                 pointer = f'You are {Job.LEAD}. Read {job.job / "briefs" / (Job.LEAD + ".md")}'
-                if job.lead_kind == 'claude' and job.backend == 'core':
+                if job.lead_kind == 'claude' and job.on_core:
                     (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
                     self.assertIn(f'--model {LEAD_MODEL} --effort low', ' '.join(lead))
                     continue
-                if job.backend == 'core':  # a Codex lead in a Core terminal
+                if job.on_core:  # a Codex lead in a Core terminal
                     (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
                     self.assertTrue(lead[-1].startswith(pointer), 'the brief pointer is the first prompt')
                     lead = ' '.join(lead)
                     self.assertIn('/codex ', lead)
                     self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra" --no-daemon', lead)
                     self.assertIn('-c sandbox_workspace_write.network_access=true', lead)
-                    self.assertIn('codex-notify', lead)
                     self.assertNotIn('--session-id', lead, 'Codex names its own session')
                     brief = (job.job / 'briefs' / (Job.LEAD + '.md')).read_text()
-                    self.assertIn('fleet-job types each new line of', brief)
-                    self.assertIn('into this terminal', brief)
                     self.assertIn('prints APPROVED', brief)
                     self.assertNotIn('typed in your pane', brief)
+                    if job.backend == 'native':  # no hooks and no inbox: Core types the news into its terminal
+                        self.assertNotIn('codex-notify', lead)
+                        self.assertIn('Core types the news into this terminal', brief)
+                        continue
+                    self.assertIn('codex-notify', lead)
+                    self.assertIn('fleet-job types each new line of', brief)
+                    self.assertIn('into this terminal', brief)
                     continue
                 (lead,) = [c for c in job.herdr_calls() if c.startswith(f'agent start {Job.LEAD} --kind {job.lead_kind} ')]
                 if job.lead_kind == 'claude':
@@ -237,10 +245,12 @@ class Outcomes(unittest.TestCase):
     def test_o3_workers(self):
         def check(job):
             runs = {job.labels(r).get('stampede.agent'): r for r in job.calls('run')}
+            if job.backend == 'native':
+                return self.native_helpers(job, runs)
             for kind in KINDS:
                 agent = 'build-' + kind
                 if kind not in WORKERS[job.backend]:
-                    self.refused(job, 'start ' + kind, REFUSED[kind])
+                    self.refused(job, 'start ' + kind, REFUSED[job.backend][kind])
                     self.assertNotIn(agent, runs)
                     self.assertFalse(any(c.startswith(f'agent start {agent} ') for c in job.herdr_calls()))
                 elif job.backend == 'core' and kind in HANDED:
@@ -256,6 +266,34 @@ class Outcomes(unittest.TestCase):
                     self.assertTrue(any(c.startswith(f'agent start {agent} --kind {kind}') for c in job.herdr_calls()))
         self.outcome('O3', check)
 
+    def native_helpers(self, job, runs):
+        """O3 on a native job: claude and codex helpers as Core children of the lead, a program helper the same way, and
+        every other kind refused with or without --pane, nothing started."""
+        lead = job.address(Job.LEAD)
+        for kind in KINDS:
+            agent = 'build-' + kind
+            if kind in WORKERS['native']:
+                self.ok(job, 'start ' + kind, f'STARTED {agent} (t', f') under {Job.LEAD}')
+                self.assertEqual(Path(job.program(runs[agent])[0]).name, kind)
+                self.assertEqual(job.option(runs[agent], '--parent'), lead, 'a helper is a Core child of its starter')
+                self.assertEqual(job.labels(runs[agent])['stampede.kind'], kind)
+            else:
+                self.refused(job, 'start ' + kind, REFUSED['native'][kind])
+                self.refused(job, 'start ' + kind + ' --pane', NATIVE_PANE)
+                self.assertNotIn(agent, runs)
+                self.assertFalse(any(c.startswith(f'agent start {agent} ') for c in job.herdr_calls()), 'nothing goes to Herdr')
+        self.ok(job, 'start program', f'STARTED watch-ci (t', f') under {Job.LEAD}')
+        self.assertEqual(job.program(runs['watch-ci']), ['sleep', '60'])
+        self.assertEqual((job.labels(runs['watch-ci'])['stampede.kind'], job.option(runs['watch-ci'], '--parent')), ('program', lead))
+        place = lambda name: tuple(job.labels(runs[name]).get(k) for k in ('herdr.tab', 'stampede.pane', 'stampede.split', 'stampede.beside'))
+        self.assertEqual([place(n) for n in (Job.LEAD, 'build-claude', 'build-codex', 'watch-ci')],  # the owner's 2x2 on main
+                         [('main', '1', None, None), ('main', '2', 'right', Job.LEAD), ('main', '3', 'down', 'build-claude'),
+                          ('main', '4', 'down', Job.LEAD)])
+
+    def heard(self, job):
+        """What reached the lead: its inbox file, or on a native job what Core typed into its terminal."""
+        return '\n'.join(job.sent(Job.LEAD)) if job.backend == 'native' else job.inbox()
+
     def test_o4_question(self):
         def check(job):
             out = self.ok(job, 'ask', 'ASKED ')
@@ -264,12 +302,12 @@ class Outcomes(unittest.TestCase):
                 (event,) = self.events(job, 'question')
                 self.assertEqual((event['route'], event['payload']['owner']), (job.bot, job.bot))
                 self.assertEqual((event['payload']['question'], event['payload']['options']), (QUESTION, [ANSWER, 'no']))
-                self.ok(job, 'answer', 'DELIVERED')
-                self.assertIn(f'ANSWER {event["payload"]["ask"]} {QUESTION}: {ANSWER}', job.inbox())
+                self.ok(job, 'answer', 'SUBMITTED' if job.backend == 'native' else 'DELIVERED')
+                self.assertIn(f'ANSWER {event["payload"]["ask"]} {QUESTION}: {ANSWER}', self.heard(job))
                 self.assertEqual(job.asked(), '', 'no phone card in a bot\'s job')
             else:
                 self.assertIn(f'--option {ANSWER} --option no -- {QUESTION}', job.asked())
-                self.assertIn(f'ANSWER {QUESTION}: {ANSWER}', job.inbox())
+                self.assertIn(f'ANSWER {QUESTION}: {ANSWER}', self.heard(job))
                 self.assertEqual(self.events(job, 'question'), [])
             item = job.job.absolute() / 'outbox/001.md'
             self.assertIn(POST, item.read_text(), 'the outbox stays the record')
@@ -290,11 +328,11 @@ class Outcomes(unittest.TestCase):
             self.ok(job, 'gate', 'GATE ' + job.ident)
             notice = 'A typed yes does not count on Core; answer in the chat or on the phone that started this job.'
             brief = (job.job / 'briefs' / (Job.LEAD + '.md')).read_text()
-            typed = ['typed ' + text for text in ('yes', 'approve', 'go ahead')] if job.backend == 'core' else []
-            if job.backend == 'core':
+            typed = ['typed ' + text for text in ('yes', 'approve', 'go ahead')] if job.on_core else []
+            if job.on_core:
                 self.assertIn(f'reply with one short line: "{notice}"', brief)
                 for step in typed:
-                    self.ok(job, step, 'DELIVERED')
+                    self.ok(job, step, 'SUBMITTED' if job.backend == 'native' else 'DELIVERED')
             else:
                 self.assertNotIn(notice, brief)
             refused = ['approve other commit', 'approve inside Herdr', 'approve in a Core terminal'] + ([] if job.bot else ['approve'])
@@ -322,6 +360,15 @@ class Outcomes(unittest.TestCase):
 
     def test_o6_tell(self):
         def check(job):
+            if job.backend == 'native':  # every tell is one hc send, working or not; Core holds it for a person's draft
+                self.ok(job, 'tell lead', f'SUBMITTED {Job.LEAD} ({job.address(Job.LEAD)})')
+                self.assertIn('Use the repo root', job.sent(Job.LEAD))
+                address = job.address(job.worker)
+                for step in ('tell worker', 'tell working worker', 'tell done worker'):
+                    self.ok(job, step, f'SUBMITTED {job.worker} ({address})')
+                self.assertEqual(job.sent(job.worker), ['Check the path', 'And the error path', 'And the docs'])
+                self.assertFalse(any('--if' in c or '--force' in c for c in job.calls('send')), 'never guarded, never forced')
+                return
             self.ok(job, 'tell lead', f'DELIVERED {Job.LEAD} (inbox file)')
             self.assertIn('Use the repo root', job.inbox())
             if job.backend == 'core':
@@ -355,7 +402,20 @@ class Outcomes(unittest.TestCase):
     def test_o8_reopen_safe(self):
         def check(job):
             runs, herdr = job.before_reopen
-            if job.backend == 'core':
+            if job.backend == 'native':  # one LIVE line per node of the record, nothing started
+                out = self.ok(job, 'reopen')
+                self.assertEqual(sorted(out.split()[1] for out in out.strip().splitlines()),
+                                 sorted([Job.LEAD, 'build-claude', 'build-codex', 'watch-ci']))
+                self.assertTrue(all(row.startswith('LIVE ') for row in out.strip().splitlines()), out)
+                self.assertEqual(job.after_end, runs, 'nothing started')
+                out = self.ok(job, 'reopen ended')  # the helpers ended: no work handed out by the reopen itself
+                self.assertIn(f'LIVE {Job.LEAD} (', out)
+                self.assertRegex(out, r'(?m)^STARTED build-claude \(t\d+\) under ' + re.escape(Job.LEAD) + '$')
+                self.assertIn('SKIPPED build-codex (codex keeps no session to resume: --fresh starts it again with its brief)', out)
+                self.assertIn('SKIPPED watch-ci (a program: --rerun-programs runs it again)', out)
+                self.assertEqual([job.labels(r)['stampede.agent'] for r in job.calls('run')[job.after_end:]], ['build-claude'])
+                self.assertEqual(job.labels(job.calls('run')[-1]).get('stampede.pane'), '2', 'the place it had')
+            elif job.backend == 'core':
                 out = self.ok(job, 'reopen', f'LIVE {job.key}: no agent to restart')
                 self.assertEqual(len(job.calls('run')), runs, 'nothing started')
                 for kind in HANDED:
@@ -397,7 +457,7 @@ class Outcomes(unittest.TestCase):
         job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1', WORKERS, HANDED)
         (job.root / 'ask.md').write_text('Write hello.txt\n')
         env = {k: v for k, v in job.client_env().items() if k != 'HERDR_EVENTS_OWNER'}  # the guide's command as written
-        code, out, err = job.run('new', (ROOT / 'scripts/stampede', 'new', '--core', '--file', job.root / 'ask.md', '--cwd',
+        code, out, err = job.run('new', (ROOT / 'scripts/stampede', 'new', '--core', '--relay', '--file', job.root / 'ask.md', '--cwd',
                                          job.repo, '--name', Job.NAME), env, 'sshd')
         self.assertEqual(code, 0, out + err)
         self.assertFalse((job.job / 'owner').is_file(), 'proof: run as written, the job is local')
@@ -418,6 +478,13 @@ class Outcomes(unittest.TestCase):
                 blocked = [q for q in job.queued() if q['payload'].get('state') == 'blocked']
                 self.assertEqual([q['route'] for q in blocked], [job.bot])
 
+
+    def test_f17_a_native_ask_says_where_the_answer_goes(self):  # fixed: ask names the lead's terminal on a native job
+        """F17: on a native job the answer is typed into the lead's terminal (there is no inbox), and ask told the lead the
+        answer goes to, or comes to, its inbox, for a bot and for the phone alike."""
+        for job in self.jobs:
+            if job.backend == 'native':
+                self.assertNotIn('inbox', self.step(job, 'ask')[1], f'{job.client}/native')
 
     # findings of the live runs (docs/CLIENTS.md, "Found by the live runs") that the fakes can show
     def fresh(self, name, backend, where='outside'):
@@ -483,7 +550,7 @@ class Outcomes(unittest.TestCase):
                 code, out, err = job.run('start ' + kind, (STAMPEDE, 'start', job.job, 'probe-' + kind, '--kind', kind,
                                                            '--brief', brief, *where), job.lead_env())
                 self.assertEqual(code, 2, out + err)
-                self.assertIn(REFUSED[kind] if backend == 'tui' else UNHANDED, err)
+                self.assertIn(REFUSED['tui'][kind] if backend == 'tui' else UNHANDED, err)
 
 
     @unittest.expectedFailure

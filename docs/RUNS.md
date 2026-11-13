@@ -8,6 +8,7 @@ Each run here really happened. Times are local, names are the real agent and tab
 - [Run 3: stampede improves itself, by a fresh tester](#run-3-stampede-improves-itself-by-a-fresh-tester)
 - [Run 4: a landlord app's competitors, features and site, by a fresh tester](#run-4-a-landlord-apps-competitors-features-and-site-by-a-fresh-tester)
 - [Run 5: a property-data research and build job, by a fresh tester](#run-5-a-property-data-research-and-build-job-by-a-fresh-tester)
+- [Core-native sandbox fleet test, 13 Nov 2026](#core-native-sandbox-fleet-test-13-nov-2026)
 
 ## Run 1: the fleet that built stampede v0
 
@@ -298,3 +299,28 @@ The tester logged 29 findings. The ones the lean version answers:
 - **A cancelled phone question stayed on the phone**: cancel stopped the wrapper, not its child. `stampede cancel` now stops the whole process group.
 - **Claude's dimmed prompt suggestions read as typed answers**, seven times, once under the merge question. The failure modes now name it: it is not typing, and `herdr agent read <name> --ansi` shows it dim ([failure-modes.md](../skills/herdr-fleet/references/failure-modes.md)).
 - **Nearly every owner answer came through another session**, not the lead or the phone. The lean lead is the one contact, and a relayed yes never passes a gate. Since 23 Oct 2026 a gate in a job a bot started goes back to that bot, which records the owner's yes with `stampede approve-gate`; a yes passed on with `stampede tell` still never counts.
+
+## Core-native sandbox fleet test, 13 Nov 2026
+
+**13 Nov 2026, 16:45, macOS 27.2 arm64, Herdr Core 0.1.21.** A run of [tests/evals/live/native_fleet.py](../tests/evals/live/native_fleet.py) at commit `4814458` on the branch that adds Core-native jobs ([CORE-NATIVE.md](CORE-NATIVE.md)): the review's fixes and the owner's layout order. It was the third of three full runs in a row, and all three passed every check.
+
+What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folders under a short `/tmp` folder, started as an ssh start so no launchd job), this checkout's `scripts/stampede`, the job folders, Core's parent links, labels, notes and waits, and `herdr-event-core --sweep`. What stood in: the agents (`core_agent.py` as `claude`: OSC 7501 status, no model, no Claude session file, so its session "never ran") and the helpers' work (`sleep`, a script that reports `blocked`, scripts that write a result file and send its path). The bot's route was a URL on 127.0.0.1 that was never flushed. The machine's own core showed the same 13 terminals before and after each run.
+
+| # | check | result | seconds | what it showed |
+|---|---|---|---|---|
+| 1 | tree | PASS | 6.3 | a stand-in lead, 2 helpers, 2 sub-helpers each started from inside their helper; Core's `parent` of every node is its starter, and `stampede tree --json` shows the same 7 |
+| 2 | fan-out | PASS | 22.7 | 20 program helpers: 12 started in 1.8 s, 8 `QUEUED`, never more than 12 live; on each piece of Core's news (`hc wait --children any` on the lead) `stampede next` started fan-13 to fan-20 oldest first and never left a place free; all 20 done in 22.5 s |
+| 3 | the owner's cap | PASS | 3.2 | `--max-helpers 3`: 3 started, 2 queued, 3 running in every sample |
+| 4 | layout | PASS | 2.3 | the lead and 3 helpers as panes 1 to 4 of `main`: no split, then right of the lead, down of helper 1, down of the lead; the same 2x2 on `main-2` and `main-3`; a helper's own helpers by the same rule; `--tab ci`: 4 as panes 1 to 4, the 5th pane 1 of `ci-2`; a new helper took a freed pane; `tree --json` shows `pane`, `split`, `beside` |
+| 5 | a blocked child | PASS | 1.0 | `hc wait --children any <parent>` returned the blocked child, and Core's note was on the parent's screen |
+| 6 | waiting | PASS | 8.0 | `any` returned on the first child, `all` once none worked (7.0 s) |
+| 7 | results in files | PASS | 1.7 | an agent's `<hc from="...">res-1: done <path></hc>` and a plain program's bare `res-2: done <path>` on the parent's screen, and both files there |
+| 8 | crash and rebuild | PASS | 4.8 | the lead killed: a plain `reopen` (1.6 s) started the lead, then the two never-ran Claude helpers from the queue, `SKIPPED` the 4 programs, said `DONE (closed)` for 6 helpers closed by name and `LIVE` for the `outlived` child; `--rerun-programs` then started the 4 under their parents, in their old places; with cap 3, a reopen printed `QUEUED` for 2 and `stampede next` started each as a place freed, never more than 3 running |
+| 9 | teardown | PASS | 6.5 | `stampede close <job>` ended leaves first, the outlived child before the lead, in 2.3 s, and nothing was live; a reopen brought the 8 back; a finished job (`finish`, the lead killed) reopened with `--rerun-programs` was refused in one line, exit 2, and a plain reopen started and queued nothing |
+| 10 | the lead's watchdog | PASS | 4.0 | a blocked lead gave one `blocked` event over two sweeps, and its kill one `dead`; a lead killed and removed before any sweep gave one `dead`, then none |
+
+**Earlier runs the same day.** The first run (14:00) failed checks 8 and 9: a reopen restarted helpers closed by name, and an `--outlive-parent` helper fell out of the tree once its lead died. It also found that `ask` named an inbox a native job does not have, and that Core tags only an agent's message. All four were fixed before the 14:51 run, which passed. The final review then found that a reopen could start work beyond the cap or on a finished job, that a start that timed out but began was started again, and that the watchdog missed a lead removed before any sweep. All were fixed at `c05c38e` and `95b05ff`; checks 8, 9 and 10 now cover the reopen and the watchdog, and the adopted start is covered only by the unit tests.
+
+**A flake, explained.** One earlier run failed the fan-out check once. The check then ran `stampede next` whenever its own poll saw a helper end, so an end that an earlier `next` had already filled looked like a new free place, and `next` rightly answered `WAITING 1 queued (12 running, cap 12)`. The check now waits on Core's news as a lead does, and checks only that a `WAITING` line never shows a free place.
+
+**`hc wait --children any` and a message.** In [tests/evals/live/wait_probe.py](../tests/evals/live/wait_probe.py), a stand-in lead ran `hc wait --children any --timeout 120` from inside its own terminal while its child sent it one line and then idled, 3 s later: in 5 runs of 5, and once more with the child exiting, the wait returned 0.0 s after the send with `reason` `message` and `from` the child. A wait that did not return in a real job's lead was not reproduced here.

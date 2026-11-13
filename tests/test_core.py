@@ -98,7 +98,7 @@ class CoreCase(unittest.TestCase):
         ask = self.root / 'ask.md'
         ask.write_text('Fix the login bug\n')
         kw.setdefault('cwd', str(self.repo))
-        return self.quiet(fj.new, str(ask), None, core=True, **kw)
+        return self.quiet(fj.new, str(ask), None, core=True, relay=True, **kw)
 
     @property
     def job(self):

@@ -7,6 +7,8 @@ it as relay-<12 hex of the key> in the job's launch environment; reopen.sh start
   herdr-event-core --alive     exit 0 when the selected core answers hello on its socket, else 1; never starts a core
   herdr-event-core --core-version   print the version the running core gives in that hello; exit 1 when none answers
   herdr-event-core --socket    print the selected core's socket path, as Core finds it
+  herdr-event-core --sweep     one look at the lead of every open Core-native job (backend native), then exit 0; the
+                               watchdog timer runs it. See Sweep below.
 
 To the lead, in <job>/inbox.log, for every terminal but the lead's and its own: BLOCKED <agent> <kind>, ERROR <agent> <msg>,
 GONE <agent> <reason> exit <code>, WAITED <name> exit <code> (a wait terminal), LOST <agent> (its record is gone),
@@ -181,6 +183,8 @@ def shelled(terminal):
 
 
 class Follower:
+    STATE = 'relay-state.json'
+
     def __init__(self, job):
         self.job = Path(job).absolute()
         self.key = (self.job / 'workspace').read_text().strip()
@@ -189,7 +193,7 @@ class Follower:
         self.lead = lead.read_text().strip() if lead.is_file() else ''
         owner = self.job / 'owner'
         self.owner = owner.read_text().strip() if owner.is_file() else ''
-        path = self.job / 'relay-state.json'
+        path = self.job / self.STATE
         state = json.loads(path.read_text()) if path.is_file() else {}
         self.terminals, self.sent, self.floor = state.get('terminals', {}), set(state.get('sent', [])), None
         self.unsent, self.retried = state.get('unsent', {}), None  # identity -> event, for the bot, not yet taken
@@ -201,8 +205,8 @@ class Follower:
         return (self.job / 'finished').exists() or (self.job / 'start-failed').exists()
 
     def save(self):
-        path = self.job / 'relay-state.json'
-        temporary = path.with_name('.relay-state.json.tmp')
+        path = self.job / self.STATE
+        temporary = path.with_name('.' + self.STATE + '.tmp')
         temporary.write_text(json.dumps({'terminals': self.terminals, 'sent': sorted(self.sent), 'unsent': self.unsent}))
         os.replace(temporary, path)
 
@@ -639,7 +643,104 @@ class Follower:
         return 0
 
 
+class Sweep(Follower):
+    """One look at a Core-native job's lead, the root nobody is above: a helper's news is its parent's, by Core's own
+    note. To the bot only, through herdr-event-post, as the follower posts: blocked (kind, msg) and error once per
+    episode, stale (with minutes_unchanged) once per stall, and dead once: no live terminal carries the lead's labels
+    (stampede.job=<key>, stampede.role=lead), or the one that does is a shell in a lost program's place; never when it
+    exited 0 by itself. <job>/sweep-state.json keeps what it saw and sent, and every event the relay did not take,
+    tried again first on the next pass."""
+    STATE = 'sweep-state.json'
+
+    def look(self):
+        self.retry(now=True)
+        code, listed = hc('ls', '--all', '--label', 'stampede.job=' + self.key, '--label', 'stampede.role=lead')
+        if code != 0 or not isinstance(listed.get('terminals'), list):
+            return  # Core did not answer clearly: no news
+        rows, live = listed['terminals'], []
+        for row in rows:
+            if row.get('state') == 'live':
+                code, terminal = hc('get', row.get('address'))
+                if code != 0:
+                    return
+                live.append(terminal)
+        lead = next((t for t in reversed(live) if not shelled(t)), None)
+        if lead:
+            for address, record in self.terminals.items():
+                record['finished'] = record['finished'] or address != lead['address']  # an earlier launch, replaced
+            self.track(lead['address'], self.lead or (lead.get('labels') or {}).get('stampede.agent') or lead['address'], 'lead')
+            self.observe(lead['address'], lead.get('status'), lead.get('turn'))
+            self.stalls()
+        else:
+            ended = {row['address']: row for row in rows if row.get('address')}
+            ended.update({t['address']: {'reason': 'lost'} for t in live})  # a shell in its place
+            if not ended and not self.terminals:  # Core has no row at all: a lead that started and was removed is lost
+                node = started(self.job)
+                ended = {node['address']: {'reason': 'lost'} if node.get('state') != 'finished' else
+                         {'reason': node.get('reason'), 'exit_code': node.get('exit_code')}} if node else {}
+            if not any(not r['finished'] for r in self.terminals.values()) and ended:
+                newest = list(ended)[-1]  # a lead that ended before any pass saw it
+                if newest not in self.terminals:
+                    self.track(newest, self.lead or newest, 'lead')
+            for address, record in self.terminals.items():
+                if not record['finished']:
+                    self.gone(address, ended.get(address, {'reason': 'lost'}))
+        self.save()
+
+    def gone(self, address, data):
+        record = self.terminals[address]
+        record['finished'] = True
+        code, reason = data.get('exit_code'), data.get('reason') or 'exited'
+        if reason == 'exited' and code == 0:
+            return  # its own exit 0: no alarm
+        self.notify(f'{address}|finished', address,
+                    post={'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason})
+
+
+def started(job):
+    """The lead's node in <job>/tree.json (address, saved state, exit_code, reason) once its start went through, else None
+    (it never started, or is starting)."""
+    try:
+        nodes = json.loads((job / 'tree.json').read_text()).get('nodes') or {}
+        return next((n for n in nodes.values() if isinstance(n, dict) and n.get('role') == 'lead' and n.get('address')), None)
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def sweep():
+    """Each marker jobs/hc-<12 hex> whose job folder says backend native and is neither finished nor closed, on that job's own core
+    (its endpoint); a core that does not answer is no news, and none is ever started. A pass still running for a job
+    makes the next one skip it. Exit 0."""
+    jobs = Path(os.environ.get('HERDR_EVENTS_DIR') or Path.home() / '.config/herdr-events') / 'jobs'
+    base = {name: os.environ.get(name) for name in ('HC_SESSION', 'HC_SOCKET')}
+    for marker in sorted(jobs.glob('hc-*')):
+        try:
+            job = Path(marker.read_text().splitlines()[0].strip())
+            native = (job / 'backend').read_text().strip() == 'native' and (job / 'workspace').read_text().strip() == marker.name
+            point = json.loads((job / 'endpoint').read_text()) if (job / 'endpoint').is_file() else {}
+        except (OSError, IndexError, ValueError):
+            continue
+        if not re.fullmatch(r'hc-[0-9a-f]{12}', marker.name) or not native or (job / 'finished').exists() or (job / 'closed').exists():
+            continue
+        for name, key in (('HC_SESSION', 'session'), ('HC_SOCKET', 'socket')):
+            value = point.get(key, base[name])
+            os.environ.pop(name, None) if not value else os.environ.__setitem__(name, value)
+        with open(job / 'sweep-state.json.lock', 'a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                continue
+            look = Sweep(job)
+            if alive():
+                look.look()
+            else:
+                look.retry(now=True)  # the relay needs no core
+    return 0
+
+
 def main(argv):
+    if argv == ['--sweep']:
+        return sweep()
     if argv == ['--alive']:
         return 0 if alive() else 1
     if argv == ['--socket']:

@@ -10,11 +10,15 @@ and draws an empty-prompt line so hc read shows a prompt with nothing typed. No 
     claude  -> core_agent.py --kind claude <claude args...> [first prompt]
     codex   -> core_agent.py --kind codex  <codex args...>  [first prompt]
 
-A prompt is chat unless one of its lines is an instruction for the stand-in:
+A prompt is chat unless one of its lines (or ' ;; ' parts of one line) is an instruction for the stand-in:
     sleep <seconds>        stay working that long (a tell meanwhile is refused as working)
     report <path>          write a report with Status: DONE at <path> (relative to the job folder)
     detach <pid file>      start a deliberately detached child (its own session) and write its pid there
     fleet-job <args...>    run fleet-job with these arguments (a reply, a question, a gate, finish)
+    block                  report blocked and stay so (a dialog no one answers), as a stuck agent does
+    hc <args...>           run hc with these arguments from this terminal (the caller is this agent), logged with its seconds
+    idle                   end this turn reporting idle, not done
+    exit                   exit at this point of the turn, as an agent that quits
 Everything it does is appended to <job>/standin/<agent>.log, one JSON object per line, for the runner to check."""
 import json, os, queue, re, shlex, subprocess, sys, threading, time, uuid
 from datetime import datetime
@@ -56,7 +60,7 @@ class Agent:
             self.name = self.notify[self.notify.index('--agent') + 1]
         self.name = self.name or 'agent'
         self.thread = self.session or uuid.uuid4().hex
-        self.events = queue.Queue()
+        self.events, self.blocked, self.end = queue.Queue(), False, 'done'
         folder = self.job / 'standin' if self.job else Path('/tmp')
         folder.mkdir(parents=True, exist_ok=True)
         self.log_path = folder / (self.name + '.log')
@@ -117,7 +121,7 @@ class Agent:
 
     def act(self, text):
         """The stand-in's instructions in a prompt, each logged with what came of it."""
-        for row in text.splitlines():
+        for row in re.split(r'\n| ;; ', text):
             row = row.strip()
             found = re.fullmatch(r'sleep (\d+)', row)
             if found:
@@ -139,6 +143,26 @@ class Agent:
                 Path(found.group(1)).write_text(str(child.pid) + '\n')
                 self.log(event='action', action='detach', child=child.pid, pid_file=found.group(1))
                 continue
+            if row == 'block':
+                self.blocked = True
+                self.log(event='action', action='block')
+                continue
+            if row in ('idle', 'exit'):
+                self.log(event='action', action=row)
+                if row == 'exit':
+                    os._exit(0)
+                self.end = row
+                continue
+            found = re.fullmatch(r'hc (.+)', row)
+            if found:
+                began = time.time()
+                try:
+                    done = subprocess.run(['hc', *shlex.split(found.group(1))], capture_output=True, text=True, timeout=900)
+                    result = {'exit': done.returncode, 'stdout': done.stdout[-2000:], 'stderr': done.stderr[-2000:]}
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    result = {'exit': 127, 'stdout': '', 'stderr': str(error)}
+                self.log(event='action', action='hc', argv=shlex.split(found.group(1)), seconds=round(time.time() - began, 2), **result)
+                continue
             found = re.fullmatch(r'fleet-job (.+)', row)
             if found:
                 argv = ['fleet-job', *shlex.split(found.group(1))]
@@ -154,7 +178,11 @@ class Agent:
         status('working')
         self.act(text)
         time.sleep(0.3)
-        status('done')
+        if self.blocked:
+            status('blocked')
+            return
+        status(self.end)
+        self.end = 'done'
         os.write(1, MARKER.encode())
         if self.kind == 'codex' and self.notify:
             payload = {'type': 'agent-turn-complete', 'thread-id': self.thread, 'turn-id': uuid.uuid4().hex,
@@ -209,6 +237,9 @@ class Agent:
                 continue
             if kind == 'eof':
                 self.log(event='exit', reason='stdin closed')
+                return 0
+            if kind == 'prompt' and value.strip() in ('/exit', '/quit'):  # the CLIs' own way out
+                self.log(event='exit', reason=value.strip())
                 return 0
             if kind == 'prompt':
                 self.turn(value, 'terminal')
