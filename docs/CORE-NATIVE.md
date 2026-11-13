@@ -79,7 +79,7 @@ A message from an agent (a terminal that reports a status) arrives in the termin
 | a helper's turn end, block or exit | its parent | Core's note; no stampede code |
 | a question, a gate | the owner (the bot that started the job, else the phone) | `stampede ask`, `ask --gate`, through `herdr-event-post` to a bot |
 | a post | the bot that started the job; in a local job no one (it is only written to `<job>/outbox/`) | `stampede post`, through `herdr-event-post` |
-| the job is done | the bot that started the job; in a local job no one | `stampede finish`: one `done` event, `source` `stampede` |
+| the job is done | the bot that started the job; in a local job the machine's default route when one is set (else it is only logged) | `stampede finish`: one `done` event, `source` `stampede` |
 | the lead is blocked, at an error, dead or stalled | the owner | the machine's watchdog timer runs `herdr-event-sweep`: one event per episode, `source` `hc`, `pane` `hc:<key>/<address>`, `workspace` `<key>`, `agent` the lead's name |
 
 A client that wants live changes follows Core: `hc events --label stampede.job=<key>` for the labelled terminals, or `hc events` for all, and applies each fact change to its copy of the tree.
@@ -138,7 +138,7 @@ A start over the cap is queued, not refused. The lead runs `stampede next <job>`
 
 - No `--front-door`: `stampede new --core` refuses it (exit 2), since the front door reads the lead's pane and a Core job has none. The chat that starts a Core job passes the owner's words with `stampede tell <job> lead "..."` and reads the lead with `hc read <address>`. A native front door for a Core job is planned.
   - **A job a bot started** (it has an owner tag): questions, gates, posts and done reach that bot as events, and the bot records a gate's yes with `approve-gate`.
-  - **A job started locally:** a question or a gate goes to the owner's phone, and `approve-gate` refuses it; a post is only written to `<job>/outbox/` and no one is told, and `finish` sends no event.
+  - **A job started locally:** a question or a gate goes to the owner's phone, and `approve-gate` refuses it; a post is only written to `<job>/outbox/` and no one is told; `finish` sends its `done` event through the ordinary relay, to the default route when one is set, and it is only logged when no route has a URL.
 - No `--pane`: a Core-native job hands nothing to a Herdr TUI pane. Run another CLI as a program (`stampede start <job> <name> -- <cli> ...`).
 - No follower terminal (`relay-<key>`), `inbox.log`, `inbox/`, `hooks/`, `core.json` or `agents.tsv`.
 - The earlier Core path, with those parts, is `stampede new --core --relay`. It is kept for one release.
