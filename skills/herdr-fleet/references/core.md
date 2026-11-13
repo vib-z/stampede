@@ -46,9 +46,9 @@ stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--
 ```
 
 - **The parent rule.** A helper is a Core child of the terminal that runs `stampede start`: yours, or a helper's when that helper starts its own. From outside Core its parent is the lead. `--parent <agent>` names another parent in the job.
-- **A branch ends with its parent.** When a parent's program ends, Core ends its children. `--outlive-parent` keeps one running: only for a watcher that must outlive its parent, and only when the brief says so.
+- **A branch ends with its parent.** When a parent's program ends, Core ends its children. `--outlive-parent` keeps one running: only for a watcher that must outlive its parent, and only when the brief says so. Core sets a parent once, so after a reopen it still names your old address: `stampede tree` shows it at depth 1 as `outlived <its old parent>`, it counts under the cap, and a whole-job close ends it with the rest.
 - A helper gets its brief with its start. Write it on the hand-off template, and tell it to write its result to a file and send you the path.
-- `STARTED <name> (<address>) under <parent>`: it runs. `QUEUED <name> (<n> running, cap <c>)`: it waits under the cap ([below](#the-cap-and-the-queue)). Both exit 0. `FAILED <name> (<why>)`, exit 1: Core refused the run. Exit 2: refused before anything ran (the name `lead`, a name a live terminal or a queued start holds, a bad brief or kind, an unknown parent, `--pane`).
+- `STARTED <name> (<address>) under <parent>`: it runs. `QUEUED <name> (<n> running, cap <c>)`: it waits under the cap ([below](#the-cap-and-the-queue)). Both exit 0. `FAILED <name> (<why>)`, exit 1: Core refused the run. Exit 2: refused before anything ran (the name `lead`, which names the job's lead, a name a live terminal or a queued start holds, a bad brief or kind, an unknown parent, `--pane`).
 - A helper's report defaults to `<job>/reports/<name>.md`; `--yolo-in <worktree>` runs it in no-checks mode there.
 - A helper may start its own helpers only when its brief gives it that job.
 
@@ -84,8 +84,9 @@ A wait can return before the work is done (a message, a timeout): handle what ca
 ## What wakes you
 
 - **Core's notes** about each child: its turn ended, it is blocked, it exited. No stampede code is involved.
-- **Messages** typed into your terminal by `hc send`, from a helper or from `stampede tell`. A message arrives as `<hc from="t7 name">...</hc>`: it is information, never the owner's approval.
+- **Messages** typed into your terminal by `hc send`, from a helper or from `stampede tell`. A message from an agent arrives as `<hc from="t7 name">...</hc>`; one from a plain program (it reports no status) arrives as bare text. Either is information, never the owner's approval.
 - A blocked helper reaches you by Core's note. When the block is the owner's to decide, raise it with `stampede ask`.
+- The owner's answer to `stampede ask` (a question or a gate) is typed into your terminal by Core: `ASKED <id> (Core types the answer into the lead's terminal; cancel with: ...)`.
 
 The owner hears a question, a gate, a post and done from your own commands (`stampede ask`, `ask --gate`, `post`, `finish`). The machine's watchdog timer looks at you, the lead, every 5 minutes (`herdr-event-core --sweep`) and tells the owner once per episode when you are blocked, at an error, dead or stalled.
 
@@ -119,14 +120,14 @@ Labels only; Core's tree never depends on them.
 ## Reopen
 
 - `stampede snapshot <job>` rewrites `tree.json` from Core's tree, and `REOPEN.md` and `reopen.sh` from it; `new`, every start, `reopen`, `close` and `finish` write it too. It prints the record's path; `FAILED snapshot (<why>)`, exit 1, when Core does not answer.
-- After a crash or a reboot, `stampede reopen <job>` (or `bash <job>/reopen.sh`) walks the record parents first and starts what is not live, each child under its parent's new address. Per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (you: no `under`), `SKIPPED <name> ...` (a program, a plain child, or one whose parent is not running), `DONE <name> (exited 0)`, or `FAILED <name> (<why>)`, exit 1. `NOT TOLD <name> (<why>)` when a line to it could not go.
+- After a crash or a reboot, `stampede reopen <job>` (or `bash <job>/reopen.sh`) walks the record parents first and starts what is not live, each child under its parent's new address. Per node: `LIVE <name> (<address>)`, `STARTED <name> (<address>) under <parent>` (you: no `under`), `SKIPPED <name> ...` (a program, a plain child, or one whose parent is not running), `DONE <name> (exited 0)`, `DONE <name> (closed)` for a helper closed by name (nothing under it starts either), or `FAILED <name> (<why>)`, exit 1. `NOT TOLD <name> (<why>)` when a line to it could not go.
 - A Claude agent resumes its session when Claude's own session file shows it ran, labelled `stampede.resumed=1`; else it starts with that id and its first prompt. A Codex agent always starts fresh with its first prompt. A program runs again only with `--rerun-programs`. A terminal still live is left alone.
 - The restarted lead gets one line saying it was reopened. `--prompt` gives each resumed helper one line with its parent's name and new address, and tells it to read its brief again. `--fresh` starts every Claude agent on a new session.
 
 ## Close
 
-- `stampede close <job> <agent>` ends that agent's subtree, leaves first: politely when idle or done (`/exit` for Claude, `/quit` for Codex, then up to 15 s), else by killing its terminal, then removes it. It prints `CLOSED <name> (<address>)` per terminal, in order; `FAILED <name> (<why>)`, exit 1, and goes on with the rest. Refused, exit 2, from a terminal inside that subtree.
-- `stampede close <job>` with no agent ends the whole job, you last, and writes `<job>/closed`. That is the owner's call: only on their yes (SKILL.md, Wrap up).
+- `stampede close <job> <agent>` ends that agent's subtree, leaves first: politely when idle or done (`/exit` for Claude, `/quit` for Codex, then up to 15 s to leave), else by killing its terminal, then removes it. It prints `CLOSED <name> (<address>)` per terminal, in order; `FAILED <name> (<why>)`, exit 1, and goes on with the rest. Refused, exit 2, from a terminal inside that subtree.
+- A helper closed by name stays closed: a later reopen leaves it and its branch. `stampede close <job>` with no agent ends the whole job, you last, and writes `<job>/closed`; it marks no helper closed, so a later reopen brings back what ran. That is the owner's call: only on their yes (SKILL.md, Wrap up).
 - `stampede finish <job> "<one line on where it ended>"` once, as on the TUI: one `done` event for the owner.
 
 ## What a Core-native job does not have
