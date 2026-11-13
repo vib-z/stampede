@@ -54,7 +54,7 @@ class Install(unittest.TestCase):
         bin_dir = self.home / '.local/bin'
         self.assertEqual((bin_dir / 'stampede').resolve(), ROOT / 'scripts/stampede')
         self.assertEqual((bin_dir / 'fleet-job').resolve(), ROOT / 'scripts/stampede')
-        for name in ('herdr-trust', 'herdr-doctor', 'herdr-event-post', 'herdr-reopen-snapshot'):
+        for name in ('herdr-trust', 'herdr-doctor', 'herdr-event-post', 'herdr-event-sweep', 'herdr-reopen-snapshot'):
             self.assertTrue((bin_dir / name).is_symlink(), name)
         self.assertFalse((bin_dir / 'test-relay.sh').exists())
         self.assertEqual(kept.read_text(), 'the owner\'s own file')

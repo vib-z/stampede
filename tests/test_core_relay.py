@@ -193,21 +193,21 @@ class CoreAlive(Shell):
         fake.symlink_to('/bin/sleep')
         unrelated = subprocess.Popen([str(fake), '30'])
         self.addCleanup(unrelated.kill)
-        result = self.run_script('herdr-event-core', '--alive', HC_SOCKET=str(self.home / 'none.sock'))
+        result = self.run_script('herdr-event-sweep', '--alive', HC_SOCKET=str(self.home / 'none.sock'))
         self.assertEqual(result.returncode, 1)
         self.assertFalse((self.home / 'core/calls').exists())
 
     def test_a_socket_that_answers_hello_is_up(self):
         path, server = core_socket(self.home)
         self.addCleanup(server.shutdown)
-        self.assertEqual(self.run_script('herdr-event-core', '--alive', HC_SOCKET=str(path)).returncode, 0)
+        self.assertEqual(self.run_script('herdr-event-sweep', '--alive', HC_SOCKET=str(path)).returncode, 0)
 
     def test_the_running_core_names_its_own_version(self):
         path, server = core_socket(self.home)
         self.addCleanup(server.shutdown)
-        shown = self.run_script('herdr-event-core', '--core-version', HC_SOCKET=str(path))
+        shown = self.run_script('herdr-event-sweep', '--core-version', HC_SOCKET=str(path))
         self.assertEqual((shown.returncode, shown.stdout.strip()), (0, '0.1.13'))
-        down = self.run_script('herdr-event-core', '--core-version', HC_SOCKET=str(self.home / 'none.sock'))
+        down = self.run_script('herdr-event-sweep', '--core-version', HC_SOCKET=str(self.home / 'none.sock'))
         self.assertEqual((down.returncode, down.stdout), (1, ''))
         self.assertFalse((self.home / 'core/calls').exists(), 'never an hc command')
 
@@ -749,7 +749,7 @@ class ReviewRetry(CoreCase):
                   'labels': {'stampede.job': key, 'stampede.agent': 'build-api', 'stampede.role': 'worker'}}
         snapshot = {'channel': None, 'seq': 1, 'terminals': [record]}
         heartbeat = {'jsonrpc': '2.0', 'method': 'heartbeat', 'params': {'seq': 9}}
-        with mock.patch.object(core.Follower, 'post', post), mock.patch.object(core, 'RETRY_EVERY', 0):
+        with mock.patch.object(core.Follower, 'post', post), mock.patch.object(core.base, 'RETRY_EVERY', 0):
             follower = core.Follower(job)
             for row in (snapshot, status('t3', 'blocked', kind='permission'), turn('t3', 1, 'blocked'), status('t3', None),
                         finished('t3', 1)):
@@ -798,7 +798,7 @@ class ReviewStall(CoreCase):
         core = follower_module()
         env = {k: v for k, v in (('FLEET_WATCH_NOTIFY', notify), ('HERDR_EVENTS_STALE_MINUTES', minutes)) if v is not None}
         with mock.patch.object(core.Follower, 'post', lambda follower, event: self.posts.append(event)), \
-                mock.patch.object(core, 'wall', lambda: self.now[0]), mock.patch.object(core, 'STALL_EVERY', 0), \
+                mock.patch.object(core.base, 'wall', lambda: self.now[0]), mock.patch.object(core.base, 'STALL_EVERY', 0), \
                 mock.patch.dict(os.environ, env):
             follower = core.Follower(self.job_dir)
             records = [{'address': a, 'name': n, 'state': 'live', 'turn': 0, 'status': {'state': 'working'},
@@ -925,7 +925,7 @@ class ReviewDurable(CoreCase):
 
     def timeout_before_the_queue(self, restart):
         core = follower_module()
-        with mock.patch.object(core, 'POST_TIMEOUT', 0.6):
+        with mock.patch.object(core.base, 'POST_TIMEOUT', 0.6):
             self.slow.touch()
             follower = self.follower(core)
             for row in self.rows():

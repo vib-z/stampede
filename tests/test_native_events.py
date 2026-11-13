@@ -1,4 +1,4 @@
-"""A Core-native job on the relay side: herdr-event-core --sweep (the lead's blocked, error, stale and dead, once each),
+"""A Core-native job on the relay side: herdr-event-sweep (the lead's blocked, error, stale and dead, once each),
 the watchdog that runs it, flush's UNDELIVERED line through fleet-job tell, and herdr-reopen-snapshot's hand-over.
 Every script runs for real, against the fake hc and a socket that answers hello like a running core."""
 import json, os, shutil, subprocess, sys, unittest
@@ -51,7 +51,7 @@ class NativeCase(CoreCase):
 
     def sweep(self):
         (self.root / 'home/.local/state/herdr-events/dedupe.tsv').unlink(missing_ok=True)  # the sweep's own memory only
-        result = subprocess.run([str(RELAY / 'herdr-event-core'), '--sweep'], capture_output=True, text=True, timeout=60)
+        result = subprocess.run([str(RELAY / 'herdr-event-sweep')], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
@@ -77,6 +77,21 @@ class Sweep(NativeCase):
                          {'source': 'hc', 'state': 'blocked', 'pane': f'hc:{self.key}/t1', 'workspace': self.key, 'agent': 'lead-x',
                           'kind': 'permission', 'msg': 'run rm?', 'output_tail': 'Allow rm? y/n',
                           'event_id': f'{self.key}/t1|blocked|1', 'job': str(self.jd), 'owner': 'alpha'})
+
+    def test_the_follower_still_answers_the_sweep_and_the_probes_for_one_release(self):
+        self.lead(status={'state': 'blocked', 'kind': 'permission'})
+        old = subprocess.run([str(RELAY / 'herdr-event-core'), '--sweep'], capture_output=True, text=True, timeout=60)
+        self.assertEqual(old.returncode, 0, old.stderr)
+        self.sweep()  # the new script takes over the same state: nothing twice
+        self.assertEqual(self.ids(), [f'{self.key}/t1|blocked|1'])
+        for script in ('herdr-event-core', 'herdr-event-sweep'):
+            for socket, code in ((self.socket, 0), (self.root / 'none.sock', 1)):
+                alive = subprocess.run([str(RELAY / script), '--alive'], env={**os.environ, 'HC_SOCKET': str(socket)},
+                                       capture_output=True, text=True, timeout=30)
+                self.assertEqual((alive.returncode, alive.stdout), (code, ''), script)
+        shown = subprocess.run([str(RELAY / 'herdr-event-sweep'), '--help'], capture_output=True, text=True, timeout=30)
+        self.assertEqual(shown.returncode, 0)
+        self.assertIn('herdr-event-sweep --alive', shown.stdout)
 
     def test_a_second_episode_posts_again(self):
         self.lead(status={'state': 'blocked', 'kind': 'permission'})
