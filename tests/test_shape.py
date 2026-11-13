@@ -239,6 +239,7 @@ class Shape(unittest.TestCase):
         gates = ROOT / "skills" / "herdr-fleet" / "references" / "gates.md"
         self.assertLess(len(gates.read_bytes()), 3000)
         self.assertIn("sitemap", gates.read_text(encoding="utf-8"))
+        self.assertIn("reviewed commit is the commit the gate names", gates.read_text(encoding="utf-8"))  # merge only what was reviewed
         copies = [rel(p) for p in md_files() if is_playbook(p) and p != gates and "sitemap" in p.read_text(encoding="utf-8").lower()]
         self.assertEqual(copies, [])
 
