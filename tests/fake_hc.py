@@ -257,8 +257,10 @@ def main(argv):
         try:
             leave(state)
             command(state, [a for a in argv if a != '--json'] if argv[:1] != ['run'] else argv)
-        finally:
-            path.write_text(json.dumps(state, indent=1))
+        finally:  # a temporary file and os.replace: a reader between two calls never sees half a file
+            temporary = HOME / f'.state.json.{os.getpid()}'
+            temporary.write_text(json.dumps(state, indent=1))
+            os.replace(temporary, path)
     time.sleep(HOLD[0])
 
 

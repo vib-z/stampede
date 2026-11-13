@@ -442,10 +442,12 @@ class Reopen(NativeCase):
     def test_parents_first_each_under_its_parent_s_new_address(self):
         code, out = self.reopen()
         self.assertEqual(code, 0, out)
-        self.assertEqual(out.splitlines(), [f'STARTED {LEAD} (t7)', f'STARTED build-api (t8) under {LEAD}', f'STARTED build-ui (t9) under {LEAD}',
-                                            'STARTED deep (t10) under build-api', 'SKIPPED watch-ci (a program: --rerun-programs runs it again)',
-                                            'SKIPPED ci-wait (a plain child: run it again if still needed: make test)'])
-        lead, api, ui, deep = (self.run_of(n) for n in (LEAD, 'build-api', 'build-ui', 'deep'))
+        self.assertEqual(out.splitlines(), [f'STARTED {LEAD} (t7)', f'STARTED build-api (t8) under {LEAD}',
+                                            'SKIPPED build-ui (codex keeps no session to resume: --fresh starts it again with its brief)',
+                                            'SKIPPED watch-ci (a program: --rerun-programs runs it again)',
+                                            'SKIPPED ci-wait (a plain child: run it again if still needed: make test)',
+                                            'STARTED deep (t9) under build-api'])   # its session never ran: through the queue, after the walk
+        lead, api, deep = (self.run_of(n) for n in (LEAD, 'build-api', 'deep'))
         self.assertIn('--no-parent', lead)
         self.assertEqual(self.option(lead, '--session-id'), self.nodes[LEAD]['session'])   # no session file: it never ran
         self.assertTrue(self.program(lead)[-1].startswith(f'You are {LEAD}.'))
@@ -453,16 +455,14 @@ class Reopen(NativeCase):
         self.assertNotIn('--session-id', api)
         self.assertNotIn('You are', self.program(api)[-1])
         self.assertEqual(self.labels(api)['stampede.resumed'], '1')
-        self.assertIn('--no-daemon', ui)
-        self.assertIn(f'Your parent is {LEAD} at t7', self.program(ui)[-1])
         self.assertEqual(self.option(deep, '--parent'), 't8')
         self.assertIn('Your parent is build-api at t8', self.program(deep)[-1])
         self.assertEqual(self.labels(deep)['herdr.tab'], self.nodes['deep']['tab'])
         self.assertIn('You were reopened', self.state()['terminals']['t7']['sent'][-1])
         self.assertEqual(self.state()['terminals']['t8']['sent'], [])
         code, out = self.reopen()
-        self.assertEqual(len(self.runs()), self.before + 4)
-        self.assertEqual([row.split()[0] for row in out.splitlines()], ['LIVE'] * 4 + ['SKIPPED'] * 2)
+        self.assertEqual(len(self.runs()), self.before + 3)
+        self.assertEqual(sorted(row.split()[0] for row in out.splitlines()), ['LIVE'] * 3 + ['SKIPPED'] * 3)
 
     def test_prompt_and_fresh(self):
         self.reopen('--prompt')
@@ -505,10 +505,139 @@ class Reopen(NativeCase):
 
     def test_a_resumed_idle_agent_holds_no_place_under_the_cap(self):
         self.reopen()
-        (self.job / 'max-helpers').write_text('2\n')   # build-api (resumed, idle) does not count; build-ui and deep do
+        (self.job / 'max-helpers').write_text('1\n')   # build-api (resumed, idle) does not count; deep does
         self.assertIn('QUEUED', self.start('more')[1])
-        (self.job / 'max-helpers').write_text('3\n')
+        (self.job / 'max-helpers').write_text('2\n')
         self.assertIn('STARTED more', self.quiet(fj.native().next_, self.job)[1])
+
+
+class NoWorkByItself(NativeCase):
+    """A reopen never hands out work by itself (R1, R3), and an uncertain start is never lost or doubled (R2)."""
+    def running(self):
+        return sum(fj.native().running(t) for t in self.state()['terminals'].values())
+
+    def waiting(self):
+        return [r['name'] for _, r in fj.native().queued(self.job)]
+
+    def reopen(self, *flags):
+        return self.quiet(fj.native().reopen, self.job, '--fresh' in flags, '--prompt' in flags, '--rerun-programs' in flags)
+
+    def test_r1_reopen_keeps_the_cap(self):
+        self.started(max_helpers=1)
+        self.start('a', kind='codex')
+        self.terminal('t2', status={'state': 'done'}, turn=1)
+        self.start('b', kind='codex')
+        fj.hc('kill', 't1')
+        code, out = self.reopen()
+        self.assertIn('SKIPPED a (codex keeps no session to resume: --fresh starts it again with its brief)', out)
+        self.assertEqual((self.running(), self.waiting()), (0, []))
+        code, out = self.reopen('--fresh')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines()[1:], [f'STARTED a (t5) under {LEAD}', 'QUEUED b (1 running, cap 1)'])
+        self.assertEqual((self.running(), self.waiting()), (1, ['b']))
+        self.assertIn(f'Your parent is {LEAD} at t4', self.program(self.runs()[-1])[-1])
+
+    def test_r2_a_start_that_timed_out_but_began_is_adopted_and_holds_its_place(self):
+        self.started(max_helpers=1)
+        for name in ('a', 'b', 'c'):
+            self.start(name)
+        self.terminal('t2', status={'state': 'done'}, turn=1)
+        self.shape(run_error={'b': 'timeout'}, spawn_also=True)
+        code, out = self.quiet(fj.native().next_, self.job)
+        self.assertEqual(out.splitlines(), [f'STARTED b (t3) under {LEAD}', 'WAITING 1 queued (1 running, cap 1)'])
+        self.assertEqual((code, self.running(), self.waiting()), (0, 1, ['c']))
+        node = json.loads((self.job / 'tree.json').read_text())['nodes']['b']
+        self.assertEqual((node['address'], node['session']), ('t3', self.state()['terminals']['t3']['labels']['stampede.session']))
+
+    def test_r3_a_finished_job_reopens_for_reading_only(self):
+        self.started(max_helpers=1)
+        self.start('a', kind='codex')
+        self.quiet(fj.finish, self.job, 'accepted')
+        fj.hc('kill', 't1')
+        before = len(self.runs())
+        code, out = self.reopen()
+        self.assertEqual(len(self.runs()), before)
+        self.assertIn(f'SKIPPED {LEAD} (the job is finished, and its Claude session never ran', out)
+        self.assertIn(f'SKIPPED a: its parent {LEAD} is not running', out)
+        folder = self.root / 'home/.claude/projects/x'
+        folder.mkdir(parents=True)
+        session = json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD]['session']
+        (folder / (session + '.jsonl')).write_text('{}\n')
+        code, out = self.reopen('--prompt')
+        lead = self.runs()[-1]
+        self.assertEqual((len(self.runs()), self.option(lead, '--resume')), (before + 1, session))
+        self.assertNotIn('Read ', self.program(lead)[-1])
+        self.assertIn('SKIPPED a (the job is finished, and codex keeps no session to resume)', out)
+        self.assertIn('reopened for reading: the job is finished', self.state()['terminals']['t3']['sent'][-1])
+        self.assertEqual(self.waiting(), [])
+
+    def test_the_refusals_on_a_finished_job(self):
+        self.started()
+        (self.job / 'finished').write_text('done\n')
+        for flag in ('--fresh', '--rerun-programs'):
+            done = self.cli('reopen', self.job, flag)
+            self.assertEqual(done.returncode, 2, done.stderr)
+            self.assertIn('reopens for reading only', done.stderr)
+
+    def test_fresh_and_rerun_programs_go_through_the_cap(self):
+        self.started()
+        self.start('build-api')
+        self.start('build-ui', kind='codex')
+        with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': 't2'}):
+            self.start('deep')
+        self.start('watch-ci', 'make', 'watch')
+        (self.job / 'max-helpers').write_text('1\n')
+        fj.hc('kill', 't1')
+        code, out = self.reopen('--fresh', '--rerun-programs')
+        self.assertEqual(out.splitlines(), [f'STARTED {LEAD} (t6)', f'STARTED build-api (t7) under {LEAD}',
+                                            'QUEUED build-ui (1 running, cap 1)', 'QUEUED deep (1 running, cap 1)',
+                                            'QUEUED watch-ci (1 running, cap 1)'])
+        self.terminal('t7', status={'state': 'done'}, turn=1)
+        self.assertIn('STARTED build-ui (t8) under', self.quiet(fj.native().next_, self.job)[1])
+        self.terminal('t8', status={'state': 'done'}, turn=1)
+        _, out = self.quiet(fj.native().next_, self.job)
+        self.assertIn('STARTED deep (t9) under build-api', out)
+        self.assertIn('Your parent is build-api at t7', self.program(self.runs()[-1])[-1])
+
+    def test_a_child_whose_parent_still_waits_is_left_waiting_then_started_after_it(self):
+        self.started()
+        queue = self.job / 'queue'
+        queue.mkdir(exist_ok=True)
+        for stamp, name, parent in ((1, 'child', 'p'), (2, 'p', LEAD)):
+            request = dict(name=name, kind='claude', brief=str(self.brief(self.job, name)), model=None, effort=None, cwd=str(self.repo),
+                           tab=None, parent=parent, outlive=False, program=[], yolo=False, report=str(self.job / 'reports' / name))
+            (queue / f'{stamp}-{name}.json').write_text(json.dumps(request))
+        _, out = self.quiet(fj.native().next_, self.job)
+        self.assertEqual(out.splitlines(), [f'STARTED p (t2) under {LEAD}', 'WAITING 1 queued (1 running, cap 12)'])
+        self.assertEqual(self.quiet(fj.native().next_, self.job)[1].strip(), 'STARTED child (t3) under p')
+
+    def test_a_request_whose_terminal_already_lives_is_adopted(self):
+        self.started()
+        (self.job / 'max-helpers').write_text('1\n')
+        self.start('h0')
+        self.start('h1')
+        self.terminal('t2', status={'state': 'done'}, turn=1)
+        self.add_terminal('t9', parent='t1', labels={'stampede.job': fj.job_key(self.job), 'stampede.role': 'helper',
+                                                     'stampede.agent': 'h1', 'stampede.kind': 'claude', 'herdr.tab': 'main'})
+        before = len(self.runs())
+        _, out = self.quiet(fj.native().next_, self.job)
+        self.assertEqual(out.strip(), f'STARTED h1 (t9) under {LEAD}')
+        self.assertEqual((len(self.runs()), self.waiting()), (before, []))
+
+    def test_core_silent_after_a_failed_run_keeps_the_request(self):
+        self.started()
+        (self.job / 'max-helpers').write_text('1\n')
+        self.start('h0')
+        self.start('h1')
+        self.start('h2')
+        self.terminal('t2', status={'state': 'done'}, turn=1)
+        self.shape(run_error={'h1': 'timeout'}, lookup_error='timeout')
+        code, out = self.quiet(fj.native().next_, self.job)
+        self.assertEqual(code, 1)
+        self.assertIn('UNKNOWN h1: ', out)
+        self.assertIn('run stampede next once Herdr Core answers', out)
+        self.assertNotIn('h2', out)
+        self.assertEqual(self.waiting(), ['h1', 'h2'])
 
 
 class Close(NativeCase):
