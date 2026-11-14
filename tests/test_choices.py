@@ -188,12 +188,63 @@ class Roles(Choices):
         self.config('[roles.docs]\nkind = 3\n')
         self.assertIn('roles.docs.kind must be a str', settings_.current().problems[0])
 
+    def test_b1_a_role_with_only_a_model_or_only_an_effort_takes_the_rest_from_default(self):
+        self.config('[roles.docs]\nmodel = "claude-sonnet-5-5"\n[roles.lint]\neffort = "low"\n')
+        argv, node = self.start('docs-api')
+        self.assertIn('--model claude-sonnet-5-5 --effort medium', argv)
+        self.assertEqual((node['kind'], node['model'], node['effort']), ('claude', 'claude-sonnet-5-5', 'medium'))
+        brief = self.brief(self.job, 'lint-web')
+        self.assertEqual(self.main('start', self.job, 'lint-web', '--brief', brief)[0], 0)
+        node = json.loads((self.job / 'tree.json').read_text())['nodes']['lint-web']
+        self.assertEqual((node['kind'], node['model'], node['effort']), ('claude', 'claude-opus-5-5', 'low'))
+
+    def test_b2_kind_codex_on_a_role_with_no_kind_gets_no_claude_model(self):
+        self.config('[roles.docs]\nmodel = "claude-sonnet-5-5"\n')
+        argv, node = self.start('docs-api', '--kind', 'codex')
+        self.assertTrue(argv.split(' ', 1)[0].endswith('/codex'))
+        self.assertNotIn('claude-sonnet', argv)
+        self.assertNotIn('-m ', argv)
+        self.assertEqual((node['kind'], node['model'], node['effort']), ('codex', None, None))
+
     def test_a_program_takes_no_role(self):
         self.quiet(cli_.new, str(self.ask), None, core=True, cwd=str(self.repo))
         code, out, err = self.main('start', self.job, 'build-ci', '--', 'sleep', '1')
         self.assertEqual(code, 0, out + err)
         node = json.loads((self.job / 'tree.json').read_text())['nodes']['build-ci']
         self.assertEqual((node['kind'], node['model'], node['effort']), ('program', None, None))
+
+
+class RoleValues(unittest.TestCase):
+    """cli.role_values: each of kind, model and effort by itself, the flag, else the role's, else roles.default's; a
+    table's model and effort only with that table's kind (its own, else roles.default.kind)."""
+    DEFAULT = {'roles.default.kind': 'claude', 'roles.default.model': 'claude-opus-5-5', 'roles.default.effort': 'medium'}
+    ROLES = {'all': {'kind': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, 'model': {'model': 'claude-sonnet-5-5'},
+             'effort': {'effort': 'low'}, 'kind': {'kind': 'codex'}, 'none': {}}
+
+    def resolve(self, role, kind):
+        values = dict(self.DEFAULT)
+        values.update({f'roles.{role}.{k}': v for k, v in self.ROLES.get(role, {}).items()})
+        return cli_.role_values(values, role, kind, None, None)
+
+    def test_the_table(self):
+        D = ('claude-opus-5-5', 'medium')
+        want = {  # role -> {--kind: (kind, model, effort)}; None is no --kind
+            'all': {None: ('codex', 'gpt-6.1-sol', 'high'), 'codex': ('codex', 'gpt-6.1-sol', 'high'), 'claude': ('claude', *D)},
+            'model': {None: ('claude', 'claude-sonnet-5-5', 'medium'), 'claude': ('claude', 'claude-sonnet-5-5', 'medium'),
+                      'codex': ('codex', None, None)},
+            'effort': {None: ('claude', 'claude-opus-5-5', 'low'), 'claude': ('claude', 'claude-opus-5-5', 'low'),
+                       'codex': ('codex', None, None)},
+            'kind': {None: ('codex', None, None), 'codex': ('codex', None, None), 'claude': ('claude', *D)},
+            'none': {None: ('claude', *D), 'claude': ('claude', *D), 'codex': ('codex', None, None)},
+            'unknown': {None: ('claude', *D), 'claude': ('claude', *D), 'codex': ('codex', None, None)}}
+        for role, cases in want.items():
+            for kind, expected in cases.items():
+                with self.subTest(role=role, kind=kind):
+                    self.assertEqual(self.resolve(role, kind), expected)
+
+    def test_a_flag_always_wins(self):
+        values = {**self.DEFAULT, 'roles.all.kind': 'codex', 'roles.all.model': 'gpt-6.1-sol'}
+        self.assertEqual(cli_.role_values(values, 'all', None, 'gpt-6-astra', 'max'), ('codex', 'gpt-6-astra', 'max'))
 
 
 class Lead(Choices):

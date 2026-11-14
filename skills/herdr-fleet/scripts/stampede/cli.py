@@ -458,18 +458,27 @@ def backend_for(a):
 
 
 def role_defaults(job, agent, kind, model, effort):
-    """start's kind, model and effort: each one given wins; else the role's (the name up to its first -), else
-    roles.default. A role's model and effort go only with its own kind, so a Codex start never gets a Claude model.
-    The lead keeps its own CLI, model and effort (lead_model)."""
+    """start's kind, model and effort: the lead keeps its own CLI, model and effort (lead_model); any other agent's come
+    from its role, the name up to its first - (role_values)."""
     if agent == job_.roster(job)[1]:
         return kind or job_.lead_kind(job), model, effort
-    values = settings_.current(job).values
-    role = agent.split('-')[0]
-    kind = kind or values.get(f'roles.{role}.kind') or values['roles.default.kind']
-    for each in (role, 'default'):
-        if values.get(f'roles.{each}.kind', kind) == kind and (values.get(f'roles.{each}.model') or values.get(f'roles.{each}.effort')):
-            return kind, model or values.get(f'roles.{each}.model'), effort or values.get(f'roles.{each}.effort')
-    return kind, model, effort
+    return role_values(settings_.current(job).values, agent.split('-')[0], kind, model, effort)
+
+
+def role_values(values, role, kind, model, effort):
+    """Each of kind, model and effort by itself: the flag, else roles.<role>, else roles.default. A table's model and
+    effort go only with that table's kind (its own, else roles.default.kind), so a Codex start never gets a Claude model:
+    with no match the CLI's own default applies (None)."""
+    default = values['roles.default.kind']
+    kind = kind or values.get(f'roles.{role}.kind') or default
+
+    def pick(field, given):
+        for table in (role, 'default'):
+            value = values.get(f'roles.{table}.{field}')
+            if not given and value and (values.get(f'roles.{table}.kind') or default) == kind:
+                return value
+        return given
+    return kind, pick('model', model), pick('effort', effort)
 
 
 NATIVE_ONLY = ('next', 'tree', 'snapshot', 'reopen', 'close')

@@ -18,7 +18,7 @@ stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>
 ```
 
 - It makes the job folder `<jobs_root>/jobs/<date>-<owner or local>-<slug>`, the repo in its `workdir`, writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, and writes the reopen record.
-- `STARTED <lead> (<address>)`, then `<lead> <job dir>`, exit 0. `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN`, exit 1, as on the relay path. A refusal (bad flags, a used folder, Core silent before anything was made), exit 2.
+- `STARTED <lead> (<address>)`, then `<lead> <job dir>`, exit 0. `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN`, exit 1, as on the relay path. A refusal (bad flags, Core silent before anything was made), exit 2; a name used that day gets `-2`.
 - `--cwd` is the repo (default: the git root of the current folder). `--space` names the space (lowercase letters, digits, `-` and `_`); the default is the job's slug, with 4 hex of the key added when another job's live space has that name. `--max-helpers` sets this job's cap. `--review` and `--fork` work as on the TUI; `--front-door` makes the chat that started the job the owner's only contact: post, ask and gate through `<job>/outbox` ([front-door.md](front-door.md#on-herdr-core)).
 
 ## The job folder

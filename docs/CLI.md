@@ -99,7 +99,7 @@ A Core job's commands, one by one (what each does: [CORE-NATIVE.md](CORE-NATIVE.
 
 | command | 0 | 1 | 2 |
 |---|---|---|---|
-| `new --core` | the lead started | `BLOCKED`, `NOT READY`, `FAILED`, `UNKNOWN` | bad flags, a used folder, Core silent before anything was made |
+| `new --core` | the lead started | `BLOCKED`, `NOT READY`, `FAILED`, `UNKNOWN` | bad flags, Core silent before anything was made (a name used that day gets `-2`, never a refusal) |
 | `start` | `STARTED` or `QUEUED` | a `FAILED` start, during the drain too | a refusal: the name taken, `--pane`, a bad brief or kind, an unknown parent, a finished job, a job that is not native |
 | `next` | `STARTED`, `WAITING`, `NOTHING QUEUED`, `DROPPED` | a `FAILED` start, or `UNKNOWN` | a finished job; not a native job |
 | `tree` | the tree | `NO LEAD` | not a native job |
