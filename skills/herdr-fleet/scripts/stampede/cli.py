@@ -263,8 +263,9 @@ JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapsh
 
 
 def main(argv):
-    if argv[:1] and argv[0] in JSON and out_.wants(argv):
-        return out_.as_json(argv[0], lambda: parse_and_run(argv))
+    command, plain = out_.split(argv, JSON)
+    if command:
+        return out_.as_json(command, lambda: parse_and_run(plain))
     return parse_and_run(argv)
 
 
@@ -441,7 +442,7 @@ def parse_and_run(argv):
         out_.refuse('stampede ' + a.cmd + ': ' + base_.line(error))
         return 2
     if getattr(a, 'job', None) and a.cmd != 'hook':
-        out_.FACTS['job'] = str(Path(a.job).expanduser().absolute())
+        out_.fact(job=str(Path(a.job).expanduser().absolute()))
     if a.cmd == 'start' and job_.backend(a.job) != 'native':
         missing = [flag for flag, value in (('--brief', a.brief), ('--pane', a.pane or job_.backend(a.job) == 'core'))
                    if not value]
@@ -535,7 +536,7 @@ def run(a):
         if unknown:
             raise ValueError(f'--no-gate {unknown[0]} is no gate: it takes ' + ', '.join(gates_.names()))
         core, why = backend_for(a)
-        out_.FACTS['backend'] = ('core' if a.relay else 'native') if core else 'tui'  # as <job>/backend names it
+        out_.fact(backend=('core' if a.relay else 'native') if core else 'tui')  # as <job>/backend names it
         if a.cwd and not core:
             raise ValueError('--cwd is for a job on Herdr Core (new --core)')
         if a.relay and not core:
@@ -560,7 +561,7 @@ def run(a):
     if a.cmd == 'start' and not a.program:
         a.kind, a.model, a.effort = role_defaults(a.job, a.agent, a.kind, a.model, a.effort)
     if a.cmd == 'start':
-        out_.FACTS.update(kind='program' if a.program else a.kind, model=a.model, effort=a.effort)
+        out_.fact(kind='program' if a.program else a.kind, model=a.model, effort=a.effort)
     job = getattr(a, 'job', None)
     if a.cmd in NATIVE_ONLY and job_.backend(job) != 'native':
         raise ValueError(f'{a.cmd} is for a native job (new --core); {job} is a {job_.backend(job)} job')

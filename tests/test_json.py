@@ -2,9 +2,10 @@
 stampede command against the fakes, the steps of tests/clients_run.py plus the commands they leave out (MORE), twice: once
 plain and once with --json on every command that takes it. Each --json step must print one object and nothing else on
 stdout, exit as the plain step did, carry its status, and name the facts the plain line names."""
-import json, re, shutil, sys, tempfile, unittest
+import ast, json, os, re, shutil, subprocess, sys, tempfile, unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import clients_run  # noqa: E402
@@ -12,11 +13,37 @@ from clients_run import Job, check_process_tree, SHA  # noqa: E402
 from test_clients import CLIENTS, WORKERS, HANDED  # noqa: E402
 from test_gates import FAKE_GH  # noqa: E402
 sys.path.insert(0, str(clients_run.ROOT / 'skills/herdr-fleet/scripts'))
-from stampede import cli as cli_, out as out_  # noqa: E402
+from stampede import cli as cli_, out as out_, owner as owner_  # noqa: E402
 
 PLAYS = [(client, backend, False) for client in ('herdr-chat', 'claude-code', 'grokbot') for backend in ('tui', 'core', 'native')]
 PLAYS += [('claude-code', backend, True) for backend in ('tui', 'native')]  # a front door: wait, approve, approve-gate
 FACTS = ('agent', 'address', 'parent', 'lead', 'id', 'sha', 'pr', 'outbox', 'path', 'pane', 'running', 'cap', 'queued')
+DOC = (clients_run.ROOT / 'docs/CLI-JSON.md').read_text()
+
+
+def rows(heading):
+    """The cells of the table under '## <heading>' in docs/CLI-JSON.md, header and rule left out."""
+    part = DOC.split('## ' + heading + '\n', 1)[1].split('\n## ', 1)[0]
+    return [[c.strip() for c in line.strip('|').split('|')] for line in part.splitlines() if line.startswith('| `')]
+
+
+def documented():
+    """{command: statuses} from Per command: each backticked status word, None for null."""
+    found = {}
+    for command, statuses, _ in rows('Per command'):
+        found.setdefault(command.strip('`').split()[0], set()).update(
+            set(re.findall(r'`([A-Z][A-Z_ ]*[A-Z_])`', statuses)) | ({None} if 'null' in statuses else set()))
+    return found
+
+
+def always():
+    """{(command, status or '*' or None): facts} from Always present, and the facts that may be null."""
+    table = {}
+    for command, status, facts in rows('Always present'):
+        status = status.strip('`')
+        table[(command.strip('`'), None if status == 'null' else status)] = re.findall(r'`([a-z_]+)`', facts)
+    nullable = re.findall(r'`([a-z_]+)`', DOC.split('Null allowed:', 1)[1].split(';', 1)[0])
+    return table, set(nullable)
 
 
 def normal(text):
@@ -87,6 +114,11 @@ class Play(Job):
             self.front('new auto', 'new', '--file', self.root / 'ask.md', '--cwd', self.repo, '--name', 'xd')
         if self.backend == 'native':
             self.lead('next', 'next', job)
+            if self.json:  # a queued start that is no request: next crashes, and still prints one object
+                (job / 'queue').mkdir(exist_ok=True)
+                (job / 'queue' / '0001-bad.json').write_text('{"name": "bad"}')
+                self.lead('next crash', 'next', job)
+                (job / 'queue' / '0001-bad.json').unlink()
             self.lead('snapshot', 'snapshot', job)
             self.front('reopen', 'reopen', job)
             self.front('close worker', 'close', job, 'build-claude')
@@ -141,6 +173,12 @@ class Json(unittest.TestCase):
                                 self.assertIn(normal(result[key]), plain_text, key)
                     if argv[1] in out_.LISTS:
                         self.assertIsInstance(obj['results'], list)
+                    for line in pout.splitlines():  # a result line that names an address carries it as a fact
+                        named = re.match(r'(SUBMITTED|STARTED|LIVE|CLOSED) (\S+) \((\S+)\)$', line)
+                        if named:
+                            self.assertIn(normal(named[3]), [normal(r.get('address') or r.get('pane')) for r in results], line)
+                    if 'error' not in obj:
+                        self.check_always(argv[1], obj)
         for command in cli_.JSON:
             self.assertTrue(any(c == command for c, _ in seen), f'{command} --json was never run')
         for command in ('start', 'tell', 'ask', 'post', 'finish', 'approve', 'gate-ok', 'cancel', 'merge', 'wait'):
@@ -148,6 +186,19 @@ class Json(unittest.TestCase):
                 if backend == 'core' and command == 'wait':
                     continue
                 self.assertIn((command, backend), seen)
+
+    def check_always(self, command, obj):
+        """Every fact the Always present table names for this command and status is in the object, and not null
+        unless the table allows it."""
+        table, nullable = always()
+        checks = [(obj, table.get((command, '*'), []) + table.get((command, obj['status']), []))]
+        if command in out_.LISTS:
+            checks += [(r, table.get((command, r['status']), [])) for r in obj['results']]
+        for where, facts in checks:
+            for key in facts:
+                self.assertIn(key, where, (command, where.get('status')))
+                if key not in nullable:
+                    self.assertIsNotNone(where[key], (command, where.get('status'), key))
 
     def test_the_facts_a_status_names(self):
         """A few objects in full: the shape an agent reads."""
@@ -180,12 +231,192 @@ class Json(unittest.TestCase):
         usage = json.loads(native.steps['tell no text'][1])
         self.assertIn('the following arguments are required', usage['error'])
         self.assertEqual(json.loads(native.steps['wait timeout'][1])['results'][0]['status'], 'TIMEOUT')
+        code, out, err = native.steps['next crash']
+        self.assertEqual((code, json.loads(out)['ok'], json.loads(out)['error'].split(':')[0]), (1, False, 'KeyError'))
+        self.assertIn('Traceback', err)
         nxt = json.loads(native.steps['next'][1])
         self.assertEqual(nxt['status'], 'NOTHING QUEUED')
         tui = next(p for p in self.json if (p.client, p.backend, p.door) == ('claude-code', 'tui', False))
         items = json.loads(tui.steps['wait items'][1])['results']
         self.assertEqual([(i['status'], i['outbox'], i['kind']) for i in items], [('ITEM', '001', 'post')])
         self.assertIn('PLAN READY', items[0]['text'])
+
+
+ENTRIES = {'new': ('cli.new',), 'start': ('cli.start',), 'tell': ('owner.tell',), 'ask': ('owner.ask', 'owner.ask_gate'),
+           'post': ('owner.post',), 'wait': ('owner.wait',), 'finish': ('owner.finish',), 'next': ('native.next_',),
+           'snapshot': ('native.snapshot',), 'reopen': ('native.reopen',), 'close': ('native.close',), 'approve': ('owner.approve',),
+           'approve-gate': ('owner.approve_gate',), 'gate-ok': ('owner.gate_ok',), 'cancel': ('owner.cancel',),
+           'merge': ('gates.merge',)}  # where run() sends each command
+QUIET = {('merge', 'APPROVED')}  # merge runs gate-ok with stdout pointed elsewhere: never a result
+
+
+def statuses():
+    """{command: every status its code can print}: each out.emit status, and SUBMITTED and FAILED for out.said, in every
+    function the command's entry can reach through the package (a reference to a function counts as a call)."""
+    calls, emits = {}, {}
+    for path in (clients_run.ROOT / 'skills/herdr-fleet/scripts/stampede').glob('*.py'):
+        mod, tree = path.stem, ast.parse(path.read_text())
+        alias = {a.asname or a.name: a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.level == 1 for a in n.names}
+        for fn in (n for n in tree.body if isinstance(n, ast.FunctionDef)):
+            name = mod + '.' + fn.name
+            calls[name], emits[name] = set(), set()
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in alias:
+                    calls[name].add(alias[n.value.id] + '.' + n.attr)
+                elif isinstance(n, ast.Name):
+                    calls[name].add(mod + '.' + n.id)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+                        and alias.get(n.func.value.id) == 'out' and n.func.attr in ('emit', 'said'):
+                    first = n.args[0]
+                    if n.func.attr == 'said':
+                        emits[name] |= {'SUBMITTED', 'FAILED'}
+                    else:
+                        emits[name].add(first.value if isinstance(first, ast.Constant) else '<computed>')
+    found = {}
+    for command, entries in ENTRIES.items():
+        todo, seen = list(entries), set()
+        while todo:
+            f = todo.pop()
+            if f in calls and f not in seen:
+                seen.add(f)
+                todo += calls[f]
+        found[command] = {s for f in seen for s in emits[f]} - {s for c, s in QUIET if c == command}
+    return found
+
+
+class Schema(unittest.TestCase):
+    def test_every_status_the_code_can_print_is_in_the_schema(self):
+        code, docs = statuses(), documented()
+        self.assertEqual(set(code), set(cli_.JSON))
+        for command, found in code.items():
+            self.assertNotIn('<computed>', found, f'{command}: a status out.emit is given must be a literal')
+            self.assertFalse(found - docs[command], f'{command} can print these, missing from docs/CLI-JSON.md')
+        self.assertIn('DROPPED', code['reopen'])
+
+    def test_a_line_from_another_program_carries_the_same_facts(self):
+        cases = {'SUBMITTED build-codex (t4)': {'status': 'SUBMITTED', 'agent': 'build-codex', 'address': 't4'},
+                 'SUBMITTED w9:p2 (pressed Enter again: the first was dropped)': {'status': 'SUBMITTED', 'agent': 'w9:p2', 'address': None},
+                 'SUBMITTED lead-x': {'status': 'SUBMITTED', 'agent': 'lead-x', 'address': None},
+                 'FAILED build-codex (it is working)': {'status': 'FAILED', 'agent': 'build-codex', 'reason': 'it is working'},
+                 'FAILED w9:p2 focused: the owner is in that pane; retry later':
+                     {'status': 'FAILED', 'agent': 'w9:p2', 'reason': 'focused: the owner is in that pane; retry later'}}
+        for line, want in cases.items():
+            code, out, _ = call(['post', '--json'], lambda: out_.said(line + '\n', end='') or 0)
+            self.assertEqual({k: out.get(k) for k in want}, want, line)
+
+
+def call(argv, body=None):
+    """cli.main(argv) in this process, or out.as_json(argv[0], body): (exit code, the object, stderr), fds 1 and 2 caught."""
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        sys.stdout.flush(), sys.stderr.flush()
+        saved = os.dup(1), os.dup(2)
+        os.dup2(out.fileno(), 1), os.dup2(err.fileno(), 2)
+        try:
+            code = cli_.main(argv) if body is None else out_.as_json(argv[0], body)
+        finally:
+            sys.stdout.flush(), sys.stderr.flush()
+            os.dup2(saved[0], 1), os.dup2(saved[1], 2)
+            os.close(saved[0]), os.close(saved[1])
+        out.seek(0), err.seek(0)
+        text = out.read().decode()
+        return code, (json.loads(text) if text.strip() else text), err.read().decode()
+
+
+class Calls(unittest.TestCase):
+    """--json at its edges: where the flag stands, a crash or an interrupt, and calls one after another in one process."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.job = self.root / 'job'
+        self.job.mkdir()
+        (self.job / 'lead').write_text('lead-x\n')
+        (self.job / 'ask.md').write_text('ask\n')
+        env = {'HOME': str(self.root), 'HERDR_EVENTS_DIR': str(self.root / 'events'), 'FLEET_JOBS_ROOT': str(self.root),
+               'STAMPEDE_NO_UPDATE_CHECK': '1'}
+        patch = mock.patch.dict(os.environ, env)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for name in ('HERDR_EVENTS_OWNER', 'HERDR_WORKSPACE_ID', 'HERDR_ENV', 'HC_TERMINAL_ID', 'XDG_CONFIG_HOME'):
+            os.environ.pop(name, None)
+
+    def stampede(self, *argv):
+        done = subprocess.run([str(clients_run.STAMPEDE), *map(str, argv)], capture_output=True, text=True, timeout=60)
+        return done.returncode, done.stdout, done.stderr
+
+    def test_the_flag_before_or_after_the_command_and_anywhere_in_its_arguments(self):
+        for argv in (('--json', 'post', self.job, 'hi'), ('post', '--json', self.job, 'hi'), ('post', self.job, '--json', 'hi'),
+                     ('post', self.job, 'hi', '--json'), ('--json', 'post', self.job, 'hi', '--json')):
+            code, out, err = self.stampede(*argv)
+            got = json.loads(out)
+            self.assertEqual((code, got['command'], got['status'], err), (0, 'post', 'POSTED', ''), argv)
+            self.assertNotIn('--json', got.get('notes', []))
+        for argv in (('--json', 'tell'), ('tell', '--json'), ('--json', 'tell', self.job)):  # a usage error: one object, exit 2
+            code, out, err = self.stampede(*argv)
+            got = json.loads(out)
+            self.assertEqual((code, got['ok'], err), (2, False, ''), argv)
+            self.assertIn('the following arguments are required', got['error'])
+        code, out, err = self.stampede('start', self.job, 'watch-ci', '--', 'sleep', '1', '--json')  # the program's flag
+        self.assertEqual((code, out), (2, ''))  # plain: argparse's usage error on stderr
+        self.assertIn('start: error: the following arguments are required', err)  # argparse names the prog its own way on 3.9
+
+    def test_a_crash_or_an_interrupt_still_ends_in_one_object(self):
+        def raises(error):
+            def post(*args):
+                raise error
+            return post
+
+        def in_finally(*args):
+            try:
+                return 0
+            finally:
+                raise RuntimeError('raised in a finally')
+        cases = [(raises(RuntimeError('boom')), 1, 'RuntimeError: boom'), (raises(KeyError('name')), 1, "KeyError: 'name'"),
+                 (in_finally, 1, 'RuntimeError: raised in a finally'),
+                 (raises(KeyboardInterrupt()), 130, 'KeyboardInterrupt: interrupted'),
+                 (raises(SystemExit('stopped here')), 1, 'stopped here')]  # Python's own exit 1 for a SystemExit with text
+        for post, code, error in cases:
+            with mock.patch.object(owner_, 'post', post):
+                got_code, got, err = call(['post', str(self.job), 'hi', '--json'])
+            self.assertEqual((got_code, got['ok'], got['command'], got['status']), (code, False, 'post', None), error)
+            self.assertEqual((got['error'], got['retry']), (error, None))
+            if error.startswith('RuntimeError') or error.startswith('KeyError'):
+                self.assertIn('Traceback', err)
+        self.assertIsNone(out_.RUN)
+
+    def test_nothing_of_one_call_reaches_the_next(self):
+        missing = self.root / 'nope'
+        sequences = [
+            (['tell', str(missing), 'lead', 'hi', '--json'], ['post', str(self.job), 'hi', '--json']),  # a refusal, then a success
+            (['post', str(self.job), 'hi', '--json'], ['tell', '--help', '--json']),  # a success, then --help
+            (['post', str(self.job), 'hi', '--json'], ['tell', '--json']),  # a success, then a usage error
+        ]
+        for first, second in sequences:
+            call(first)
+            code, got, _ = call(second)
+            fresh = (code, got['command'])
+            if second[1] == '--help':
+                self.assertEqual((code, got['ok'], got['status']), (0, True, None))
+                self.assertFalse({'error', 'job', 'agent', 'outbox'} & set(got), got)
+            elif second[0] == 'post':
+                self.assertEqual((code, got['status']), (0, 'POSTED'))
+                self.assertNotIn('error', got)
+            else:
+                self.assertEqual((code, got['ok'], got['status']), (2, False, None))
+                self.assertFalse({'outbox', 'path', 'job'} & set(got), got)
+            self.assertEqual(fresh[1], second[0] if second[0] != '--json' else second[1])
+        with mock.patch.object(owner_, 'post', side_effect=RuntimeError('boom')):  # an exception, then a success
+            call(['post', str(self.job), 'hi', '--json'])
+        code, got, _ = call(['post', str(self.job), 'again', '--json'])
+        self.assertEqual((code, got['status']), (0, 'POSTED'))
+        self.assertNotIn('error', got)
+        self.assertIsNone(out_.RUN)
+
+    def test_a_reader_that_goes_away_leaves_no_traceback(self):
+        done = subprocess.run(['bash', '-c', '"$0" post "$1" hi --json | true; echo "exit ${PIPESTATUS[0]}" >&2',
+                               str(clients_run.STAMPEDE), str(self.job)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.stderr.strip().splitlines()[-1], 'exit 0')
+        self.assertNotIn('Traceback', done.stderr)
 
 
 if __name__ == '__main__':
