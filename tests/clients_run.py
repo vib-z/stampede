@@ -7,6 +7,7 @@ did in `steps`; test_clients.py asserts them. The client's commands run with its
 Herdr (the pane's ids), outside it (an app's command: no Herdr ids, no Herdr process above it), or over ssh (the same,
 under a process named sshd). The lead's commands run with the lead's own environment. Nothing touches a real Herdr,
 Herdr Core or agent CLI: the fake Herdr of test_herdr_reopen_snapshot through HERDR and PATH, tests/fake_hc.py through HC.
+tests/test_json.py plays the same steps plain and with --json.
 """
 from datetime import datetime
 import json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, traceback

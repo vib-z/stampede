@@ -3,7 +3,7 @@ import fcntl, json, os, re, signal, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_
+from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, out as out_
 
 HERDR_SEND = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'
 
@@ -27,8 +27,9 @@ def type_pointer(job, agent, who, brief, pointer):
     herdr-send's SUBMITTED line, or 1 and a BLOCKED line with the tell that hands the brief over."""
     submitted, said = herdr_send(job, agent, pointer)
     if submitted:
-        return print(said)
-    print(f'BLOCKED {agent}: its brief pointer did not go in ({base_.line(said)}); fix that, then stampede tell {job} {who} "Read {brief}"')
+        return out_.said(said)
+    out_.emit('BLOCKED', f'BLOCKED {agent}: its brief pointer did not go in ({base_.line(said)}); fix that, then stampede tell {job} {who} "Read {brief}"',
+              agent=agent, reason=base_.line(said), retry=f'stampede tell {job} {who} "Read {brief}"')
     return 1
 
 

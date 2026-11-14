@@ -2,7 +2,7 @@
 import json, math, os, re, subprocess
 from pathlib import Path
 
-from . import base as base_, job as job_, settings as settings_
+from . import base as base_, job as job_, settings as settings_, out as out_
 
 
 def default_socket(session):
@@ -200,8 +200,9 @@ class CoreUnknown(RuntimeError):
 
 
 def unknown(job, error):
-    print(f'UNKNOWN {error.agent}: {base_.line(error)}. Nothing was taken back: once Herdr Core answers, run bash '
-          f'{Path(job).absolute() / "reopen.sh"}, which adopts it by its labels or starts it, never a second copy')
+    out_.emit('UNKNOWN', f'UNKNOWN {error.agent}: {base_.line(error)}. Nothing was taken back: once Herdr Core answers, run bash '
+              f'{Path(job).absolute() / "reopen.sh"}, which adopts it by its labels or starts it, never a second copy',
+              agent=error.agent, reason=base_.line(error), retry='bash ' + str(Path(job).absolute() / 'reopen.sh'))
     return 1
 
 
@@ -255,5 +256,6 @@ def start_failed(job, key, relay, reason):
     if job_.job_owner(job):
         (job_.events_dir() / 'owners' / key).unlink(missing_ok=True)
     (job / 'start-failed').write_text(reason + '\n')
-    print(f'FAILED {job_.roster(job)[1]} ({reason}): nothing of {job} runs; the folder stays as a record, and a retry is a new job')
+    out_.emit('FAILED', f'FAILED {job_.roster(job)[1]} ({reason}): nothing of {job} runs; the folder stays as a record, and a retry is a new job',
+              agent=job_.roster(job)[1], reason=reason)
     return 1

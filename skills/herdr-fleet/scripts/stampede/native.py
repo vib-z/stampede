@@ -4,7 +4,8 @@ is the contract."""
 import contextlib, fcntl, json, os, shlex, subprocess, time, uuid
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_, settings as settings_, gates as gates_
+from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_, settings as settings_, gates as gates_, \
+    out as out_
 
 KINDS = ('claude', 'codex')
 
@@ -380,21 +381,25 @@ def outcome(job, key, lead, address, brief):
     try:
         terminal = hcapi_.hc('get', address, job=job)
     except hcapi_.HcError as error:
-        print(f'NOT READY {lead}: {base_.line(error)}; read it with hc read {address} once Herdr Core answers')
+        out_.emit('NOT READY', f'NOT READY {lead}: {base_.line(error)}; read it with hc read {address} once Herdr Core answers',
+                  agent=lead, lead=lead, address=address, reason=base_.line(error), job=str(Path(job).absolute()))
         return 1
     if terminal.get('state') != 'live':
         record(job, lead, state='failed')
         return hcapi_.start_failed(job, key, '', f'{terminal.get("reason") or "ended"} exit {terminal.get("exit_code")}')
     word, resend = hcapi_.core_status(terminal), f'then stampede tell {job} lead "Read {brief}" if it went idle without its first prompt'
     if word in ('working', 'idle', 'done'):
-        print(f'STARTED {lead} ({address})\n{lead} {job}')
+        out_.emit('STARTED', f'STARTED {lead} ({address})\n{lead} {job}',
+                  agent=lead, lead=lead, address=address, job=str(Path(job).absolute()))
         return 0
     if word == 'blocked':
-        print(f'BLOCKED {lead}: {(terminal.get("status") or {}).get("kind") or "blocked"}; read it with hc read {address}, clear '
-              f'the dialog with hc keys {address} <keys>, {resend}')
+        out_.emit('BLOCKED', f'BLOCKED {lead}: {(terminal.get("status") or {}).get("kind") or "blocked"}; read it with hc read {address}, clear '
+                  f'the dialog with hc keys {address} <keys>, {resend}',
+                  agent=lead, lead=lead, address=address, reason=(terminal.get('status') or {}).get('kind') or 'blocked', job=str(Path(job).absolute()))
     else:
-        print(f'NOT READY {lead}: {word or "no status"}; read it with hc read {address}; it stays this job\'s lead, so never '
-              f'start a second one; {resend}')
+        out_.emit('NOT READY', f'NOT READY {lead}: {word or "no status"}; read it with hc read {address}; it stays this job\'s lead, so never '
+                  f'start a second one; {resend}',
+                  agent=lead, lead=lead, address=address, reason=word or 'no status', job=str(Path(job).absolute()))
     return 1
 
 
@@ -448,7 +453,7 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
         path = enqueue(queue, request)
         _, failed, count, limit = drain(job, terminals)
         if path.is_file():
-            print(f'QUEUED {name} ({count} running, cap {limit})')
+            out_.emit('QUEUED', f'QUEUED {name} ({count} running, cap {limit})', agent=name, running=count, cap=limit)
     return 1 if failed else 0
 
 
@@ -482,7 +487,7 @@ def drain(job, terminals):
         if not parent:
             (path.parent / 'dropped').mkdir(exist_ok=True)
             os.replace(path, path.parent / 'dropped' / path.name)
-            print(f'DROPPED {name}: its parent {request["parent"]} is gone')
+            out_.emit('DROPPED', f'DROPPED {name}: its parent {request["parent"]} is gone', agent=name, parent=request['parent'])
             continue
         shown = launch(job, key, request, parent, terminals)
         if shown == 'unknown':
@@ -504,7 +509,8 @@ def adopt(job, request, terminal, argv):
            effort=request['effort'], session=tags.get('stampede.session') or '', brief=request['brief'], report=request['report'],
            cwd=request['cwd'], base=request['tab'], **where_of(tags), outlive=request['outlive'], argv=argv, address=terminal['address'],
            state='live')
-    print(f'STARTED {name} ({terminal["address"]}) under {request["parent"]}')
+    out_.emit('STARTED', f'STARTED {name} ({terminal["address"]}) under {request["parent"]}',
+              agent=name, address=terminal['address'], parent=request['parent'])
 
 
 def launch(job, key, request, parent, terminals, existing=None):
@@ -529,16 +535,17 @@ def launch(job, key, request, parent, terminals, existing=None):
             return existing
         shown = run(job, name, tags, request['cwd'], argv, parent['address'], request['outlive'])
     except ValueError as error:
-        print(f'FAILED {name} ({base_.line(error)})')
+        out_.emit('FAILED', f'FAILED {name} ({base_.line(error)})', agent=name, reason=base_.line(error))
         return None
     except hcapi_.HcError as error:
         try:
             found = agent(key, listing(job), name)
         except hcapi_.HcError as silent:
-            print(f'UNKNOWN {name}: {base_.line(error)}, then {base_.line(silent)}; run stampede next once Herdr Core answers')
+            out_.emit('UNKNOWN', f'UNKNOWN {name}: {base_.line(error)}, then {base_.line(silent)}; run stampede next once Herdr Core answers',
+                      agent=name, reason=base_.line(error))
             return 'unknown'
         if not found:
-            print(f'FAILED {name} ({base_.line(error)})')
+            out_.emit('FAILED', f'FAILED {name} ({base_.line(error)})', agent=name, reason=base_.line(error))
             return None
         adopt(job, request, found, argv)
         return found
@@ -567,9 +574,9 @@ def next_(job):
         started, failed, count, limit = drain(job, listing(job))
         left = len(queued(job))
     if left:
-        print(f'WAITING {left} queued ({count} running, cap {limit})')
+        out_.emit('WAITING', f'WAITING {left} queued ({count} running, cap {limit})', queued=left, running=count, cap=limit)
     elif not started and not failed:
-        print('NOTHING QUEUED')
+        out_.emit('NOTHING QUEUED', 'NOTHING QUEUED')
     return 1 if failed else 0
 
 
@@ -612,13 +619,14 @@ def tell(job, name, text):
         found = agent(job_.core_key(job), terminals, name)
         if not found:
             names = {labels(t).get('stampede.agent') for t in live(job_.core_key(job), terminals)} - {lead, None}
-            print(f'FAILED {name} (no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))})')
+            out_.emit('FAILED', f'FAILED {name} (no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))})',
+                      agent=name, reason='no live terminal')
             return 2
         hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
     except hcapi_.HcError as error:
-        print(f'FAILED {name} ({base_.line(error)})')
+        out_.emit('FAILED', f'FAILED {name} ({base_.line(error)})', agent=name, reason=base_.line(error))
         return 2
-    print(f'SUBMITTED {name} ({found["address"]})')
+    out_.emit('SUBMITTED', f'SUBMITTED {name} ({found["address"]})', agent=name, address=found['address'])
     return 0
 
 
@@ -707,9 +715,10 @@ def refresh(job):
 
 def snapshot(job):
     try:
-        print(refresh(job))
+        path = refresh(job)
+        out_.emit(None, path, path=str(path))
     except hcapi_.HcError as error:
-        print(f'FAILED snapshot ({base_.line(error)})')
+        out_.emit('FAILED', f'FAILED snapshot ({base_.line(error)})', reason=base_.line(error))
         return 1
     return 0
 
@@ -746,41 +755,44 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
         waiting = {r['name'] for _, r in queued(job)}
         later = set() if finished else set(waiting)  # what the drain after the walk starts, or leaves waiting
         for name in sorted(waiting) if finished else ():  # a finished job starts nothing: its queue stays, inert
-            print(f'SKIPPED {name} (the job is finished: its queued start stays in the queue)')
+            out_.emit('SKIPPED', f'SKIPPED {name} (the job is finished: its queued start stays in the queue)', agent=name, reason='finished')
         for node in parents_first(nodes):
             name, parent, kind = node['name'], node.get('parent'), node.get('kind')
             running_now = agent(key, terminals, name) if node.get('role') != 'plain' else None
             if running_now:
                 now[name] = running_now
-                print(f'LIVE {name} ({running_now["address"]})')
+                out_.emit('LIVE', f'LIVE {name} ({running_now["address"]})', agent=name, address=running_now['address'])
                 continue
             if node.get('state') == 'closed':  # closed on purpose by name: it and its branch stay closed
-                print(f'DONE {name} (closed)')
+                out_.emit('DONE', f'DONE {name} (closed)', agent=name, reason='closed')
                 continue
             if name in waiting:
                 continue
             session = node.get('session') or ''
             resume = kind == 'claude' and not fresh and session and agents_.claude_session_file(session)
             if parent and parent not in now and not (parent in later and not resume):
-                print(f'SKIPPED {name}: its parent {parent} is not running')
+                out_.emit('SKIPPED', f'SKIPPED {name}: its parent {parent} is not running',
+                          agent=name, parent=parent, reason='parent not running')
                 continue
             if node.get('role') == 'plain':
-                print(f'SKIPPED {name} (a plain child: run it again if still needed: {shlex.join(node.get("argv") or [])})')
+                out_.emit('SKIPPED', f'SKIPPED {name} (a plain child: run it again if still needed: {shlex.join(node.get("argv") or [])})',
+                          agent=name, reason='plain')
                 continue
             if kind == 'program':
                 if node.get('state') == 'finished' and node.get('exit_code') == 0:
-                    print(f'DONE {name} (exited 0)')
+                    out_.emit('DONE', f'DONE {name} (exited 0)', agent=name, reason='exited 0')
                     continue
                 if not rerun:
-                    print(f'SKIPPED {name} (a program: --rerun-programs runs it again)')
+                    out_.emit('SKIPPED', f'SKIPPED {name} (a program: --rerun-programs runs it again)', agent=name, reason='program')
                     continue
             elif kind == 'codex' and not fresh and (node['role'] != 'lead' or finished):
-                print(f'SKIPPED {name} (codex keeps no session to resume: --fresh starts it again with its brief)'
-                      if not finished else f'SKIPPED {name} (the job is finished, and codex keeps no session to resume)')
+                out_.emit('SKIPPED', f'SKIPPED {name} (codex keeps no session to resume: --fresh starts it again with its brief)'
+                          if not finished else f'SKIPPED {name} (the job is finished, and codex keeps no session to resume)',
+                          agent=name, reason='codex')
                 continue
             elif not resume and finished:
-                print(f'SKIPPED {name} (the job is finished, and its Claude session never ran: a first prompt would start '
-                      'its work again)')
+                out_.emit('SKIPPED', f'SKIPPED {name} (the job is finished, and its Claude session never ran: a first prompt would start '
+                          'its work again)', agent=name, reason='finished')
                 continue
             if node['role'] == 'helper' and not resume:  # a brief starts again: through the queue and the cap
                 yolo = kind != 'program' and agents_.YOLO[kind][0] in (node.get('argv') or [])
@@ -806,11 +818,12 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                 shown = run(job, name, tags, node.get('cwd') or job_.workdir(job), argv, under, node.get('outlive'))
             except (hcapi_.HcError, ValueError) as error:
                 failed = True
-                print(f'FAILED {name} ({base_.line(error)})')
+                out_.emit('FAILED', f'FAILED {name} ({base_.line(error)})', agent=name, reason=base_.line(error))
                 continue
             now[name] = {'address': shown['address']}
             record(job, name, address=shown['address'], state='live', session=session, exit_code=None, reason=None)
-            print(f'STARTED {name} ({shown["address"]})' + (f' under {parent}' if parent else ''))
+            out_.emit('STARTED', f'STARTED {name} ({shown["address"]})' + (f' under {parent}' if parent else ''),
+                      agent=name, address=shown['address'], parent=parent)
             if name == lead:
                 told.append((name, shown['address'], f'[stampede] You were reopened for reading: the job is finished. Start no '
                                                      f'work; stampede tree {job} shows what came back.' if finished else
@@ -825,12 +838,13 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
             failed = failed or bool(fails)
             for _, request in queued(job):
                 if request['name'] in later:
-                    print(f'QUEUED {request["name"]} ({count} running, cap {limit})')
+                    out_.emit('QUEUED', f'QUEUED {request["name"]} ({count} running, cap {limit})',
+                              agent=request['name'], running=count, cap=limit)
     for name, address, text in told:
         try:
             hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
         except hcapi_.HcError as error:
-            print(f'NOT TOLD {name} ({base_.line(error)})')
+            out_.emit('NOT TOLD', f'NOT TOLD {name} ({base_.line(error)})', agent=name, reason=base_.line(error))
     return 1 if failed else 0
 
 
@@ -860,8 +874,8 @@ def close(job, name=None):
             foreign.add(t['address'])
         if other not in (None, key):
             failed = True
-            print(f'SKIPPED {name_of(t)} ({t["address"]}): it carries another job\'s key ({other}); this job closes only its '
-                  'own terminals, so it and its branch stay')
+            out_.emit('SKIPPED', f'SKIPPED {name_of(t)} ({t["address"]}): it carries another job\'s key ({other}); this job closes only its '
+                      'own terminals, so it and its branch stay', agent=name_of(t), address=t['address'], reason='another job')
     by, kept = {t['address']: t for t in terminals}, set()
     for address in [a for a in foreign if by[a].get('parent') not in foreign]:  # its ancestors stay too: ending one could end it
         parent = by[address].get('parent')
@@ -871,7 +885,8 @@ def close(job, name=None):
                 break
             parent = by[parent].get('parent')
     for address in sorted(kept):
-        print(f'SKIPPED {name_of(by[address])} ({address}): a terminal of another job runs under it')
+        out_.emit('SKIPPED', f'SKIPPED {name_of(by[address])} ({address}): a terminal of another job runs under it',
+                  agent=name_of(by[address]), address=address, reason='another job under it')
     under = [(d, t) for d, t in under if t['address'] not in foreign | kept]
     for _, t in sorted(under, key=lambda pair: -pair[0]) + ([] if target['address'] in kept else [(0, target)]):
         tags, address = labels(t), t['address']
@@ -890,10 +905,10 @@ def close(job, name=None):
             hcapi_.hc('rm', address, job=job)
         except hcapi_.HcError as error:
             failed = True
-            print(f'FAILED {shown} ({base_.line(error)})')
+            out_.emit('FAILED', f'FAILED {shown} ({base_.line(error)})', agent=shown, address=address, reason=base_.line(error))
             continue
         closed.append(shown)
-        print(f'CLOSED {shown} ({address})')
+        out_.emit('CLOSED', f'CLOSED {shown} ({address})', agent=shown, address=address)
     if whole and target['address'] not in kept:  # the job put away: a later reopen brings back what ran, so no node is marked closed
         (job / 'closed').write_text(time.strftime('%Y-%m-%d %H:%M') + '\n')
     with contextlib.suppress(hcapi_.HcError):

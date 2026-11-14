@@ -8,6 +8,7 @@ A job runs on the Herdr TUI (tabs and panes) or on Herdr Core (a tree of termina
 
 - `stampede doctor` checks the machine and this checkout, one line each with its fix (`stampede doctor --core` for Herdr Core). Its warnings are the owner's to fix.
 - `stampede --help` lists every command; `stampede <command> --help` gives its flags and an example.
+- `--json` on any command: one JSON object ([docs/CLI-JSON.md](docs/CLI-JSON.md)).
 - `herdr-trust <repo>` once per repo, so Claude and Codex skip the trust dialog. The repo must sit under `FLEET_TRUST_ROOT` (default `~/code`).
 - Write the ask (the owner's words, and any agreed plan) to a file outside the repo.
 - See what a job will do: `stampede config show` (every setting, and the layer that set it).

@@ -3,7 +3,8 @@ import fcntl, json, os, shlex, subprocess, time, uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_, settings as settings_, gates as gates_
+from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_, settings as settings_, gates as gates_, \
+    out as out_
 
 
 def deliver_core(job, lead):
@@ -295,7 +296,8 @@ def core_outcome(job, agent, address, who, brief, plain=False):
         if plain:
             hcapi_.unknown(job, hcapi_.CoreUnknown(agent, f'started as {address}, then hc get failed ({base_.line(error)})'))
             return 'unknown'
-        print(f'NOT READY {agent}: {base_.line(error)}; read it with hc read {address} once Herdr Core answers')
+        out_.emit('NOT READY', f'NOT READY {agent}: {base_.line(error)}; read it with hc read {address} once Herdr Core answers',
+                  agent=agent, address=address, reason=base_.line(error))
         return 'not ready'
     word = hcapi_.core_status(terminal)
     if terminal.get('state') != 'live':
@@ -305,20 +307,21 @@ def core_outcome(job, agent, address, who, brief, plain=False):
             tail = ''
         reason = f'{terminal.get("reason") or "ended"} exit {terminal.get("exit_code")}'
         job_.bind(job, agent, {'state': 'failed', 'reason': reason})
-        print(f'FAILED {agent} ({reason}): {base_.line(tail)}')
+        out_.emit('FAILED', f'FAILED {agent} ({reason}): {base_.line(tail)}', agent=agent, address=address, reason=reason)
         return 'failed'
     if plain:
         return 'started'
     if word in ('working', 'idle', 'done'):
-        print(f'STARTED {agent} ({address})')
+        out_.emit('STARTED', f'STARTED {agent} ({address})', agent=agent, address=address)
         return 'started'
     resend = f'then stampede tell {job} {who} "Read {brief}" if it went idle without its first prompt'
     if word == 'blocked':
         kind = (terminal.get('status') or {}).get('kind') or 'blocked'
-        print(f'BLOCKED {agent}: {kind}; read it with hc read {address}, clear the dialog with hc keys {address} <keys>, {resend}')
+        out_.emit('BLOCKED', f'BLOCKED {agent}: {kind}; read it with hc read {address}, clear the dialog with hc keys {address} <keys>, {resend}',
+                  agent=agent, address=address, reason=kind)
     else:
-        print(f'NOT READY {agent}: {word or "no status"}; read it with hc read {address}; it stays this job\'s {who}, '
-              f'so never start a second one; {resend}')
+        out_.emit('NOT READY', f'NOT READY {agent}: {word or "no status"}; read it with hc read {address}; it stays this job\'s {who}, '
+                  f'so never start a second one; {resend}', agent=agent, address=address, reason=word or 'no status')
     return 'not ready'
 
 
@@ -355,7 +358,7 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
             return hcapi_.unknown(job, error)
         except hcapi_.HcError as error:  # confirmed: no terminal of the job runs it, and its entry says failed
             job_.snapshot(job)
-            print(f'FAILED {agent} ({base_.line(error)})')
+            out_.emit('FAILED', f'FAILED {agent} ({base_.line(error)})', agent=agent, reason=base_.line(error))
             return 1
         job_.snapshot(job)
         return 0 if core_outcome(job, agent, address, 'lead' if lead else agent, brief) == 'started' else 1
@@ -513,7 +516,7 @@ def drafted(address, job=None):
 def tell_core(job, name, text):
     """Prompt a Codex agent in its Core terminal: send_core's one SUBMITTED or FAILED line, and exit 2 on FAILED."""
     submitted, said = send_core(job, name, text)
-    print(said)
+    out_.said(said)
     if not submitted:
         raise SystemExit(2)
 
@@ -647,6 +650,6 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False, settin
         return hcapi_.start_failed(job, key, relay, job_.core_entries(job)[lead].get('reason', 'the lead ended'))
     job_.snapshot(job)
     if outcome == 'started':
-        print(lead + ' ' + str(job))
+        out_.emit('STARTED', lead + ' ' + str(job), agent=lead, lead=lead, job=str(Path(job).absolute()))
         return 0
     return 1

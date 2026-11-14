@@ -18,6 +18,7 @@ stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>
 
 - `--cwd` is the repo (default: the git root here). `--space` names the space; the default is the job's slug.
 - It prints `STARTED <lead> (<address>)`, then `<lead> <job dir>`, exit 0. `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN`, exit 1: the lead is the job's one lead, so do what the line says and never run `new` again for it.
+- With `--json`, every `stampede` command here prints one JSON object instead: the line's first word as `status`, what it names as facts (`docs/CLI-JSON.md`).
 - `--front-door` makes the chat that started the job the owner's only contact ([front-door.md](front-door.md#on-herdr-core)).
 
 ## Start a helper

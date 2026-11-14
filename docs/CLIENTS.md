@@ -86,6 +86,8 @@ Expected: `OK (skipped=18, expected failures=6)`; O10 plays one more job per cli
 
 How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per client and backend, 8 at a time, each in a scratch folder with its own `HOME`, a fake Herdr (`HERDR`, and first on `PATH`), the fake Herdr Core [tests/fake_hc.py](../tests/fake_hc.py) (`HC`), a fake CLI for each worker kind, a route for a bot that is never flushed, a recorder as `FLEET_ASK_CMD`, and a fake `moshi-hook` first on `PATH`, so no card reaches a phone. A client outside Herdr runs its commands with pid 1 as their parent's parent, so no Herdr process sits above them wherever the suite runs; a bot's run under a process named `sshd`. Nothing reaches a real Herdr, Herdr Core, agent CLI or the network.
 
+[tests/test_json.py](../tests/test_json.py) replays these plays for three clients on each backend, and a front door on the TUI and a Core job, once plain and once with `--json` on every command, plus the commands the plays leave out (`next`, `snapshot`, `reopen`, `close`, `cancel`, `merge`, `wait --timeout 0`, and a refusal each): each `--json` object must match its plain lines ([CLI-JSON.md](CLI-JSON.md)).
+
 ## Add a client
 
 1. One row in `CLIENTS` in [tests/test_clients.py](../tests/test_clients.py): its README front-door row (or `None`), `where` (`inside`, `outside` or `ssh`), its `backends`, and for a bot its slug (`bot`) and `owner_from` (`tag` or `env`).

@@ -2,7 +2,7 @@
 import contextlib, fcntl, json, os, re, shlex, subprocess, time, uuid
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, tui as tui_
+from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, tui as tui_, out as out_
 
 
 def live_terminal(job, agent):
@@ -120,7 +120,7 @@ def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in,
             job_.bind(job, agent, {'state': 'failed', 'reason': base_.line(error)})
             release_pane(job, agent)
             job_.snapshot(job)
-            print(f'FAILED {agent} ({base_.line(error)}){note}')
+            out_.emit('FAILED', f'FAILED {agent} ({base_.line(error)}){note}', agent=agent, pane=pane, reason=base_.line(error))
             return 1
         try:
             herdrapi_.herdr('pane', 'rename', pane, agent)
@@ -133,8 +133,9 @@ def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in,
                 found = herdrapi_.herdr_agents().get(pane)
             except ValueError as lookup:
                 job_.snapshot(job)
-                print(f'UNKNOWN {agent}: {base_.line(error)}, and Herdr could not tell whether it started ({base_.line(lookup)}). Nothing was '
-                      f'taken back: once Herdr answers, bash {job / "reopen.sh"} adopts it or names the start, never a second copy')
+                out_.emit('UNKNOWN', f'UNKNOWN {agent}: {base_.line(error)}, and Herdr could not tell whether it started ({base_.line(lookup)}). Nothing was '
+                          f'taken back: once Herdr answers, bash {job / "reopen.sh"} adopts it or names the start, never a second copy',
+                          agent=agent, pane=pane, reason=base_.line(error), retry='bash ' + str(job / 'reopen.sh'))
                 return 1
             if not found or found.get('name') != agent or found.get('agent') != kind:
                 return failed(error, f': Herdr did not see {kind} start in pane {pane}, but its CLI may still run there: read it '
@@ -143,18 +144,21 @@ def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in,
         why = commit_handed(job, agent, pane)
         job_.snapshot(job)
         if why:
-            print(f'UNKNOWN {agent}: {why}, so it is not settled as this job\'s launch and gets no brief. Nothing was taken back: '
-                  f'once Herdr shows it, bash {job / "reopen.sh"} settles it')
+            out_.emit('UNKNOWN', f'UNKNOWN {agent}: {why}, so it is not settled as this job\'s launch and gets no brief. Nothing was taken back: '
+                      f'once Herdr shows it, bash {job / "reopen.sh"} settles it',
+                      agent=agent, pane=pane, reason=why, retry='bash ' + str(job / 'reopen.sh'))
             return 1
     if blocked:
-        print(f'BLOCKED {agent}: clear the startup dialog in pane {pane}, then stampede tell {job} {agent} "Read {brief}"')
+        out_.emit('BLOCKED', f'BLOCKED {agent}: clear the startup dialog in pane {pane}, then stampede tell {job} {agent} "Read {brief}"',
+                  agent=agent, pane=pane, retry=f'stampede tell {job} {agent} "Read {brief}"')
         return 1
     why = prompt_handed(job, agent, agents_.pointer(agent, brief))
     if why:
-        print(f'NOT BRIEFED {agent} (pane {pane}): {why}. It runs as this job\'s {agent}, so never start a second one: '
-              f'read its screen, and only once its prompt is empty and idle: {briefing(job, agent, brief)}')
+        out_.emit('NOT BRIEFED', f'NOT BRIEFED {agent} (pane {pane}): {why}. It runs as this job\'s {agent}, so never start a second one: '
+                  f'read its screen, and only once its prompt is empty and idle: {briefing(job, agent, brief)}',
+                  agent=agent, pane=pane, reason=why, retry=briefing(job, agent, brief))
         return 1
-    print(f'STARTED {agent} (pane {pane})')
+    out_.emit('STARTED', f'STARTED {agent} (pane {pane})', agent=agent, pane=pane)
     return 0
 
 
@@ -355,9 +359,10 @@ def tell_handed(job, name, text):
     """tell to a handed agent: one SUBMITTED or FAILED line (exit 2), as tell_core."""
     why = prompt_handed(job, name, text)
     if why:
-        print(f'FAILED {name} ({why})')
+        out_.emit('FAILED', f'FAILED {name} ({why})', agent=name, reason=why)
         raise SystemExit(2)
-    print(f'SUBMITTED {name} (pane {job_.core_entries(job)[name]["pane"]})')
+    out_.emit('SUBMITTED', f'SUBMITTED {name} (pane {job_.core_entries(job)[name]["pane"]})',
+              agent=name, pane=job_.core_entries(job)[name]['pane'])
 
 
 def reopen_handed(job, agent):
