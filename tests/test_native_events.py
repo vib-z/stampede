@@ -670,6 +670,9 @@ class EndToEnd(NativeCase):
                               env={**os.environ, 'HERDR_EVENTS_OWNER': 'alpha'})  # a bot's job: its events are queued for it
         self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
         job = Path(made.stdout.split()[-1])
+        self.assertNotIn(self.repo, job.parents, 'the job folder is under the jobs root, not in the repo')
+        self.assertEqual((job / 'workdir').read_text().strip(), str(self.repo))
+        self.assertEqual((self.events / 'jobs' / (job / 'workspace').read_text().strip()).read_text().strip(), str(job))
         self.assertIs(json.loads((job / 'settings.json').read_text())['values']['alerts.helpers'], True)
         point = json.loads((job / 'endpoint').read_text())
         (job / 'endpoint').write_text(json.dumps({**point, 'socket': str(self.socket)}))  # the fake core's hello socket
