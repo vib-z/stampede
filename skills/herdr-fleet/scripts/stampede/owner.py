@@ -74,59 +74,78 @@ def ask_now(job, question, options, command=None, gate=None, ident=None):
         if asked['route'] != 'local':
             raise PermissionError(f'gate {gate} goes to {asked["route"]}, not to the phone')
         question, options = gate_question(asked), []
-    argv = shlex.split(ask_command(job) if gate else command or ask_command(job))
-    for option in options:
-        argv += ['--option', option]
-    yes = False
+    pin = pin_asks(job) if job_.backend(job) == 'native' else None  # before the question: keeping never gets in the way
     try:
-        result = subprocess.run([*argv, '--', question], stdin=subprocess.DEVNULL, capture_output=True, text=True)
-        yes = result.returncode == 0 and result.stdout.strip().lower() in ('', 'yes')
-        if result.returncode == 0 and result.stdout.strip():
-            status, answer = 'ANSWER', base_.line(result.stdout)
-        elif result.returncode == 1:
-            status, answer = 'ANSWER', 'no (denied or cancelled)'
-        else:
-            status, answer = 'ASK FAILED', 'exit ' + str(result.returncode) + ': ' + base_.line(result.stderr or result.stdout)
-    except OSError as error:
-        status, answer = 'ASK FAILED', 'exit 127: ' + base_.line(error)
-    if gate and yes:
+        argv = shlex.split(ask_command(job) if gate else command or ask_command(job))
+        for option in options:
+            argv += ['--option', option]
+        yes = False
         try:
-            record_yes(job, gate, asked['sha'], 'owner, through ' + Path(argv[0]).name, asked)
-            return 0
-        except PermissionError as error:
-            status, answer = 'GATE NOT RECORDED', base_.line(error)
-    line = status + ' ' + base_.line(question) + ': ' + answer
-    if job_.backend(job) == 'native':
-        kept = asks_folder(job) / ((ident or uuid.uuid4().hex[:12]) + '.answer')
-        keep(kept, line + '\n')  # first, so the answer outlives a send that fails or never returns
-        if notify_lead(job, line, kept):
+            result = subprocess.run([*argv, '--', question], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            yes = result.returncode == 0 and result.stdout.strip().lower() in ('', 'yes')
+            if result.returncode == 0 and result.stdout.strip():
+                status, answer = 'ANSWER', base_.line(result.stdout)
+            elif result.returncode == 1:
+                status, answer = 'ANSWER', 'no (denied or cancelled)'
+            else:
+                status, answer = 'ASK FAILED', 'exit ' + str(result.returncode) + ': ' + base_.line(result.stderr or result.stdout)
+        except OSError as error:
+            status, answer = 'ASK FAILED', 'exit 127: ' + base_.line(error)
+        if gate and yes:
+            try:
+                record_yes(job, gate, asked['sha'], 'owner, through ' + Path(argv[0]).name, asked)
+                return 0
+            except PermissionError as error:
+                status, answer = 'GATE NOT RECORDED', base_.line(error)
+        line = status + ' ' + base_.line(question) + ': ' + answer
+        if job_.backend(job) != 'native':
+            tell(job, 'lead', line)
+            return 0 if status == 'ANSWER' else 1
+        name = (ident or uuid.uuid4().hex[:12]) + '.answer'
+        kept = Path(job).absolute() / 'asks' / name if pin is not None and keep(pin, name, line + '\n') else None
+        if notify_lead(job, line, kept):  # kept first, so the answer outlives a send that fails or never returns
             return 1
-        kept.unlink()
-    else:
-        tell(job, 'lead', line)
-    return 0 if status == 'ANSWER' else 1
+        if kept:
+            with contextlib.suppress(OSError):
+                os.unlink(name, dir_fd=pin)
+        return 0 if status == 'ANSWER' else 1
+    finally:
+        if pin is not None:
+            os.close(pin)
 
 
-def asks_folder(job):
-    """<job>/asks, private (0700) whatever the umask, and made so when it is more open: a kept answer is the owner's words."""
-    folder = Path(job).absolute() / 'asks'
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(folder, 0o700)
-    return folder
-
-
-def keep(path, text):
-    """Write text to path whole and private: a new 0600 file of its own beside it, then os.replace onto path, so a reader
-    of the old file sees only the old text and a crash leaves one of the two whole."""
-    temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}')
+def pin_asks(job):
+    """<job>/asks, made 0700 when missing, as a descriptor: the job's own folder, made private (0700), or None when it is a
+    link, not a folder, or not ours. Every kept answer is written through it, so a swap while the owner thinks changes
+    nothing."""
+    path = Path(job).absolute() / 'asks'
+    with contextlib.suppress(OSError):
+        os.mkdir(path, 0o700)
     try:
-        with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as out:
+        pin = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        os.fchmod(pin, 0o700)
+    except OSError:
+        os.close(pin)
+        return None
+    return pin
+
+
+def keep(pin, name, text):
+    """Write text whole and private as name in the pinned folder: a new 0600 file of its own, then os.replace onto name,
+    so a reader of the old file sees only the old text and a crash leaves one of the two whole. False when it could not."""
+    temporary = f'.{name}.{uuid.uuid4().hex}'
+    try:
+        with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=pin), 'w') as out:
             out.write(text)
-        os.replace(temporary, path)
-    except BaseException:
+        os.replace(temporary, name, src_dir_fd=pin, dst_dir_fd=pin)
+        return True
+    except OSError:
         with contextlib.suppress(OSError):
-            temporary.unlink()
-        raise
+            os.unlink(temporary, dir_fd=pin)
+        return False
 
 
 def ask_background(job, question, options, command=None, gate=None):
@@ -134,7 +153,11 @@ def ask_background(job, question, options, command=None, gate=None):
     job = Path(job).absolute()
     command = command or ask_command(job)
     require_ask_command(command)
-    folder = asks_folder(job)
+    folder = job / 'asks'
+    folder.mkdir(parents=True, exist_ok=True)
+    pin = pin_asks(job)  # private through a descriptor; a link or a file is left as it is
+    if pin is not None:
+        os.close(pin)
     ident = uuid.uuid4().hex[:12]
     argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command,
             *(['--gate', gate] if gate else []), *['--option=' + option for option in options], '--', question]

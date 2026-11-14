@@ -480,14 +480,61 @@ class Shared(NativeCase):
         self.assertIn('postgres', reader.read())
         reader.close()
         self.assertEqual((kept.stat().st_mode & 0o777, 'mysql' in kept.read_text()), (0o600, True))
-        with mock.patch.object(owner_.os, 'replace', side_effect=OSError('disk full')), self.assertRaises(OSError):
-            self.quiet(owner_.ask_now, self.job, 'Third?', [], 'echo sqlite', ident='a1b2c3d4e5f6')
+        with mock.patch.object(owner_.os, 'replace', side_effect=OSError('disk full')):  # keeping fails: sent as main does
+            code, out = self.quiet(owner_.ask_now, self.job, 'Third?', [], 'echo sqlite', ident='a1b2c3d4e5f6')
+        self.assertEqual((code, 'kept in' in out), (1, False))
         self.assertIn('mysql', kept.read_text())  # the old answer whole, and no temporary file left
         self.assertEqual(sorted(p.name for p in folder.iterdir()), ['a1b2c3d4e5f6.answer'])
         folder.chmod(0o777)  # the background ask makes the folder private too
         with mock.patch.object(owner_.subprocess, 'Popen', return_value=mock.Mock(pid=1)):
             self.quiet(owner_.ask_background, self.job, 'Later?', [], 'echo')
         self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+
+    def outside(self):
+        """A folder outside the job holding an answer of the id the tests use, mode 0755: (folder, its listing)."""
+        folder = self.root / 'elsewhere'
+        folder.mkdir(exist_ok=True)
+        (folder / 'a1b2c3d4e5f6.answer').write_text('not the job\'s\n')
+        folder.chmod(0o755)
+        return folder, lambda: (folder.stat().st_mode & 0o777, {f.name: (f.stat().st_ino, f.read_text()) for f in folder.iterdir()})
+
+    def test_an_asks_link_is_not_followed_and_the_answer_still_goes(self):
+        folder, listing = self.outside()
+        before = listing()
+        (self.job / 'asks').symlink_to(folder)
+        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+        self.assertEqual(code, 0, out)
+        self.assertIn('ANSWER Which db?: postgres', self.state()['terminals']['t1']['sent'][-1])
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        code, out = self.quiet(owner_.ask_now, self.job, 'Again?', [], 'echo mysql', ident='a1b2c3d4e5f6')
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith(f'FAILED {LEAD} (hc send: t1 is blocked)'), out)
+        self.assertEqual(listing(), before)  # nothing made, replaced or chmodded there
+
+    def test_an_asks_file_does_not_stop_the_answer(self):
+        (self.job / 'asks').write_text('a file\n')
+        asked = self.root / 'asked'
+        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], f'sh -c "touch {asked}; echo postgres"', ident='a1b2c3d4e5f6')
+        self.assertEqual((code, asked.exists()), (0, True), out)
+        self.assertIn('ANSWER Which db?: postgres', self.state()['terminals']['t1']['sent'][-1])
+        self.assertEqual((self.job / 'asks').read_text(), 'a file\n')
+
+    def test_a_folder_swapped_for_a_link_while_the_owner_thinks_changes_nothing(self):
+        folder, listing = self.outside()
+        before, real, pin = listing(), self.job / 'asks.real', owner_.pin_asks
+
+        def pinned_then_swapped(job):
+            fd = pin(job)
+            (self.job / 'asks').rename(real)
+            (self.job / 'asks').symlink_to(folder)
+            return fd
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        with mock.patch.object(owner_, 'pin_asks', pinned_then_swapped):
+            self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')[0], 1)
+        self.assertIn('ANSWER Which db?: postgres', (real / 'a1b2c3d4e5f6.answer').read_text())
+        self.assertEqual(listing(), before)
 
     def test_approve_gate_for_a_bot_and_post_and_finish(self):
         (self.job / 'owner').write_text('alpha\n')
