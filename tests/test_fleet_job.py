@@ -698,13 +698,15 @@ class StampedeReview1(unittest.TestCase):
 
     def test_r6_the_references_start_agents_hooked_and_copy_no_env_file(self):
         refs = ROOT / 'skills/herdr-fleet/references'
-        for name in ('worked-example.md', 'agents-and-models.md'):
+        for name in ('worked-example.md', 'tui.md', 'clis.md'):
             text = (refs / name).read_text()
-            self.assertIn('fleet-job start "$B"', text, name)
+            if name != 'clis.md':   # the CLIs page has no start recipe; it still may not copy an env file or start unhooked
+                self.assertIn('stampede start "$B"', text, name)
             self.assertNotRegex(text, r'cp [^\n]*\.env', name)
             self.assertNotRegex(text, r'herdr agent prompt \S+ "You are', name)   # an unhooked start, then the brief by hand
         self.assertNotIn('Monitor tool', (refs / 'worked-example.md').read_text())
-        self.assertNotIn('herdr agent start review-', (refs / 'agents-and-models.md').read_text())   # the takeover starts hooked too
+        for name in ('agents-and-models.md', 'clis.md', 'tui.md'):   # a reviewer in a builder's pane starts hooked too
+            self.assertNotIn('herdr agent start review-', (refs / name).read_text(), name)
 
 
 class Gates(unittest.TestCase):
