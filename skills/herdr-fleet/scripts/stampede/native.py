@@ -37,6 +37,9 @@ def labels(terminal):
     return terminal.get('labels') or {}
 
 
+AGENT_ROLES = ('lead', 'helper')  # the stampede.role values new, start and reopen give the agents they launch
+
+
 def live(key, terminals):
     """The job's live terminals, a shell Core put in a lost program's place left out."""
     return [t for t in terminals if t.get('state') == 'live' and labels(t).get('stampede.job') == key and not hcapi_.shelled(t)]
@@ -594,15 +597,21 @@ def tree(job, as_json=False):
     key, terminals = job_.core_key(job), listing(job)
     lead = lead_of(key, terminals)
     rows, shown = [], job_tree(key, terminals)
-    named = {name_of(t) for _, t, _ in shown}
+
+    def shell(t):  # a shell Core left in a lost agent's place: only an agent native launched is judged, any other role never
+        return labels(t).get('stampede.role') in AGENT_ROLES and hcapi_.shelled(t)
+    named = {name_of(t) for _, t, _ in shown if not shell(t)}
     for t in reversed(terminals):  # a helper reopen left ended (a program, a codex): its newest terminal, under no live lead
-        if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'helper' and name_of(t) not in named:
+        if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'helper' and name_of(t) not in named \
+                and not shell(t):
             shown.append((1, t, None))
             named.add(name_of(t))
     for depth, t, outlived in shown:
-        tags = labels(t)
-        rows.append({'depth': depth, 'name': name_of(t), 'address': t['address'], 'parent': t.get('parent'),
-                     'role': tags.get('stampede.role') or 'plain', 'kind': tags.get('stampede.kind') or '-',
+        tags, shelled = labels(t), shell(t)  # such a shell keeps the agent's Core name too: it is named by its address
+        rows.append({'depth': depth, 'name': t['address'] if shelled else name_of(t), 'address': t['address'], 'parent': t.get('parent'),
+                     'role': 'plain' if shelled else tags.get('stampede.role') or 'plain',
+                     'kind': 'shell' if shelled else tags.get('stampede.kind') or '-',
+                     'shell_of': name_of(t) if shelled else None,
                      'status': hcapi_.core_status(t) or t.get('state'), 'state': t.get('state'), 'tab': tags.get('herdr.tab') or '-',
                      'outlived': outlived, **{k: v for k, v in where_of(tags).items() if k != 'tab'}})
     waiting = [{k: r[k] for k in ('name', 'parent', 'kind', 'tab')} for _, r in queued(job)]
@@ -612,7 +621,7 @@ def tree(job, as_json=False):
         print(f'space {read(job, "space")} ({key})')
         for r in rows:
             print('  ' * (r['depth'] + 1) + f'{r["name"]} ({r["address"]}) {r["role"]} {r["kind"]} {r["status"]} tab {r["tab"]}' + (f' pane {r["pane"]}' if r['pane'] else '')
-                  + (f' outlived {r["outlived"]}' if r['outlived'] else ''))
+                  + (f' outlived {r["outlived"]}' if r['outlived'] else '') + (f' left in {r["shell_of"]}\'s place' if r['shell_of'] else ''))
         for r in waiting:
             print(f'  queued {r["name"]} under {r["parent"]} ({r["kind"]})')
     if not lead:
