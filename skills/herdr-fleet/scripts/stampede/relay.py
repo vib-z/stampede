@@ -566,14 +566,15 @@ def send_core(job, name, text, limit=None):
                 sent = hcapi_.hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text, limit=limit or hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
                 quiet = ('' if sent.get('started') is not False else
                          f'; it has not gone working yet: read it with hc read {address} before any resend')
-                return True, f'SUBMITTED {name} ({address}){quiet}'
+                return True, out_.Line(f'SUBMITTED {name} ({address}){quiet}', agent=name, address=address)
         except hcapi_.HcError as error:
             if error.kind not in SEND_REFUSED and error.code not in (9, 10, 11):  # no answer, or a failure Core does not name
-                return None, (f'FAILED {name} ({base_.line(error)}; a send still held by a draft types nothing once stopped, '
-                              f'but read it with hc read {address} before any resend)')
+                why = (f'{base_.line(error)}; a send still held by a draft types nothing once stopped, but read it with hc read '
+                       f'{address} before any resend')
+                return None, out_.Line(f'FAILED {name} ({why})', agent=name, reason=why)
             held = {'cancelled': 'Herdr Core cancelled the send before it typed anything: tell again if still needed'}
             why = {9: refused['blocked'], 10: refused['working'], 11: 'not ready'}.get(error.code) or held.get(error.kind, base_.line(error))
-    return False, f'FAILED {name} ({why})'
+    return False, out_.Line(f'FAILED {name} ({why})', agent=name, reason=why)
 
 
 def core_hint():

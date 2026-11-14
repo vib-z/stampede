@@ -2,10 +2,11 @@
 the facts are kept and as_json prints one object at the end, and nothing else reaches stdout: a subprocess's output
 goes to stderr, and any other line this process prints goes under "notes". Whatever way the command ends (a refusal,
 a usage error, an exception, an interrupt), stdout holds exactly one object."""
-import contextlib, io, json, os, re, sys, traceback
+import contextlib, io, json, os, re, sys, threading, traceback
 
 LISTS = ('next', 'reopen', 'close', 'wait')  # their results are always the list under "results"
 RUN = None  # the Run of the --json call under way, only while as_json runs it
+LOCK = threading.Lock()  # fd 1 is the whole process's: one --json call at a time
 
 
 class Run:
@@ -22,12 +23,22 @@ def emit(status, text, /, end='\n', **facts):
     RUN.results.append({'status': status, **facts})
 
 
-SAID = re.compile(r'(?P<status>[A-Z][A-Z_]*) (?P<agent>[^\s(]*[^\s(:]):? ?(?:\((?P<inside>[^)]*)\))?(?P<rest>.*)', re.S)
+class Line(str):
+    """A result line built in this package for its caller to print, with the facts its builder knows."""
+    def __new__(cls, text, **facts):
+        line = super().__new__(cls, text)
+        line.facts = facts
+        return line
+
+
+SAID = re.compile(r'(?P<status>[A-Z][A-Z_]*) (?P<agent>[^\s(]*[^\s(:]):? ?(?:\((?P<inside>.*)\))?(?P<rest>.*)', re.S)
 
 
 def said(text, /, end='\n', **facts):
-    """A line another program wrote: herdr-send's or send_core's `SUBMITTED <agent> [(<address>)]`, or
-    `FAILED <agent> (<reason>)` or `FAILED <agent> <reason>`, with the same facts as a line printed here."""
+    """A SUBMITTED or FAILED line: a Line's own facts, or for another program's line (herdr-send's)
+    `SUBMITTED <agent> [(<address>)]`, `FAILED <agent> (<reason>)` (everything to the last `)`) or `FAILED <agent> <reason>`."""
+    if isinstance(text, Line):
+        return emit(text.split()[0], text, end, **text.facts, **facts)
     m = SAID.fullmatch(text.strip())
     if not m:
         return emit(text.split()[0] if text.split() else None, text, end, **facts)
@@ -56,14 +67,20 @@ def refuse(line, retry=None):
 
 
 def as_json(command, body):
-    """Run body() with --json: return its exit code, having printed one object on the real stdout."""
+    """Run body() with --json: return its exit code, having printed one object on the real stdout. One call at a time,
+    and everything it sets up is undone on every way out, a failure while setting up included."""
+    with LOCK:
+        return _as_json(command, body)
+
+
+def _as_json(command, body):
     global RUN
-    run = RUN = Run()
-    sys.stdout.flush()
-    real = os.dup(1)
-    os.dup2(2, 1)  # a subprocess's stdout goes to stderr, never into the object
-    err, crash = io.StringIO(), None
+    run, real, err, crash = Run(), None, io.StringIO(), None
     try:
+        RUN = run
+        sys.stdout.flush()
+        real = os.dup(1)
+        os.dup2(2, 1)  # a subprocess's stdout goes to stderr, never into the object
         with contextlib.redirect_stdout(run.sink), contextlib.redirect_stderr(err):
             try:
                 code = body()
@@ -75,9 +92,11 @@ def as_json(command, body):
                 code, crash = 1, (f'{type(error).__name__}: {error}', traceback.format_exc())
     finally:
         RUN = None
-        sys.stdout.flush()
-        os.dup2(real, 1)
-        os.close(real)
+        if real is not None:
+            with contextlib.suppress(OSError, ValueError):
+                sys.stdout.flush()
+            os.dup2(real, 1)
+            os.close(real)
     notes = [line for line in (run.sink.getvalue() + err.getvalue()).splitlines() if line.strip()]
     if isinstance(code, str):  # SystemExit('text'): Python prints the text and exits 1
         notes.append(code)
@@ -104,13 +123,7 @@ def as_json(command, body):
     return code
 
 
-def split(argv, commands):
-    """(command, argv without --json) when argv asks for --json for one of commands, before or after the command's name
-    and anywhere among its arguments up to a -- that starts a program (after it, the flag is the program's); else
-    (None, argv)."""
-    cut = argv.index('--') if '--' in argv else len(argv)
-    head, tail = argv[:cut], argv[cut:]
-    command = next((a for a in head if not a.startswith('-')), None)
-    if '--json' not in head or command not in commands:
-        return None, argv
-    return command, [a for a in head if a != '--json'] + tail
+def asks(argv):
+    """True when --json stands as a word before any -- (after it, the words are a program's or a message's). It only
+    decides whether a call ends in one object; argparse alone decides what the word is."""
+    return '--json' in argv[:argv.index('--') if '--' in argv else len(argv)]

@@ -2,7 +2,7 @@
 stampede command against the fakes, the steps of tests/clients_run.py plus the commands they leave out (MORE), twice: once
 plain and once with --json on every command that takes it. Each --json step must print one object and nothing else on
 stdout, exit as the plain step did, carry its status, and name the facts the plain line names."""
-import ast, json, os, re, shutil, subprocess, sys, tempfile, unittest
+import ast, json, os, re, shutil, subprocess, sys, tempfile, threading, time, unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
@@ -299,10 +299,21 @@ class Schema(unittest.TestCase):
                  'SUBMITTED lead-x': {'status': 'SUBMITTED', 'agent': 'lead-x', 'address': None},
                  'FAILED build-codex (it is working)': {'status': 'FAILED', 'agent': 'build-codex', 'reason': 'it is working'},
                  'FAILED w9:p2 focused: the owner is in that pane; retry later':
-                     {'status': 'FAILED', 'agent': 'w9:p2', 'reason': 'focused: the owner is in that pane; retry later'}}
+                     {'status': 'FAILED', 'agent': 'w9:p2', 'reason': 'focused: the owner is in that pane; retry later'},
+                 'FAILED a (b (c) d)': {'status': 'FAILED', 'agent': 'a', 'reason': 'b (c) d'}}  # to the last )
         for line, want in cases.items():
             code, out, _ = call(['post', '--json'], lambda: out_.said(line + '\n', end='') or 0)
             self.assertEqual({k: out.get(k) for k in want}, want, line)
+
+    def test_a_failure_s_reason_comes_from_the_code_that_knows_it(self):
+        """send_core's FAILED line: the reason a slash command gets holds parentheses, and the object has it whole."""
+        why = 'a slash command needs typed keys, which Core cannot guard: when hc get t4 shows idle, run hc keys t4 / r space ( a l l ) enter'
+        line = out_.Line(f'FAILED build-codex ({why})', agent='build-codex', reason=why)
+        code, out, _ = call(['tell', '--json'], lambda: out_.said(line) or 0)
+        self.assertEqual((out['status'], out['agent'], out['reason']), ('FAILED', 'build-codex', why))
+        self.assertEqual(str(line), f'FAILED build-codex ({why})')  # the plain line is the same text
+        code, out, _ = call(['tell', '--json'], lambda: out_.said(out_.Line('FAILED a (as printed)', agent='a', reason='as known')) or 0)
+        self.assertEqual(out['reason'], 'as known', 'a Line\'s own facts, never a parse of its text')
 
 
 def call(argv, body=None):
@@ -359,6 +370,21 @@ class Calls(unittest.TestCase):
         code, out, err = self.stampede('start', self.job, 'watch-ci', '--', 'sleep', '1', '--json')  # the program's flag
         self.assertEqual((code, out), (2, ''))  # plain: argparse's usage error on stderr
         self.assertIn('start: error: the following arguments are required', err)  # argparse names the prog its own way on 3.9
+        attached = self.root / 'plan.md'
+        attached.write_text('plan\n')
+        for argv in (('ask', self.job, '--option', '--json', 'yes', 'Keep it?'), ('post', self.job, '--file', '--json', attached, 'hi'),
+                     ('ask', self.job, '--option', 'a', '--option', '--json', 'Q'), ('post', '--json', self.job, '--file')):
+            before = sorted(self.job.rglob('*'))
+            code, out, err = self.stampede(*argv)  # argparse refuses an option whose value is --json; nothing is asked or posted
+            got = json.loads(out)
+            self.assertEqual((code, got['ok'], err), (2, False, ''), argv)
+            self.assertIn('expected one argument', got['error'])
+            self.assertEqual(sorted(self.job.rglob('*')), before, argv)
+        code, out, err = self.stampede('post', self.job, '--', '--json', 'is', 'a', 'word')  # after --, the message's
+        self.assertEqual((code, out.split()[0]), (0, 'POSTED'), err)
+        self.assertIn('--json is a word', max((self.job / 'outbox').glob('*.md')).read_text())
+        code, out, err = self.stampede('--json', 'config', 'show', '--job', self.job)  # the top level's flag reaches config show
+        self.assertEqual((code, sorted(json.loads(out))[:2]), (0, ['environment', 'files']), err)
 
     def test_a_crash_or_an_interrupt_still_ends_in_one_object(self):
         def raises(error):
@@ -411,6 +437,56 @@ class Calls(unittest.TestCase):
         self.assertEqual((code, got['status']), (0, 'POSTED'))
         self.assertNotIn('error', got)
         self.assertIsNone(out_.RUN)
+
+    def test_two_threads_at_once_each_get_their_own_object(self):
+        jobs = [self.job, self.root / 'job2']
+        jobs[1].mkdir()
+        (jobs[1] / 'lead').write_text('lead-y\n')
+        (jobs[1] / 'ask.md').write_text('ask\n')
+        real_post, codes = owner_.post, {}
+
+        def slow_post(*args):
+            time.sleep(0.3)  # both calls overlap
+            return real_post(*args)
+
+        def one(job):
+            codes[str(job)] = cli_.main(['post', str(job), 'hi from ' + job.name, '--json'])
+        stdout, fd = sys.stdout, os.fstat(1).st_ino
+        with tempfile.TemporaryFile() as out, mock.patch.object(owner_, 'post', slow_post):
+            saved = os.dup(1)
+            os.dup2(out.fileno(), 1)
+            try:
+                threads = [threading.Thread(target=one, args=(job,)) for job in jobs]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            finally:
+                os.dup2(saved, 1)
+                os.close(saved)
+            out.seek(0)
+            objects = [json.loads(line) for line in out.read().decode().splitlines()]
+        self.assertEqual(sorted(o['job'] for o in objects), sorted(str(j) for j in jobs))
+        for o in objects:
+            self.assertEqual((o['status'], o['path']), ('POSTED', o['job'] + '/outbox/001.md'))
+            self.assertNotIn('results', o)
+        self.assertEqual(set(codes.values()), {0})
+        self.assertIs(sys.stdout, stdout)
+        self.assertEqual(os.fstat(1).st_ino, fd)
+
+    def test_a_failure_while_setting_up_leaves_nothing_behind(self):
+        broken = open(os.devnull, 'w')
+        broken.close()
+        with mock.patch.object(sys, 'stdout', broken):
+            with self.assertRaises(ValueError):  # the first flush, on a closed stdout
+                cli_.main(['post', str(self.job), 'hi', '--json'])
+        self.assertIsNone(out_.RUN)
+        self.assertFalse(out_.LOCK.locked())
+        code, text, err = call(['tell', str(self.root / 'nope'), 'lead', 'hi'])  # stdout repaired: a plain refusal as usual
+        self.assertEqual((code, text), (2, ''))
+        self.assertIn('stampede tell: job folder not found', err)
+        code, got, _ = call(['post', str(self.job), 'hi', '--json'])
+        self.assertEqual((code, got['status']), (0, 'POSTED'))
 
     def test_a_reader_that_goes_away_leaves_no_traceback(self):
         done = subprocess.run(['bash', '-c', '"$0" post "$1" hi --json | true; echo "exit ${PIPESTATUS[0]}" >&2',

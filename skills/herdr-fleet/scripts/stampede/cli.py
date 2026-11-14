@@ -263,9 +263,12 @@ JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapsh
 
 
 def main(argv):
-    command, plain = out_.split(argv, JSON)
-    if command:
-        return out_.as_json(command, lambda: parse_and_run(plain))
+    """argparse owns --json; whether to wrap the whole call in one object, its own usage error included, is decided
+    before it parses: --json as a word before any -- (out.asks), on a command in JSON. The command is the first word
+    that is no flag, since the top-level parser has no option that takes a value."""
+    name = next((word for word in argv if not word.startswith('-')), None)
+    if out_.asks(argv) and (name is None or name in JSON):
+        return out_.as_json(name, lambda: parse_and_run(argv))
     return parse_and_run(argv)
 
 
@@ -276,6 +279,11 @@ def parse_and_run(argv):
                                      formatter_class=form)
     sub = parser.add_subparsers(dest='cmd', metavar='<command>', help=argparse.SUPPRESS)
     sub.required = True
+
+    def json_flag(p, text='print one JSON object instead of the lines (docs/CLI-JSON.md)'):
+        """--json, before or after the command: one dest, and a subcommand's own default never undoes the top level's."""
+        p.add_argument('--json', action='store_true', default=argparse.SUPPRESS, help=text)
+    parser.add_argument('--json', action='store_true', help='with a command: print one JSON object (docs/CLI-JSON.md)')
 
     def command(name, description=None):
         return sub.add_parser(name, description=description or SUMMARY[name][0].upper() + SUMMARY[name][1:] + '.',
@@ -355,7 +363,7 @@ def parse_and_run(argv):
     p.add_argument('--timeout', type=int, help='seconds (default: the setting timeouts.wait, 3600); exit 3 when nothing came')
     for verb in ('next', 'snapshot'):
         command(verb).add_argument('job', help=JOB)
-    p = command('tree'); p.add_argument('job', help=JOB); p.add_argument('--json', action='store_true', help='one JSON document')
+    p = command('tree'); p.add_argument('job', help=JOB); json_flag(p, 'one JSON document')
     p = command('reopen', 'A native job: start what is not live, parents first. A finished job reopens for reading only.')
     p.add_argument('job', help=JOB)
     p.add_argument('--fresh', action='store_true', help='every Claude agent starts a new session with its brief')
@@ -389,11 +397,11 @@ def parse_and_run(argv):
                           'Exit 1 when any line is a PROBLEM.')
     p.add_argument('--core', action='store_true', help='check Herdr Core only (passed to herdr-doctor)')
     p.add_argument('--tui', action='store_true', help='check the Herdr TUI only (passed to herdr-doctor)')
-    p.add_argument('--json', action='store_true', help='{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}')
+    json_flag(p, '{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}')
     p = command('check', 'Run the fast part of this checkout\'s unit tests (under 15 seconds) in a scratch HOME, with no herdr or hc\n'
                          'on PATH, so nothing reaches a live job. One line per test module, then the total. Exit 0 or 1.')
     p.add_argument('--full', action='store_true', help='run the whole suite (minutes)')
-    p.add_argument('--json', action='store_true', help='{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
+    json_flag(p, '{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
     p = command('config', 'The settings: config show prints every setting as key = value (source), the source being the layer\n'
                           'that set it (default, user, repo, env:<NAME>, flag or set), then the environment-only variables,\n'
                           'then any problems. Exit 1 when the config has problems.')
@@ -401,7 +409,7 @@ def parse_and_run(argv):
     p.required = True
     p = p.add_parser('show', description='Every setting and the layer that set it; exit 1 when the config has problems.',
                      epilog=EXAMPLES['config'], formatter_class=form)
-    p.add_argument('--json', action='store_true', help='{"values", "sources", "files", "environment", "problems"}')
+    json_flag(p, '{"values", "sources", "files", "environment", "problems"}')
     p.add_argument('--job', help='a job folder: the settings it saved at new (else the repo is the git root here)')
     p = sub.add_parser('prepush'); p.add_argument('remote'); p.add_argument('url', nargs='?')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
@@ -411,7 +419,7 @@ def parse_and_run(argv):
     p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
     p.add_argument('--fresh', action='store_true', help='each agent it starts begins a new session with its brief')
     for name in JSON:
-        sub.choices[name].add_argument('--json', action='store_true', help='print one JSON object instead of the lines (docs/CLI-JSON.md)')
+        json_flag(sub.choices[name])
     sub.add_parser('_deliver').add_argument('job')
     sub.add_parser('_wake').add_argument('job')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])

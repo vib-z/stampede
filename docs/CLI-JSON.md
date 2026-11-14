@@ -1,6 +1,6 @@
 # JSON output
 
-Add `--json` to any command an agent runs, before or after the command's name (`stampede --json tell ...` or `stampede tell ... --json`), and it prints one JSON object on stdout instead of its lines, and nothing else there. After the `--` that starts a program in `start`, `--json` is the program's. The exit code is the same as without `--json`. The lines without `--json` do not change. The commands are in [CLI.md](CLI.md); `tree`, `doctor`, `check` and `config show` keep the `--json` documents named there.
+Add `--json` to any command an agent runs, before or after the command's name (`stampede --json tell ...` or `stampede tell ... --json`), and it prints one JSON object on stdout instead of its lines, and nothing else there. It is a flag like any other: an option's value cannot be the word `--json` (`ask <job> --option --json ...` is refused, exit 2), and a message that holds the word goes after `--` (`stampede post <job> -- --json is a word`). After the `--` that starts a program in `start`, `--json` is the program's. The exit code is the same as without `--json`. The lines without `--json` do not change. The commands are in [CLI.md](CLI.md); `tree`, `doctor`, `check` and `config show` keep the `--json` documents named there.
 
 ```console
 $ stampede start <job> build-api --kind claude --brief <job>/briefs/build-api.md --json
