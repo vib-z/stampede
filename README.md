@@ -427,33 +427,34 @@ APPROVED 83307febaa1a at <commit>
 
 The front door shows you the plan file itself, and a yes to its own summary is never an approval. A gate's item carries the exact `approve-gate` line, which the front door runs with your words quoted. If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `BLOCKED_ON_CARD` instead of pretending the message was read. The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead, so the front door is never left waiting on a job that ended. The front door's loop: [skills/stampede](skills/stampede/SKILL.md#relay-a---front-door-job); the lead's side: [front-door.md](skills/herdr-fleet/references/front-door.md).
 
-**On Herdr Core** the same loop runs with `stampede new --core --front-door`, against the test suite's fake `hc` here (the chat's `approve` and `approve-gate` ran from outside Herdr; `<repo>` is the repo's path):
+**On Herdr Core** the same loop runs with `stampede new --front-door` from a chat outside Herdr (`backend` `auto` picks Herdr Core there; `--core` says so outright), against the test suite's fake `hc` here, from the repo (every command ran from outside Herdr):
 
 ```console
-$ stampede new --core --file ask.md --name login --front-door --review
+$ stampede new --file ask.md --name login --front-door --review
+on Herdr Core (backend auto: not inside a Herdr pane)
 STARTED lead-login (t1)
-lead-login <repo>/.herdr-login
-$ J=<repo>/.herdr-login
+lead-login ~/code/herdr-jobs/jobs/2026-11-14-local-login
+$ J=~/code/herdr-jobs/jobs/2026-11-14-local-login
 $ stampede post $J "PLAN READY: two helpers" --file $J/plan.md                     # the lead
-POSTED 001 for the front door to relay (<repo>/.herdr-login/outbox/001.md)
+POSTED 001 for the front door to relay (~/code/herdr-jobs/jobs/2026-11-14-local-login/outbox/001.md)
 $ stampede wait $J                                                                # the chat, in the background
 # 001 post
 ...
 $ stampede approve $J --by "owner in desktop chat: 'go'"
 SUBMITTED lead-login (t1)
 $ stampede ask $J --gate --sha <commit> --pr 12 "merge PR #12"                    # the lead
-GATE 66185eb7d9f5 posted to the front door as outbox 002; act after fleet-job gate-ok <repo>/.herdr-login 66185eb7d9f5 --sha <the commit you act on> prints APPROVED
+GATE deca46984e27 posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login deca46984e27 --sha <the commit you act on> prints APPROVED
 $ stampede wait $J                                                                # the chat
 # 002 gate
 
-Gate 66185eb7d9f5: merge PR #12 (PR #12) at <commit, 12 hex>?
+Gate deca46984e27: merge PR #12 (PR #12) at <commit, 12 hex>?
 One exact action, yes or no. Show the owner this action as written.
 
-Answer with: fleet-job approve-gate <repo>/.herdr-login 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell <repo>/.herdr-login lead 'GATE 66185eb7d9f5 NO: <their words>')
+Answer with: fleet-job approve-gate ~/code/herdr-jobs/jobs/2026-11-14-local-login deca46984e27 --sha <commit> --digest b490e3daedbc6383 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell ~/code/herdr-jobs/jobs/2026-11-14-local-login lead 'GATE deca46984e27 NO: <their words>')
 
-$ stampede approve-gate $J 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
+$ stampede approve-gate $J deca46984e27 --sha <commit> --digest b490e3daedbc6383 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
 SUBMITTED lead-login (t1)
-APPROVED 66185eb7d9f5 at <commit>
+APPROVED deca46984e27 at <commit>
 $ stampede wait $J                                                                # the lead waits at a permission dialog
 BLOCKED lead-login: permission. Core says it waits at a dialog in its terminal t1 (hc read t1). Its screen:
 Allow this command?
