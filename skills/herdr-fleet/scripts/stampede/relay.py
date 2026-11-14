@@ -115,7 +115,7 @@ def hold(job, lead, address):
     did. Without one the hold has no count yet, and held takes the first settled look."""
     key, turn = job_.core_key(job), None
     try:
-        turn = settled(hcapi_.hc('get', address), job)
+        turn = settled(hcapi_.hc('get', address, job=job), job)
     except hcapi_.HcError:
         pass
     record = {'address': address, 'turn': turn, 'at': datetime.now().strftime('%Y-%m-%d %H:%M')}
@@ -139,7 +139,7 @@ def core_ready(job, lead):
     hcapi_.target(job)
     address = job_.core_entries(job).get(lead, {}).get('address')
     try:
-        terminal = hcapi_.hc('get', address) if address else {}
+        terminal = hcapi_.hc('get', address, job=job) if address else {}
     except hcapi_.HcError as error:
         if error.kind != 'not_found':
             raise
@@ -204,7 +204,7 @@ def session_proof(job, agent, session):
         return 'ran'
     try:
         found = hcapi_.hc('ls', '--all', '--label', 'stampede.job=' + job_.core_key(job), '--label', 'stampede.agent=' + agent,
-                   '--label', 'stampede.session=' + session).get('terminals', [])
+                   '--label', 'stampede.session=' + session, job=job).get('terminals', [])
     except hcapi_.HcError:
         return 'never' if launch and launch.get('proof') == 'never' else 'unknown'
     if found:
@@ -257,13 +257,13 @@ def core_run(job, agent, role, program, cwd, session=None):
     for name in names:
         try:
             terminal = hcapi_.hc('run', '--bg', '--no-parent', '--no-notify', '--name', name, '--cwd', str(cwd), *labels, *shown, '--',
-                          *hcapi_.launch_env(job), *program)
+                          *hcapi_.launch_env(job), *program, job=job)
             break
         except hcapi_.HcError as error:
             if error.kind == 'name_taken' and name != names[-1]:
                 continue
             try:  # this launch's own terminal, live or already finished: by its launch label, never an older one's
-                spawned = hcapi_.hc('ls', '--all', *labels[:4], *labels[-2:]).get('terminals', [])
+                spawned = hcapi_.hc('ls', '--all', *labels[:4], *labels[-2:], job=job).get('terminals', [])
             except hcapi_.HcError as lookup:  # the entry stays starting: a later start or reopen reconciles it by its labels
                 raise hcapi_.CoreUnknown(agent, f'hc run answered {base_.line(error)}, and hc ls could not tell whether it started '
                                          f'({base_.line(lookup)})') from None
@@ -286,11 +286,11 @@ def core_outcome(job, agent, address, who, brief, plain=False):
     is blocked, at an error or silent after 30 s: it stays this job's agent), or 'failed' (its terminal finished).
     plain: a program with no status (the follower): live after 3 s is 'started'; Core not answering is 'unknown'."""
     try:
-        hcapi_.hc('wait', address, '--timeout', '3' if plain else '30', wait=3 if plain else 30)
+        hcapi_.hc('wait', address, '--timeout', '3' if plain else '30', wait=3 if plain else 30, job=job)
     except hcapi_.HcError:
         pass
     try:
-        terminal = hcapi_.hc('get', address)
+        terminal = hcapi_.hc('get', address, job=job)
     except hcapi_.HcError as error:  # unconfirmed: it may run, so it stays this job's
         if plain:
             hcapi_.unknown(job, hcapi_.CoreUnknown(agent, f'started as {address}, then hc get failed ({base_.line(error)})'))
@@ -300,7 +300,7 @@ def core_outcome(job, agent, address, who, brief, plain=False):
     word = hcapi_.core_status(terminal)
     if terminal.get('state') != 'live':
         try:
-            tail = hcapi_.hc('read', address, '--lines', '20').get('text', '')
+            tail = hcapi_.hc('read', address, '--lines', '20', job=job).get('text', '')
         except hcapi_.HcError:
             tail = ''
         reason = f'{terminal.get("reason") or "ended"} exit {terminal.get("exit_code")}'
@@ -498,13 +498,13 @@ def acknowledged(job, lead):
     return 3
 
 
-def drafted(address):
+def drafted(address, job=None):
     """True when the last 8 non-empty screen lines show no empty-prompt marker: text already typed, which Core would
     paste after. Core 0.1.20 holds a send only while a person is typing; a draft left alone past draft_wait, and text
     typed with hc keys, still gets the message pasted after it. Cut here, since hc read may give the whole screen, whose
     scrollback can hold a marker. A screen Core cannot read counts as empty."""
     try:
-        screen = hcapi_.hc('read', address, '--lines', '8').get('text', '')
+        screen = hcapi_.hc('read', address, '--lines', '8', job=job).get('text', '')
     except hcapi_.HcError:
         return False
     return handed_.typed(screen)
@@ -534,7 +534,7 @@ def send_core(job, name, text, limit=None):
     hcapi_.target(job)
     address, lost = job_.core_entries(job).get(name, {}).get('address'), None
     try:
-        terminal = hcapi_.hc('get', address) if address else {}
+        terminal = hcapi_.hc('get', address, job=job) if address else {}
     except hcapi_.HcError as error:
         terminal, lost = {}, None if error.kind == 'not_found' else error
     labels, word = terminal.get('labels') or {}, hcapi_.core_status(terminal)
@@ -556,11 +556,11 @@ def send_core(job, name, text, limit=None):
                 keys = ' '.join(['space' if c == ' ' else c for c in text] + ['enter'])
                 why = (f'a slash command needs typed keys, which Core cannot guard: when hc get {address} shows idle, '
                        f'run hc keys {address} {keys}')
-            elif drafted(address):  # Core pastes after it; clearing it could erase someone's own typing
+            elif drafted(address, job):  # Core pastes after it; clearing it could erase someone's own typing
                 why = (f'text is already typed in its prompt; Core cannot clear it safely: read it with hc read {address}, '
                        f'clear it with hc keys {address} ctrl+c when hc get shows idle, then tell again')
             else:
-                sent = hcapi_.hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text, limit=limit or hcapi_.send_limit())
+                sent = hcapi_.hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text, limit=limit or hcapi_.send_limit(), job=job)
                 quiet = ('' if sent.get('started') is not False else
                          f'; it has not gone working yet: read it with hc read {address} before any resend')
                 return True, f'SUBMITTED {name} ({address}){quiet}'
@@ -599,7 +599,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False, settin
         raise ValueError(f'{job} already exists: a job folder is used once; start another job with --name')
     key = job_.job_key(job)  # the path's hash: a folder made again at this path has the same key
     try:
-        earlier = hcapi_.hc('ls', '--label', 'stampede.job=' + key).get('terminals', [])
+        earlier = hcapi_.hc('ls', '--label', 'stampede.job=' + key, limit=settings.get('timeouts.hc_call')).get('terminals', [])
     except hcapi_.HcError as error:
         raise ValueError(f'Herdr Core did not answer ({base_.line(error)}): nothing was made') from None
     if earlier:

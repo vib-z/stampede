@@ -36,7 +36,7 @@ KEY = re.compile(r'[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*')
 
 CONTROL = re.compile(r'[\x00-\x08\x0a-\x1f\x7f]')  # TOML refuses these raw in a string or comment; a tab is fine
 ESCAPES = {'b': '\b', 't': '\t', 'n': '\n', 'f': '\f', 'r': '\r', '"': '"', '\\': '\\'}
-NUMBER = re.compile(r'[+-]?(0|[1-9](?:_?\d)*)(\.\d(?:_?\d)*)?([eE][+-]?\d(?:_?\d)*)?')
+NUMBER = re.compile(r'[+-]?(0|[1-9](?:_?[0-9])*)(\.[0-9](?:_?[0-9])*)?([eE][+-]?[0-9](?:_?[0-9])*)?')  # ASCII digits only
 
 
 def loads_subset(text):
@@ -52,7 +52,7 @@ def loads_subset(text):
     def skip(newlines):
         nonlocal i
         while i < n:
-            if text[i] in ' \t\r' or (newlines and text[i] == '\n'):
+            if text[i] in ' \t' or text.startswith('\r\n', i) or (newlines and text[i] == '\n'):  # a lone \r ends nothing
                 i += 1
             elif text[i] == '#':
                 j = text.find('\n', i)
@@ -71,11 +71,11 @@ def loads_subset(text):
     def name(stop):
         nonlocal i
         j = text.find(stop, i)
-        key = text[i:j].strip() if j >= 0 else ''
+        key = text[i:j].strip(' \t') if j >= 0 else ''  # TOML's whitespace is a space or a tab, nothing else
         if not KEY.fullmatch(key):
             fail(f'bad key {key!r}')
         i = j + 1
-        return tuple(part.strip() for part in key.split('.'))
+        return tuple(part.strip(' \t') for part in key.split('.'))
 
     def into(node, parts):
         for part in parts:
@@ -260,7 +260,7 @@ def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
                 put(key, value, source, path)
     for key, name in [(key, name) for name, key in ENV.items() if env.get(name)] + lead_env(env):
         text = env[name]
-        number = isinstance(DEFAULTS[key], int) and re.fullmatch(r'[+-]?\d+', text)
+        number = isinstance(DEFAULTS[key], int) and re.fullmatch(r'[+-]?[0-9]+', text)
         put(key, int(text) if number else text, 'env:' + name, 'environment ' + name)
     for key, value in (saved or {}).get('values', {}).items():
         source = saved['sources'].get(key, 'default')

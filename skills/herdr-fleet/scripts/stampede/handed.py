@@ -12,7 +12,7 @@ def live_terminal(job, agent):
     address = job_.core_entries(job).get(agent, {}).get('address')
     if address:
         try:
-            terminal = hcapi_.hc('get', address)
+            terminal = hcapi_.hc('get', address, job=job)
         except hcapi_.HcError as error:
             if error.kind != 'not_found':
                 raise
@@ -21,11 +21,11 @@ def live_terminal(job, agent):
         if terminal.get('state') == 'live' and labels.get('stampede.job') == key and labels.get('stampede.agent') == agent \
                 and not hcapi_.shelled(terminal):
             return terminal
-    for found in hcapi_.hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent).get('terminals', []):
+    for found in hcapi_.hc('ls', '--label', 'stampede.job=' + key, '--label', 'stampede.agent=' + agent, job=job).get('terminals', []):
         if found.get('state', 'live') != 'live':
             continue
         try:  # hc ls shows no labels and no argv; the terminal's own record says which Claude session it runs
-            shown = hcapi_.hc('get', found['address'])
+            shown = hcapi_.hc('get', found['address'], job=job)
         except hcapi_.HcError:
             shown = {}
         if hcapi_.shelled(shown):

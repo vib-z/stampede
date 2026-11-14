@@ -39,9 +39,10 @@ class HcError(RuntimeError):
 TARGET = []  # the job target() pointed this process at: its saved settings time every hc call
 
 
-def hc_call():
-    """Seconds one hc call may take on top of what the command itself waits for (the job's timeouts.hc_call)."""
-    return settings_.current(TARGET[-1] if TARGET else None).get('timeouts.hc_call')
+def hc_call(job=None):
+    """Seconds one hc call may take on top of what the command itself waits for: that job's timeouts.hc_call (else the
+    job target() last pointed this process at, else the live layers). Every call for a job passes its job."""
+    return settings_.current(job if job is not None else TARGET[-1] if TARGET else None).get('timeouts.hc_call')
 
 
 # A send is stopped SEND_MARGIN seconds before Core's draft hold could run out, so it never goes in after a draft someone
@@ -166,12 +167,12 @@ def typing_unsafe():
     return typing_guard()[0]
 
 
-def hc(*args, wait=0, limit=None):
+def hc(*args, wait=0, limit=None, job=None):
     """One Herdr Core command (HC names the binary) and its JSON answer; on failure Core's error kind and exit code.
-    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer hc_call() seconds after that
+    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer hc_call(job) seconds after that
     (or after limit seconds, when given) is stopped, kind 'timeout': a hung hc never holds a lock or a lead. Core
     cancels a send whose caller is gone before it typed anything."""
-    limit = limit or hc_call() + wait
+    limit = limit or hc_call(job) + wait
     try:
         result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True,
                                 timeout=limit)
@@ -242,7 +243,7 @@ def start_failed(job, key, relay, reason):
     address = job_.core_entries(job).get(relay, {}).get('address')
     for verb in ('kill', 'rm'):
         try:
-            hc(verb, address) if address else None
+            hc(verb, address, job=job) if address else None
         except HcError:
             pass
     for agent, entry in job_.core_entries(job).items():

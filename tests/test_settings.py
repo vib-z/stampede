@@ -394,6 +394,34 @@ class Review(Wired):
         self.config('[helpers]\nmax = 012\n')
         self.assertEqual((len(st.current().problems), st.current().get('helpers.max')), (1, 12), 'the layer is skipped')
 
+    def test_b3_round_2_only_ascii_digits_and_toml_whitespace(self):
+        """A file both readers refuse, on every Python: a non-ASCII digit, sign or space, a BOM, a lone carriage return.
+        Written out, so the fallback reader (Python 3.9 and 3.10) is held to what tomllib does."""
+        refused = {'unicode-digit': 'helpers.max = 1\u0663\n', 'nbsp': '\u00a0helpers.max = 3\n',
+                   'vertical-tab': '\vhelpers.max = 3\n', 'bom': '\ufeffhelpers.max = 3\n',
+                   'lone-cr': 'helpers.max = 3\rhelpers.tab_panes = 2\n', 'cr-in-array': 'a = [1,\r2]\n',
+                   'non-ascii-key': '[helpers]\nm\u00e4x = 3\n', 'minus-sign': 'helpers.max = \u22123\n',
+                   'fullwidth-digit': 'helpers.max = \uff13\n', 'superscript': 'helpers.max = \u00b3\n',
+                   'em-space': 'helpers.max\u2003= 3\n', 'next-line': 'helpers.max = 3\u0085\n',
+                   'line-separator': 'helpers.max = 3\u2028\n', 'zero-width': 'helpers.max\u200b= 3\n',
+                   'ideographic-space': '\u3000helpers.max = 3\n', 'arabic-in-float': 'a = 1.\u0663\n'}
+        accepted = {'crlf': ('[helpers]\r\nmax = 3\r\n# c\r\n', {'helpers': {'max': 3}}),
+                    'tabs': ('\thelpers.max\t=\t3\n', {'helpers': {'max': 3}})}
+        for reader in (st.loads_subset, st.parse):
+            for name, text in refused.items():
+                with self.subTest(reader=reader.__name__, case=name), self.assertRaises(ValueError):
+                    reader(text)
+            for name, (text, want) in accepted.items():
+                with self.subTest(reader=reader.__name__, case=name):
+                    self.assertEqual(reader(text), want)
+        for text in ('[helpers]\n"max" = 3\n', 'helpers . max = 3\n'):  # TOML, but outside the subset: refused, with a line
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, '^line [0-9]+: '):
+                st.loads_subset(text)
+        self.config(refused['unicode-digit'])  # the reviewer's file-level case: one problem, never 13
+        self.assertEqual((len(st.current().problems), st.current().get('helpers.max')), (1, 12))
+        with self.env(STAMPEDE_MAX_HELPERS='\u0661\u0662'):
+            self.assertEqual(st.current().get('helpers.max'), 12, 'an environment value of Arabic digits is no number')
+
     def test_b4_the_cap_file_new_writes_holds_the_resolved_cap(self):
         settings = st.load(env=os.environ, flags={'helpers.max': 3}, sets=['helpers.max=6'])
         self.assertEqual((settings.get('helpers.max'), settings.source('helpers.max')), (6, 'set'))
