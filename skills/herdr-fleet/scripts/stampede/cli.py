@@ -1,6 +1,6 @@
 """The parser (main) with every command's help, the dispatch (run) and the two commands that start agents on every
 backend: new and start."""
-import json, os, subprocess, sys
+import json, os, shlex, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 
@@ -107,7 +107,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if not (workspace or pane):
         raise ValueError('new needs --workspace or --pane, or run it inside Herdr' + relay_.core_hint()
-                         + f'; to run it here on Herdr Core: stampede new --core --file {ask_file} --cwd {git_root()}')
+                         + f'; to run it here on Herdr Core: stampede new --core --file {shlex.quote(str(ask_file))} --cwd {git_root()}')
     if fork is not None and not base_.SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     ask = Path(ask_file).expanduser().read_text()
@@ -202,7 +202,8 @@ EXAMPLES = {
   stampede tell <job> build-api "Read <job>/briefs/build-api.md again: the Done when changed"''',
     'ask': '''examples:
   stampede ask <job> "Which database?" --option Postgres --option SQLite
-  stampede ask <job> --gate "merge PR 12" --sha "$(git rev-parse HEAD)" --pr 12''',
+  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)     (the PR's head: the commit the owner says yes to)
+  stampede ask <job> --gate "merge PR 12" --sha "$sha" --pr 12''',
     'post': '''examples:
   stampede post <job> "PLAN READY" --file <job>/plan.md
   stampede post <job> "the login page, before and after" --file before.png --file after.png''',
@@ -213,7 +214,9 @@ EXAMPLES = {
     'approve': 'example:\n  stampede approve <job> --by owner',
     'approve-gate': '''example (run the approve line the gate event carries, as given):
   stampede approve-gate <job> 0123456789ab --sha <40 hex> --by owner --digest <digest>''',
-    'gate-ok': 'example:\n  stampede gate-ok <job> 0123456789ab --sha "$(git rev-parse HEAD)" && gh pr merge 12',
+    'gate-ok': '''example (one commit for the check and the act, so a later push cannot slip in):
+  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
+  stampede gate-ok <job> 0123456789ab --sha "$sha" && gh pr merge 12 --squash --match-head-commit "$sha"''',
     'cancel': 'example:\n  stampede cancel <job> 0123456789ab',
     'finish': 'example:\n  stampede finish <job> "PR 12 merged; the report is <job>/reports/lead.md"',
     'snapshot': 'example:\n  stampede snapshot <job>',
@@ -384,16 +387,17 @@ def main(argv):
 
 def git_root():
     done = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
-    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else '<repo>'
+    return shlex.quote(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else '<repo>'  # printed in a command
 
 
 def require_job(job):
-    """Every command but new and hook: the job folder exists and holds its lead file, before anything reads its backend."""
+    """Every command but new and hook: the job folder exists and is one (new writes lead and ask.md; either will do, so a
+    job that lost one can still be finished or reopened), before anything reads its backend."""
     path = Path(job).expanduser()
     if not path.is_dir():
         raise ValueError(f'job folder not found: {job}')
-    if not (path / 'lead').is_file():
-        raise ValueError(f'not a job folder, it has no lead file: {job}')
+    if not ((path / 'lead').is_file() or (path / 'ask.md').is_file()):
+        raise ValueError(f'not a job folder, it has no lead or ask.md file: {job}')
 
 
 NATIVE_ONLY = ('next', 'tree', 'snapshot', 'reopen', 'close')

@@ -372,7 +372,8 @@ class TreeTell(NativeCase):
         self.assertEqual(code, 2)
         self.assertTrue(out.startswith('FAILED build-api ('))
         result = self.cli('tell', self.job, 'nobody', 'x')
-        self.assertEqual((result.returncode, result.stdout.strip()), (2, 'FAILED nobody (no live terminal of this job is nobody)'))
+        self.assertEqual(result.returncode, 2)   # the names it has, as tell on the other backends gives them
+        self.assertRegex(result.stdout.strip(), r'^FAILED nobody \(no live terminal of this job is nobody; it has: lead, build-api(, [a-z-]+)*\)$')
 
     def test_notify_lead_types_into_the_lead_and_never_raises(self):
         self.quiet(owner_.notify_lead, self.job, 'TURN build-api')

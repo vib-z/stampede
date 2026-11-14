@@ -581,11 +581,14 @@ def tell(job, name, text):
     """hc send to an agent's terminal (lead names the lead), stopped as a relay send is; never --force. 2 when nothing
     was typed."""
     hcapi_.target(job)
-    name = read(job, 'lead') if name == 'lead' else name
+    lead = read(job, 'lead')
+    name = lead if name == 'lead' else name
     try:
-        found = agent(job_.core_key(job), listing(), name)
+        terminals = listing()
+        found = agent(job_.core_key(job), terminals, name)
         if not found:
-            print(f'FAILED {name} (no live terminal of this job is {name})')
+            names = {labels(t).get('stampede.agent') for t in live(job_.core_key(job), terminals)} - {lead, None}
+            print(f'FAILED {name} (no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))})')
             return 2
         hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit())
     except hcapi_.HcError as error:

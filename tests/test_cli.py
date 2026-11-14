@@ -1,6 +1,6 @@
 """The stampede command teaches itself: grouped help with examples, errors that name the next step, stampede doctor and
 stampede check. Everything runs in a scratch HOME with fakes; nothing reaches a live Herdr or Herdr Core."""
-import json, os, re, subprocess, sys, tempfile, unittest
+import json, os, re, shlex, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -8,7 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 BOT = ROOT / 'skills/grokbot-herdr/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import base as base_, check as check_  # noqa: E402
+sys.path.insert(0, str(ROOT / 'tests'))
+from stampede import base as base_, check as check_, doctor as doctor_  # noqa: E402
+from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
+from quiet import quiet  # noqa: E402
 
 ORDER = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'next', 'tree', 'approve', 'approve-gate', 'gate-ok', 'cancel',
          'finish', 'snapshot', 'reopen', 'close', 'doctor', 'check', 'update')
@@ -57,7 +60,7 @@ class Cli(unittest.TestCase):
             with self.subTest(name):
                 result = self.stampede(name, '--help')
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertRegex(result.stdout, r'\n\nexamples?( \(.*\))?:\n  stampede ' + name)
+                self.assertRegex(result.stdout, r'\n\nexamples?( \(.*\))?:\n(  .*\n)*  stampede ' + name)
                 self.assertTrue(result.stdout.split('\n\n')[1].strip(), 'a description')
                 for flag in re.findall(r'^  (-[-\w]+(?: [A-Z_]+)?)\s*$', result.stdout, re.M):  # a flag on a line of its own
                     self.assertNotRegex(result.stdout, re.escape(flag) + r'\n\n', f'{flag} has help')
@@ -71,7 +74,7 @@ class Cli(unittest.TestCase):
         plain.mkdir()
         for argv in (('tell', '{}', 'lead', 'hi'), ('tree', '{}'), ('start', '{}', 'build-x'), ('post', '{}', 'x'),
                      ('approve', '{}', '--by', 'o'), ('close', '{}'), ('finish', '{}', 'done')):
-            for folder, said in ((self.home / 'gone', 'job folder not found: '), (plain, 'not a job folder, it has no lead file: ')):
+            for folder, said in ((self.home / 'gone', 'job folder not found: '), (plain, 'not a job folder, it has no lead or ask.md file: ')):
                 with self.subTest(argv=argv[0], folder=folder.name):
                     result = self.stampede(*[str(folder) if a == '{}' else a for a in argv])
                     self.assertEqual((result.returncode, result.stdout, result.stderr),
@@ -136,19 +139,98 @@ class Cli(unittest.TestCase):
         self.assertIn('herdr-doctor', {c['name'] for c in report['checks']}, 'its lines are passed through')
         self.assertEqual(self.stampede('doctor', '--core', '--tui').returncode, 2)
 
+    def check(self, setup):
+        """stampede check in its own process, as --json, with check.py changed by setup first."""
+        out = subprocess.run([sys.executable, '-I', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); from stampede import check; '
+                              + setup + '; sys.exit(check.main(as_json=True))', str(SCRIPTS)], capture_output=True, text=True, timeout=120)
+        return out.returncode, json.loads(out.stdout)
+
     def test_check_needs_a_tests_folder_and_reports_each_module(self):
         with mock.patch.object(check_, 'ROOT', self.home), self.assertRaisesRegex(ValueError, 'no tests folder in '):
             check_.main()
-        out = subprocess.run([sys.executable, '-I', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); from stampede import check; '
-                              'check.FAST = ("test_version", "test_no_such_module"); sys.exit(check.main(as_json=True))', str(SCRIPTS)],
-                             capture_output=True, text=True, timeout=120)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        report = json.loads(out.stdout)
+        code, report = self.check('check.FAST = ("test_version",)')
+        self.assertEqual(code, 0)
         self.assertTrue(report['ok'])
         self.assertEqual([m['name'] for m in report['modules']], ['test_version'])
         self.assertEqual(report['tests'], report['modules'][0]['tests'])
         self.assertGreater(report['tests'], 0)
 
+    def test_check_fails_for_a_missing_fast_module_and_an_empty_full_run(self):
+        code, report = self.check('check.FAST = ("test_version", "test_no_such_module")')
+        self.assertEqual((code, report['ok']), (1, False))
+        missing = [m for m in report['modules'] if m['name'] == 'test_no_such_module']
+        self.assertEqual([m['output'] for m in missing], ['tests/test_no_such_module.py is missing from this checkout'])
+        code, report = self.check('check.FAST = ("test_version", "test_no_such_module"); check.OPTIONAL = {"test_no_such_module"}')
+        self.assertEqual((code, report['ok']), (0, True), 'only an optional module may be absent')
+        self.assertEqual(check_.OPTIONAL, {'test_settings'})
+        (self.home / 'tests').mkdir()
+        with mock.patch.object(check_, 'ROOT', self.home), quiet():
+            self.assertEqual(check_.main(full=True), 1, 'a full run of no tests is no pass')
+
+    def fake_herdr_doctor(self, body):
+        helpers = self.home / 'helpers'
+        helpers.mkdir()
+        (helpers / 'herdr-doctor').write_text('#!/bin/bash\n' + body)
+        (helpers / 'herdr-doctor').chmod(0o755)
+        return mock.patch.object(doctor_, 'HELPERS', helpers)
+
+    def test_doctor_counts_a_failing_herdr_doctor_as_a_problem(self):
+        with self.fake_herdr_doctor('echo "ok herdr on PATH"\necho "warn x: y"\necho BACKEND_CRASH >&2\nexit 7\n'), \
+                mock.patch.object(doctor_, 'CHECKS', ()), quiet():
+            checks = doctor_.herdr_doctor(False, False)
+            code = doctor_.main(as_json=True)
+        self.assertEqual([c['level'] for c in checks], ['ok', 'warn', 'PROBLEM'], 'its lines are kept')
+        self.assertEqual(checks[-1]['text'], 'herdr-doctor exited 7 (BACKEND_CRASH)')
+        self.assertEqual(code, 1)
+
+    def test_doctor_shows_home_paths_with_a_tilde(self):
+        with mock.patch.dict(os.environ, {'HOME': str(ROOT.parent)}):
+            text = doctor_.checkout()[0]['text']
+            self.assertEqual(doctor_.shown(ROOT.parent / 'x' / 'y'), '~/x/y')
+            self.assertEqual(doctor_.shown('/elsewhere/x'), '/elsewhere/x')
+        self.assertIn(' in ~/' + ROOT.name + ', ', text)
+        self.assertNotIn(str(ROOT), text)
+
+    def test_the_gate_examples_bind_one_commit_for_the_check_and_the_act(self):
+        texts = [self.stampede(name, '--help').stdout for name in ('ask', 'gate-ok')] + [(ROOT / 'docs/CLI.md').read_text()]
+        for text in texts:
+            for merge in re.findall(r'gh pr merge[^\n]*', text):
+                self.assertIn('--match-head-commit "$sha"', merge)
+            self.assertNotIn('rev-parse HEAD', text)
+        self.assertIn('stampede gate-ok <job> 0123456789ab --sha "$sha" && gh pr merge 12 --squash --match-head-commit "$sha"', texts[1])
+
+    def test_the_hint_outside_herdr_runs_as_printed_with_spaces_in_its_paths(self):
+        repo = self.home / 'repo with spaces'
+        repo.mkdir()
+        subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+        ask = repo.parent / 'ask plan.md'
+        ask.write_text('Fix the login bug\n')
+        result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask)], capture_output=True, text=True,
+                                env=self.env, cwd=repo, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        command = shlex.split(result.stderr.split('to run it here on Herdr Core: ')[1])
+        self.assertEqual(command, ['stampede', 'new', '--core', '--file', str(ask), '--cwd', str(repo.resolve())])
+
+    def test_a_blocked_tui_start_exits_0_as_the_exit_table_says(self):
+        repo = self.home / 'repo'
+        repo.mkdir()
+        (self.home / 'ask.md').write_text('Fix the login bug\n')
+        herdr, _ = fake_herdr(repo, 'blocked')
+        new = self.stampede('new', '--file', self.home / 'ask.md', '--workspace', 'w9', HERDR=herdr)
+        job = next((self.home / 'jobs-root/jobs').iterdir())
+        start = self.stampede('start', job, 'build-x', '--kind', 'claude', '--pane', 'w9:p3', '--brief', valid_brief(job), HERDR=herdr)
+        for result in (new, start):
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('BLOCKED', result.stdout)
+        table = (ROOT / 'docs/CLI.md').read_text()
+        self.assertIn('| 0 | done; also `new` and `start` on the Herdr TUI that print `BLOCKED <agent>: clear the startup dialog', table)
+
+    def test_a_job_that_lost_its_lead_file_is_still_a_job(self):
+        job = self.job()
+        (job / 'lead').unlink()
+        (job / 'ask.md').write_text('the ask\n')
+        result = self.stampede('tree', job)   # past the folder check, to the command's own answer
+        self.assertEqual(result.stderr, f'stampede tree: tree is for a native job (new --core); {job} is a tui job\n')
 
 if __name__ == '__main__':
     unittest.main()

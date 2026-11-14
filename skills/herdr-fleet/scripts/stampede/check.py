@@ -6,10 +6,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from . import base as base_
 
 ROOT = base_.SCRIPTS.parents[2]
-# the fast part: the repo's shape and contracts, then pure-unit classes; a name that is not here (settings) is skipped
+# the fast part: the repo's shape and contracts, then pure-unit classes. Each must be there, but OPTIONAL
 FAST = ('test_shape', 'test_version', 'test_hc_contract', 'test_layers', 'test_settings', 'test_routes', 'test_herdr_trust',
         'test_herdr_send', 'test_platform', 'test_install',
         'test_fleet_job.Messages', 'test_fleet_job.Briefs', 'test_fleet_job.Command')
+OPTIONAL = {'test_settings'}  # it comes with the layered config; until then a checkout has none
 RAN = re.compile(r'^Ran (\d+) tests? in', re.M)
 
 
@@ -25,15 +26,22 @@ def main(full=False, as_json=False):
     tests = ROOT / 'tests'
     if not tests.is_dir():
         raise ValueError(f'no tests folder in {ROOT}: stampede check runs from a git checkout (git clone the repo, then run it there)')
-    names = (sorted(p.stem for p in tests.glob('test_*.py')) if full
-             else [n for n in FAST if (tests / (n.split('.')[0] + '.py')).is_file()])
+    if full:  # none at all is a broken checkout, never a pass
+        names = sorted(p.stem for p in tests.glob('test_*.py'))
+        missing = [] if names else [('tests', 'no test_*.py in this checkout\'s tests folder: run git status there')]
+    else:
+        names = [n for n in FAST if (tests / (n.split('.')[0] + '.py')).is_file()]
+        missing = [(n, f'tests/{n.split(".")[0]}.py is missing from this checkout') for n in FAST if n not in names and n not in OPTIONAL]
     home = tempfile.mkdtemp(prefix='stampede-check-')
     try:
         os.mkdir(os.path.join(home, 'bin'))
         os.symlink(sys.executable, os.path.join(home, 'bin', 'python3'))
         env = {'HOME': home, 'PATH': os.path.join(home, 'bin') + ':/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'en_US.UTF-8',
                'STAMPEDE_NO_UPDATE_CHECK': '1'}
-        began, results = time.monotonic(), []
+        began, results = time.monotonic(), [{'name': n, 'ok': False, 'tests': 0, 'seconds': 0.0, 'output': why} for n, why in missing]
+        if not as_json:
+            for r in results:
+                print(f'FAIL {r["name"]:<32} {r["output"]}', flush=True)
         with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 2)) as pool:
             for future in as_completed([pool.submit(run, name, env) for name in names]):
                 name, ok, count, seconds, output = future.result()

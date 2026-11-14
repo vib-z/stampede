@@ -64,7 +64,7 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 ## Errors
 
 Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what to do>`, never a traceback. Among them:
-- `stampede tell: job folder not found: <path>`, or `not a job folder, it has no lead file: <path>`, for every command given a job folder, before anything else.
+- `stampede tell: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>`, for every command given a job folder, before anything else.
 - `stampede tell: agent <name> is not in this job (it has: lead, <names>)`.
 - `stampede new: the ask file <path> does not exist: ...`, before any other check.
 - `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core: stampede new --core --file <ask> --cwd <git root>`.
@@ -76,10 +76,10 @@ The full list, each with its fix, is the README's [Troubleshoot](../README.md#tr
 
 | code | means | from |
 |---|---|---|
-| 0 | done | every command |
-| 1 | Herdr, Herdr Core or a program failed (one `stampede <command>: ...` line), or a start that did not end with a ready agent (`BLOCKED`, `NOT READY`, `UNKNOWN`, `FAILED`); `doctor` found a `PROBLEM`; `check` had a failure; `update` refused or failed; `update --check` saw a newer release | `new`, `start`, `next`, `snapshot`, `reopen`, `close`, `doctor`, `check`, `update` |
-| 2 | a usage error or a refusal, with the reason: no such job folder, an agent not in the job, a kind it does not run there, a start before approval, yolo outside a worktree, a gate with no yes at that commit, no route for the bot, `approve-gate` inside Herdr, a Python older than 3.9; also `tell` when nothing was typed (`FAILED`), and `check` with no `tests/` | every command |
-| 3 | `tell`: `BLOCKED_ON_CARD`, the message is queued; `wait`: nothing came before `--timeout`; a `--relay` job's `reopen.sh`: `NOT ACKNOWLEDGED` | `tell`, `wait` |
+| 0 | done; also `new` and `start` on the Herdr TUI that print `BLOCKED <agent>: clear the startup dialog ...`: the agent runs, held at a dialog; clear it, then send the printed `tell` line | every command |
+| 1 | Herdr, Herdr Core or a program failed (one `stampede <command>: ...` line); on Herdr Core (a Core job, a `--relay` job, or an agent handed to a TUI pane) a `new` or `start` that did not end with a ready agent (`BLOCKED`, `NOT READY`, `NOT BRIEFED`, `UNKNOWN`, `FAILED`); on the Herdr TUI a Codex lead whose brief pointer did not go in (`BLOCKED <lead>: its brief pointer did not go in`); a failed `next`, `snapshot`, `reopen` or `close`; `doctor` found a `PROBLEM`; `check` had a failure; `update` refused or failed; `update --check` saw a newer release | any command for a failure; the rest as named |
+| 2 | a usage error or a refusal, with the reason: no such job folder, an agent not in the job, a kind it does not run there, a start before approval, yolo outside a worktree, a gate with no yes at that commit, no route for the bot, `approve-gate` inside Herdr, a Python older than 3.9; also `tell` when nothing was typed (`FAILED`, every backend), `start` of a non-Claude worker on the Herdr TUI whose brief pointer was not sent (the same `FAILED`), and `check` with no `tests/` | every command |
+| 3 | `tell`: `BLOCKED_ON_CARD`, the message is queued; `wait`: nothing came before `--timeout`; a `--relay` job's `reopen.sh` (`_reopen`): `NOT ACKNOWLEDGED` | `tell`, `wait`, `_reopen` |
 
 The `wake` hook exits 2 on purpose: that wakes Claude.
 

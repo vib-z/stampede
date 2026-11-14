@@ -671,7 +671,7 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `stampede start: pane ...'s shell is in ..., not ...` | `--yolo-in` needs the pane's shell in that worktree; use auto mode or `cd` the pane first |
 | `FileExistsError` from `stampede new` | a job of that name exists; pass `--name <new slug>` |
 | `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core: stampede new --core ...` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([skills/stampede](skills/stampede/SKILL.md)), or run the printed `new --core` line |
-| `stampede <command>: job folder not found: <path>`, or `not a job folder, it has no lead file: <path>` | pass the folder `stampede new` printed (`$FLEET_JOBS_ROOT/jobs/<date>-<owner>-<name>`, or `<repo>/.herdr-<name>` for an older Core job) |
+| `stampede <command>: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>` | pass the folder `stampede new` printed (`$FLEET_JOBS_ROOT/jobs/<date>-<owner>-<name>`, or `<repo>/.herdr-<name>` for an older Core job) |
 | `stampede tell: agent <name> is not in this job (it has: ...)` | use one of the names it lists, or `lead` |
 | `stampede new: the ask file <path> does not exist` | write what the job is for in that file, then run `new` again |
 | `POSTED <n> to the outbox only ...: no bot or front door hears it` | a local job's post is in `<job>/outbox` and nobody is told: a bot sets `HERDR_EVENTS_OWNER=<bot>` when it runs `new`, and a chat outside Herdr starts the job with `--front-door` |
