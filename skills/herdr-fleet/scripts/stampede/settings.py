@@ -249,7 +249,7 @@ def user_file(env=None, home=None):
 def set_backend(key, value):
     """config set: writes backend, the one key it takes, to the user's own file (through a link, to the file it names).
     Exactly that change or none: bytes kept as they are, the one plain top-level line replaced (else put first, valid
-    before any table), the new text parsed back, then a unique temporary file with the old mode renamed over it."""
+    before any table), the new text parsed back whole and equal to the old with that one value, then a unique temporary file with the old mode renamed over it."""
     path = user_file()
     if key != 'backend':
         raise ValueError(f'config set takes backend only; for {key}, edit {path}')
@@ -258,23 +258,25 @@ def set_backend(key, value):
     target = path.resolve()
     old = target.read_bytes() if target.is_file() else b''
 
-    def backend_of(data):
+    def parsed(data):
         try:
-            return parse(data.decode()).get('backend')
+            return parse(data.decode())
         except ValueError as error:  # TOML and UTF-8 errors are ValueErrors
             raise ValueError(f'{path} does not parse ({str(error).splitlines()[0] if str(error) else type(error).__name__}): fix it by hand; nothing was changed') from None
     table = re.search(rb'(?m)^[ \t]*\[', old)
     top = old[:table.start()] if table else old
     line = re.compile(rb'(?m)^[ \t]*backend[ \t]*=[ \t]*"[a-z]+"[ \t]*(?:#[^\r\n]*)?(?=\r?$)')
     wanted = f'backend = "{value}"'.encode()
-    if backend_of(old) is None:
+    before = parsed(old)
+    expected = {**before, 'backend': value}
+    if before.get('backend') is None:
         new = wanted + (b'\r\n' if b'\r\n' in old else b'\n') + old
     elif len(line.findall(top)) == 1:
         new = line.sub(wanted, top, count=1) + old[len(top):]
     else:
         raise ValueError(f'{path}: its backend is not one plain line backend = "<word>": edit the file by hand; nothing was changed')
-    if backend_of(new) != value:
-        raise ValueError(f'{path}: the change would not set backend to {value}: edit the file by hand; nothing was changed')
+    if parsed(new) != expected:  # the whole file: only backend may differ, and it must be the value asked for
+        raise ValueError(f'{path}: the change would not set only backend to {value}: edit the file by hand; nothing was changed')
     target.parent.mkdir(parents=True, exist_ok=True)
     umask = os.umask(0)
     os.umask(umask)

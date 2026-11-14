@@ -243,6 +243,38 @@ class SetBackend(Choices):
                 self.assertEqual(self.user.read_bytes(), text.encode('latin-1'))
                 self.assertEqual([p.name for p in self.user.parent.iterdir()], ['config.toml'])
 
+    def test_a_look_alike_line_inside_another_value_is_never_taken_for_the_setting(self):
+        """3.13's tomllib reads each and the whole-file check refuses it; 3.9's fallback parser refuses multi-line strings
+        before that. Either way: exit 2, bytes unchanged."""
+        for text in ('lead.claude.model = """\nbackend = "auto"\n"""\n"backend" = "core"\n',
+                     "lead.claude.model = \'\'\'\nbackend = \"auto\"\n\'\'\'\nbackend = \'core\'\n",
+                     'x = """\nbackend = "tui"\n"""\nbackend = """auto"""\n'):
+            with self.subTest(text=text):
+                self.user.write_text(text)
+                code, _, err = self.set('backend', 'core')
+                self.assertEqual(code, 2, err)
+                self.assertIn('nothing was changed', err)
+                self.assertEqual(self.user.read_text(), text)
+
+    def test_with_no_backend_a_look_alike_inside_a_string_stays_as_it_is(self):
+        """The line goes first and the string keeps its text; 3.9's fallback parser refuses the file: exit 2, unchanged."""
+        for text in ('lead.claude.model = """\nbackend = "auto"\n"""\n', "lead.claude.model = \'\'\'\nbackend = \"auto\"\n\'\'\'\n"):
+            with self.subTest(text=text):
+                self.user.write_text(text)
+                code, _, err = self.set('backend', 'core')
+                if settings_.tomllib:
+                    self.assertEqual((code, self.user.read_text()), (0, 'backend = "core"\n' + text), err)
+                    self.assertEqual(settings_.parse(self.user.read_text())['lead'], settings_.parse(text)['lead'])
+                else:
+                    self.assertEqual((code, self.user.read_text()), (2, text), err)
+
+    def test_the_plain_line_is_replaced_and_every_other_value_is_the_same(self):
+        self.config('# mine\njobs_root = "~/jobs"\nbackend = "auto"\ntrust_root = "~/src"\n\n[lead]\nkind = "codex"\nforbid = ["a", "b"]\n'
+                    '[lead.codex]\nmodel = "m"\n[roles.build]\nkind = "claude"\neffort = "high"\n[helpers]\nmax = 6\n')
+        before = settings_.parse(self.user.read_text())
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual(settings_.parse(self.user.read_text()), {**before, 'backend': 'core'})
+
     def test_a_failure_before_the_rename_leaves_the_file_whole_and_no_temporary_file(self):
         self.config('backend = "auto"\n')
         with mock.patch.object(settings_.os, 'replace', side_effect=OSError('disk full')):
