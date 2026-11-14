@@ -138,8 +138,12 @@ def keep(pin, name, text):
     so a reader of the old file sees only the old text and a crash leaves one of the two whole. False when it could not."""
     temporary = f'.{name}.{uuid.uuid4().hex}'
     try:
-        with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=pin), 'w') as out:
-            out.write(text)
+        fd, data = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=pin), text.encode()
+        try:  # the descriptor is ours from open to close, so nothing in between can lose it
+            while data:
+                data = data[os.write(fd, data):]
+        finally:
+            os.close(fd)
         os.replace(temporary, name, src_dir_fd=pin, dst_dir_fd=pin)
         return True
     except OSError:

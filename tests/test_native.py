@@ -536,6 +536,28 @@ class Shared(NativeCase):
         self.assertIn('ANSWER Which db?: postgres', (real / 'a1b2c3d4e5f6.answer').read_text())
         self.assertEqual(listing(), before)
 
+    def test_keeping_leaves_no_descriptor_open(self):
+        def descriptors():
+            return len(os.listdir('/dev/fd'))
+        keep = owner_.keep
+
+        def failing(pin, name, text):  # writing fails inside keep only, after the temporary file is open (os.fdopen too, the
+            # review's case: whatever wraps the descriptor, nothing may lose it)
+            with mock.patch.object(owner_.os, 'write', side_effect=OSError('disk full')), \
+                    mock.patch.object(owner_.os, 'fdopen', side_effect=OSError('no wrapper')):
+                return keep(pin, name, text)
+        for blocked in (True, False):
+            self.shape(send_error={'t1': 'blocked'} if blocked else {})
+            self.terminal('t1', status={'state': 'blocked' if blocked else 'idle'})
+            for fails in (True, False):
+                with self.subTest(blocked=blocked, fails=fails):
+                    before = descriptors()
+                    with mock.patch.object(owner_, 'keep', failing if fails else keep):
+                        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+                    self.assertEqual((descriptors(), code), (before, 1 if blocked else 0), out)
+                    self.assertEqual('kept in' in out, blocked and not fails)
+                    self.assertFalse([f for f in (self.job / 'asks').iterdir() if f.name.startswith('.')])  # no temporary file
+
     def test_approve_gate_for_a_bot_and_post_and_finish(self):
         (self.job / 'owner').write_text('alpha\n')
         self.quiet(owner_.ask_gate, self.job, 'Merge PR #3', SHA, 3)
