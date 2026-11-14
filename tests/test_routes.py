@@ -116,28 +116,40 @@ class Routes(unittest.TestCase):
         self.settings('HC=one\r\nHC=two\r\nHC_SESSION=s')
         self.assertEqual(self.read_back('/bin/bash', ['HC', 'HC_SESSION']), {'HC': 'two', 'HC_SESSION': 's'})
 
-    def test_a_file_over_100_lines_or_16_kb_or_with_a_nul_is_skipped_whole_and_the_event_still_goes(self):
+    def test_a_file_over_100_lines_or_4_kb_or_with_a_nul_is_skipped_whole_and_the_event_still_goes(self):
         self.route('bot-alpha', 'https://alpha.invalid/hook')
         names = [f'HERDR_EVENTS_X{i}' for i in range(100)]
-        longest = [f'{n}={"v" * (161 - len(n))}' for n in names]   # 100 lines, 16 KB: the most a file may hold
+        longest = [f'{n}={"v" * (38 - len(n))}' for n in names]   # 100 lines, 4 KB: the most a file may hold
         self.settings('\n'.join(longest) + '\n')
-        self.assertLessEqual(len('\n'.join(longest) + '\n'), 16384)
+        self.assertLessEqual(len('\n'.join(longest) + '\n'), 4096)
         for bash in self.bashes():
             got = self.read_back(bash, names)
             self.assertEqual([n for n in names if got[n] == '<unset>'], [], bash)
-        for text in ('\n'.join(longest) + '\nHC=x\n',                     # 101 lines
-                     'HC=x\n' + '# ' + 'x' * 16384 + '\n',                 # over 16 KB
-                     '\n'.join(f'{n}={"v" * 400}' for n in names) + '\n',  # enough to overflow the environment
-                     'HC=x\n\0\nHC_SESSION=y\n'):                          # a NUL byte
-            self.settings(text)
+        for text, why in (('\n'.join(longest) + '\nHC=x\n', 'over 100 lines'),
+                          ('HC=x\n' + '# ' + 'x' * 4096 + '\n', 'over 4 KB'),
+                          ('\n'.join(f'{n}={"v" * 400}' for n in names) + '\n', 'over 4 KB'),   # enough to overflow the environment
+                          ('HC=x\n\0\nHC_SESSION=y\n', 'it holds a NUL byte'),
+                          (None, 'not a readable regular file')):                          # a folder in its place
+            config = self.home / '.config/stampede/config'
+            if config.is_dir():
+                config.rmdir()
+            if text is None:
+                config.unlink()
+                config.mkdir()
+            else:
+                self.settings(text)
+            doctor = self.bare(SCRIPTS / 'herdr-doctor', '--relay', HERDR_EVENTS_ROUTES_DIR=str(self.routes))
+            self.assertIn(f'warn the settings file is not read: {why}; a timer and the hooks do not see it', doctor.stdout)
+            self.assertNotIn('HC=x', doctor.stdout + doctor.stderr)
             for bash in self.bashes():
-                self.assertEqual(set(self.read_back(bash, ['HC', 'HC_SESSION', names[0]]).values()), {'<unset>'}, (bash, text[:40]))
+                self.assertEqual(set(self.read_back(bash, ['HC', 'HC_SESSION', names[0]]).values()), {'<unset>'}, (bash, why))
             post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}),
                              HERDR_EVENTS_ROUTES_DIR=str(self.routes))
             self.assertEqual((post.returncode, post.stdout, post.stderr), (0, '', ''))
             self.assertIn('https://alpha.invalid/hook', self.sent.read_text())
             self.sent.unlink()
             (self.home / '.local/state/herdr-events/dedupe.tsv').unlink()
+        (self.home / '.config/stampede/config').rmdir()
         self.settings('\n'.join(longest) + '\n')   # the largest file allowed: the event still goes
         post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}),
                          HERDR_EVENTS_ROUTES_DIR=str(self.routes))
