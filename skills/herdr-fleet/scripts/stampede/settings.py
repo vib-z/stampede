@@ -291,33 +291,27 @@ def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
 
 SETS = []  # this command's --set pairs (cli puts them here): every setting it reads applies them
 VERSION_FILE = Path(__file__).resolve().parents[4] / 'VERSION'
-_seen = {}
 
 
 def current(job=None):
     """The settings this process works with: a job's settings.json when it has one, else the user file and the
-    environment as they are now; then this command's --set pairs. Resolved once until one of its inputs changes."""
+    environment as they are now; then this command's --set pairs. Read afresh each time: the files are small, and a
+    copy kept by modification time goes stale when a file is written twice within the clock's grain."""
     path = Path(job) / 'settings.json' if job else None
-    user = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'stampede' / 'config.toml'
-    names = list(ENV) + ['FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT'] + [name for name, _, _ in ENV_ONLY]
-    stamp = tuple(p.stat().st_mtime_ns if p and p.exists() else None for p in (path, user))
-    key = (str(path), str(user), stamp, tuple(os.environ.get(n) for n in names), tuple(SETS))
-    if key not in _seen:
-        saved, bad = None, ''
-        try:
-            saved = json.loads(path.read_text()) if stamp[0] else None
-        except (OSError, ValueError, RecursionError) as error:
-            bad = str(error)
-        if saved is not None and not (isinstance(saved, dict) and isinstance(saved.get('values'), dict)
-                                      and isinstance(saved.get('sources'), dict)):
-            saved, bad = None, 'not {"values": {...}, "sources": {...}}'
-        settings = load(env=os.environ, sets=SETS, saved=saved)
-        if saved or bad:
-            settings.files['job'] = {'path': str(path), 'exists': True}
-        if bad:  # the live layers, as for a job made before settings.json
-            settings.problems.append(f'{path}: not a stampede settings file ({bad}); the live layers apply')
-        _seen[key] = settings
-    return _seen[key]
+    saved, bad = None, ''
+    try:
+        saved = json.loads(path.read_text()) if path and path.exists() else None
+    except (OSError, ValueError, RecursionError) as error:
+        bad = str(error)
+    if saved is not None and not (isinstance(saved, dict) and isinstance(saved.get('values'), dict)
+                                  and isinstance(saved.get('sources'), dict)):
+        saved, bad = None, 'not {"values": {...}, "sources": {...}}'
+    settings = load(env=os.environ, sets=SETS, saved=saved)
+    if saved or bad:
+        settings.files['job'] = {'path': str(path), 'exists': True}
+    if bad:  # the live layers, as for a job made before settings.json
+        settings.problems.append(f'{path}: not a stampede settings file ({bad}); the live layers apply')
+    return settings
 
 
 def for_new(repo, flags):
