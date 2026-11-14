@@ -30,4 +30,4 @@ herdr-send <agent> "/exit"                               # Claude and Hermes; Co
 
 On Herdr Core there is no `herdr-send`: pass the owner's words with `stampede tell <job dir> lead "..."` (it runs `hc send` to the lead), and read the lead or a helper with `hc read <address>`; never type into a helper ([core.md](../../skills/herdr-fleet/references/core.md)).
 
-`SUBMITTED` means the agent admitted the message, not that it has acted on it; wait for its report. Usage errors exit 2. How each CLI behaves: [agents-and-models.md](../../skills/herdr-fleet/references/agents-and-models.md).
+`SUBMITTED` means the agent admitted the message, not that it has acted on it; wait for its report. Usage errors exit 2. How each CLI behaves: [clis.md](../../skills/herdr-fleet/references/clis.md).

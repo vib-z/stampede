@@ -21,7 +21,8 @@ Pushing the job's own work branches and opening DRAFT PRs from them.
 1. The lead asks one exact action at one commit: `stampede ask <job> --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<exact action>"`; any other gate has no kind. It prints `GATE <id>` and where the question went: to the bot that started the job, to the front door's outbox, or to the owner's phone.
 2. The bot or front door shows the owner the action as written (for a send, the text). On their yes it runs the `approve-gate` line it was handed, `--by` quoting their words. On the phone, the owner's tap records it the same way.
 3. The lead acts only after `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED`. A Claude lead on the Herdr TUI may also act on the owner's yes typed in its own pane or card, except for a merge or a push to the default branch.
-4. A merge uses one commit throughout (the reviewed commit is the commit the gate names and the commit merged), and only `stampede merge <job> <pr> --sha <sha> --review <report> --gate <gate>`, never `gh pr merge`: it checks the report passes that sha, the PR head is it and a `merge` gate is approved at it. A new commit, a rebase too, withdraws both: a review report names the new sha and the gate is asked again ([collaboration.md, Review](collaboration.md#review)).
+4. A merge uses one commit throughout (the reviewed commit is the commit the gate names and the commit merged), and only `stampede merge <job> <pr> --sha <sha> --review <report> --gate <gate>`, never `gh pr merge`: it checks the report passes that sha, the PR head is it and a `merge` gate is approved at it.
+5. A new commit, a rebase too, withdraws both: a review report names the new sha and the gate is asked again ([review.md](review.md#a-new-head)).
 
 ## Held by code, and opting out
 

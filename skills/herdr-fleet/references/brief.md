@@ -1,6 +1,6 @@
 # Hand-off brief
 
-Write for an agent that has seen nothing else: not the ask, the plan or your lead's chat. Give it everything it needs to act on its own. A brief with a missing or empty section is not ready; `fleet-job start` refuses it. Put text directly under each heading: a sub-heading alone does not fill it.
+Write for an agent that has seen nothing else: not the ask, the plan or your lead's chat. Give it everything it needs to act on its own. A brief with a missing or empty section is not ready; `stampede start` refuses it. Put text directly under each heading: a sub-heading alone does not fill it.
 
 ## Goal
 <The outcome in one or two sentences, not the steps.>

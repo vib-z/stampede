@@ -22,4 +22,4 @@ herdr-trust <work dir>                              # only after the person's ye
 | Codex CLI | [Codex CLI](https://developers.openai.com/codex/cli) | [login on headless devices](https://developers.openai.com/codex/auth) |
 | Cursor Agent | [installation](https://cursor.com/docs/cli/installation) | [authentication](https://cursor.com/docs/cli/reference/authentication) |
 
-How stampede drives each CLI: [agents-and-models.md](../../skills/herdr-fleet/references/agents-and-models.md). Startup dialogs and their fixes: [unattended-setup.md](../../skills/herdr-fleet/references/unattended-setup.md). Next: [5-watch.md](5-watch.md).
+How stampede drives each CLI: [clis.md](../../skills/herdr-fleet/references/clis.md). Startup dialogs and their fixes: [unattended-setup.md](../../skills/herdr-fleet/references/unattended-setup.md). Next: [5-watch.md](5-watch.md).

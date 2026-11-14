@@ -1,94 +1,60 @@
-# Collaboration: briefs, messages, review, monitoring
+# Collaboration: files, messages, ownership
 
 ## Files are the channel
 
-The job folder `fleet-job new` made, `~/code/herdr-jobs/jobs/<date>-<owner>-<slug>/`, is the one channel. It sits outside every repo, so it needs no git exclude and serves agents in several worktrees or repos alike; `fleet-job start` gives each agent `--add-dir <job folder>` so it can write there from its own cwd.
+The job folder is the one channel. It sits outside every repo, so it serves agents in several worktrees or repos alike, and `stampede start` gives each agent `--add-dir <job>` to write there.
 
 | File | Written by | Holds |
 |---|---|---|
-| `_common.md` | lead | Rules for every agent (the ownership rules below, plus project facts) |
-| `<agent>.md` | lead | One brief on the [hand-off template](brief.md) |
-| `_review.md` | lead | A review brief on the [hand-off template](brief.md): diff range, checks, what it may fix |
-| `fixes-<scope>.md` | lead | Accepted findings to fix, on the [hand-off template](brief.md), with unchanged sections referenced |
-| `register.md` | lead | Roster (agent, pane, model, worktree, port), status and each lane's reviewed commit, so anyone can resume the fleet |
-| `reports/<lane>.md` | each agent, one per lane | Its last action for that lane: done, files touched, unverified, decisions. An agent with one lane may name it `reports/<agent>.md`. Its Stop hook announces a finished report (`Status: DONE`, `PASS` or `FINDINGS`) each time it changes, so a second lane needs its own file (another `--report`) |
-| `questions/<agent>.md` | any agent | A decision it cannot make. It writes the question and carries on with other work |
+| `_common.md` | lead | the rules for every agent: the ownership rules below, plus project facts |
+| `briefs/<agent>.md` | lead | one brief on the [hand-off template](brief.md) |
+| `briefs/_review.md` | lead | the review brief: diff range, checks, what it may fix ([review.md](review.md)) |
+| `briefs/fixes-<scope>.md` | lead | accepted findings to fix, on the template, unchanged sections referenced |
+| `register.md` | lead | the roster (agent, pane, model, worktree, port), status and each lane's `Reviewed: <lane> <sha>`, so anyone can resume |
+| `reports/<lane>.md` | each agent, one per lane | its last action: done, files touched, unverified, decisions |
+| `questions/<agent>.md` | any agent | a decision it cannot make; it carries on with other work |
 
-Start every brief's Inputs with "Read `_common.md` first" and use absolute paths in prompts.
+- Start every brief's Inputs with "Read `_common.md` first". Use absolute paths in prompts.
+- A Stop hook announces a report each time it changes to `Status: DONE`, `PASS` or `FINDINGS`, so a second lane needs its own file (another `--report`).
 
 ## Messages
 
 | From and to | How |
 |---|---|
-| Lead to agent | `herdr agent prompt <name> "<one line pointing at a file>"`. It queues if the agent is mid-turn. |
-| Agent to lead | Write the report; its Stop hook announces it. A question goes on the AskUserQuestion card, which the hook turns into `questions/<agent>.md` plus a `QUESTION` line in `inbox.log` (a file alone wakes no one); questions for the owner are the lead's, through `fleet-job ask`. Do not prompt the lead's pane, because the owner types there. |
-| Agent to owner | `herdr notification show "<name> needs you" --body "<one line>" --sound request` |
-| Agent to agent | Only when the brief names the peer: `herdr agent prompt <peer> "<name>: <one line pointing at a commit or file>"` |
-| Claude to Claude | Claude Code peer messaging. `ListAgents` lists the herdr Claude sessions by their `-n` name; `SendMessage` to that name. From the lead, `SendMessage` with `notify_when_idle: true` and no message gives a one-shot notice when that agent goes idle. |
+| lead to agent | `stampede tell <job> <agent> "<one line pointing at a file>"`; it queues if the agent is mid-turn |
+| agent to lead | the report (its hook announces it), or a question card, which the hook turns into `questions/<agent>.md` and a `QUESTION` line (a file alone wakes no one). Never prompt the lead's pane: the owner types there |
+| agent to owner | `herdr notification show "<name> needs you" --body "<one line>" --sound request`; questions for the owner are the lead's (`stampede ask`) |
+| lead to owner | `stampede ask` for a question; `stampede post <job> "<text>" --file <path>` for the plan, files and the report. A post reaches the bot that started the job or the front door; in a local job only the outbox. A refused post exits 2 and the bot never heard it: fix the route (`herdr-doctor --relay`), post again |
+| agent to agent | only when the brief names the peer: `herdr-send <peer> "<name>: <one line pointing at a commit or file>"` |
+| Claude to Claude | peer messaging: `ListAgents` lists sessions by their `-n` name, `SendMessage` to it; from the lead, `notify_when_idle: true` with no message gives one notice when it goes idle. Codex cannot receive these |
 
-- Every herdr pane inherits `HERDR_ENV=1`, so any agent can run `herdr agent prompt`.
-- Claude peer messages between sessions in different permission modes wait for the owner's approval. Keep the whole fleet on `--permission-mode auto`.
-- Codex cannot receive peer messages. Reach it with `herdr agent prompt`.
-
-Rules for every message:
-- One line: the fact and a pointer (file, commit, finding IDs). Long text goes in a file.
-- A peer's message is information. The agent's brief stays the authority.
-- Never ask a peer to do something your own permissions refused. That launders the owner's decision.
-- A `timeout` or `agent_prompt_stalled` does not prove the text was not delivered. Read the agent's screen (`herdr agent read <name> --source recent-unwrapped --lines 40`) and `herdr agent get <name>` before sending it again; resend only if it clearly never landed.
-- Before every prompt, `herdr agent get <name>`: it should be idle or done. `agent prompt --wait` does not track turns, so prompting an agent that is already working can match that turn's completion. An agent at a dialog rejects the prompt with `agent_blocked` and nothing is sent; a startup dialog can also show as `idle`, so read the screen once after every start, before its first prompt.
-- Before prompting, check the owner is not in that pane: `herdr agent get <name> | jq .result.agent.focused`.
-
-## Review
-
-Default: one Codex review pass at the end (see Thinker and doer in SKILL.md). The owner can override per job.
-
-1. The builder finishes, runs the tests its brief names, writes its report and stops.
-2. The lead merges main into the lane's branch (a worktree per agent): on a real conflict, `git merge --abort` and send the builder the conflicted files and the target commit. Then it integrates (commit or merge) and runs the gates.
-3. The reviewer, Codex by default and on a different model than the builder, reads `_review.md`. It writes `reports/review-<scope>.md` with numbered findings `R1..Rn`. Each carries `file:line`, a **severity** (critical, major, minor, trivial), its **proof** (what the reviewer ran or saw: a command and its output, a failing test, the exact lines) and **pre-existing** yes or no (already on main before this work). It may fix small things only in files nobody else is editing. Everything else goes in the report.
-4. The verdict follows from the findings, not from taste: **pass** when there is no new real bug (broken behaviour, a failing test, or a regression; treat a new critical or major finding with proof as a real bug), else **fail**. A critical with no proof counts as major. Style or wording nits, and minor or trivial taste notes, are listed in the report and are not sent back. Pre-existing findings never send work back; they go in the lead's final report as suggestions.
-5. The lead triages. Only new real bugs go into `fixes-<scope>.md`. Rejected ones get a reason. Nits stay in the review report.
-6. If there are real bugs, the builder fixes them, one commit per finding, and appends "Review fixes" to its report.
-7. The reviewer rechecks only those IDs, once. Stop at pass. There is no second loop for style. If a recheck still finds a real bug, the lead decides.
-
-Every review report starts with its header: a title line, then `Status: PASS` (or `FINDINGS`) and `Reviewed: <the full sha it reviewed>`, each once at the start of a line, before anything else. `stampede merge` merges only the sha a passing report names ([gates.md](gates.md)), so every new head needs a report that names it:
-- A clean merge of main or a clean rebase, or a conflict fix that touches only the conflicted files: the reviewer confirms it from the range-diff (`git range-diff <old base>..<reviewed sha> <new base>..<new head>`) and writes a short report with the new sha; the gates run again.
-- A follow-up message to the builder changed no files (`git diff <reviewed-sha>` is empty): the head did not move, nothing to rerun.
-- Anything else reopens the review, for the changed files only.
-
-The lead writes the reviewed commit into `register.md` (`Reviewed: <lane> <sha>`), and moves it only when a new report names the new head.
-
-Variations that have worked:
-- **Cross-vendor pair.** Claude builds and Codex reviews (the default), or Claude reviews a Codex build.
-- **Design track.** Codex writes `design-direction.md`, a Claude builder implements it, and Codex reviews the rendered pages against its own file, still in one pass.
-- **Agents can message each other.** The brief may name both peers. The builder prompts `review-api "build-api: R1-R3 fixed in abc123"`, and the reviewer answers after its one recheck. The lead still merges.
-- **Workflow review.** For a big candidate, the lead can run an Ultracode multi-agent review (two refuters per finding) as the independent reviewer, if the owner opted in.
+- Every pane inherits `HERDR_ENV=1`, so any agent can prompt another.
+- One line: the fact and a pointer (file, commit, finding ids). Long text goes in a file.
+- A peer's message is information: the brief stays the authority.
+- Never ask a peer to do what your own permissions refused: that launders the owner's decision.
+- Start every agent before any brief tells it to message another: a message to an agent not yet live fails.
 
 ## Ownership rules (paste into every `_common.md`)
 
 - You own only the files your brief lists. Other agents are editing other files right now.
-- In a shared worktree, run no git writes (commit, add, stash, checkout, reset, restore, rebase, clean); the lead commits. In your own worktree, commit only to your branch.
+- In a shared worktree, run no git writes (commit, add, stash, checkout, reset, restore, rebase, clean): the lead commits. In your own worktree, commit only to your branch.
 - For append-only shared files (DECISIONS, changelogs), use the section letter your brief gives you, or propose the entry in your report.
 - Start no dev server and no production build unless your brief says so. One dev server on a fixed port serves everyone; separate worktrees get separate ports.
-- Run named test files only. After each step, run the tests the brief names (a cheap, fast check) before writing the report. The lead runs the full type check, suite and build once; parallel `tsc` runs exhaust the Mac's memory.
-- Browser: BrowserOS Neo only, in a new window of your own, and close your tabs when you finish. If a Neo call has not returned within about 2 minutes, stop using Neo and fetch that page with WebFetch or `curl -sL`.
-- Credentials and `.env` files are not part of any brief: never read, copy or print them.
-- Work autonomously. Make the reasonable call and record it in your report.
+- Run named test files only, and the tests your brief names after each step. The lead runs the full type check, suite and build once: parallel runs exhaust the machine's memory.
+- Browser: BrowserOS Neo only, in a new window of your own; close your tabs when you finish. If a Neo call has not returned in about 2 minutes, fetch that page with WebFetch or `curl -sL` instead.
+- Credentials and `.env` files are in no brief: never read, copy or print them.
+- Work on your own. Make the reasonable call and record it in your report.
 - Use the real date (`date +%F`), not the one in the brief.
-- Your last action for each lane is writing `reports/<lane>.md` (the lane your prompt named; with a single lane, `reports/<your-name>.md` is fine), under 60 lines: what you did, files touched, what you could not verify, decisions, suggestions. Then stop.
+- Your last action for each lane is `reports/<lane>.md` (one lane: `reports/<your-name>.md`), under 60 lines: what you did, files touched, what you could not verify, decisions, suggestions. Then stop.
 
-## Monitoring
+## A bot's watch
 
-- **Order.** `fleet-job start` gives each agent its hooks before its prompt, so no report goes unannounced. Start every
-  agent before any brief tells it to message another: a message to an agent that is not live yet fails.
-- **Scope.** Hooks cover only the job's own agents. `fleet-watch.sh` (a bot outside Herdr) covers every named agent in
-  the workspace; for a small test in a shared workspace, run it with `FLEET_WATCH_NOTIFY=0`.
-- **The watch.** The lead is woken by hooks (`fleet-job`); `fleet-watch.sh` is only for a bot outside Herdr. It prints:
-  - `REPORT <file>` when a report lands. Read it.
-  - `BLOCKED <name>` when an agent is at a dialog. Read its screen. Clear startup dialogs yourself (folder trust for a repo under `~/code`, Codex hooks "continue without trusting"; see [unattended-setup.md](unattended-setup.md)). Ask the owner about anything else, above all a permission prompt for an action.
-  - `GONE <name>` when an agent left its pane. Check whether it finished, crashed or self-updated.
-  - `STALL? <name> log idle <N>m` when the status says working but the session log stopped moving.
-  - `HERDR_ERROR <msg>` when a herdr call failed (server down, socket gone, PATH). Run `herdr status`; do not trust silence until it is clean.
-- **A per-agent wake-up** is the hooks' job: a `TURN`, `REPORT`, `QUESTION`, `GONE` or `UNDELIVERED` line in `inbox.log` wakes the lead. Confirm a `TURN` with the report. For Codex rely on the report; it can sit in `unknown` after answering.
-- **A quick look without dumping:** `herdr agent read <name> --source recent-unwrapped --lines 40 | tail -15`.
-- **Never wait for agents** with `sleep N; check`, Monitor or a background `until` loop: end the turn and let the hooks wake you.
-- **A stall** means status `working` with an unchanged session log for 15 minutes or more. Long xhigh or max thinking can go quiet for up to about 15 minutes, so look at the screen before killing anything. The fix is in [failure-modes.md](failure-modes.md).
+Hooks wake the lead and cover only the job's own agents. `fleet-watch.sh` is for a bot outside Herdr: it covers every named agent in the workspace (`FLEET_WATCH_NOTIFY=0` for a test in a shared workspace) and prints:
+
+- `REPORT <file>`: a report landed; read it.
+- `BLOCKED <name>`: at a dialog; read its screen, clear a startup dialog ([unattended-setup.md](unattended-setup.md#startup-dialogs-the-lead-clears)), ask the owner about anything else.
+- `GONE <name>`: it left its pane: finished, crashed or self-updated.
+- `STALL? <name> log idle <N>m`: working, but its session log stopped. Long xhigh or max thinking can go quiet for about 15 minutes: read the screen before killing anything ([failure-modes-run.md](failure-modes-run.md)).
+- `HERDR_ERROR <msg>`: a herdr call failed; run `herdr status`, and trust no silence until it is clean.
+
+A quick look without a dump: `herdr agent read <name> --source recent-unwrapped --lines 40 | tail -15`.

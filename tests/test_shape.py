@@ -5,6 +5,7 @@ Run from the repo root: python3 -m unittest tests.test_shape
 import hashlib
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,6 +30,16 @@ USERS_DIR = "/" + "Users" + "/"  # owner, 19:05: nothing hard-coded; built here 
 HERDR_ID = re.compile(r"\bw[0-9][A-Za-z0-9]*:[pt][0-9A-Za-z]+\b")  # a raw Herdr id such as w1A:p2
 MODEL = re.compile(r"\b(claude-(opus|sonnet|haiku|fable)-[0-9][0-9-]*|gpt-[0-9][A-Za-z0-9.-]*)\b")
 MODEL_OK = ("config.example", "skills/", "tests/")  # the only places a model name may appear
+SKILL_BYTES, PLAYBOOK_BYTES, LINE_CHARS = 6000, 8000, 400  # a playbook is read whole by an agent: short in bytes, not only lines
+# core-relay.md describes the deprecated --core --relay path and is deleted in v0.3.0: no byte or line-length limit until then.
+LONG_OK = {"skills/herdr-fleet/references/core-relay.md"}
+# Over a limit, or holding history, today: build-guides rewrites these and removes them from this set. Never add one.
+PENDING = {"skills/grokbot-herdr/SKILL.md", "skills/stampede/SKILL.md", "remote/events.md", "remote/claude-code.md",
+           "remote/moshi.md", "remote/watchdogs.md", "remote/README.md", "remote/other.md", "remote/any-machine/README.md",
+           "remote/phone-clients.md"}
+MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
+HISTORY = re.compile(r"\b20[0-9]{2}-[01][0-9]-[0-3][0-9]\b|\b[0-3]?[0-9] (?:" + MONTHS + r")[a-z]* 20[0-9]{2}\b"
+                     r"|owner's rule|owner-approved|Seen 20", re.I)
 
 
 def not_ignored():
@@ -127,6 +138,14 @@ def frontmatter(text):
     return fm
 
 
+def too_long(p, name):
+    """A playbook's size over its limit, counted on disk (CRLF counts), and each line over LINE_CHARS characters."""
+    size, limit = p.stat().st_size, SKILL_BYTES if p.name == "SKILL.md" else PLAYBOOK_BYTES
+    bad = [f"{name}: {size} bytes, limit {limit}"] if size > limit else []
+    return bad + [f"{name}:{i}: {len(line)} characters, limit {LINE_CHARS}"
+                  for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if len(line) > LINE_CHARS]
+
+
 class Shape(unittest.TestCase):
     def test_line_limits(self):
         bad = []
@@ -138,6 +157,37 @@ class Shape(unittest.TestCase):
             n = len(p.read_text(encoding="utf-8").splitlines())
             if n > limit:
                 bad.append(f"{rel(p)}: {n} lines, limit {limit}")
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_playbook_bytes_and_line_length(self):
+        """SKILL.md at most SKILL_BYTES, every other playbook file at most PLAYBOOK_BYTES, no line over LINE_CHARS (code too)."""
+        bad = [b for p in md_files() if is_playbook(p) and rel(p) not in LONG_OK | PENDING for b in too_long(p, rel(p))]
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_pending_is_only_the_other_lane(self):
+        """PENDING is exactly the other lane's files that broke a limit when the limits came in, each still there: it only shrinks."""
+        allowed = {"skills/grokbot-herdr/SKILL.md", "skills/stampede/SKILL.md", "remote/events.md", "remote/claude-code.md",
+                   "remote/moshi.md", "remote/watchdogs.md", "remote/README.md", "remote/other.md",
+                   "remote/any-machine/README.md", "remote/phone-clients.md"}
+        self.assertLessEqual(PENDING, allowed, sorted(PENDING - allowed))
+        for r in PENDING:
+            self.assertTrue((ROOT / r).is_file(), r)
+
+    def test_playbook_bytes_count_the_disk(self):
+        """The byte limit reads the file's bytes, so CRLF line ends count."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "SKILL.md"
+            body = ("x" * 99 + "\n") * 60   # 6,000 bytes with LF: at the limit
+            p.write_bytes(body.encode())
+            self.assertEqual(too_long(p, "SKILL.md"), [])
+            p.write_bytes(body.replace("\n", "\r\n").encode())   # 6,060 bytes on disk, 6,000 read as text
+            self.assertEqual(too_long(p, "SKILL.md"), ["SKILL.md: 6060 bytes, limit 6000"])
+
+    def test_no_history_in_playbooks(self):
+        """Playbooks hold rules, not their history (AGENTS.md section 2): no dates, no "owner's rule", no "Seen 20..."."""
+        bad = [f"{rel(p)}:{i}: history: {HISTORY.search(line).group(0)}" for p in md_files()
+               if is_playbook(p) and rel(p) not in PENDING
+               for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if HISTORY.search(line)]
         self.assertEqual(bad, [], "\n".join(bad))
 
     def test_skill_frontmatter(self):
