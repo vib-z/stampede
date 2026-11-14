@@ -372,16 +372,20 @@ class TreeTell(NativeCase):
 
     def test_tree_text_and_json_with_an_unlabelled_child(self):
         self.start('build-api')
-        self.add_terminal('t3', name='ci-wait', parent='t2', labels={}, status=None)
+        self.add_terminal('t3', name='ci-wait', parent='t2', labels={}, status=None, argv=['make', 'watch'])
+        self.add_terminal('t4', name='compiler watch', parent='t3', labels={}, status=None, argv=['/bin/zsh'])  # nested, never judged
         (self.job / 'max-helpers').write_text('1\n')
         self.start('later')
         code, out = self.quiet(native_.tree, self.job)
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines(), ['space fix-login-bug (' + job_.job_key(self.job) + ')',
                                             f'  {LEAD} (t1) lead claude idle tab main pane 1', '    build-api (t2) helper claude idle tab main pane 2',
-                                            '      ci-wait (t3) plain - live tab -', f'  queued later under {LEAD} (claude)'])
+                                            '      ci-wait (t3) plain - live tab -', '        compiler watch (t4) plain - live tab -',
+                                            f'  queued later under {LEAD} (claude)'])
         shown = json.loads(self.quiet(native_.tree, self.job, True)[1])
-        self.assertEqual([(n['name'], n['depth'], n['parent']) for n in shown['nodes']], [(LEAD, 0, None), ('build-api', 1, 't1'), ('ci-wait', 2, 't2')])
+        self.assertEqual([(n['name'], n['depth'], n['parent'], n['role'], n['kind'], n['shell_of']) for n in shown['nodes']],
+                         [(LEAD, 0, None, 'lead', 'claude', None), ('build-api', 1, 't1', 'helper', 'claude', None),
+                          ('ci-wait', 2, 't2', 'plain', '-', None), ('compiler watch', 3, 't3', 'plain', '-', None)])
         self.assertEqual(shown['queue'][0]['name'], 'later')
 
     def test_tell_sends_and_a_refusal_is_failed_exit_2(self):
