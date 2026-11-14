@@ -117,6 +117,17 @@ class OptOuts(NativeCase):
         user.unlink()
         self.assertEqual(gates_.off(job), ['push_default_branch'], 'the record, not the live file, decides')
 
+    def test_a_native_front_door_job_keeps_its_gates_in_the_brief_and_the_done_item(self):
+        job = self.started(front=True, no_gate=['deploy'])
+        brief = (job / 'briefs' / (LEAD + '.md')).read_text()
+        self.assertIn(f'Merge only with stampede merge {job} <pr>', brief)
+        self.assertIn('switched these gates off for this job: deploy;', brief)
+        self.assertEqual(gates_.off(job), ['deploy'])
+        _, out = self.quiet(owner_.finish, job, 'done')
+        self.assertIn('gates off: deploy\nFINISHED', out)
+        (item,) = [p for p in (job / 'outbox').glob('[0-9]*.md')]
+        self.assertTrue(item.read_text().rstrip().endswith('done\ngates off: deploy'), item.read_text())
+
     def test_with_no_gate_off_finish_prints_as_before(self):
         job = self.started()
         self.assertFalse((job / 'gates.log').exists())
