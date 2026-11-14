@@ -496,11 +496,10 @@ class Outcomes(unittest.TestCase):
 
     # findings: where a client does worse than another, each with its proof; a fix makes its test an unexpected success
 
-    @unittest.expectedFailure
-    def test_f1_a_bots_core_start_names_its_owner(self):
-        """F1: over ssh a bot has no workspace on Core, so only HERDR_EVENTS_OWNER makes the job its own. The bot guides'
-        Core start leaves it out; run as written, the job is local: its questions and gates go to the phone and its
-        finish to the default route, and the bot never hears them."""
+    def test_f1_a_bots_core_start_names_its_owner(self):  # fixed: the bot guides' Core start sets HERDR_EVENTS_OWNER
+        """F1: over ssh a bot has no workspace on Core, so only HERDR_EVENTS_OWNER makes the job its own. Run without it,
+        the job is local: its questions and gates go to the phone and its finish to the default route, and the bot never
+        hears them. The bot guides' Core start names it."""
         bot = next(name for name, row in CLIENTS.items() if row.get('bot'))
         job = Job(bot, CLIENTS[bot], 'core', self.root / 'f1', WORKERS, HANDED)
         (job.root / 'ask.md').write_text('Write hello.txt\n')

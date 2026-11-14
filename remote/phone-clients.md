@@ -17,5 +17,5 @@ You can watch and steer Herdr from a phone with apps other people build. They si
 | [herdr-remote](https://github.com/dcolinmorgan/herdr-remote/blob/6843636df54386781de122211d8a8d354fac2dbd/README.md) by dcolinmorgan | menu bar, phone and Telegram, with one-tap approvals | AGPL-3.0 or commercial; link only |
 | [Moshi](https://getmoshi.app/docs/herdr) | a phone terminal over SSH or Mosh, with an Inbox for agents' questions | see its site |
 
-- Each link points at the commit that was read on 18 Oct 2026; check the app's current page before installing.
+- Each link points at the commit that was read; check the app's current page before installing.
 - Moshi with stampede, step by step: [moshi.md](moshi.md). The rules every remote follows: [README.md](README.md).

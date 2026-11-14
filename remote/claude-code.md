@@ -1,6 +1,8 @@
 # Claude as the remote
 
-You talk to a Claude Code session on your machine from the Claude app or claude.ai/code, through Claude Code's Remote Control. The session runs on the machine, so it needs no SSH: it is the front desk: it writes your ask to a file, hands the job to its lead in Herdr (`stampede new --file`) and stops. The lead asks you everything; with Remote Control on for every session, the lead's row shows in the Claude app too.
+You talk to a Claude Code session on your machine from the Claude app or claude.ai/code, through Claude Code's Remote Control. The session runs on the machine, so it needs no SSH. It is the front desk: it writes your ask to a file, hands the job to its lead in Herdr (`stampede new --file`) and stops.
+
+The lead asks you everything; with Remote Control on for every session, the lead's row shows in the Claude app too.
 
 ## Do
 - Start one Claude Code session with Remote Control, in a Herdr pane of its own.
@@ -35,10 +37,11 @@ stampede new --file <ask.md> --pane "$P" --front-door --fork "$CLAUDE_CODE_SESSI
 ```
 
 - The lead runs `claude --resume <id> --fork-session` with the lead's hooks, so it starts with the whole conversation, and writes the agreed plan into `plan.md` instead of planning again. Your chat is left as it was.
-- **The ask file stays the source of truth.** The fork carries the chat's saved transcript, and a saved transcript can miss some of the chat's messages (seen in the Claude desktop app on 28 Oct 2026: tool calls and results were all there, some plain replies were not). Put the agreed plan and every fact the lead must not miss in the ask.
+- **The ask file stays the source of truth.** The fork carries the chat's saved transcript, which can miss some plain replies (tool calls and results are kept). Put the agreed plan and every fact the lead must not miss in the ask.
 - Claude Code sets `CLAUDE_CODE_SESSION_ID` in every session; the chat's folder can differ from the repo.
 - The fork carries the chat's whole context into the lead, so fork a focused planning chat, not a long one.
 - `reopen.sh` resumes the lead's own session, never the planning chat.
 - A fork is a Claude lead: `--fork` with `--lead codex` exits 2. For a Codex lead, start without `--fork`; the ask file carries the plan.
-- **The desktop chat stays your contact** (`--front-door`): you never need to watch the lead's pane. The lead posts its plan, questions, gates, screenshots and report to `<job>/outbox/`; the chat waits on it with `stampede wait <job>` in the background, sends you each item and passes your answers back. Its loop: [skills/stampede](../skills/stampede/SKILL.md#relay-a---front-door-job).
-- **On Herdr Core:** no workspace; the chat runs `stampede new --core --file <ask.md> --cwd <repo> --fork "$CLAUDE_CODE_SESSION_ID" --front-door` and relays the job with `stampede wait`, as on the TUI ([Front door on Core](../docs/CORE-NATIVE.md#front-door)). The lead is a root Core terminal and its helpers are its Core children; read any of them with `hc read <address>`, never type into one ([core.md](../skills/herdr-fleet/references/core.md)).
+- **The desktop chat stays your contact** (`--front-door`): you never need to watch the lead's pane. The lead posts its plan, questions, gates, screenshots and report to `<job>/outbox/`; the chat waits on it with `stampede wait <job>` in the background, sends you each item and passes your answers back. Its loop: [skills/stampede](../skills/stampede/SKILL.md#steps).
+- **On Herdr Core:** no workspace; the chat runs `stampede new --core --file <ask.md> --cwd <repo> --fork "$CLAUDE_CODE_SESSION_ID" --front-door` and relays the job with `stampede wait`, as on the TUI ([Front door on Core](../docs/CORE-NATIVE.md#front-door)).
+- The lead is then a root Core terminal and its helpers are its Core children: read any of them with `hc read <address>`, never type into one ([core.md](../skills/herdr-fleet/references/core.md)).

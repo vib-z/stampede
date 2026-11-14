@@ -1,13 +1,10 @@
 # Events: how a bot hears back without polling
 
-When an agent finishes a turn, gets stuck or needs an answer, one short JSON message goes to the bot's webhook. The bot waits for it instead of asking again and again. A lead inside Herdr does not need this: its own hooks wake it.
+When an agent finishes a turn, gets stuck or needs an answer, one short JSON message goes to the bot's webhook. The bot waits for it instead of asking again and again. A lead inside Herdr does not need this: its own hooks wake it. A Herdr Core job's events: [events-core.md](events-core.md).
 
 ## Do
 - Give each bot a route: a webhook URL and secret, in a file only you can read.
 - Tag each workspace with its bot before its agents start.
-- An untagged workspace, or a bot with no route file, uses the default route for its turn events; no route file at all means logged only. A question, a gate or a post (below), and `stampede finish` in a job a bot started, go only through that bot's own route, with `herdr-event-post --strict`: no route of its own (exit 3) or no queue (exit 4) is a refusal the lead sees, and a queued question, gate or post waits out a route with no URL instead of being dropped. Its lead hears it as one `UNDELIVERED` line (in `inbox.log`; in a Core-native job, sent to the lead with `stampede tell <job> lead`) when it is held, and another if it is still undelivered after 24 h.
-- One message per turn end, in a workspace with no open job: the same pane and state inside 120 seconds is sent once. While a job is open, plain turn ends in that workspace stay on the machine (below). Every gate is its own message. Blocked and permission prompts for one pane are one message for 120 seconds.
-- A send that fails waits in a queue; after an outage only each pane's newest event goes.
 - On an event, read that pane once. Never poll.
 
 ## Run
@@ -17,9 +14,8 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 | claude | Stop, StopFailure, Notification | `herdr-event-claude-hook`, a Claude Code hook |
 | codex | agent-turn-complete | `herdr-event-codex-notify`, the Codex `notify` command |
 | herdr-watchdog | stale, dead | `herdr-event-watchdog` ([watchdogs.md](watchdogs.md)) |
-| stampede | question, gate, done | `stampede ask`, `stampede ask --gate`, and `stampede finish` |
-| hc | blocked, error, stale, dead (the lead of a Core-native job) | `herdr-event-sweep`, run by the watchdog ([below](#a-herdr-core-job)) |
-| hc | blocked, error, done, idle, stale, dead, relay_down | `herdr-event-core <job>`, the follower of a `--core --relay` job ([below](#a-herdr-core-job)) |
+| stampede | question, gate, post, done | `stampede ask`, `stampede ask --gate`, `stampede post`, `stampede finish` |
+| hc | blocked, error, stale, dead, and more | a Core job's watchers ([events-core.md](events-core.md)) |
 
 ```bash
 mkdir -p ~/.config/herdr-events/routes
@@ -30,34 +26,40 @@ herdr-event-post source=test state=done pane=<pane id>   # a test event
 herdr-event-flush                                    # send what is queued, oldest first
 ```
 
-- **Payload:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`; from Herdr also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines); from Claude and Codex `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (first 2000 characters).
-- **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`): ask the owner in chat, then run it with their words.
-- **A gate:** `job`, `agent` (the lead), `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and the two answers as commands: `approve` (`stampede approve-gate <job> <gate> --sha <sha> --digest <d> --by "owner in <bot> chat"`; run it as given: the digest is the gate as it was asked and is required, so a gate changed since takes no yes) and `deny` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat with the action, PR and commit; run `approve` over plain SSH (never `hc exec`) only on their yes to that gate, else `deny` with their words. Never type a yes into a pane.
-- **A post:** `job`, `agent` (the lead), `lead_pane`, `text`, `outbox` (its number), `item` (`<job>/outbox/NNN.md`) and `files` (the copies under `outbox/NNN/`, on the machine): the lead's plan, files to look at, a decision or its report. Show the owner the text and send the files; there is nothing to answer. Held for a route with no URL, it goes out by itself once the route has one, so the lead's `UNDELIVERED post outbox NNN ... held` line says not to post it again; after 24 h in `dead/` the second line says to post again.
-- **Delivery:** an HTTP POST of the JSON to `URL`, with `Authorization: Bearer <KEY>` when `KEY` is set. URL and KEY are never logged. Queue and dead letters: `HERDR_EVENTS_HOME` (default `~/.herdr-events`). Log: `~/Library/Logs/herdr-events.log` on macOS, `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux.
+## Routes
+- A tagged workspace's events go to the route named after its tag. An untagged workspace, or a bot with no route file, uses the `default` route for its turn events. With neither, an event is logged only.
+- A question, a gate or a post, and `stampede finish` in a job a bot started, go only through that bot's own route, with `herdr-event-post --strict`.
+  - No route of its own: exit 3. Not queued: exit 4. Either is a refusal the lead sees.
+  - A route with no URL holds it instead of dropping it. The lead hears one `UNDELIVERED` line when it is held, and another if it is still undelivered after 24 h (in `inbox.log`; in a Core job, through `stampede tell <job> lead`).
+- **Delivery:** an HTTP POST of the JSON to `URL`, with `Authorization: Bearer <KEY>` when `KEY` is set. URL and KEY are never logged.
+- **A failed send** waits in the queue, `HERDR_EVENTS_HOME` (default `~/.herdr-events`). After an outage only each pane's newest event goes; after 24 h undelivered an event moves to `dead/`.
+- **Log:** `~/Library/Logs/herdr-events.log` on macOS, `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux.
+
+## What a message holds
+- **Every event:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`.
+- **From Herdr** also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines). **From Claude and Codex** `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (its first 2000 characters).
+- **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat, then run `answer` with their words.
+- **A gate:** `job`, `agent`, `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and two commands:
+  - `approve`: `stampede approve-gate <job> <gate> --sha <sha> --digest <d> --by "owner in <bot> chat"`. Run it as given, over plain SSH (never `hc exec`), only on the owner's yes to that gate. The digest is the gate as it was asked, so a gate changed since takes no yes.
+  - `deny`: `stampede tell <job> lead "<the owner's words>"`, for a no or anything else.
+  - Ask the owner in chat with the action, PR and commit. Never type a yes into a pane.
+- **A post:** `job`, `agent`, `lead_pane`, `text`, `outbox` (its number), `item` (`<job>/outbox/NNN.md`) and `files` (the copies under `outbox/NNN/`, on the machine): the lead's plan, files to look at, a decision or its report. Show the owner the text and send the files; there is nothing to answer.
+  - A post held for a route with no URL goes out by itself once the route has one: the lead's `UNDELIVERED ... held` line says not to post it again. After 24 h in `dead/`, the second line says to post again.
+- **Done:** `source` stampede, `state` done, and `summary`, the lead's one line. A second `finish` sends nothing.
+
+## How often
+- In a workspace with no open job, one message per turn end: the same pane and state inside 120 seconds is sent once.
+- Blocked and permission prompts for one pane are one message for 120 seconds. Every question and every gate is its own message.
 
 ## While a job is open
 
-`stampede new` (the same command as `fleet-job new`) writes `~/.config/herdr-events/jobs/<workspace>`, holding the job folder's path. The lead's brief tells it to run `stampede finish <job> "<one line on where it ended>"` once when the job is done or stopped for good. Until that removes the marker, these stay on the machine (logged, not sent):
+`stampede new` writes `~/.config/herdr-events/jobs/<workspace>`, holding the job folder's path. The lead runs `stampede finish <job> "<one line on where it ended>"` once, when the job is done or stopped for good, and that removes it. Until then these stay on the machine (logged, not sent):
 
-- Herdr `done` and `idle`
-- Claude `Stop`
-- Claude's `idle_prompt` notification
-- Codex `agent-turn-complete`
+- Herdr `done` and `idle`, Claude `Stop` and its `idle_prompt` notification, Codex `agent-turn-complete`.
 
-These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question`, `gate` or `post` (`stampede post`, in a job a bot started). `finish` sends one event, `source` stampede, `state` done, plus `summary`. In a job a bot started, that uses the same strict route as a question (exit 3 with no route of its own, exit 4 if it is not queued). In a job started locally, it uses the ordinary relay and still clears the marker. A second `finish` does not send again.
+These still go out: `blocked`, a permission prompt, Claude `StopFailure`, the watchdog's `stale` and `dead`, and a `question`, `gate` or `post` in a job a bot started. `finish` sends one `done`: in a job a bot started on the strict route as a question does; in a job started locally on the ordinary relay, and it still clears the marker.
 
-A Codex turn with no Herdr pane (`HERDR_PANE_ID` empty), including the Codex desktop app, is not sent. After the marker is gone, that workspace behaves as before.
-
-## A Herdr Core job
-
-A job started with `stampede new --core` has no Herdr workspace: its key, `hc-<12 hex>` (in `<job>/workspace`), stands in for the workspace id in its marker (`jobs/<key>`), its owner tag (`owners/<key>`) and every event's `workspace`. A Core terminal is named `hc:<key>/<address>` in `pane`. An explicit `workspace` must be well formed (`hc-` and 12 lowercase hex, or letters, digits, `_` and `-` only): `herdr-event-post --strict` refuses another (exit 6), and an ordinary event drops it, so it never picks an owner tag. Plain turn ends (`hc` done and idle) stay on the machine while its marker is there, as for a workspace.
-
-- **A Core-native job** (`stampede new --core`, `<job>/backend` holds `native`) has no follower. Its questions, gates, posts and `finish` go out from the lead's own `stampede` commands, and a helper's news reaches its parent as Core's own note. Only the lead, the root, needs a watcher: each watchdog run (every 5 minutes) calls `herdr-event-sweep` once. For each open marker whose job folder says `native` and has no `finished` file, nor a `closed` file (a whole-job `stampede close` writes it, `stampede reopen` removes it: a job closed on purpose is no alarm, and nothing it still owes is retried), it asks that job's own core (its `endpoint`; a core that does not answer is no news, and none is ever started) for the terminal labelled `stampede.job=<key>` and `stampede.role=lead`, and posts, once each: `blocked` (with `kind` and `msg`) and `error` per new episode; `stale` (with `minutes_unchanged`) per stall, when it is `working` and its screen has not changed for `HERDR_EVENTS_STALE_MINUTES` (30); `dead` (with `reason`, `exit_code`, `last_state`) when no live terminal carries those labels, or the one that does is the shell Core put in a lost program's place (`reason` lost), or when Core has no row for it at all while `<job>/tree.json` names the lead's address (it started, then was lost before any pass saw it, with the exit code and reason `tree.json` saved when it saved one as finished; with no address yet it is still starting, no news), but never for its own exit 0. Each event has `source` `hc`, `pane` `hc:<key>/<address>`, `workspace` `<key>`, `agent` the lead's name, `job`, `owner`, `output_tail` (its last 40 lines) and an `event_id` in the follower's form. `<job>/sweep-state.json` keeps what it saw and sent, so a later pass never sends one thing twice, and an event `herdr-event-post` did not take goes out on the next pass. Two blocks or a block and a stall inside one 5 minute window can be one message.
-- **The follower** (the `--core --relay` path only): `herdr-event-core <job>` runs as the job's `relay-<12 hex>` terminal. It follows `hc events --label stampede.job=<key>` and posts, with `agent` and `output_tail`: `blocked` (with `kind` and `msg`) and `error`, once per new episode; `done` and `idle` turn ends; `stale` (with `minutes_unchanged`) once per stall, when a working terminal's screen and status have not changed for `HERDR_EVENTS_STALE_MINUTES` (30, as the TUI watchdog); `dead` when a terminal finishes while working or blocked, or fails with no status ever, or its record is gone (`reason` lost), but never for its own exit 0 (a graceful `/exit`: the lead still gets `GONE`); a kept terminal whose program is lost (Core's `lost` event, `reason` such as `signaled`) is `dead` by the same rule, once, and the shell Core then puts at its address is never reported as an agent; and `relay_down` when Core stays unreachable for 10 minutes. For a Codex lead on Core, `blocked` with `kind` `held` (from the lead's deliverer, once per hold) says a line for the lead got no answer, so text may be left in its prompt and nothing more is typed there until it takes a turn. It skips its own terminal and the job's wait terminals. Each event carries an `event_id` (`<key>/<address>|<state>|<episode>`), and `herdr-event-post` adds it to its de-dupe key: two blocked or error episodes on one terminal are two messages, the same one sent twice is one. A permission prompt that the agent's own Claude hook also reports is one message for that episode, whichever arrives first. `herdr-event-post` records any event for a Core pane (`hc:`), the agents' own hooks' included, as sent only once it is queued, so a failed queue write suppresses no later copy; a follower event exits 5 when it cannot be queued. An event it did not take (it hung, failed or could not queue it) is kept in `<job>/relay-state.json` and sent again every 30 s, after a reconnect or a restart too, until it is queued (or meant to stay on the machine).
-- **Handed panes:** a Core job hands Cursor, Hermes and Kimi to Herdr TUI panes (`stampede start --pane`). The follower looks at them every 5 s with `herdr agent list` and `get` and posts the same events, `source` `hc`, with `pane` the Herdr pane id and `event_id` `<key>/tui:<pane>|<launch>|...`; a turn end is Herdr's `completion_seq` rising (`...|completion|<seq>`, its `turn` that value), a `blocked` event's `kind` is `dialog`, and `output_tail` is only a screen read while the agent's name and session still matched (none on a `dead` for a replaced or departed agent). While the job is open, `$HERDR_EVENTS_DIR/handed/<pane>` (the job and launch) makes `herdr-event-post` keep every other event about that pane on the machine (Herdr's plugin, the watchdog, a hook), and the watchdog skips the pane; `stampede finish` removes the job's marks.
-- **The relay hooks** inside a Core terminal stampede started (`STAMPEDE_JOB_KEY` and `HC_TERMINAL_ID` set, no `HERDR_PANE_ID`) send `pane` `hc:<key>/<address>` and `workspace` `<key>`, so a Codex turn there is no longer dropped. In any other Core terminal they behave as before.
-- **Owner tags:** `herdr-events-owner <key> <bot>` works only while the job is open; it never calls `herdr`. The tag also names the job's core when it is not the default (`session=`, `socket=` lines), and the watchdog asks that core. The watchdog, with or without the Herdr TUI, keeps a key's tag while the job is open or its core still runs one of its terminals, keeps it when Core cannot be reached, and removes it a day after Core confirmed neither.
+A Codex turn with no Herdr pane (`HERDR_PANE_ID` empty), the Codex desktop app included, is never sent. Once the marker is gone, the workspace behaves as before.
 
 ## Hooks
 

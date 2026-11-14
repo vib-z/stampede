@@ -13,7 +13,7 @@ Herdr runs on your machine and holds the agents in panes. stampede is a Herdr pl
 ## Run
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede && ~/stampede/install.sh   # on the machine, once
-herdr-doctor --tui --relay                              # exit 0 go on, exit 1 stop and report the PROBLEM lines
+stampede doctor --tui                           # exit 0 go on, exit 1 stop and report the PROBLEM lines
 herdr workspace list                            # never bare herdr over SSH: it opens the screen and hangs
 herdr workspace create --cwd <project dir> --label bot-<task> --no-focus
 herdr-trust <project dir>                       # before agents start in a repo under FLEET_TRUST_ROOT; it writes the agents' own trust settings
@@ -24,5 +24,5 @@ herdr agent send-keys <agent> esc               # Codex "Update available": skip
 - **Install:** [herdr.dev/docs](https://herdr.dev/docs/) for Herdr. stampede's own setup: [docs/SETUP.md](../../docs/SETUP.md).
 - **Literal ids:** keep `.result.workspace.workspace_id`, `.result.tab.tab_id` and `.result.root_pane.pane_id` from the create. Use the first tab; do not leave it empty.
 - **Never** set `HERDR_ENV` yourself, and never use `herdr --remote` from the bot.
-- **On Herdr Core:** `herdr-doctor --core` for the check, no workspace, and `stampede new --core --file <ask.md> --cwd <project dir>` to start; read the lead or a helper with `hc read <address>` (`stampede tree <job dir>` lists them), never type into one ([core.md](../../skills/herdr-fleet/references/core.md)).
+- **On Herdr Core:** `stampede doctor --core` for the check, no workspace, and `HERDR_EVENTS_OWNER=<bot> stampede new --core --file <ask.md> --cwd <project dir>` to start (with no workspace to tag, only that makes the job the bot's); read the lead or a helper with `hc read <address>` (`stampede tree <job dir>` lists them), never type into one ([core.md](../../skills/herdr-fleet/references/core.md)).
 - **Commands:** [CLI reference](https://herdr.dev/docs/cli-reference/), [agent automation](https://herdr.dev/docs/agent-automation/). Where they differ, the installed `herdr <command> --help` wins.
