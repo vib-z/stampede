@@ -2,12 +2,13 @@
 by a person's draft, hc calls that end, a kept terminal whose program was lost (a shell in its place), the app's space
 and tab labels as an opt-in, the follower's lost, restarted, keep, labels and heartbeat, and a Codex lead on Core.
 Each behaviour here was first measured on a real hc 0.1.20 in a scratch session; the live evals C13 to C16 repeat it."""
-import contextlib, io, json, os, sys, time, unittest
+import contextlib, io, json, os, subprocess, sys, time, unittest, uuid
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_core import CoreCase, fj
+from test_core import CoreCase
+from stampede import base as base_, job as job_, hcapi as hcapi_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, handed as handed_, cli as cli_
 from test_core_relay import core_socket, ev, finished, follower_module, status, turn
 
 SHELL = ['/bin/sh', '-l']  # what Core's restarted event leaves as a kept terminal's argv
@@ -27,7 +28,7 @@ class Told(CoreCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             try:
-                fj.tell(self.job_dir, 'review-api', text)
+                owner_.tell(self.job_dir, 'review-api', text)
                 code = 0
             except SystemExit as stop:
                 code = stop.code
@@ -56,7 +57,7 @@ class DraftHold(Told):
     def test_a_hung_hc_ends_within_the_limit_and_types_nothing(self):
         self.shape(send_slow={'t1': 30})
         started = time.monotonic()
-        with mock.patch.object(fj, 'send_limit', lambda seconds=None: 1):
+        with mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 1):
             out, code, sent = self.told()
         self.assertLess(time.monotonic() - started, 10)
         self.assertEqual((code, sent), (2, []))
@@ -79,16 +80,16 @@ class DraftHold(Told):
         for text, wait, limit in (('notes = true\n', 60.0, 50.0), ('draft_wait = 100\n', 100.0, 90.0), ('  draft_wait=20.5 # short\n', 20.5, 15),
                                   ('draft_wait = 5\n', 5.0, 15), ('draft_wait = -3\n', 0.0, 15)):
             (config / 'config.toml').write_text(text)
-            self.assertEqual((fj.core_hold()[0], fj.send_limit()), (wait, limit), text)
+            self.assertEqual((hcapi_.core_hold()[0], hcapi_.send_limit()), (wait, limit), text)
         (config / 'config.toml').write_text('draft_wait = 100\n')
         limits = []
-        real = fj.subprocess.run
+        real = subprocess.run
 
         def run(argv, *args, **kw):
             if argv[1:2] == ['send']:
                 limits.append(kw.get('timeout'))
             return real(argv, *args, **kw)
-        with mock.patch.object(fj.subprocess, 'run', run):
+        with mock.patch.object(subprocess, 'run', run):
             self.told()
         self.assertEqual(limits, [90.0])
 
@@ -97,7 +98,7 @@ class DraftHold(Told):
         would type the tell after it once its hold ran out; the send is stopped before that, and nothing is typed."""
         self.shape(draft_wait=4)  # the fake holds a draft that stays this long
         self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay'})
-        with mock.patch.object(fj, 'core_hold', lambda: (4.0, 'in a test')), mock.patch.object(fj, 'SEND_MARGIN', 3), mock.patch.object(fj, 'SEND_FLOOR', 0.5):
+        with mock.patch.object(hcapi_, 'core_hold', lambda: (4.0, 'in a test')), mock.patch.object(hcapi_, 'SEND_MARGIN', 3), mock.patch.object(hcapi_, 'SEND_FLOOR', 0.5):
             out, code, sent = self.told()
         self.assertEqual((code, sent), (2, []))
         self.assertIn('no answer in 1 s, so it was stopped', out)
@@ -105,13 +106,13 @@ class DraftHold(Told):
 
     def test_a_failure_core_does_not_name_is_not_taken_for_nothing_typed(self):
         self.shape(send_error={'t1': 'boom'})  # not one of hc send's own kinds: nobody can tell what was typed
-        self.assertEqual(fj.send_core(self.job_dir, 'review-api', 'x')[0], None)
-        for kind in fj.SEND_REFUSED:
+        self.assertEqual(relay_.send_core(self.job_dir, 'review-api', 'x')[0], None)
+        for kind in relay_.SEND_REFUSED:
             self.shape(send_error={'t1': kind})
-            self.assertIs(fj.send_core(self.job_dir, 'review-api', 'x')[0], False, kind)
+            self.assertIs(relay_.send_core(self.job_dir, 'review-api', 'x')[0], False, kind)
         import hc_contract
         kinds = {e['data']['kind'] for m in hc_contract.snapshot()['methods'] if m['name'] == 'terminal.send' for e in m['errors']}
-        self.assertEqual(set(fj.SEND_REFUSED), kinds, 'every error kind hc send has, and no other, means nothing was typed')
+        self.assertEqual(set(relay_.SEND_REFUSED), kinds, 'every error kind hc send has, and no other, means nothing was typed')
 
     def test_text_typed_by_keys_is_still_refused_first(self):
         """Core holds only for a person's live typing: text already in the prompt is stampede's own check, as before."""
@@ -140,51 +141,51 @@ class LostUnderKeep(Told):
     def test_a_live_agent_under_keep_is_still_the_agent(self):
         self.terminal('t1', keep=True)
         self.assertEqual(self.told()[:2], ('SUBMITTED review-api (t1)', 0))
-        self.assertEqual(fj.live_terminal(self.job_dir, 'review-api')['address'], 't1')
+        self.assertEqual(handed_.live_terminal(self.job_dir, 'review-api')['address'], 't1')
 
     def test_start_and_reopen_see_no_live_agent_and_start_one(self):
         self.shell()
-        self.assertIsNone(fj.live_terminal(self.job_dir, 'review-api'))
+        self.assertIsNone(handed_.live_terminal(self.job_dir, 'review-api'))
         brief = self.brief(self.job_dir, 'review-api')
         (self.job_dir / 'agents.tsv').write_text((self.job_dir / 'agents.tsv').read_text().replace(
             'review-api\tcodex\t\t\t', f'review-api\tcodex\t\t{brief}\t'))
-        with fj.launching(self.job_dir, 'review-api'):
-            outcome, out = self.quiet(fj.reopen_agent, self.job_dir, 'review-api', fj.agent_rows(self.job_dir)['review-api'], True, False)
+        with job_.launching(self.job_dir, 'review-api'):
+            outcome, out = self.quiet(relay_.reopen_agent, self.job_dir, 'review-api', job_.agent_rows(self.job_dir)['review-api'], True, False)
         self.assertEqual(outcome, 'started', out)
         run = self.calls('run')[-1]
         self.assertEqual(self.option(run, '--name'), 'review-api-' + self.key[3:7], 'the shell still holds the name')
         self.assertEqual(self.entries(self.job_dir)['review-api']['address'], 't2')
-        self.assertEqual(fj.live_terminal(self.job_dir, 'review-api')['address'], 't2', 'the shell is never adopted by its labels')
+        self.assertEqual(handed_.live_terminal(self.job_dir, 'review-api')['address'], 't2', 'the shell is never adopted by its labels')
 
     def test_a_shell_is_a_shell_whether_keep_is_still_on_or_not(self):
         """review-codex R4: hc keep --off after the loss does not bring the agent back, so the shell is still no agent."""
         self.shell()
         self.terminal('t1', keep=False)
-        self.assertTrue(fj.shelled(self.state()['terminals']['t1']))
-        self.assertIsNone(fj.live_terminal(self.job_dir, 'review-api'))
+        self.assertTrue(hcapi_.shelled(self.state()['terminals']['t1']))
+        self.assertIsNone(handed_.live_terminal(self.job_dir, 'review-api'))
         self.assertIn('put a shell in its place at t1', self.told()[0])
-        self.assertFalse(fj.shelled({'keep': True}), 'a record with no argv is not judged')
-        self.assertFalse(fj.shelled({'keep': True, 'argv': ['/usr/bin/env', 'STAMPEDE_JOB_KEY=hc-0123456789ab', 'claude']}))
-        self.assertFalse(fj.shelled({'keep': False, 'argv': ['/usr/bin/env', 'STAMPEDE_JOB_KEY=hc-0123456789ab', 'claude']}))
+        self.assertFalse(hcapi_.shelled({'keep': True}), 'a record with no argv is not judged')
+        self.assertFalse(hcapi_.shelled({'keep': True, 'argv': ['/usr/bin/env', 'STAMPEDE_JOB_KEY=hc-0123456789ab', 'claude']}))
+        self.assertFalse(hcapi_.shelled({'keep': False, 'argv': ['/usr/bin/env', 'STAMPEDE_JOB_KEY=hc-0123456789ab', 'claude']}))
 
     def test_a_second_loss_gets_a_third_name_and_never_adopts_a_shell(self):
         """review-codex R2: the first shell holds the agent's name and the second the spare. The third start takes a
         free name, and a lost answer is looked up by that launch's own label, so no older terminal is adopted."""
         self.shell()
         brief = self.brief(self.job_dir, 'review-api')
-        self.assertEqual(self.quiet(fj.start, self.job_dir, 'review-api', 'codex', None, str(brief))[0], 0)
+        self.assertEqual(self.quiet(cli_.start, self.job_dir, 'review-api', 'codex', None, str(brief))[0], 0)
         self.assertEqual(self.entries(self.job_dir)['review-api']['address'], 't2')
         self.terminal('t2', keep=True, argv=SHELL, status=None, reported=False)   # lost again: a second shell
-        code, out = self.quiet(fj.start, self.job_dir, 'review-api', 'codex', None, str(brief))
+        code, out = self.quiet(cli_.start, self.job_dir, 'review-api', 'codex', None, str(brief))
         self.assertEqual((code, self.entries(self.job_dir)['review-api']['address']), (0, 't3'), out)
         third = self.calls('run')[-1]
         self.assertRegex(self.option(third, '--name'), r'^review-api-[0-9a-f]{8}$')
-        self.assertEqual(fj.live_terminal(self.job_dir, 'review-api')['address'], 't3')
+        self.assertEqual(handed_.live_terminal(self.job_dir, 'review-api')['address'], 't3')
         self.terminal('t3', keep=True, argv=SHELL, status=None, reported=False)   # and a start whose answer is lost
         self.shape(run_error={name: 'unavailable' for name in ('review-api', 'review-api-' + self.key[3:7])})
-        with mock.patch.object(fj.uuid, 'uuid4', lambda: mock.Mock(hex='feedc0de' * 4)):
+        with mock.patch.object(uuid, 'uuid4', lambda: mock.Mock(hex='feedc0de' * 4)):
             self.shape(run_error={'review-api-feedc0de': 'unavailable'})
-            code, out = self.quiet(fj.start, self.job_dir, 'review-api', 'codex', None, str(brief))
+            code, out = self.quiet(cli_.start, self.job_dir, 'review-api', 'codex', None, str(brief))
         self.assertEqual(code, 1, out)
         self.assertIn('FAILED review-api', out)
         self.assertEqual(self.entries(self.job_dir)['review-api']['state'], 'failed', 'no shell stands in for the launch that never ran')
@@ -215,7 +216,7 @@ class AppSpace(CoreCase):
         self.assertEqual((runs['lead']['herdr.space'], runs['lead']['herdr.tab']), (space, 'lead-fix-login-bug'))
         self.assertEqual([k for k in runs['relay'] if k.startswith('herdr.')], [])
         self.shape(on_run={'build-api': {'title': '✳ ~/code/x'}})  # a title that is a folder never names a tab
-        self.quiet(fj.start, self.job, 'build-api', 'claude', None, str(self.brief(self.job, 'build-api')))
+        self.quiet(cli_.start, self.job, 'build-api', 'claude', None, str(self.brief(self.job, 'build-api')))
         worker = self.runs()['worker']
         self.assertEqual((worker['herdr.space'], worker['herdr.tab'], worker['stampede.agent']), (space, 'build-api', 'build-api'))
 
@@ -224,13 +225,13 @@ class AppSpace(CoreCase):
             self.assertEqual(self.new_core()[0], 0)
         self.assertTrue((self.job / 'app-space').is_file())
         with self.assertRaises(ValueError) as refused:
-            fj.new('ask.md', 'w1', app=True)
+            cli_.new('ask.md', 'w1', app=True)
         self.assertIn('--app-space is for new --core', str(refused.exception))
 
     def test_a_lost_answer_is_still_adopted_by_the_job_s_own_labels(self):
         self.new_core(app=True)
         self.shape(run_error={'build-api': 'unavailable'}, spawn_also=True)
-        _, out = self.quiet(fj.start, self.job, 'build-api', 'claude', None, str(self.brief(self.job, 'build-api')))
+        _, out = self.quiet(cli_.start, self.job, 'build-api', 'claude', None, str(self.brief(self.job, 'build-api')))
         self.assertIn('STARTED build-api', out)
         lookup = self.calls('ls')[-1]
         self.assertNotIn('herdr.space', ' '.join(lookup), 'the lookup names the job, the agent and the session only')
@@ -251,8 +252,8 @@ class CodexLeadOnCore(CoreCase):
         return job, key
 
     def deliver(self, job, wait=0.4):
-        with mock.patch.object(fj, 'DELIVER_FOR', wait), mock.patch.object(fj, 'DELIVER_EVERY', 0.05):
-            return self.quiet(fj.deliver, job)
+        with mock.patch.object(tui_, 'DELIVER_FOR', wait), mock.patch.object(tui_, 'DELIVER_EVERY', 0.05):
+            return self.quiet(tui_.deliver, job)
 
     def test_a_codex_lead_needs_core_s_draft_hold(self):
         """review-codex R3: its inbox is typed into its terminal with nobody watching, and only Core's hold keeps a
@@ -279,35 +280,35 @@ class CodexLeadOnCore(CoreCase):
         self.assertIn('draft_wait is 10 s', str(refused.exception))
         self.assertEqual(self.new_core()[0], 0, 'a Claude lead reads its inbox file, so it needs no hold')
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         code, out = self.deliver(job)
         self.assertEqual(code, 6)
         self.assertIn('NOT TYPED: draft_wait is 10 s', out)
         self.assertEqual(self.calls('send'), [])
         with self.assertRaises(ValueError):   # nor is a lead restarted on Codex there
-            self.quiet(fj.start, job, 'lead-demo', 'codex', None, str(job / 'briefs/lead-demo.md'))
+            self.quiet(cli_.start, job, 'lead-demo', 'codex', None, str(job / 'briefs/lead-demo.md'))
 
     def test_a_delivery_with_no_answer_is_never_typed_twice(self):
         """review-codex R1: hc send reached the lead, then its answer was lost. The lines are not typed again: their
         offsets move, and the lead is told once where to read them itself."""
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'REPORT reports/build-api.md')
-        fj.append(job / 'inbox.log', 'TURN build-api')
-        real, lost = fj.hc, []
+        base_.append(job / 'inbox.log', 'REPORT reports/build-api.md')
+        base_.append(job / 'inbox.log', 'TURN build-api')
+        real, lost = hcapi_.hc, []
 
         def hc(*args, **kw):
             answer = real(*args, **kw)
             if args[0] == 'send' and not lost:
                 lost.append(args)
-                raise fj.HcError('hc send: no answer in 50 s, so it was stopped', 'timeout', 124)
+                raise hcapi_.HcError('hc send: no answer in 50 s, so it was stopped', 'timeout', 124)
             return answer
-        with mock.patch.object(fj, 'hc', hc):
+        with mock.patch.object(hcapi_, 'hc', hc):
             code, out = self.deliver(job, wait=10)
         self.assertEqual(code, 7, out)   # held: nothing more goes into that terminal until it has taken a turn
         self.assertIn('HELD: a send to lead-demo got no answer', out)
         (lines,) = self.state()['terminals']['t1']['sent']
         self.assertIn('inbox.log: REPORT reports/build-api.md | TURN build-api', lines)
-        self.assertEqual(fj.unread(job, 'lead-demo'), [], 'the lines are not waiting to be typed again')
+        self.assertEqual(tui_.unread(job, 'lead-demo'), [], 'the lines are not waiting to be typed again')
         self.assertEqual(self.deliver(job)[0], 7, 'nor does a later deliverer type anything while the hold stands')
         self.assertEqual(len(self.calls('send')), 1)
         self.terminal('t1', turn=1)   # the lead took a turn: whatever was in its prompt was submitted
@@ -315,9 +316,9 @@ class CodexLeadOnCore(CoreCase):
         lines, pointer = self.state()['terminals']['t1']['sent']
         self.assertEqual(pointer, f'[fleet-job inbox for lead-demo, not typed by the owner] Herdr Core gave no answer to a delivery, so these '
                                   f'lines may not have reached you. Read them yourself, each once: lines 1 to 2 of {job / "inbox.log"}')
-        self.assertEqual((fj.owed(job), fj.unread(job, 'lead-demo')), ([], []))
+        self.assertEqual((relay_.owed(job), tui_.unread(job, 'lead-demo')), ([], []))
         self.assertFalse((job / 'hooks/deliver-held.json').exists())
-        fj.append(job / 'inbox.log', 'GONE build-api exited exit 0')
+        base_.append(job / 'inbox.log', 'GONE build-api exited exit 0')
         self.assertEqual(self.deliver(job)[0], 0)
         self.assertEqual(len(self.state()['terminals']['t1']['sent']), 3, 'later lines are typed as ever, once')
         held = [q for q in (self.root / 'queue/queue').glob('*.json') if json.loads(q.read_text())['payload'].get('kind') == 'held']
@@ -325,13 +326,13 @@ class CodexLeadOnCore(CoreCase):
 
     def test_a_pointer_that_is_owed_is_sent_until_it_goes_in_and_the_lines_never_again(self):
         job, _ = self.lead_job()
-        fj.append(job / 'inbox' / 'lead-demo.md', 'ANSWER: yes, the root')
+        base_.append(job / 'inbox' / 'lead-demo.md', 'ANSWER: yes, the root')
         self.shape(send_error={'t1': 'boom'})   # a failure Core does not name: nobody can tell
         code, out = self.deliver(job, wait=10)
         self.assertEqual(code, 7, out)
         self.assertEqual(self.state()['terminals']['t1']['sent'], [])
-        self.assertEqual(fj.owed(job), [[str(job / 'inbox' / 'lead-demo.md'), 1, 1]])
-        self.assertEqual(fj.unread(job, 'lead-demo'), [], 'the line is not waiting to be typed again')
+        self.assertEqual(relay_.owed(job), [[str(job / 'inbox' / 'lead-demo.md'), 1, 1]])
+        self.assertEqual(tui_.unread(job, 'lead-demo'), [], 'the line is not waiting to be typed again')
         self.terminal('t1', turn=4)   # a turn: the hold ends, and the pointer is tried, with no answer again
         self.assertEqual(self.deliver(job, wait=10)[0], 7)
         self.assertEqual(json.loads((job / 'hooks/deliver-held.json').read_text())['turn'], 4, 'held again, from this turn')
@@ -347,7 +348,7 @@ class CodexLeadOnCore(CoreCase):
     def test_a_hold_ends_with_a_turn_another_terminal_or_a_hand_and_the_owner_hears_of_it(self):
         job, key = self.lead_job()
         (job / 'owner').write_text('alpha\n')
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(send_error={'t1': 'boom'})
         self.assertEqual(self.deliver(job, wait=10)[0], 7)
         (event,) = [json.loads(q.read_text())['payload'] for q in sorted((self.root / 'queue/queue').glob('*.json'))]
@@ -358,16 +359,16 @@ class CodexLeadOnCore(CoreCase):
         (job / 'hooks/deliver-held.json').unlink()   # someone looked at the prompt and cleared the hold by hand
         self.assertEqual(self.deliver(job)[0], 0)
         self.assertIn('lines 1 to 1 of', self.state()['terminals']['t1']['sent'][0])
-        fj.hold(job, 'lead-demo', 't1')
-        self.assertFalse(fj.held(job, {'address': 't7', 'turn': 0}), 'a restarted lead is another terminal, with another prompt')
+        relay_.hold(job, 'lead-demo', 't1')
+        self.assertFalse(relay_.held(job, {'address': 't7', 'turn': 0}), 'a restarted lead is another terminal, with another prompt')
 
     def test_a_draft_the_owner_leaves_in_the_lead_s_terminal_is_never_submitted_with_a_line(self):
         """review-codex R3, for the lead: the owner starts typing after the look and leaves it. Nothing is typed."""
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(draft_wait=30)
         self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay'})
-        with mock.patch.object(fj, 'send_limit', lambda seconds=None: 0.5):
+        with mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 0.5):
             code, out = self.deliver(job, wait=10)   # the deadline is not what is tested: room for a slow machine
         self.assertEqual(code, 7, out)
         terminal = self.state()['terminals']['t1']
@@ -378,8 +379,8 @@ class CodexLeadOnCore(CoreCase):
         is stopped in time; a second one, begun while that same draft sits there, would meet the end of the hold. So
         after a send with no answer nothing is typed until the terminal has taken a turn, whatever the screen shows."""
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
-        real, born = fj.hc, []
+        base_.append(job / 'inbox.log', 'TURN build-api')
+        real, born = hcapi_.hc, []
 
         def hc(*args, **kw):   # one last key, just after stampede's first look at the (empty) prompt
             if args[0] == 'send':
@@ -387,7 +388,7 @@ class CodexLeadOnCore(CoreCase):
                 self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay',
                                             'after': max(0, born[0] + 3 - time.monotonic())})
             return real(*args, **kw)
-        with mock.patch.object(fj, 'hc', hc), mock.patch.object(fj, 'send_limit', lambda seconds=None: 2):
+        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 2):
             first = self.deliver(job, wait=15)[0]
             time.sleep(max(0, born[0] + 3.2 - time.monotonic()))   # the hold has run out: a send now would go in after the draft
             later = [self.deliver(job, wait=10)[0] for _ in range(2)]
@@ -409,21 +410,21 @@ class CodexLeadOnCore(CoreCase):
         for said in ('fleet-job types each new line of', 'into this terminal', 'prints APPROVED', 'A typed yes does not count on Core'):
             self.assertIn(said, text)
         self.assertNotIn('typed in your pane', text)
-        self.assertEqual(fj.lead_kind(self.job), 'codex')
-        self.assertEqual(fj.agent_rows(self.job)['lead-fix-login-bug']['session'], '', 'Codex names its own session')
+        self.assertEqual(job_.lead_kind(self.job), 'codex')
+        self.assertEqual(job_.agent_rows(self.job)['lead-fix-login-bug']['session'], '', 'Codex names its own session')
 
     def test_a_standing_codex_choice_is_the_lead_of_a_core_job_and_a_fork_still_refuses_it(self):
         with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}):
             self.assertEqual(self.new_core()[0], 0)
-            self.assertEqual(fj.lead_kind(self.job), 'codex')
+            self.assertEqual(job_.lead_kind(self.job), 'codex')
             with self.assertRaises(ValueError) as refused:
                 self.new_core(fork='0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37')
             self.assertIn('--fork forks a Claude chat', str(refused.exception))
 
     def test_its_inbox_is_typed_with_hc_send_only_while_it_is_idle(self):
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'GONE build-api killed exit -')
-        fj.append(job / 'inbox' / 'lead-demo.md', 'ANSWER: yes, the root')
+        base_.append(job / 'inbox.log', 'GONE build-api killed exit -')
+        base_.append(job / 'inbox' / 'lead-demo.md', 'ANSWER: yes, the root')
         code, out = self.deliver(job)
         self.assertEqual(code, 0, out)
         (text,) = self.state()['terminals']['t1']['sent']
@@ -438,7 +439,7 @@ class CodexLeadOnCore(CoreCase):
 
     def test_it_waits_while_the_lead_works_is_blocked_or_is_a_shell(self):
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         for change in ({'status': {'state': 'working'}}, {'status': {'state': 'blocked', 'kind': 'permission'}},
                        {'status': None, 'keep': True, 'argv': SHELL}, {'status': {'state': 'idle'}, 'state': 'finished'}):
             with self.subTest(change=change):
@@ -446,12 +447,12 @@ class CodexLeadOnCore(CoreCase):
                 code, out = self.deliver(job, wait=0.3)
                 self.assertEqual(code, 3, out)
                 self.assertEqual(self.calls('send'), [])
-                self.assertEqual(len(fj.unread(job, 'lead-demo')), 1, 'the line stays unread')
+                self.assertEqual(len(tui_.unread(job, 'lead-demo')), 1, 'the line stays unread')
 
     def test_a_draft_in_its_prompt_or_a_person_typing_is_never_typed_over(self):
         job, _ = self.lead_job()
         self.terminal('t1', draft='zzz', screen='› zzz\n  ? for help')
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.assertEqual(self.deliver(job, wait=0.3)[0], 3)
         self.assertEqual(self.state()['terminals']['t1']['sent'], [])
         self.terminal('t1', draft='', screen='› ', person={'draft': 'the owner is typing', 'then': 'send'})
@@ -462,7 +463,7 @@ class CodexLeadOnCore(CoreCase):
 
     def test_a_core_that_does_not_answer_leaves_the_line_for_the_next_deliverer(self):
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(get_error={'t1': 'unavailable'})
         code, out = self.deliver(job)
         self.assertEqual(code, 4)
@@ -470,8 +471,8 @@ class CodexLeadOnCore(CoreCase):
 
     def test_tell_and_the_follower_wake_its_deliverer(self):
         job, _ = self.lead_job()
-        with mock.patch.object(fj, 'deliver_soon') as kicked:
-            _, out = self.quiet(fj.tell, job, 'lead', 'GATE 0123456789ab APPROVED')
+        with mock.patch.object(tui_, 'deliver_soon') as kicked:
+            _, out = self.quiet(owner_.tell, job, 'lead', 'GATE 0123456789ab APPROVED')
         self.assertEqual(out.strip(), 'DELIVERED lead-demo (inbox file; typed into its terminal once it is idle)')
         kicked.assert_called_once()
         core = follower_module()
@@ -492,16 +493,16 @@ class CodexLeadOnCore(CoreCase):
         rollout.mkdir(parents=True)
         (rollout / f'rollout-2026-11-11T00-00-00-{thread}.jsonl').write_text(json.dumps({'payload': {}}) + '\n')
         payload = {'type': 'agent-turn-complete', 'thread-id': thread, 'last-assistant-message': 'planned'}
-        with mock.patch.dict(os.environ, {'CODEX_HOME': str(self.root / 'codex')}), mock.patch.object(fj, 'RELAY_CODEX', '/usr/bin/true'), \
-                mock.patch.object(fj, 'deliver_soon') as kicked:
-            fj.codex_notify(job, 'lead-demo', payload)
-            fj.codex_notify(job, 'lead-demo', {**payload, 'thread-id': 'a-sub-agent-thread-with-no-file'})
+        with mock.patch.dict(os.environ, {'CODEX_HOME': str(self.root / 'codex')}), mock.patch.object(hooks_, 'RELAY_CODEX', '/usr/bin/true'), \
+                mock.patch.object(tui_, 'deliver_soon') as kicked:
+            hooks_.codex_notify(job, 'lead-demo', payload)
+            hooks_.codex_notify(job, 'lead-demo', {**payload, 'thread-id': 'a-sub-agent-thread-with-no-file'})
         self.assertEqual(kicked.call_count, 2)
-        self.assertEqual(fj.agent_rows(job)['lead-demo']['session'], thread)
+        self.assertEqual(job_.agent_rows(job)['lead-demo']['session'], thread)
         self.assertFalse((job / 'inbox.log').exists(), 'the lead\'s own turn never goes to its own inbox.log')
         self.terminal('t1', state='finished')
-        with fj.launching(job, 'lead-demo'):
-            outcome, out = self.quiet(fj.reopen_agent, job, 'lead-demo', fj.agent_rows(job)['lead-demo'], False, True)
+        with job_.launching(job, 'lead-demo'):
+            outcome, out = self.quiet(relay_.reopen_agent, job, 'lead-demo', job_.agent_rows(job)['lead-demo'], False, True)
         self.assertEqual(outcome, 'started', out)
         program = self.program(self.calls('run')[-1])
         self.assertEqual((program[1], program[-1]), ('resume', thread))
@@ -512,8 +513,8 @@ class CodexLeadOnCore(CoreCase):
         brief.write_text('the brief\n')
         (job / 'agents.tsv').write_text((job / 'agents.tsv').read_text().replace('lead-demo\tcodex\t\t\t', f'lead-demo\tcodex\t\t{brief}\t'))
         self.terminal('t1', state='finished')
-        with fj.launching(job, 'lead-demo'):
-            self.quiet(fj.reopen_agent, job, 'lead-demo', fj.agent_rows(job)['lead-demo'], False, True)
+        with job_.launching(job, 'lead-demo'):
+            self.quiet(relay_.reopen_agent, job, 'lead-demo', job_.agent_rows(job)['lead-demo'], False, True)
         self.assertEqual(self.program(self.calls('run')[-1])[-1], f'You are lead-demo in a herdr fleet. Read {brief} and do everything it says.')
 
     def test_a_reopened_codex_lead_acknowledges_through_its_deliverer(self):
@@ -522,8 +523,8 @@ class CodexLeadOnCore(CoreCase):
 
         def typed(folder):  # the deliverer, played at once: what fleet-job _deliver does once the lead is idle
             self.deliver(folder)
-        with mock.patch.object(fj, 'deliver_soon', typed), mock.patch.object(fj, 'REOPEN_DEADLINE', 5), mock.patch.object(fj, 'REOPEN_EVERY', 0.3):
-            code, out = self.quiet(fj.acknowledged, job, 'lead-demo')
+        with mock.patch.object(tui_, 'deliver_soon', typed), mock.patch.object(relay_, 'REOPEN_DEADLINE', 5), mock.patch.object(relay_, 'REOPEN_EVERY', 0.3):
+            code, out = self.quiet(relay_.acknowledged, job, 'lead-demo')
         self.assertEqual(code, 0, out)
         self.assertIn('ACKNOWLEDGED lead-demo', out)
         self.assertIn('REOPENED lead-demo', self.state()['terminals']['t1']['sent'][0])
@@ -532,8 +533,8 @@ class CodexLeadOnCore(CoreCase):
         """review-codex R10: a prompt finishes between the deliverer's look and the send's own, and the owner then starts
         a draft. The stopped send's hold must not be ended by that earlier turn: its count is read after the send."""
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
-        real, seen, born = fj.hc, [], []
+        base_.append(job / 'inbox.log', 'TURN build-api')
+        real, seen, born = hcapi_.hc, [], []
 
         def hc(*args, **kw):
             answer = real(*args, **kw)
@@ -544,7 +545,7 @@ class CodexLeadOnCore(CoreCase):
                 born.append(time.monotonic())   # the owner starts typing right after the look at the prompt
                 self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay', 'after': 3})
             return answer
-        with mock.patch.object(fj, 'hc', hc), mock.patch.object(fj, 'send_limit', lambda seconds=None: 2):
+        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 2):
             first = self.deliver(job, wait=15)[0]
             time.sleep(max(0, born[0] + 3.2 - time.monotonic()))
             self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay', 'after': 0})   # the hold has run out
@@ -558,16 +559,16 @@ class CodexLeadOnCore(CoreCase):
         """A turn that was already running when the send got no answer may end with the left text still in the prompt:
         the hold takes its count only once the terminal is at rest, and ends with a turn after that."""
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(send_error={'t1': 'boom'})
         self.terminal('t1', status={'state': 'done'}, turn=3)
-        real = fj.hc
+        real = hcapi_.hc
 
         def hc(*args, **kw):
             if args[0] == 'send':   # the lead turns working under the send, which then gets no answer
                 self.terminal('t1', status={'state': 'working'})
             return real(*args, **kw)
-        with mock.patch.object(fj, 'hc', hc):
+        with mock.patch.object(hcapi_, 'hc', hc):
             self.assertEqual(self.deliver(job, wait=4)[0], 3, 'no answer, and the lead is working: it is waited for')
         self.assertIsNone(json.loads((job / 'hooks/deliver-held.json').read_text())['turn'], 'no count yet: a turn was under way')
         self.shape(send_error={})
@@ -584,10 +585,10 @@ class CodexLeadOnCore(CoreCase):
         value that lets a Codex lead be typed to is the value its sends are stopped by."""
         job, _ = self.lead_job()
         self.shape(core_env={'HC_DRAFT_MS': '30000'})
-        self.assertEqual((fj.typing_guard(), fj.send_limit()), (('', 30.0), 20.0))
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        self.assertEqual((hcapi_.typing_guard(), hcapi_.send_limit()), (('', 30.0), 20.0))
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(core_env={'HC_DRAFT_MS': '9000'}, draft_wait=9)   # the same, in small: a 9 s hold, sends stopped after 6
-        real = fj.hc
+        real = hcapi_.hc
 
         def hc(*args, **kw):
             answer = real(*args, **kw)
@@ -595,8 +596,8 @@ class CodexLeadOnCore(CoreCase):
                 self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay'})
             return answer
         started = time.monotonic()
-        with mock.patch.object(fj, 'hc', hc), mock.patch.object(fj, 'SEND_MARGIN', 3), mock.patch.object(fj, 'SEND_FLOOR', 0.5):
-            self.assertEqual(fj.typing_guard(), ('', 9.0))
+        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'SEND_MARGIN', 3), mock.patch.object(hcapi_, 'SEND_FLOOR', 0.5):
+            self.assertEqual(hcapi_.typing_guard(), ('', 9.0))
             code, out = self.deliver(job, wait=12)
         self.assertEqual(code, 7, out)
         self.assertLess(time.monotonic() - started, 8.5, 'stopped before the 9 s hold ran out')
@@ -608,12 +609,12 @@ class CodexLeadOnCore(CoreCase):
         a terminal that has been at rest for a few seconds by Core's own clock."""
         now = time.time() * 1000
         rest = {'state': 'live', 'status': {'state': 'done'}, 'turn': 6}
-        self.assertEqual(fj.settled({**rest, 'status_ms': now - 60_000}), 6)
-        self.assertIsNone(fj.settled({**rest, 'status_ms': now - 1_000}))
-        self.assertIsNone(fj.settled(rest), 'no clock, no count')
-        self.assertIsNone(fj.settled({**rest, 'status': {'state': 'working'}, 'status_ms': now - 60_000}))
+        self.assertEqual(relay_.settled({**rest, 'status_ms': now - 60_000}), 6)
+        self.assertIsNone(relay_.settled({**rest, 'status_ms': now - 1_000}))
+        self.assertIsNone(relay_.settled(rest), 'no clock, no count')
+        self.assertIsNone(relay_.settled({**rest, 'status': {'state': 'working'}, 'status_ms': now - 60_000}))
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(send_error={'t1': 'boom'})
         recent = now + 3_600_000   # a status change that stays "only just now" for the whole test
         self.terminal('t1', status_ms=recent, turn=6)
@@ -622,7 +623,7 @@ class CodexLeadOnCore(CoreCase):
         self.shape(send_error={})
         self.terminal('t1', turn=7)   # the count of that turn shows a moment later: no hold may end by it
         self.assertEqual(self.deliver(job, wait=2)[0], 3)
-        self.assertEqual((len(self.calls('send')), fj.hold_count(job)), (1, None))
+        self.assertEqual((len(self.calls('send')), relay_.hold_count(job)), (1, None))
         self.terminal('t1', status_ms=now - 60_000)
         self.assertEqual(self.deliver(job, wait=10)[0], 7)
         self.assertEqual(json.loads((job / 'hooks/deliver-held.json').read_text())['turn'], 7)
@@ -633,12 +634,12 @@ class CodexLeadOnCore(CoreCase):
         """review-codex R11: a deliverer woken by a turn's end sees a status only just changed. It stays the few seconds
         a settled look takes, so the hold gets its count, and the next turn ends it."""
         job, _ = self.lead_job()
-        fj.append(job / 'inbox.log', 'TURN build-api')
+        base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(send_error={'t1': 'boom'})
         self.terminal('t1', status={'state': 'done'}, turn=6, status_ms=time.time() * 1000)
-        with mock.patch.object(fj, 'HOLD_SETTLE', 0.6):
+        with mock.patch.object(relay_, 'HOLD_SETTLE', 0.6):
             self.assertEqual(self.deliver(job, wait=10)[0], 7)
-            self.assertEqual(fj.hold_count(job), 6, 'taken by the same deliverer, once the terminal had settled')
+            self.assertEqual(relay_.hold_count(job), 6, 'taken by the same deliverer, once the terminal had settled')
             self.shape(send_error={})
             self.terminal('t1', turn=7, status_ms=time.time() * 1000)   # the next wake-up, again right at a turn's end
             self.assertEqual(self.deliver(job, wait=10)[0], 0)
@@ -650,14 +651,14 @@ class CodexLeadOnCore(CoreCase):
         acknowledgement a delivery gives, and reopen keeps asking."""
         job, _ = self.lead_job()
         self.shape(send_error={'t1': 'boom'})
-        with mock.patch.object(fj, 'deliver_soon', lambda folder: self.deliver(folder, wait=10)), \
-                mock.patch.object(fj, 'REOPEN_DEADLINE', 1.5), mock.patch.object(fj, 'REOPEN_EVERY', 0.2):
-            code, out = self.quiet(fj.acknowledged, job, 'lead-demo')
+        with mock.patch.object(tui_, 'deliver_soon', lambda folder: self.deliver(folder, wait=10)), \
+                mock.patch.object(relay_, 'REOPEN_DEADLINE', 1.5), mock.patch.object(relay_, 'REOPEN_EVERY', 0.2):
+            code, out = self.quiet(relay_.acknowledged, job, 'lead-demo')
         self.assertEqual(code, 3, out)
         self.assertIn('NOT ACKNOWLEDGED', out)
         self.assertNotIn('ACKNOWLEDGED lead-demo: its wake delivered', out)
         self.assertFalse((job / 'hooks/ack-lead-demo.json').exists())
-        self.assertTrue(fj.owed(job), 'the lead is still owed the lines')
+        self.assertTrue(relay_.owed(job), 'the lead is still owed the lines')
 
     def test_core_s_draft_wait_is_read_as_core_reads_it(self):
         """review-codex R8: the hold decides whether lines may be typed unattended, so it is Core's own reading of its
@@ -670,14 +671,14 @@ class CodexLeadOnCore(CoreCase):
                  ('draft_wait = inf\n', ('unknown', None)), ('draft_wait = true\n', ('unknown', None)), ('draft_wait = 1e300\n', ('unknown', None)))
         for text, want in cases:
             (config / 'config.toml').write_text(text)
-            self.assertEqual(fj.draft_config(), want, text)
+            self.assertEqual(hcapi_.draft_config(), want, text)
         import builtins
         real = builtins.__import__
         with mock.patch.object(builtins, '__import__', lambda name, *a, **kw: (_ for _ in ()).throw(ImportError(name)) if name == 'tomllib' else real(name, *a, **kw)):
             (config / 'config.toml').write_text('draft_wait = 45\n')   # a Python before 3.11 cannot read TOML
-            self.assertEqual(fj.draft_config(), ('unknown', None))
+            self.assertEqual(hcapi_.draft_config(), ('unknown', None))
             (config / 'config.toml').write_text('notes = true\n')
-            self.assertEqual(fj.draft_config(), ('default', 60.0))
+            self.assertEqual(hcapi_.draft_config(), ('default', 60.0))
         for text, said in (('draft_wait = 30e-2\n', 'draft_wait is 0.3 s in Herdr Core\'s config.toml'), ('"draft_wait" = 0.1\n', 'draft_wait is 0.1 s'),
                            ('draft_wait = "long"\n', 'cannot be read here as Core reads it')):
             (config / 'config.toml').write_text(text)
@@ -686,29 +687,29 @@ class CodexLeadOnCore(CoreCase):
             self.assertIn(said, str(refused.exception))
             self.assertFalse(self.job.exists())
         (config / 'config.toml').write_text('draft_wait = "long"\n')
-        self.assertEqual(fj.send_limit(), fj.SEND_FLOOR, 'a tell by hand gets the shortest limit when the hold is not known')
+        self.assertEqual(hcapi_.send_limit(), hcapi_.SEND_FLOOR, 'a tell by hand gets the shortest limit when the hold is not known')
         (config / 'config.toml').unlink()
         self.shape(core_env={'HC_DRAFT_MS': '8000'})   # Core's fallback when its config sets nothing
         with self.assertRaises(ValueError) as refused:
             self.new_core(kind='codex')
         self.assertIn('draft_wait is 8 s by HC_DRAFT_MS in the running core\'s environment', str(refused.exception))
         (config / 'config.toml').write_text('draft_wait = 60\n')   # the config wins over that fallback, as in Core
-        self.assertEqual(fj.typing_unsafe(), '')
+        self.assertEqual(hcapi_.typing_unsafe(), '')
         (config / 'config.toml').unlink()
         self.shape(core_env={}, exec_error='unavailable')
-        self.assertIn('environment cannot be read', fj.typing_unsafe())
-        self.assertEqual(fj.send_limit(), fj.SEND_FLOOR)
+        self.assertIn('environment cannot be read', hcapi_.typing_unsafe())
+        self.assertEqual(hcapi_.send_limit(), hcapi_.SEND_FLOOR)
         self.shape(exec_error='')
-        self.assertEqual(fj.typing_unsafe(), '')
+        self.assertEqual(hcapi_.typing_unsafe(), '')
         elsewhere = self.root / 'core-home/.config/herdr-core'   # the core reads its own config, wherever this shell's is
         elsewhere.mkdir(parents=True)
         (elsewhere / 'config.toml').write_text('draft_wait = 12\n')
         (config / 'config.toml').write_text('draft_wait = 90\n')
         self.shape(core_env={'HOME': str(self.root / 'core-home')})
-        self.assertEqual(fj.core_hold()[0], 12.0)
-        self.assertIn('draft_wait is 12 s', fj.typing_unsafe())
+        self.assertEqual(hcapi_.core_hold()[0], 12.0)
+        self.assertIn('draft_wait is 12 s', hcapi_.typing_unsafe())
         self.shape(core_env={'HOME': str(self.root / 'core-home'), 'XDG_CONFIG_HOME': str(self.root / 'home/.config')})
-        self.assertEqual((fj.core_hold()[0], fj.typing_unsafe()), (90.0, ''))
+        self.assertEqual((hcapi_.core_hold()[0], hcapi_.typing_unsafe()), (90.0, ''))
 
     def test_a_lead_restarted_on_the_other_cli_gets_its_brief_for_it(self):
         self.new_core()
@@ -716,7 +717,7 @@ class CodexLeadOnCore(CoreCase):
         self.assertNotIn('fleet-job types each new line of', brief.read_text())
         address = self.entries(self.job)[lead]['address']
         self.terminal(address, state='finished')
-        _, out = self.quiet(fj.start, self.job, lead, 'codex', None, str(brief))
+        _, out = self.quiet(cli_.start, self.job, lead, 'codex', None, str(brief))
         self.assertIn('STARTED ' + lead, out)
         self.assertIn('fleet-job types each new line of', brief.read_text())
         self.assertIn('into this terminal', brief.read_text())

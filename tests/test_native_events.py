@@ -158,14 +158,14 @@ class Sweep(NativeCase):
 
     def test_a_lead_lost_before_any_pass_is_dead_once(self):
         """R4: new, kill and hc rm before the first pass: Core has no row, tree.json has the lead's address."""
-        from test_core import fj
+        from stampede import hcapi as hcapi_, native as native_, cli as cli_
         ask = self.root / 'ask.md'
         ask.write_text('Fix the login bug\n')
         with mock.patch.dict(os.environ, {'HC_SOCKET': str(self.socket)}):
-            code, out = self.quiet(fj.new, str(ask), None, core=True, cwd=str(self.repo))
+            code, out = self.quiet(cli_.new, str(ask), None, core=True, cwd=str(self.repo))
             self.assertEqual(code, 0, out)
-            fj.hc('kill', 't1')
-            fj.hc('rm', 't1')
+            hcapi_.hc('kill', 't1')
+            hcapi_.hc('rm', 't1')
         (self.job / 'owner').write_text('alpha\n')  # a route of its own, so the post is queued
         key = (self.job / 'workspace').read_text().strip()
         self.sweep()
@@ -175,15 +175,15 @@ class Sweep(NativeCase):
 
     def test_a_lead_saved_as_exited_0_then_removed_is_no_dead(self):
         """R6: the lead left by itself with exit 0, a snapshot saved it, then its record was removed: no alarm."""
-        from test_core import fj
+        from stampede import hcapi as hcapi_, native as native_, cli as cli_
         ask = self.root / 'ask.md'
         ask.write_text('Fix the login bug\n')
         with mock.patch.dict(os.environ, {'HC_SOCKET': str(self.socket)}):
-            code, out = self.quiet(fj.new, str(ask), None, core=True, cwd=str(self.repo))
+            code, out = self.quiet(cli_.new, str(ask), None, core=True, cwd=str(self.repo))
             self.assertEqual(code, 0, out)
             self.terminal('t1', state='finished', status=None, exit_code=0, reason='exited')
-            self.quiet(fj.native().snapshot, self.job)
-            fj.hc('rm', 't1')
+            self.quiet(native_.snapshot, self.job)
+            hcapi_.hc('rm', 't1')
         (self.job / 'owner').write_text('alpha\n')
         node = next(n for n in json.loads((self.job / 'tree.json').read_text())['nodes'].values() if n.get('role') == 'lead')
         self.assertEqual((node.get('state'), node.get('exit_code'), node.get('reason')), ('finished', 0, 'exited'))

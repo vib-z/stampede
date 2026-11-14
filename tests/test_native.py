@@ -5,7 +5,8 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_core import CoreCase, SCRIPTS, SHA, LEAD, fj  # noqa: E402
+from test_core import CoreCase, SCRIPTS, SHA, LEAD  # noqa: E402
+from stampede import job as job_, hcapi as hcapi_, herdrapi as herdrapi_, owner as owner_, relay as relay_, native as native_, cli as cli_
 
 FLEET = SCRIPTS / 'fleet-job'
 
@@ -14,7 +15,7 @@ class NativeCase(CoreCase):
     def new(self, **kw):
         ask = self.root / 'ask.md'
         ask.write_text('Fix the login bug\n')
-        return self.quiet(fj.new, str(ask), None, core=True, cwd=str(self.repo), **kw)
+        return self.quiet(cli_.new, str(ask), None, core=True, cwd=str(self.repo), **kw)
 
     def started(self, **kw):
         code, out = self.new(**kw)
@@ -23,7 +24,7 @@ class NativeCase(CoreCase):
 
     def start(self, name, *program, kind='claude', **kw):
         brief = None if program else str(self.brief(self.job, name))
-        return self.quiet(fj.start, self.job, name, None if program else kind, None, brief, program=program, **kw)
+        return self.quiet(cli_.start, self.job, name, None if program else kind, None, brief, program=program, **kw)
 
     def runs(self):
         return self.calls('run')
@@ -42,14 +43,14 @@ class New(NativeCase):
         run = self.runs()[0]
         self.assertIn('--no-parent', run)
         tags = self.labels(run)
-        key = fj.job_key(job)
+        key = job_.job_key(job)
         self.assertEqual({k: tags[k] for k in ('stampede.job', 'stampede.role', 'stampede.agent', 'stampede.space', 'stampede.kind',
                                                'herdr.space', 'herdr.tab')},
                          {'stampede.job': key, 'stampede.role': 'lead', 'stampede.agent': LEAD, 'stampede.space': 'fix-login-bug',
                           'stampede.kind': 'claude', 'herdr.space': 'fix-login-bug', 'herdr.tab': 'main'})
         self.assertEqual(tags['stampede.session'], self.option(run, '--session-id'))
         self.assertNotIn('--settings', run)
-        self.assertEqual(fj.backend(job), 'native')
+        self.assertEqual(job_.backend(job), 'native')
         for name in ('backend', 'endpoint', 'workspace', 'lead', 'space', 'tree.json', 'briefs/' + LEAD + '.md'):
             self.assertTrue((job / name).is_file(), name)
         for name in ('inbox', 'inbox.log', 'hooks', 'core.json', 'agents.tsv', 'relay-state.json', 'max-helpers'):
@@ -69,7 +70,7 @@ class New(NativeCase):
     def test_the_space_is_the_slug_or_space_and_gets_a_suffix_on_a_clash(self):
         self.add_terminal('t1', labels={'stampede.job': 'hc-000000000000', 'stampede.space': 'fix-login-bug'})
         job = self.started()
-        self.assertEqual((job / 'space').read_text().strip(), 'fix-login-bug-' + fj.job_key(job)[3:7])
+        self.assertEqual((job / 'space').read_text().strip(), 'fix-login-bug-' + job_.job_key(job)[3:7])
         self.setUp()
         job = self.started(space='login', max_helpers=3)
         self.assertEqual((job / 'space').read_text().strip(), 'login')
@@ -77,7 +78,7 @@ class New(NativeCase):
         self.assertEqual(self.labels(self.runs()[0])['herdr.space'], 'login')
 
     def test_relay_makes_the_earlier_kind_and_space_needs_native(self):
-        with mock.patch.object(fj, 'new_core', return_value=0) as core:
+        with mock.patch.object(relay_, 'new_core', return_value=0) as core:
             self.new(relay=True)
         core.assert_called_once()
         with self.assertRaises(ValueError):
@@ -88,7 +89,7 @@ class New(NativeCase):
         code, out = self.new()
         self.assertEqual(code, 1)
         self.assertIn(f'FAILED {LEAD}', out)
-        self.assertFalse((self.events / 'jobs' / fj.job_key(self.job)).exists())
+        self.assertFalse((self.events / 'jobs' / job_.job_key(self.job)).exists())
 
 
 class Start(NativeCase):
@@ -149,7 +150,7 @@ class Start(NativeCase):
                          ({'brief': str(bad)}, 'is missing'), ({'kind': 'cursor'}, 'as a program'), ({'parent': 'nobody'}, 'no agent nobody')):
             args = {'agent': 'other', 'kind': 'claude', 'pane': None, 'brief': str(self.brief(self.job, 'other')), **kw}
             with self.subTest(kw=kw), self.assertRaises(ValueError) as refused:
-                self.quiet(fj.start, self.job, args.pop('agent'), args.pop('kind'), args.pop('pane'), args.pop('brief'), **args)
+                self.quiet(cli_.start, self.job, args.pop('agent'), args.pop('kind'), args.pop('pane'), args.pop('brief'), **args)
             self.assertIn(said, str(refused.exception))
         self.assertEqual(len(self.runs()), 2)
 
@@ -181,15 +182,15 @@ class Cap(NativeCase):
         self.assertEqual((code, out.strip()), (0, 'QUEUED h12 (12 running, cap 12)'))
         code, out = self.start('h13')
         self.assertIn('QUEUED h13 (12 running, cap 12)', out)
-        self.assertEqual(self.quiet(fj.native().next_, self.job)[1].strip(), 'WAITING 2 queued (12 running, cap 12)')
+        self.assertEqual(self.quiet(native_.next_, self.job)[1].strip(), 'WAITING 2 queued (12 running, cap 12)')
         self.terminal(self.addresses()['h0'], status={'state': 'done'})
-        code, out = self.quiet(fj.native().next_, self.job)
+        code, out = self.quiet(native_.next_, self.job)
         self.assertEqual(out.splitlines()[0], f'STARTED h12 (t{14}) under {LEAD}')   # oldest first
         self.terminal(self.addresses()['h1'], status={'state': 'idle'}, turn=1)
-        fj.hc('kill', self.addresses()['h2'])
-        _, out = self.quiet(fj.native().next_, self.job)
+        hcapi_.hc('kill', self.addresses()['h2'])
+        _, out = self.quiet(native_.next_, self.job)
         self.assertIn('STARTED h13', out)
-        self.assertEqual(self.quiet(fj.native().next_, self.job)[1].strip(), 'NOTHING QUEUED')
+        self.assertEqual(self.quiet(native_.next_, self.job)[1].strip(), 'NOTHING QUEUED')
 
     def test_depth_two_counts_and_the_lead_and_plain_children_do_not(self):
         for n in range(2):
@@ -206,15 +207,15 @@ class Cap(NativeCase):
             self.start('h0')
             self.assertIn('cap 1', self.start('h1')[1])
             (self.job / 'max-helpers').write_text('2\n')
-            self.assertIn('STARTED h1', self.quiet(fj.native().next_, self.job)[1])
+            self.assertIn('STARTED h1', self.quiet(native_.next_, self.job)[1])
 
     def test_a_queued_start_whose_parent_is_gone_is_dropped(self):
         (self.job / 'max-helpers').write_text('1\n')
         self.start('h0')
         with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': 't2'}):
             self.start('child')
-        fj.hc('kill', 't2')
-        _, out = self.quiet(fj.native().next_, self.job)
+        hcapi_.hc('kill', 't2')
+        _, out = self.quiet(native_.next_, self.job)
         self.assertIn('DROPPED child: its parent h0 is gone', out)
         self.assertTrue(list((self.job / 'queue/dropped').glob('*-child.json')))
 
@@ -274,19 +275,19 @@ class Layout(NativeCase):
     def test_a_freed_place_is_taken_again_lowest_first_with_the_fall_back(self):
         for n in range(1, 4):
             self.start(f'h{n}')
-        fj.hc('kill', self.addresses()['h1'])
-        fj.hc('kill', self.addresses()['h2'])
+        hcapi_.hc('kill', self.addresses()['h1'])
+        hcapi_.hc('kill', self.addresses()['h2'])
         self.start('a')
         self.start('b')
         self.assertEqual(self.places('a', 'b'), [('main', '2', 'right', LEAD), ('main', '3', 'down', 'a')])
-        fj.hc('kill', self.addresses()['a'])
+        hcapi_.hc('kill', self.addresses()['a'])
         self.start('c')   # pane 2 again; then pane 3's split target gone: it would split the lead right
-        fj.hc('kill', self.addresses()['c'])
-        fj.hc('kill', self.addresses()['b'])
+        hcapi_.hc('kill', self.addresses()['c'])
+        hcapi_.hc('kill', self.addresses()['b'])
         self.start('d')
         self.start('e')
         self.assertEqual(self.places('d', 'e'), [('main', '2', 'right', LEAD), ('main', '3', 'down', 'd')])
-        fj.hc('kill', self.addresses()['d'])
+        hcapi_.hc('kill', self.addresses()['d'])
         self.terminal(self.addresses()['e'], labels={**self.state()['terminals'][self.addresses()['e']]['labels'], 'stampede.pane': '9'})
         self.start('f')
         self.assertEqual(self.places('f'), [('main', '2', 'right', LEAD)])
@@ -294,7 +295,7 @@ class Layout(NativeCase):
     def test_the_fall_back_when_the_split_target_is_free(self):
         self.start('h1')
         self.start('h2')
-        fj.hc('kill', self.addresses()['h1'])
+        hcapi_.hc('kill', self.addresses()['h1'])
         self.terminal(self.addresses()['h2'], labels={**self.state()['terminals'][self.addresses()['h2']]['labels'], 'stampede.pane': '3'})
         self.start('h3')
         self.start('h4')
@@ -302,7 +303,7 @@ class Layout(NativeCase):
         state = self.state()
         state['terminals']['t1']['labels'].pop('stampede.pane')
         (self.core / 'state.json').write_text(json.dumps(state))
-        fj.hc('kill', self.addresses()['h3'])
+        hcapi_.hc('kill', self.addresses()['h3'])
         self.start('h5')   # the lead holds a place but no number: pane 1 is free, so no split
         self.assertEqual(self.places('h5'), [('main', '1', None, None)])
 
@@ -316,25 +317,25 @@ class Layout(NativeCase):
     def test_a_second_job_has_its_own_main(self):
         ask = self.root / 'ask2.md'
         ask.write_text('Another job\n')
-        code, out = self.quiet(fj.new, str(ask), None, name='other', core=True, cwd=str(self.repo))
+        code, out = self.quiet(cli_.new, str(ask), None, name='other', core=True, cwd=str(self.repo))
         self.assertEqual(code, 0, out)
-        other = fj.job_key(self.repo / '.herdr-other')
+        other = job_.job_key(self.repo / '.herdr-other')
         lead = next(t for t in self.state()['terminals'].values() if t['labels'].get('stampede.job') == other)
         self.assertEqual((lead['labels']['herdr.tab'], lead['labels']['stampede.pane']), ('main', '1'))
 
     def test_reopen_keeps_places_and_tree_shows_them(self):
         for n in range(1, 4):
             self.start(f'h{n}', kind='codex')
-        fj.hc('kill', 't1')
-        self.quiet(fj.native().reopen, self.job, True, False, False)
+        hcapi_.hc('kill', 't1')
+        self.quiet(native_.reopen, self.job, True, False, False)
         self.assertEqual(self.places(LEAD, 'h1', 'h2', 'h3'), [('main', '1', None, None), ('main', '2', 'right', LEAD),
                                                               ('main', '3', 'down', 'h1'), ('main', '4', 'down', LEAD)])
         nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
         self.assertEqual((nodes['h2']['pane'], nodes['h2']['split'], nodes['h2']['beside']), (3, 'down', 'h1'))
-        _, out = self.quiet(fj.native().tree, self.job)
+        _, out = self.quiet(native_.tree, self.job)
         self.assertIn('h3 (t', out)
         self.assertTrue(any(line.endswith('tab main pane 4') and 'h3' in line for line in out.splitlines()), out)
-        _, out = self.quiet(fj.native().tree, self.job, True)
+        _, out = self.quiet(native_.tree, self.job, True)
         row = next(r for r in json.loads(out)['nodes'] if r['name'] == 'h1')
         self.assertEqual((row['tab'], row['pane'], row['split'], row['beside']), ('main', 2, 'right', LEAD))
 
@@ -349,35 +350,35 @@ class TreeTell(NativeCase):
         self.add_terminal('t3', name='ci-wait', parent='t2', labels={}, status=None)
         (self.job / 'max-helpers').write_text('1\n')
         self.start('later')
-        code, out = self.quiet(fj.native().tree, self.job)
+        code, out = self.quiet(native_.tree, self.job)
         self.assertEqual(code, 0)
-        self.assertEqual(out.splitlines(), ['space fix-login-bug (' + fj.job_key(self.job) + ')',
+        self.assertEqual(out.splitlines(), ['space fix-login-bug (' + job_.job_key(self.job) + ')',
                                             f'  {LEAD} (t1) lead claude idle tab main pane 1', '    build-api (t2) helper claude idle tab main pane 2',
                                             '      ci-wait (t3) plain - live tab -', f'  queued later under {LEAD} (claude)'])
-        shown = json.loads(self.quiet(fj.native().tree, self.job, True)[1])
+        shown = json.loads(self.quiet(native_.tree, self.job, True)[1])
         self.assertEqual([(n['name'], n['depth'], n['parent']) for n in shown['nodes']], [(LEAD, 0, None), ('build-api', 1, 't1'), ('ci-wait', 2, 't2')])
         self.assertEqual(shown['queue'][0]['name'], 'later')
 
     def test_tell_sends_and_a_refusal_is_failed_exit_2(self):
         self.start('build-api')
-        code, out = self.quiet(fj.tell, self.job, 'build-api', 'Use the v2 endpoint')
+        code, out = self.quiet(owner_.tell, self.job, 'build-api', 'Use the v2 endpoint')
         self.assertEqual((code, out.strip()), (0, 'SUBMITTED build-api (t2)'))
         self.assertEqual(self.state()['terminals']['t2']['sent'], ['Use the v2 endpoint'])
         self.assertFalse([c for c in self.calls('send') if '--force' in c])
-        self.quiet(fj.tell, self.job, 'lead', 'the owner says hi')
+        self.quiet(owner_.tell, self.job, 'lead', 'the owner says hi')
         self.assertEqual(self.state()['terminals']['t1']['sent'], ['the owner says hi'])
         self.shape(send_error={'t2': 'cancelled'})
-        code, out = self.quiet(fj.tell, self.job, 'build-api', 'again')
+        code, out = self.quiet(owner_.tell, self.job, 'build-api', 'again')
         self.assertEqual(code, 2)
         self.assertTrue(out.startswith('FAILED build-api ('))
         result = self.cli('tell', self.job, 'nobody', 'x')
         self.assertEqual((result.returncode, result.stdout.strip()), (2, 'FAILED nobody (no live terminal of this job is nobody)'))
 
     def test_notify_lead_types_into_the_lead_and_never_raises(self):
-        self.quiet(fj.notify_lead, self.job, 'TURN build-api')
+        self.quiet(owner_.notify_lead, self.job, 'TURN build-api')
         self.assertEqual(self.state()['terminals']['t1']['sent'], ['TURN build-api'])
         self.shape(ls_error='unavailable')
-        self.quiet(fj.notify_lead, self.job, 'lost')
+        self.quiet(owner_.notify_lead, self.job, 'lost')
 
 
 class Shared(NativeCase):
@@ -386,38 +387,38 @@ class Shared(NativeCase):
         self.started()
 
     def test_ask_gate_ok_and_approve_gate(self):
-        self.assertFalse(fj.pane_yes(self.job))
-        with mock.patch.object(fj, 'ASK_CMD', 'true'):
-            self.assertEqual(self.quiet(fj.ask_now, self.job, 'Which db?', [], 'echo postgres')[0], 0)
+        self.assertFalse(owner_.pane_yes(self.job))
+        with mock.patch.object(owner_, 'ASK_CMD', 'true'):
+            self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres')[0], 0)
         self.assertIn('ANSWER Which db?: postgres', self.state()['terminals']['t1']['sent'][-1])
-        with mock.patch.object(fj, 'ask_background'):
-            self.quiet(fj.ask_gate, self.job, 'Merge PR #3', SHA, 3)
+        with mock.patch.object(owner_, 'ask_background'):
+            self.quiet(owner_.ask_gate, self.job, 'Merge PR #3', SHA, 3)
         gate = next((self.job / 'gates').glob('*.json')).stem
         with self.assertRaises(PermissionError) as refused:
-            fj.gate_ok(self.job, gate, SHA)
+            owner_.gate_ok(self.job, gate, SHA)
         self.assertNotIn('typed in your pane', str(refused.exception))
-        self.quiet(fj.tell, self.job, 'lead', 'yes')
+        self.quiet(owner_.tell, self.job, 'lead', 'yes')
         with self.assertRaises(PermissionError):
-            fj.gate_ok(self.job, gate, SHA)
-        with mock.patch.object(fj, 'ASK_CMD', 'true'):
-            self.quiet(fj.ask_now, self.job, 'q', [], None, gate)
-        self.assertIn('APPROVED', self.quiet(fj.gate_ok, self.job, gate, SHA)[1])
+            owner_.gate_ok(self.job, gate, SHA)
+        with mock.patch.object(owner_, 'ASK_CMD', 'true'):
+            self.quiet(owner_.ask_now, self.job, 'q', [], None, gate)
+        self.assertIn('APPROVED', self.quiet(owner_.gate_ok, self.job, gate, SHA)[1])
 
     def test_approve_gate_for_a_bot_and_post_and_finish(self):
         (self.job / 'owner').write_text('alpha\n')
-        self.quiet(fj.ask_gate, self.job, 'Merge PR #3', SHA, 3)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #3', SHA, 3)
         gate = json.loads(next((self.job / 'gates').glob('*.json')).read_text())
-        with mock.patch.object(fj, 'inside_herdr', return_value=True), self.assertRaises(PermissionError) as refused:
-            fj.approve_gate(self.job, gate['gate'], SHA, 'owner', fj.gate_digest(gate))
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=True), self.assertRaises(PermissionError) as refused:
+            owner_.approve_gate(self.job, gate['gate'], SHA, 'owner', owner_.gate_digest(gate))
         self.assertIn('Herdr Core', str(refused.exception))
-        with mock.patch.object(fj, 'inside_herdr', return_value=False):
-            self.assertIn('APPROVED', self.quiet(fj.approve_gate, self.job, gate['gate'], SHA, 'owner in chat', fj.gate_digest(gate))[1])
-        self.assertIn('APPROVED', self.quiet(fj.gate_ok, self.job, gate['gate'], SHA)[1])
-        self.assertIn('POSTED 001 to alpha', self.quiet(fj.post, self.job, 'PLAN READY')[1])
-        self.assertIn('FINISHED', self.quiet(fj.finish, self.job, 'done')[1])
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            self.assertIn('APPROVED', self.quiet(owner_.approve_gate, self.job, gate['gate'], SHA, 'owner in chat', owner_.gate_digest(gate))[1])
+        self.assertIn('APPROVED', self.quiet(owner_.gate_ok, self.job, gate['gate'], SHA)[1])
+        self.assertIn('POSTED 001 to alpha', self.quiet(owner_.post, self.job, 'PLAN READY')[1])
+        self.assertIn('FINISHED', self.quiet(owner_.finish, self.job, 'done')[1])
         events = [json.loads(p.read_text())['payload'] for p in (self.root / 'queue/queue').glob('*') if not p.name.startswith('.')]
         self.assertTrue(events)
-        key = fj.job_key(self.job)
+        key = job_.job_key(self.job)
         for event in events:
             self.assertEqual((event['workspace'], event['lead_pane']), (key, f'hc:{key}/t1'))
         self.assertFalse((self.events / 'jobs' / key).exists())
@@ -436,15 +437,15 @@ class Shared(NativeCase):
 
 class Fake(CoreCase):
     def test_a_parent_from_parent_or_the_caller_and_its_end_ends_its_branch(self):
-        fj.hc('run', '--bg', '--no-parent', '--name', 'a', '--', 'x')
-        fj.hc('run', '--bg', '--parent', 'a', '--name', 'b', '--', 'x')
+        hcapi_.hc('run', '--bg', '--no-parent', '--name', 'a', '--', 'x')
+        hcapi_.hc('run', '--bg', '--parent', 'a', '--name', 'b', '--', 'x')
         with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': 't2'}):
-            fj.hc('run', '--bg', '--name', 'c', '--', 'x')
-            fj.hc('run', '--bg', '--outlive-parent', '--name', 'd', '--', 'x')
-        self.assertEqual([fj.hc('get', t)['parent'] for t in ('t1', 't2', 't3', 't4')], [None, 't1', 't2', 't2'])
-        fj.hc('kill', 't1')
-        self.assertEqual([fj.hc('get', t)['state'] for t in ('t1', 't2', 't3', 't4')], ['finished', 'finished', 'finished', 'live'])
-        self.assertEqual({t['address'] for t in fj.native().listing()}, {'t1', 't2', 't3', 't4'})
+            hcapi_.hc('run', '--bg', '--name', 'c', '--', 'x')
+            hcapi_.hc('run', '--bg', '--outlive-parent', '--name', 'd', '--', 'x')
+        self.assertEqual([hcapi_.hc('get', t)['parent'] for t in ('t1', 't2', 't3', 't4')], [None, 't1', 't2', 't2'])
+        hcapi_.hc('kill', 't1')
+        self.assertEqual([hcapi_.hc('get', t)['state'] for t in ('t1', 't2', 't3', 't4')], ['finished', 'finished', 'finished', 'live'])
+        self.assertEqual({t['address'] for t in native_.listing()}, {'t1', 't2', 't3', 't4'})
 
 
 class Record(NativeCase):
@@ -477,9 +478,9 @@ class Record(NativeCase):
         self.add_terminal('t4', name='ci-wait', parent='t2', labels={}, status=None, argv=['make', 'test'])
         self.terminal('t3', state='finished', exit_code=3, reason='exited', status=None)
         self.terminal('t2', labels={**self.state()['terminals']['t2']['labels'], 'stampede.kind': 'codex'})
-        fj.native().record(self.job, 'old-one', role='helper', kind='claude', state='live')
+        native_.record(self.job, 'old-one', role='helper', kind='claude', state='live')
         session = self.nodes()['build-api']['session']
-        code, out = self.quiet(fj.native().snapshot, self.job)
+        code, out = self.quiet(native_.snapshot, self.job)
         self.assertEqual((code, out.strip()), (0, str(self.job / 'tree.json')))
         nodes = self.nodes()
         self.assertEqual((nodes['ci-wait']['role'], nodes['ci-wait']['argv'], nodes['ci-wait']['parent']), ('plain', ['make', 'test'], 'build-api'))
@@ -493,23 +494,23 @@ class Record(NativeCase):
     def test_herdr_reopen_snapshot_hands_a_native_job_to_fleet_job_snapshot(self):
         self.started()
         self.start('build-api')
-        fj.hc('kill', 't2')
+        hcapi_.hc('kill', 't2')
         script = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'
-        done = subprocess.run([str(script), fj.job_key(self.job), str(self.job)], capture_output=True, text=True)
+        done = subprocess.run([str(script), job_.job_key(self.job), str(self.job)], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.nodes()['build-api']['state'], 'finished')
         self.shape(ls_error='unavailable')
-        self.assertNotEqual(subprocess.run([str(script), fj.job_key(self.job), str(self.job)], capture_output=True).returncode, 0)
+        self.assertNotEqual(subprocess.run([str(script), job_.job_key(self.job), str(self.job)], capture_output=True).returncode, 0)
 
     def test_finish_refreshes_the_record_and_never_fails_for_it(self):
         self.started()
         self.start('build-api')
-        fj.hc('kill', 't2')
-        self.quiet(fj.finish, self.job, 'done')
+        hcapi_.hc('kill', 't2')
+        self.quiet(owner_.finish, self.job, 'done')
         self.assertEqual(self.nodes()['build-api']['state'], 'finished')
         self.shape(ls_error='unavailable')
         (self.job / 'finished').unlink()
-        self.assertIn('FINISHED', self.quiet(fj.finish, self.job, 'done again')[1])
+        self.assertIn('FINISHED', self.quiet(owner_.finish, self.job, 'done again')[1])
 
 
 class Reopen(NativeCase):
@@ -522,16 +523,16 @@ class Reopen(NativeCase):
             self.start('deep')                        # t4, under build-api
         self.start('watch-ci', 'make', 'watch')       # t5, a program
         self.add_terminal('t6', name='ci-wait', parent='t1', labels={}, status=None, argv=['make', 'test'], die_with_parent=True)
-        self.quiet(fj.native().snapshot, self.job)
+        self.quiet(native_.snapshot, self.job)
         self.nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
         folder = self.root / 'home/.claude/projects/x'
         folder.mkdir(parents=True)
         (folder / (self.nodes['build-api']['session'] + '.jsonl')).write_text('{}\n')
-        fj.hc('kill', 't1')                           # the whole tree ends with the lead
+        hcapi_.hc('kill', 't1')                           # the whole tree ends with the lead
         self.before = len(self.runs())
 
     def reopen(self, *flags):
-        return self.quiet(fj.native().reopen, self.job, '--fresh' in flags, '--prompt' in flags, '--rerun-programs' in flags)
+        return self.quiet(native_.reopen, self.job, '--fresh' in flags, '--prompt' in flags, '--rerun-programs' in flags)
 
     def run_of(self, name):
         return next(r for r in self.runs()[self.before:] if self.labels(r).get('stampede.agent') == name)
@@ -574,7 +575,7 @@ class Reopen(NativeCase):
         self.assertIn('STARTED watch-ci', self.reopen('--rerun-programs')[1])
         self.assertEqual(self.program(self.run_of('watch-ci')), ['make', 'watch'])
         self.setUp()
-        fj.native().record(self.job, 'watch-ci', state='finished', exit_code=0)
+        native_.record(self.job, 'watch-ci', state='finished', exit_code=0)
         self.assertIn('DONE watch-ci (exited 0)', self.reopen('--rerun-programs')[1])
 
     def test_a_failed_parent_s_children_are_skipped(self):
@@ -585,7 +586,7 @@ class Reopen(NativeCase):
         self.assertIn('SKIPPED deep: its parent build-api is not running', out)
 
     def test_the_marker_and_tag_come_back_and_closed_goes_and_a_finished_job_gets_neither(self):
-        key = fj.job_key(self.job)
+        key = job_.job_key(self.job)
         (self.job / 'owner').write_text('alpha\n')
         (self.events / 'jobs' / key).unlink()
         (self.job / 'closed').write_text('x\n')
@@ -594,7 +595,7 @@ class Reopen(NativeCase):
         self.assertIn('owner=alpha', (self.events / 'owners' / key).read_text())
         self.assertFalse((self.job / 'closed').exists())
         self.setUp()
-        key = fj.job_key(self.job)
+        key = job_.job_key(self.job)
         (self.job / 'finished').write_text('done\n')
         (self.events / 'jobs' / key).unlink()
         self.reopen()
@@ -605,26 +606,26 @@ class Reopen(NativeCase):
         (self.job / 'max-helpers').write_text('1\n')   # build-api (resumed, idle) does not count; deep does
         self.assertIn('QUEUED', self.start('more')[1])
         (self.job / 'max-helpers').write_text('2\n')
-        self.assertIn('STARTED more', self.quiet(fj.native().next_, self.job)[1])
+        self.assertIn('STARTED more', self.quiet(native_.next_, self.job)[1])
 
 
 class NoWorkByItself(NativeCase):
     """A reopen never hands out work by itself (R1, R3), and an uncertain start is never lost or doubled (R2)."""
     def running(self):
-        return sum(fj.native().running(t) for t in self.state()['terminals'].values())
+        return sum(native_.running(t) for t in self.state()['terminals'].values())
 
     def waiting(self):
-        return [r['name'] for _, r in fj.native().queued(self.job)]
+        return [r['name'] for _, r in native_.queued(self.job)]
 
     def reopen(self, *flags):
-        return self.quiet(fj.native().reopen, self.job, '--fresh' in flags, '--prompt' in flags, '--rerun-programs' in flags)
+        return self.quiet(native_.reopen, self.job, '--fresh' in flags, '--prompt' in flags, '--rerun-programs' in flags)
 
     def test_r1_reopen_keeps_the_cap(self):
         self.started(max_helpers=1)
         self.start('a', kind='codex')
         self.terminal('t2', status={'state': 'done'}, turn=1)
         self.start('b', kind='codex')
-        fj.hc('kill', 't1')
+        hcapi_.hc('kill', 't1')
         code, out = self.reopen()
         self.assertIn('SKIPPED a (codex keeps no session to resume: --fresh starts it again with its brief)', out)
         self.assertEqual((self.running(), self.waiting()), (0, []))
@@ -640,7 +641,7 @@ class NoWorkByItself(NativeCase):
             self.start(name)
         self.terminal('t2', status={'state': 'done'}, turn=1)
         self.shape(run_error={'b': 'timeout'}, spawn_also=True)
-        code, out = self.quiet(fj.native().next_, self.job)
+        code, out = self.quiet(native_.next_, self.job)
         self.assertEqual(out.splitlines(), [f'STARTED b (t3) under {LEAD}', 'WAITING 1 queued (1 running, cap 1)'])
         self.assertEqual((code, self.running(), self.waiting()), (0, 1, ['c']))
         node = json.loads((self.job / 'tree.json').read_text())['nodes']['b']
@@ -649,8 +650,8 @@ class NoWorkByItself(NativeCase):
     def test_r3_a_finished_job_reopens_for_reading_only(self):
         self.started(max_helpers=1)
         self.start('a', kind='codex')
-        self.quiet(fj.finish, self.job, 'accepted')
-        fj.hc('kill', 't1')
+        self.quiet(owner_.finish, self.job, 'accepted')
+        hcapi_.hc('kill', 't1')
         before = len(self.runs())
         code, out = self.reopen()
         self.assertEqual(len(self.runs()), before)
@@ -680,7 +681,7 @@ class NoWorkByItself(NativeCase):
         self.started(max_helpers=1)
         self.start('a', kind='codex')
         self.start('b', kind='codex')
-        self.quiet(fj.finish, self.job, 'accepted')
+        self.quiet(owner_.finish, self.job, 'accepted')
         self.terminal('t2', status={'state': 'done'}, turn=1)
         before = len(self.runs())
         code, out = self.reopen()
@@ -701,15 +702,15 @@ class NoWorkByItself(NativeCase):
             self.start('deep')
         self.start('watch-ci', 'make', 'watch')
         (self.job / 'max-helpers').write_text('1\n')
-        fj.hc('kill', 't1')
+        hcapi_.hc('kill', 't1')
         code, out = self.reopen('--fresh', '--rerun-programs')
         self.assertEqual(out.splitlines(), [f'STARTED {LEAD} (t6)', f'STARTED build-api (t7) under {LEAD}',
                                             'QUEUED build-ui (1 running, cap 1)', 'QUEUED deep (1 running, cap 1)',
                                             'QUEUED watch-ci (1 running, cap 1)'])
         self.terminal('t7', status={'state': 'done'}, turn=1)
-        self.assertIn('STARTED build-ui (t8) under', self.quiet(fj.native().next_, self.job)[1])
+        self.assertIn('STARTED build-ui (t8) under', self.quiet(native_.next_, self.job)[1])
         self.terminal('t8', status={'state': 'done'}, turn=1)
-        _, out = self.quiet(fj.native().next_, self.job)
+        _, out = self.quiet(native_.next_, self.job)
         self.assertIn('STARTED deep (t9) under build-api', out)
         self.assertIn('Your parent is build-api at t7', self.program(self.runs()[-1])[-1])
 
@@ -721,9 +722,9 @@ class NoWorkByItself(NativeCase):
             request = dict(name=name, kind='claude', brief=str(self.brief(self.job, name)), model=None, effort=None, cwd=str(self.repo),
                            tab=None, parent=parent, outlive=False, program=[], yolo=False, report=str(self.job / 'reports' / name))
             (queue / f'{stamp}-{name}.json').write_text(json.dumps(request))
-        _, out = self.quiet(fj.native().next_, self.job)
+        _, out = self.quiet(native_.next_, self.job)
         self.assertEqual(out.splitlines(), [f'STARTED p (t2) under {LEAD}', 'WAITING 1 queued (1 running, cap 12)'])
-        self.assertEqual(self.quiet(fj.native().next_, self.job)[1].strip(), 'STARTED child (t3) under p')
+        self.assertEqual(self.quiet(native_.next_, self.job)[1].strip(), 'STARTED child (t3) under p')
 
     def test_a_request_whose_terminal_already_lives_is_adopted(self):
         self.started()
@@ -731,10 +732,10 @@ class NoWorkByItself(NativeCase):
         self.start('h0')
         self.start('h1')
         self.terminal('t2', status={'state': 'done'}, turn=1)
-        self.add_terminal('t9', parent='t1', labels={'stampede.job': fj.job_key(self.job), 'stampede.role': 'helper',
+        self.add_terminal('t9', parent='t1', labels={'stampede.job': job_.job_key(self.job), 'stampede.role': 'helper',
                                                      'stampede.agent': 'h1', 'stampede.kind': 'claude', 'herdr.tab': 'main'})
         before = len(self.runs())
-        _, out = self.quiet(fj.native().next_, self.job)
+        _, out = self.quiet(native_.next_, self.job)
         self.assertEqual(out.strip(), f'STARTED h1 (t9) under {LEAD}')
         self.assertEqual((len(self.runs()), self.waiting()), (before, []))
 
@@ -746,7 +747,7 @@ class NoWorkByItself(NativeCase):
         self.start('h2')
         self.terminal('t2', status={'state': 'done'}, turn=1)
         self.shape(run_error={'h1': 'timeout'}, lookup_error='timeout')
-        code, out = self.quiet(fj.native().next_, self.job)
+        code, out = self.quiet(native_.next_, self.job)
         self.assertEqual(code, 1)
         self.assertIn('UNKNOWN h1: ', out)
         self.assertIn('run stampede next once Herdr Core answers', out)
@@ -758,7 +759,7 @@ class Close(NativeCase):
     def setUp(self):
         super().setUp()
         self.shape(on_run={'build-api': {'leaves': 1}, 'deep': {'status': {'state': 'working'}}})
-        patch = mock.patch.object(fj.native(), 'LEAVE_FOR', 3)   # the lead stays idle: it is killed after this long
+        patch = mock.patch.object(native_, 'LEAVE_FOR', 3)   # the lead stays idle: it is killed after this long
         patch.start()
         self.addCleanup(patch.stop)
         self.started()
@@ -768,7 +769,7 @@ class Close(NativeCase):
         self.add_terminal('t4', name='ci-wait', parent='t3', labels={}, status=None, die_with_parent=True)
 
     def test_the_whole_job_closes_deepest_first_politely_when_idle(self):
-        code, out = self.quiet(fj.native().close, self.job)
+        code, out = self.quiet(native_.close, self.job)
         self.assertEqual(code, 0, out)
         self.assertEqual(out.splitlines(), ['CLOSED ci-wait (t4)', 'CLOSED deep (t3)', 'CLOSED build-api (t2)', f'CLOSED {LEAD} (t1)'])
         self.assertEqual([c[-1] for c in self.calls('rm')], ['t4', 't3', 't2', 't1'])
@@ -784,37 +785,37 @@ class Close(NativeCase):
 
     def test_an_idle_agent_leaves_by_itself_with_exit_0(self):
         self.terminal('t3', status={'state': 'idle'}, leaves=1)
-        self.quiet(fj.native().close, self.job, 'deep')
+        self.quiet(native_.close, self.job, 'deep')
         self.assertNotIn('t3', [c[-1] for c in self.calls('kill')])
 
     def test_a_helper_closed_by_name_stays_closed_at_reopen_and_a_whole_close_does_not(self):
-        self.quiet(fj.native().close, self.job, 'build-api')
+        self.quiet(native_.close, self.job, 'build-api')
         nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
         self.assertEqual((nodes['build-api']['state'], nodes['deep']['state']), ('closed', 'closed'))
-        fj.hc('kill', 't1')
+        hcapi_.hc('kill', 't1')
         before = len(self.calls('run'))
-        code, out = self.quiet(fj.native().reopen, self.job)
+        code, out = self.quiet(native_.reopen, self.job)
         self.assertEqual(code, 0, out)
         self.assertEqual(out.splitlines(), [f'STARTED {LEAD} (t5)', 'DONE build-api (closed)', 'DONE deep (closed)'])
         self.assertEqual(len(self.calls('run')), before + 1)
-        self.quiet(fj.native().close, self.job)
-        _, out = self.quiet(fj.native().reopen, self.job)
+        self.quiet(native_.close, self.job)
+        _, out = self.quiet(native_.reopen, self.job)
         self.assertIn(f'STARTED {LEAD}', out)
         self.assertIn('DONE build-api (closed)', out)
 
     def test_a_helper_s_subtree_and_the_refusal_from_inside(self):
         with mock.patch.dict(os.environ, {'HC_TERMINAL_ID': 't3'}), self.assertRaises(ValueError):
-            fj.native().close(self.job, 'build-api')
+            native_.close(self.job, 'build-api')
         result = self.cli('close', self.job, 'lead', env={'HC_TERMINAL_ID': 't1'})
         self.assertEqual((result.returncode, len(result.stderr.strip().splitlines())), (2, 1))
-        _, out = self.quiet(fj.native().close, self.job, 'build-api')
+        _, out = self.quiet(native_.close, self.job, 'build-api')
         self.assertEqual(out.splitlines(), ['CLOSED ci-wait (t4)', 'CLOSED deep (t3)', 'CLOSED build-api (t2)'])
         self.assertFalse((self.job / 'closed').exists())
         self.assertEqual(self.state()['terminals']['t1']['state'], 'live')
 
     def test_a_terminal_core_refuses_is_failed_and_the_rest_go_on(self):
         self.shape(get_error={'t3': 'unavailable'})
-        code, out = self.quiet(fj.native().close, self.job)
+        code, out = self.quiet(native_.close, self.job)
         self.assertEqual(code, 1)
         self.assertIn('FAILED deep (', out)
         self.assertIn(f'CLOSED {LEAD} (t1)', out)
@@ -829,18 +830,18 @@ class Outlived(NativeCase):
         self.started()
         self.start('keeper', 'sleep', '900', outlive=True)        # t2, under t1, outlives it
         self.add_terminal('t3', name='keeper-log', parent='t2', labels={}, status=None)
-        fj.hc('kill', 't1')
-        self.quiet(fj.native().reopen, self.job)                  # the lead is t4; keeper still names t1
+        hcapi_.hc('kill', 't1')
+        self.quiet(native_.reopen, self.job)                  # the lead is t4; keeper still names t1
 
     def test_tree_snapshot_the_cap_and_close_take_it(self):
         self.assertEqual(self.state()['terminals']['t2']['parent'], 't1')
-        _, out = self.quiet(fj.native().tree, self.job)
+        _, out = self.quiet(native_.tree, self.job)
         self.assertIn(f'    keeper (t2) helper program idle tab main pane 2 outlived {LEAD}', out.splitlines())
         self.assertIn('      keeper-log (t3) plain - live tab -', out.splitlines())
-        shown = json.loads(self.quiet(fj.native().tree, self.job, True)[1])
+        shown = json.loads(self.quiet(native_.tree, self.job, True)[1])
         self.assertEqual([(n['name'], n['depth'], n['outlived']) for n in shown['nodes']][1:],
                          [('keeper', 1, LEAD), ('keeper-log', 2, None)])
-        self.quiet(fj.native().snapshot, self.job)
+        self.quiet(native_.snapshot, self.job)
         nodes = json.loads((self.job / 'tree.json').read_text())['nodes']
         self.assertEqual((nodes['keeper']['state'], nodes['keeper']['address']), ('live', 't2'))
         (self.job / 'max-helpers').write_text('1\n')
@@ -848,7 +849,7 @@ class Outlived(NativeCase):
         (self.job / 'queue').joinpath('dropped').mkdir(exist_ok=True)
         for path in (self.job / 'queue').glob('*.json'):
             path.unlink()
-        _, out = self.quiet(fj.native().close, self.job)
+        _, out = self.quiet(native_.close, self.job)
         self.assertEqual(out.splitlines(), ['CLOSED keeper-log (t3)', 'CLOSED keeper (t2)', f'CLOSED {LEAD} (t4)'])
 
 
@@ -863,13 +864,13 @@ class Wording(NativeCase):
         self.assertIn("lead names the job's lead", str(refused.exception))
 
     def test_ask_says_core_types_the_answer_into_the_terminal(self):
-        with mock.patch.object(fj.subprocess, 'Popen') as spawned:
+        with mock.patch.object(subprocess, 'Popen') as spawned:
             spawned.return_value.pid = 1
-            _, out = self.quiet(fj.ask, self.job, 'Which db?', [])
+            _, out = self.quiet(owner_.ask, self.job, 'Which db?', [])
         self.assertNotIn('inbox', out)
         self.assertIn("Core types the answer into the lead's terminal", out)
         (self.job / 'owner').write_text('alpha\n')
-        _, out = self.quiet(fj.ask, self.job, 'Which db?', [])
+        _, out = self.quiet(owner_.ask, self.job, 'Which db?', [])
         self.assertNotIn('inbox', out)
         self.assertIn('Core types the answer into your terminal', out)
 

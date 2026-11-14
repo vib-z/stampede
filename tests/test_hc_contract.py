@@ -9,9 +9,10 @@ sys.path.insert(0, str(ROOT / 'tests'))
 import hc_contract  # noqa: E402
 
 FAKE_HC = ROOT / 'tests/fake_hc.py'
-PRODUCT = [ROOT / 'skills/herdr-fleet/scripts/fleet_job.py', ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core',
-           ROOT / 'skills/grokbot-herdr/scripts/herdr-event-sweep',
-           ROOT / 'skills/grokbot-herdr/scripts/herdr-event-watchdog', ROOT / 'skills/herdr-fleet/scripts/core_native.py']
+PACKAGE = ROOT / 'skills/herdr-fleet/scripts/stampede'
+PRODUCT = sorted(PACKAGE.glob('*.py')) + [ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core',
+                                          ROOT / 'skills/grokbot-herdr/scripts/herdr-event-sweep',
+                                          ROOT / 'skills/grokbot-herdr/scripts/herdr-event-watchdog']
 
 
 def follower():
@@ -54,7 +55,7 @@ class Snapshot(unittest.TestCase):
         self.assertTrue(self.view['heartbeat'])
 
     def test_the_send_error_kinds_stampede_tells_apart_are_core_s(self):
-        text = PRODUCT[0].read_text()
+        text = (PACKAGE / 'relay.py').read_text()
         self.assertIn("'cancelled'", text)
         self.assertIn('cancelled', self.view['send']['errors'])
 
