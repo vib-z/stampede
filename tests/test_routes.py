@@ -90,14 +90,17 @@ class Routes(unittest.TestCase):
         return sorted({'/bin/bash', *(b for b in ('/opt/homebrew/bin/bash', '/usr/local/bin/bash') if Path(b).exists())})
 
     def test_a_line_the_reader_takes_holds_what_a_shell_that_sources_it_holds(self):
-        taken = ['N=plain', 'export N=plain', '  export   N=a.b/c:d@e%f+g,h=i-j_k', 'N=', 'N= # nothing',
+        taken = ['N=plain', 'export N=plain', 'export\tN=tab\t# a tab between tokens', '  export   N=a.b/c:d@e%f+g,h=i-j_k', 'N=', 'N= # nothing',
                  'N=x # a comment', 'N=x\t# a tab, then a comment', "N='a $b `c` \\d \"e\"'", "N='x' # it's",
                  'N="a b $HOME ${HOME} ~/c \' !"', 'N="x" # c', 'N=$HOME/x', 'N=${HOME}/x', 'N=~/x', 'N=$HOME',
                  'N=a=b', 'N="$HOME}"', 'N=trailing   ']
         skipped = ['N=$(echo ran)', 'N=`echo ran`', 'N=$OTHER', 'N=$HOMEx', 'N=$HOME_x', 'N="${HOME:-x}"', 'N=${HOME:-x}',
                    'N="a\\"b"', 'N=a\\ b', 'N=a b', 'N=(a b)', 'N=a#b', "N='a'#b", 'N="a"b', 'N=x\\', 'N=~', 'N=a:~/b',
                    'N=*', 'N=a;b', 'export N', 'export -n N=x', 'readonly N=x', 'N=x; M=y', 'N=x && M=y', 'f() { N=x; }',
-                   'if true; then N=x; fi', 'N={a,b}', 'N="$1"', 'N=é']
+                   'if true; then N=x; fi', 'N={a,b}', 'N="$1"', 'N=é', '1N=x', 'N=a$', 'N="a$"',
+                   # a control byte bash does not take as a space: after the value, before the name, after export
+                   *[f'N=x{c} # c' for c in '\v\f\r'], *[f'{c}N=x' for c in '\v\f\r'], *[f'export{c}N=x' for c in '\v\f\r'],
+                   "N='a\tb'", 'N="a\tb"', 'N=a\x01b']
         for bash in self.bashes():
             for line in taken + skipped:
                 with self.subTest(bash=bash, line=line):
@@ -109,17 +112,41 @@ class Routes(unittest.TestCase):
                         self.assertEqual(got, self.read_back(bash, ['HERDR_EVENTS_MACHINE'], 'source')['HERDR_EVENTS_MACHINE'])
                         self.assertNotEqual(got, '<unset>')
 
-    def test_crlf_no_final_newline_the_last_line_wins_and_an_oversized_file_is_skipped(self):
+    def test_crlf_no_final_newline_and_the_last_line_wins(self):
         self.settings('HC=one\r\nHC=two\r\nHC_SESSION=s')
         self.assertEqual(self.read_back('/bin/bash', ['HC', 'HC_SESSION']), {'HC': 'two', 'HC_SESSION': 's'})
-        self.settings('HC=one\n' + '# filler\n' * 500)
-        self.assertEqual(self.read_back('/bin/bash', ['HC']), {'HC': '<unset>'})
-        self.settings('HC=one\n# ' + 'x' * 5000 + '\n')
-        self.assertEqual(self.read_back('/bin/bash', ['HC']), {'HC': '<unset>'})
+
+    def test_a_file_over_100_lines_or_16_kb_or_with_a_nul_is_skipped_whole_and_the_event_still_goes(self):
+        self.route('bot-alpha', 'https://alpha.invalid/hook')
+        names = [f'HERDR_EVENTS_X{i}' for i in range(100)]
+        longest = [f'{n}={"v" * (161 - len(n))}' for n in names]   # 100 lines, 16 KB: the most a file may hold
+        self.settings('\n'.join(longest) + '\n')
+        self.assertLessEqual(len('\n'.join(longest) + '\n'), 16384)
+        for bash in self.bashes():
+            got = self.read_back(bash, names)
+            self.assertEqual([n for n in names if got[n] == '<unset>'], [], bash)
+        for text in ('\n'.join(longest) + '\nHC=x\n',                     # 101 lines
+                     'HC=x\n' + '# ' + 'x' * 16384 + '\n',                 # over 16 KB
+                     '\n'.join(f'{n}={"v" * 400}' for n in names) + '\n',  # enough to overflow the environment
+                     'HC=x\n\0\nHC_SESSION=y\n'):                          # a NUL byte
+            self.settings(text)
+            for bash in self.bashes():
+                self.assertEqual(set(self.read_back(bash, ['HC', 'HC_SESSION', names[0]]).values()), {'<unset>'}, (bash, text[:40]))
+            post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}),
+                             HERDR_EVENTS_ROUTES_DIR=str(self.routes))
+            self.assertEqual((post.returncode, post.stdout, post.stderr), (0, '', ''))
+            self.assertIn('https://alpha.invalid/hook', self.sent.read_text())
+            self.sent.unlink()
+            (self.home / '.local/state/herdr-events/dedupe.tsv').unlink()
+        self.settings('\n'.join(longest) + '\n')   # the largest file allowed: the event still goes
+        post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}),
+                         HERDR_EVENTS_ROUTES_DIR=str(self.routes))
+        self.assertEqual((post.returncode, post.stderr), (0, ''))
+        self.assertIn('https://alpha.invalid/hook', self.sent.read_text())
 
     def test_every_setting_config_example_lists_is_read_and_no_identity_name_is(self):
         text = (ROOT / 'config.example').read_text().split('\n# Environment only')[1]
-        names = sorted(set(re.findall(r'(?m)^# ([A-Z][A-Z0-9_]*)=', text))) + ['HERDR_BIN_PATH', 'HERDR_PLUGIN_STATE_DIR']
+        names = sorted(set(re.findall(r'(?m)^# ([A-Z][A-Z0-9_]*)=', text))) + ['HERDR', 'HERDR_BIN_PATH', 'HERDR_PLUGIN_STATE_DIR']
         identity = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_PLUGIN_EVENT_JSON',
                     'HERDR_EVENTS_OWNER', 'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'STAMPEDE_JOB_KEY', 'FLEET_JOB_DIR']
         self.assertIn('HERDR_EVENTS_ROUTES_DIR', names)

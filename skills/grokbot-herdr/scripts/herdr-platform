@@ -4,22 +4,33 @@
 # GNU stat -c is tried first: on GNU, stat -f prints a filesystem report and still exits 0.
 # A script sources the copy beside itself, following one symlink (install.sh links the scripts).
 
+if stat -c %s / >/dev/null 2>&1; then
+  file_bytes() { stat -c %s "$1"; }
+  file_mtime() { stat -c %Y "$1"; }
+  file_mode() { stat -c %a "$1"; }
+else
+  file_bytes() { stat -f %z "$1"; }
+  file_mtime() { stat -f %m "$1"; }
+  file_mode() { stat -f %Lp "$1"; }
+fi
+
 # The settings file, ${XDG_CONFIG_HOME:-~/.config}/stampede/config: the user's own shell file, read here as data and
 # never run, so a script a timer or a hook starts with no environment sees its settings too. A line counts only when
 # it is [export ]NAME=value, the value bare, '...' or "...", with $HOME, ${HOME} and a leading ~/ the only expansions,
-# then an optional " # comment"; a final CR is dropped. Any other line is skipped, and herdr_settings_skipped lists
-# its number for herdr-doctor. A setting (FLEET_*, HERDR_*, HC, HC_*, STAMPEDE_*) is exported unless the environment
-# holds it, even empty; the names Herdr, Herdr Core and stampede set per pane, terminal or job never are. A file that
-# is not regular, has over 500 lines or a line of 4096 characters is skipped whole. Nothing here prints.
+# then an optional " # comment"; only a space and a tab separate, and a final CR is dropped. Any other line, or one
+# holding another control byte, is skipped; herdr_settings_skipped lists its number for herdr-doctor. A setting
+# (FLEET_*, HERDR, HERDR_*, HC, HC_*, STAMPEDE_*) is exported unless the environment holds it, even empty; the names
+# Herdr, Herdr Core and stampede set per pane, terminal or job never are. A file that is not regular, over 16 KB or
+# over 100 lines, or holding a NUL byte, is skipped whole. Nothing here prints.
 herdr_settings_skipped=""
-_hp_f="${XDG_CONFIG_HOME:-$HOME/.config}/stampede/config"
-if [ -f "$_hp_f" ] && [ -r "$_hp_f" ]; then
-  _hp_an=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
-  _hp_line="^[[:space:]]*(export[[:space:]]+)?([_$_hp_an]+)=(.*)\$"
-  _hp_end='([[:space:]]+#.*)?[[:space:]]*$'
-  _hp_sq="^'([^']*)'$_hp_end"
-  _hp_dq='^"([^"\\`]*)"'"$_hp_end"
-  _hp_bare="^([$_hp_an./:@%+,=~\${}_-]*)$_hp_end"
+_hp_f="${XDG_CONFIG_HOME:-$HOME/.config}/stampede/config"; _hp_size=""
+# a relay script this one starts holds every value already (it inherits them, and the environment wins): it skips this
+[ "${_STAMPEDE_SETTINGS_READ-}" != "$_hp_f" ] && [ -f "$_hp_f" ] && [ -r "$_hp_f" ] && _hp_size=$(file_bytes "$_hp_f" 2>/dev/null)
+case $_hp_size in ''|*[!0-9]*) _hp_size=16385;; esac
+if [ "$_hp_size" -le 16384 ]; then
+  _hp_al=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_; _hp_an=${_hp_al}0123456789; _hp_ws=$' \t'
+  # one line: NAME=, then '...', "..." or a bare word, then nothing or a # comment; no control byte but a separating tab
+  _hp_re="^[$_hp_ws]*(export[$_hp_ws]+)?([$_hp_al][$_hp_an]*)=('[^'[:cntrl:]]*'|\"[^\"\\\`[:cntrl:]]*\"|[$_hp_an./:@%+,=~\${}-]*)([$_hp_ws]+#[^[:cntrl:]]*)?[$_hp_ws]*\$"
   _hp_expand() {  # _hp_expand <text> <1 for a bare word>: _hp_out is <text> with $HOME, ${HOME} (and, bare, ~/) expanded; 1 for anything else
     local s=$1 pre rest
     _hp_out=""
@@ -41,27 +52,32 @@ if [ -f "$_hp_f" ] && [ -r "$_hp_f" ]; then
     [ "$2" = 1 ] && case $s in *[{}]*) return 1;; esac
     _hp_out=$_hp_out$s
   }
-  _hp_n=0; _hp_ok=1; _hp_names=(); _hp_values=()
-  while IFS= read -r -n 4096 _hp_l || [ -n "$_hp_l" ]; do
-    _hp_n=$((_hp_n + 1))
-    if [ "${#_hp_l}" -ge 4096 ] || [ "$_hp_n" -gt 500 ]; then _hp_ok=0; break; fi
-    _hp_l=${_hp_l%$'\r'}
-    case ${_hp_l#"${_hp_l%%[![:space:]]*}"} in ''|'#'*) continue;; esac
-    _hp_good=0
-    if [[ $_hp_l =~ $_hp_line ]]; then
-      _hp_k=${BASH_REMATCH[2]}; _hp_r=${BASH_REMATCH[3]}
-      if [[ $_hp_r =~ $_hp_sq ]]; then _hp_out=${BASH_REMATCH[1]}; _hp_good=1
-      elif [[ $_hp_r =~ $_hp_dq ]]; then _hp_expand "${BASH_REMATCH[1]}" 0 && _hp_good=1
-      elif [[ $_hp_r =~ $_hp_bare ]]; then _hp_expand "${BASH_REMATCH[1]}" 1 && _hp_good=1
-      fi
+  _hp_n=0; _hp_b=0; _hp_ok=1; _hp_names=(); _hp_values=(); _hp_l=""
+  _hp_lc=${LC_ALL-}; _hp_lcset=${LC_ALL+x}; LC_ALL=C   # bytes, and ASCII classes, whatever the user's locale
+  while [ "$_hp_ok" = 1 ] && { IFS= read -r _hp_l || [ -n "$_hp_l" ]; }; do
+    _hp_n=$((_hp_n + 1)); _hp_b=$((_hp_b + ${#_hp_l} + 1))
+    if [ "$_hp_n" -gt 100 ]; then _hp_ok=0; break; fi
+    _hp_l=${_hp_l%$'\r'}; _hp_good=0
+    if [[ $_hp_l =~ $_hp_re ]]; then
+      _hp_k=${BASH_REMATCH[2]}; _hp_out=${BASH_REMATCH[3]}; _hp_good=1
+      case $_hp_out in
+        \'*) _hp_out=${_hp_out:1:${#_hp_out}-2};;
+        \"*) _hp_out=${_hp_out:1:${#_hp_out}-2}; [[ $_hp_out =~ [$] ]] && { _hp_expand "$_hp_out" 0 || _hp_good=0; };;
+        *) [[ $_hp_out =~ [$~{}] ]] && { _hp_expand "$_hp_out" 1 || _hp_good=0; };;
+      esac
+    else
+      case ${_hp_l#"${_hp_l%%[!$_hp_ws]*}"} in ''|'#'*) continue;; esac
     fi
     if [ "$_hp_good" = 0 ]; then herdr_settings_skipped="$herdr_settings_skipped $_hp_n"; continue; fi
     case $_hp_k in
       HERDR_ENV|HERDR_PANE_ID|HERDR_TAB_ID|HERDR_WORKSPACE_ID|HERDR_PLUGIN_EVENT_JSON|HERDR_EVENTS_OWNER) ;;
       HC_TERMINAL_*|HC_SCOPE|STAMPEDE_JOB_KEY|FLEET_JOB_DIR) ;;
-      FLEET_*|HERDR_*|HC|HC_*|STAMPEDE_*) _hp_names[${#_hp_names[@]}]=$_hp_k; _hp_values[${#_hp_values[@]}]=$_hp_out;;
+      FLEET_*|HERDR|HERDR_*|HC|HC_*|STAMPEDE_*) _hp_names[${#_hp_names[@]}]=$_hp_k; _hp_values[${#_hp_values[@]}]=$_hp_out;;
     esac
   done <"$_hp_f"
+  # read drops a NUL byte (bash 3.2 also the rest of its line), so a file holding one reads short of its size
+  [ "$_hp_b" -eq "$_hp_size" ] || [ "$_hp_b" -eq $((_hp_size + 1)) ] || _hp_ok=0
+  { if [ -n "$_hp_lcset" ]; then LC_ALL=$_hp_lc; else unset LC_ALL; fi; } 2>/dev/null
   # the last line for a name wins, as in a shell: export from the end, each name once, never over the environment
   _hp_i=${#_hp_names[@]}
   while [ "$_hp_ok" = 1 ] && [ "$_hp_i" -gt 0 ]; do
@@ -69,21 +85,12 @@ if [ -f "$_hp_f" ] && [ -r "$_hp_f" ]; then
     [ -n "${!_hp_k+x}" ] || export "$_hp_k=${_hp_values[$_hp_i]}"
   done
   [ "$_hp_ok" = 1 ] || herdr_settings_skipped=""
+  export _STAMPEDE_SETTINGS_READ="$_hp_f"
   herdr_settings_skipped=${herdr_settings_skipped# }
   unset -f _hp_expand
-  unset _hp_an _hp_line _hp_end _hp_sq _hp_dq _hp_bare _hp_n _hp_ok _hp_names _hp_values _hp_l _hp_good _hp_k _hp_r _hp_out _hp_i
+  unset _hp_al _hp_an _hp_ws _hp_re _hp_b _hp_lc _hp_lcset _hp_n _hp_ok _hp_names _hp_values _hp_l _hp_good _hp_k _hp_r _hp_out _hp_i
 fi
-unset _hp_f
-
-if stat -c %s / >/dev/null 2>&1; then
-  file_bytes() { stat -c %s "$1"; }
-  file_mtime() { stat -c %Y "$1"; }
-  file_mode() { stat -c %a "$1"; }
-else
-  file_bytes() { stat -f %z "$1"; }
-  file_mtime() { stat -f %m "$1"; }
-  file_mode() { stat -f %Lp "$1"; }
-fi
+unset _hp_f _hp_size
 
 # MD5 of stdin, the same hex on both (pane output, compared only with itself).
 hash_stdin() { python3 -c 'import hashlib,sys; print(hashlib.md5(sys.stdin.buffer.read()).hexdigest())'; }
