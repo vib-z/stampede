@@ -16,7 +16,7 @@ git clone https://github.com/vib-z/stampede.git ~/stampede && cd ~/stampede
 ./install.sh --dry-run                              # read what it would do
 ./install.sh                                        # on Linux this also starts the event timers
 mkdir -p ~/.config/stampede && echo 'export HERDR_EVENTS_MACHINE=<this machine>' >> ~/.config/stampede/config
-echo '. ~/.config/stampede/config' >> ~/.zshrc       # bash: ~/.bashrc; the plugin event reads this file too
+echo '. ~/.config/stampede/config' >> ~/.zshrc       # bash: ~/.bashrc; the relay and its timers read it too
 herdr plugin link . && herdr plugin list            # only when a bot should hear events
 ```
 

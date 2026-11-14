@@ -19,7 +19,7 @@ Events cover a turn that ends. Watchdogs cover the rest: an agent that hangs, a 
 | `herdr-event-core <job>` | a `--core --relay` job's follower, in place of the TUI watchdog and `fleet-watch.sh` for that job, its handed TUI panes included: `stale` once per stall (`HERDR_EVENTS_STALE_MINUTES`, 30), `dead`, `RELAY DOWN`, and with `FLEET_WATCH_NOTIFY=1` a phone push ([core.md](../skills/herdr-fleet/references/core.md)) | started by `stampede new --core --relay` |
 | `fleet-watch.sh` | for a bot outside Herdr: `REPORT`, `BLOCKED`, `GONE` and `STALL?` lines for one job, with a phone push (`FLEET_WATCH_*`) | by the bot, as a background command |
 
-The two timers. On macOS, launch agents with the labels `herdr-doctor --relay` checks:
+The two timers. A timer starts its helper with no environment; the helper reads `~/.config/stampede/config` itself, so set a value there, never in a plist or unit. On macOS, launch agents with the labels `herdr-doctor --relay` checks:
 
 ```bash
 plist() {  # plist <label> <helper> <seconds>

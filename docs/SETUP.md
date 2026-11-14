@@ -87,7 +87,7 @@ mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config.toml
 stampede config show
 ```
 
-The layers, every key and the environment names that still work: [README, Configure](../README.md#configure). The environment-only variables (`HC`, `HC_SESSION`, `HC_SOCKET`, `HERDR_EVENTS_*`, `FLEET_WATCH_*` and the others at the end of config.example) stay environment variables: export them in your shell profile, or in the shell file `~/.config/stampede/config` sourced from it, which the plugin event also reads. A shell file you already source keeps working: every variable in it is read as before.
+The layers, every key and the environment names that still work: [README, Configure](../README.md#configure). The environment-only variables (`HC`, `HC_SESSION`, `HC_SOCKET`, `HERDR_EVENTS_*`, `FLEET_WATCH_*` and the others at the end of config.example) stay environment variables: export them in your shell profile, or in the shell file `~/.config/stampede/config` sourced from it. The relay scripts (the plugin event, the hooks, the watchdog and the flusher) read that file themselves, so a timer started with no environment honours it too; a value already in the environment wins.
 
 ## The event relay, for a remote bot
 

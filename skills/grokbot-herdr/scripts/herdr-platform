@@ -4,6 +4,25 @@
 # GNU stat -c is tried first: on GNU, stat -f prints a filesystem report and still exits 0.
 # A script sources the copy beside itself, following one symlink (install.sh links the scripts).
 
+# The settings file: the user's own shell file ${XDG_CONFIG_HOME:-~/.config}/stampede/config, so a script a timer or a
+# hook starts with no environment sees what a shell that sources it sees. It runs once, in a subshell (one fork, no
+# new program); each FLEET_, HERDR_, HC or STAMPEDE_ variable it sets is exported unless the environment already holds
+# it, even empty. A missing file is silent. One that writes to stderr (a syntax error) gives its first line, and the
+# script goes on with what it did set.
+_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/stampede/config"
+if [ -r "$_cfg" ]; then
+  _err=""
+  { IFS= read -r -d '' _err || true
+    while IFS= read -r -d '' _kv; do
+      _k=${_kv%%=*}; [ -n "${!_k+x}" ] || export "$_kv"
+    done
+  } < <(set +eu; set -a; . "$_cfg" 2>&1 >/dev/null </dev/null; printf '\0'
+        for _k in ${!FLEET_*} ${!HERDR_*} ${!HC*} ${!STAMPEDE_*}; do printf '%s=%s\0' "$_k" "${!_k}"; done)
+  [ -z "$_err" ] || printf 'stampede settings: %s\n' "${_err%%$'\n'*}" >&2
+  unset _err _kv _k
+fi
+unset _cfg
+
 if stat -c %s / >/dev/null 2>&1; then
   file_bytes() { stat -c %s "$1"; }
   file_mtime() { stat -c %Y "$1"; }

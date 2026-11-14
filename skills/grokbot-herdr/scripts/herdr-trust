@@ -3,6 +3,9 @@
 # (~/.codex/config.toml, only when ~/.codex exists), so agents started there skip the folder-trust dialog. Owner-approved 2026-10-16 for
 # fleet setup. Only repos under $FLEET_TRUST_ROOT (default ~/code). Trusts the main checkout's root, which covers its worktrees. Idempotent.
 set -euo pipefail
+_src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
+case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
+. "$(dirname "$_src")/herdr-platform"
 dir="${1:?usage: herdr-trust <dir>}"
 common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || { echo "not a git repo: $dir" >&2; exit 2; }
 root=$(cd "$(dirname "$common")" && pwd -P)
