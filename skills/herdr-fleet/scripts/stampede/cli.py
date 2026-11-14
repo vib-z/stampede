@@ -106,6 +106,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         kind = check(settings.get('lead.kind'), settings)
         if lead_model or lead_effort:
             settings = settings_.for_new(repo, {**flags, f'lead.{kind}.model': lead_model, f'lead.{kind}.effort': lead_effort})
+        model = settings.get(f'lead.{kind}.model')
+        if model in settings.get('lead.forbid'):
+            raise ValueError(f'the lead may not run on {model} (lead.forbid): pick another with --lead-model, or another CLI with --lead')
         return settings, kind
     if core:
         settings, kind = resolve(repo_of(cwd))

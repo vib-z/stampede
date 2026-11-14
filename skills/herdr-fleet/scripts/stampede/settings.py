@@ -11,10 +11,10 @@ except ImportError:  # Python 3.9 and 3.10
     tomllib = None
 
 DEFAULTS_FILE = Path(__file__).resolve().parent / 'defaults.toml'
-ENV = {'FLEET_LEAD_KIND': 'lead.kind', 'FLEET_ASK_CMD': 'ask.command', 'FLEET_JOBS_ROOT': 'jobs_root',
+ENV = {'FLEET_LEAD_KIND': 'lead.kind', 'FLEET_LEAD_FORBID': 'lead.forbid', 'FLEET_ASK_CMD': 'ask.command', 'FLEET_JOBS_ROOT': 'jobs_root',
        'FLEET_TRUST_ROOT': 'trust_root', 'STAMPEDE_MAX_HELPERS': 'helpers.max', 'STAMPEDE_TAB_PANES': 'helpers.tab_panes'}
 # FLEET_LEAD_MODEL and FLEET_LEAD_EFFORT set the pair of the CLI the model belongs to: see lead_env.
-USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.')  # run a command or lower a safety rule: never from a repo
+USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.', 'lead.forbid')  # run a command or lower a safety rule: never from a repo
 ENV_ONLY = (  # read by other programs too, so they stay environment variables: (name, default, what it does)
     ('FLEET_WATCH_INTERVAL', '30', 'seconds between passes of fleet-watch.sh'),
     ('FLEET_WATCH_PASSES', '0', 'fleet-watch.sh stops after this many passes; 0 runs until stopped'),
@@ -24,6 +24,9 @@ ENV_ONLY = (  # read by other programs too, so they stay environment variables: 
     ('HERDR_EVENTS_ROUTES_DIR', '~/.config/herdr-events/routes', 'one file per route, holding URL= and KEY='),  # $HERDR_EVENTS_DIR/routes
     ('HERDR_EVENTS_FLUSH_LOG', '~/.herdr-events/flush.log', "the flusher's log"),  # $HERDR_EVENTS_HOME/flush.log
     ('HERDR_EVENTS_DIR', '~/.config/herdr-events', 'owner tags, job markers, handed panes'),
+    ('HERDR_EVENTS_FALLBACK_ROUTE', '', 'a route for an owner with no route file, and for a Codex turn outside Herdr'),
+    ('HERDR_EVENTS_LAUNCHD', 'local', 'the label prefix of the two macOS launchd jobs herdr-doctor checks'),
+    ('HERDR_DOCTOR_EXTRA', '', 'an executable of your own that herdr-doctor runs last'),
     ('HERDR_EVENTS_STALE_MINUTES', '30', "minutes a working terminal's screen may stay unchanged before stale"),
     ('HC', 'hc', 'the Herdr Core binary'),
     ('HC_SESSION', 'default', 'which core'),
@@ -200,7 +203,7 @@ def kind(value):
 def fits(value, default):
     """The default's type is the key's type; a list's items take the type of the default's first item."""
     if isinstance(default, list):
-        return isinstance(value, list) and all(type(item) is type(default[0]) for item in value)
+        return isinstance(value, list) and all(type(item) is type(default[0] if default else '') for item in value)
     return type(value) is type(default)
 
 
@@ -274,6 +277,8 @@ def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
     for key, name in [(key, name) for name, key in ENV.items() if env.get(name)] + lead_env(env):
         text = env[name]
         number = isinstance(DEFAULTS[key], int) and re.fullmatch(r'[+-]?[0-9]+', text)
+        if isinstance(DEFAULTS[key], list):  # a list from the environment: comma-separated
+            text = [item.strip() for item in text.split(',') if item.strip()]
         put(key, int(text) if number else text, 'env:' + name, 'environment ' + name)
     for key, value in (saved or {}).get('values', {}).items():
         source = saved['sources'].get(key, 'default')

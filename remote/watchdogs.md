@@ -12,14 +12,14 @@ Events cover a turn that ends. Watchdogs cover the rest: an agent that hangs, a 
 ## Run
 | helper | what it does | how it runs |
 |---|---|---|
-| `herdr-doctor --relay` | read only: tools on PATH, the Herdr server and client, the event plugin, the hooks, the helpers, the two timers below, the routes, the queue, owner tags, leftover worktrees, a newer release (a `warn`, daily), free disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM. `stampede doctor` runs it, after its own checks | by hand or by the bot, before a job |
+| `herdr-doctor --relay` | read only: tools on PATH, the Herdr server and client, the event plugin, hooks and helpers, the two timers below, the routes, the queue, owner tags, leftover worktrees, a newer release (a daily `warn`), free disk, then `HERDR_DOCTOR_EXTRA`; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM; `stampede doctor` runs it | by hand or by the bot, before a job |
 | `herdr-event-watchdog` | sends `stale` (working, no output change for 30 minutes) and `dead` (pane gone without a done); skips a pane a Herdr Core job handed an agent to (its follower watches it); removes malformed tags and tags of workspaces gone a day; before its Herdr TUI part, so with or without the Herdr TUI, runs `herdr-event-sweep` once and goes on whatever it returns | every 5 minutes |
 | `herdr-event-flush` | sends the queued events, oldest first; after 24 hours undelivered, an event moves to `dead/`; a stampede question, gate or post it holds for a route with no URL, or moves to `dead/`, is told to its lead as an `UNDELIVERED` line (in a Core-native job, with `stampede tell <job> lead`) | every 2 minutes |
 | `herdr-event-sweep` | one look at the lead of each open Core-native job, on its own core: `blocked`, `error`, `stale` (`HERDR_EVENTS_STALE_MINUTES`, 30) and `dead`, once each, kept in `<job>/sweep-state.json` ([events-core.md](events-core.md#a-core-native-job-the-sweep)) | by `herdr-event-watchdog` |
 | `herdr-event-core <job>` | a `--core --relay` job's follower, in place of the TUI watchdog and `fleet-watch.sh` for that job, its handed TUI panes included: `stale` once per stall (`HERDR_EVENTS_STALE_MINUTES`, 30), `dead`, `RELAY DOWN`, and with `FLEET_WATCH_NOTIFY=1` a phone push ([core.md](../skills/herdr-fleet/references/core.md)) | started by `stampede new --core --relay` |
 | `fleet-watch.sh` | for a bot outside Herdr: `REPORT`, `BLOCKED`, `GONE` and `STALL?` lines for one job, with a phone push (`FLEET_WATCH_*`) | by the bot, as a background command |
 
-The two timers. A timer starts its helper with no environment; the helper reads the plain `NAME=value` lines of `~/.config/stampede/config` itself and runs nothing in it, so set a value there, never in a plist or unit. On macOS, launch agents with the labels `herdr-doctor --relay` checks:
+The two timers. A timer starts its helper with no environment; the helper reads the plain `NAME=value` lines of `~/.config/stampede/config` itself and runs nothing in it, so set a value there, never in a plist or unit. On macOS, launch agents with the labels `herdr-doctor --relay` checks (the prefix `local`, or the one `HERDR_EVENTS_LAUNCHD` names):
 
 ```bash
 plist() {  # plist <label> <helper> <seconds>

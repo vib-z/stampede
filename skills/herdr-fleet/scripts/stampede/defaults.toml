@@ -7,6 +7,7 @@ trust_root = "~/code"            # herdr-trust trusts repos only under this fold
 
 [lead]
 kind = "claude"  # the lead's CLI when stampede new has no --lead: claude or codex; --fork takes claude (env FLEET_LEAD_KIND)
+forbid = []      # models that may not lead a job: stampede new refuses one, however it was chosen (user only; env FLEET_LEAD_FORBID, comma-separated)
 
 [lead.claude]
 model = "claude-opus-5-5"  # a Claude lead's model (env FLEET_LEAD_MODEL, when it is not a gpt-... model)

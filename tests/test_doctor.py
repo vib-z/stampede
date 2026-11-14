@@ -44,7 +44,7 @@ esac
 exit 0
 ''')
         self.fake('launchctl', '''echo launchctl >> "$HOME/calls"
-[ "${TEST_LAUNCHD:-0}" = 1 ] && printf '%s\n' '- 0 local.herdr-event-watchdog' '- 0 local.herdr-events-flush'
+[ "${TEST_LAUNCHD:-0}" = 1 ] && printf '%s\n' "- 0 ${TEST_LAUNCHD_PREFIX:-local}.herdr-event-watchdog" "- 0 ${TEST_LAUNCHD_PREFIX:-local}.herdr-events-flush"
 exit 0
 ''')
         self.fake('df', "printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 99999999 0 %s 0%% /\\n' \"${TEST_DISK_KB:-52428800}\"\n")
@@ -222,6 +222,51 @@ echo disabled; exit 1
         self.assert_problem(self.doctor(), 'stampede --version does not match VERSION')
         (self.bin / 'stampede').unlink()
         self.assert_problem(self.doctor(), 'stampede not on PATH')
+
+    def test_the_launchd_label_prefix_is_a_setting(self):
+        if platform.system() != 'Darwin':
+            self.skipTest('launchd is the macOS timer')
+        plist = self.home / 'Library/LaunchAgents/org.example.herdr-events-flush.plist'   # its plist alone turns the relay checks on
+        plist.parent.mkdir(parents=True)
+        plist.write_text('')
+        self.assertIn('ok event relay not installed', self.doctor().stdout)              # unset: the prefix local, as before
+        self.assert_problem(self.doctor(HERDR_EVENTS_LAUNCHD='org.example'), 'launchd org.example.herdr-event-watchdog not loaded')
+        env = {**self.configure_relay(), 'TEST_LAUNCHD_PREFIX': 'org.example'}
+        self.assert_problem(self.doctor(**env), 'launchd local.herdr-event-watchdog not loaded')
+        result = self.doctor(**env, HERDR_EVENTS_LAUNCHD='org.example')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('ok launchd org.example.herdr-events-flush loaded', result.stdout)
+
+    def test_the_extra_check_runs_last_and_its_problems_count(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text('#!/bin/bash\necho "ok my watchdog loaded"\necho "warn my updater is old: update it"\n')
+        extra.chmod(0o755)
+        plain = self.doctor()
+        result = self.doctor(HERDR_DOCTOR_EXTRA=str(extra))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines(), plain.stdout.splitlines() + ['ok my watchdog loaded', 'warn my updater is old: update it'])
+        extra.write_text('#!/bin/bash\necho "PROBLEM route mine missing: restore it"\n')
+        self.assert_problem(self.doctor(HERDR_DOCTOR_EXTRA=str(extra)), 'route mine missing: restore it')
+        extra.write_text('#!/bin/bash\necho "ok half done"\nexit 4\n')                   # a failing one: one warn, no crash
+        result = self.doctor(HERDR_DOCTOR_EXTRA=str(extra))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['ok half done', 'warn HERDR_DOCTOR_EXTRA exited 4: run it by hand to see why'])
+        marker = self.home / 'ran'
+        not_run = [str(self.home / 'nowhere'), 'doctor-extra', str(self.home), f'touch {marker}', f'{extra}; touch {marker}']
+        extra.chmod(0o644)
+        not_run.append(str(extra))                                                   # not executable
+        for value in not_run:
+            with self.subTest(value=value):
+                result = self.doctor(HERDR_DOCTOR_EXTRA=value)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.stdout.splitlines()[-1],
+                                 'warn HERDR_DOCTOR_EXTRA is not an absolute path to an executable file: fix it or unset it')
+                self.assertFalse(marker.exists())
+        extra.chmod(0o755)
+        config = self.home / '.config/stampede/config'   # the settings file reaches the doctor with no shell profile line
+        config.parent.mkdir(parents=True)
+        config.write_text(f'HERDR_DOCTOR_EXTRA={extra}\n')
+        self.assertIn('ok half done', self.doctor().stdout)
 
     def test_a_copy_outside_a_checkout_needs_only_a_working_version(self):
         copy = self.home / 'skill-copy/scripts/herdr-doctor'  # no VERSION three folders up

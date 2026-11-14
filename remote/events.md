@@ -27,7 +27,8 @@ herdr-event-flush                                    # send what is queued, olde
 ```
 
 ## Routes
-- A tagged workspace's events go to the route named after its tag. An untagged workspace, or a bot with no route file, uses the `default` route for its turn events. With neither, an event is logged only.
+- A tagged workspace's events go to the route named after its tag. An untagged workspace, or a bot with no route file, uses the `default` route for its turn events; with `HERDR_EVENTS_FALLBACK_ROUTE` set to a route's name, a bot with no route file uses that one instead. With neither, an event is logged only.
+- A Codex turn with no Herdr pane and no Core terminal (the Codex desktop app) is skipped. With `HERDR_EVENTS_FALLBACK_ROUTE` set, it goes to that route as source `codex-desktop`, with no workspace or owner; each thread and turn is its own event.
 - A question, a gate or a post, and `stampede finish` in a job a bot started, go only through that bot's own route, with `herdr-event-post --strict`.
   - No route of its own: exit 3. Not queued: exit 4. Either is a refusal the lead sees.
   - A route with no URL holds it instead of dropping it. The lead hears one `UNDELIVERED` line when it is held, and another if it is still undelivered after 24 h (in `inbox.log`; in a Core job, through `stampede tell <job> lead`).

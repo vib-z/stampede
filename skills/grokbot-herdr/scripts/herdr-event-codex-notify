@@ -13,8 +13,9 @@ pane=${HERDR_PANE_ID:-}; ws=${HERDR_WORKSPACE_ID:-}
 if [ -z "$pane" ] && [ -n "${HC_TERMINAL_ID:-}" ] && [[ "${STAMPEDE_JOB_KEY:-}" =~ ^hc-[0-9a-f]{12}$ ]]; then
   pane="hc:$STAMPEDE_JOB_KEY/$HC_TERMINAL_ID"; ws=$STAMPEDE_JOB_KEY
 fi
-# A turn with no Herdr pane or stampede Core terminal (the Codex desktop app, any other notify) is not a fleet event.
-if [ -z "$pane" ]; then
+# A turn with no Herdr pane or stampede Core terminal (the Codex desktop app, any other notify) is not a fleet event,
+# unless HERDR_EVENTS_FALLBACK_ROUTE names a route for it: then it goes as source codex-desktop (herdr-event-post checks the name).
+if [ -z "$pane" ] && [ -z "${HERDR_EVENTS_FALLBACK_ROUTE:-}" ]; then
   printf '%s skip: codex turn with no herdr pane\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>"$LOG"
   wait
   exit 0
@@ -34,7 +35,8 @@ if [ -n "$tid" ]; then
     wait; exit 0
   fi
 fi
-jq -c --arg pane "$pane" --arg ws "$ws" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:"codex", state:(.type//"unknown"),
+src=codex; [ -z "$pane" ] && { src=codex-desktop; ws=""; HERDR_EVENTS_OWNER=""; }   # no workspace or owner guessed
+jq -c --arg pane "$pane" --arg ws "$ws" --arg src "$src" --arg ow "${HERDR_EVENTS_OWNER:-}" '{source:$src, state:(.type//"unknown"),
   thread_id:(.["thread-id"]//null), turn_id:(.["turn-id"]//null), cwd:(.cwd//null),
   pane:(if $pane=="" then null else $pane end), workspace:(if $ws=="" then null else $ws end), owner:(if $ow=="" then null else $ow end),
   last_assistant_message:((.["last-assistant-message"]//"")|.[0:2000])} | with_entries(select(.value!=null))' <<<"$json" | herdr-event-post

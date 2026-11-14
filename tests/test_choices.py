@@ -285,6 +285,37 @@ class Lead(Choices):
         self.assertIn('-m gpt-6-astra -c model_reasoning_effort="high"', ' '.join(self.lead_run()))
 
 
+    def test_a_forbidden_lead_model_is_refused_before_anything_is_made(self):
+        root = job_.jobs_root() / 'jobs'
+        cases = (('the default', '', {}, ()), ('--lead-model', '', {}, ('--lead-model', 'claude-fable-5-1')),
+                 ('the user file', '[lead.claude]\nmodel = "claude-fable-5-1"\n', {}, ()),
+                 ('the environment', '', {'FLEET_LEAD_MODEL': 'claude-fable-5-1'}, ()),
+                 ('a codex lead', '', {}, ('--lead', 'codex')))
+        for how, user, env, flags in cases:
+            model = 'gpt-6-astra' if 'codex' in flags else 'claude-opus-5-5' if how == 'the default' else 'claude-fable-5-1'
+            for forbid in (f'[lead]\nforbid = ["{model}"]\n', None):
+                with self.subTest(how=how, forbid=forbid):
+                    self.config(user + (forbid or ''))
+                    env_ = {**env, 'FLEET_LEAD_FORBID': '' if forbid else f'other, {model}'}
+                    code, out, err = self.new('--core', *flags, env=env_)
+                    self.assertEqual(code, 2, out + err)
+                    self.assertIn(f'the lead may not run on {model} (lead.forbid)', err)
+                    self.assertFalse(root.exists() and list(root.iterdir()))
+                    self.assertEqual(self.calls('run'), [])
+        self.config('[lead]\nforbid = ["claude-fable-5-1"]\n')                  # another model leads, and a worker is not checked
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('lead.forbid', json.loads((self.job / 'settings.json').read_text())['values'])
+        code, out, err = self.main('start', self.job, 'build-x', '--model', 'claude-fable-5-1', '--brief', self.brief(self.job, 'build-x'))
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_repo_never_sets_lead_forbid(self):
+        (self.repo / '.stampede.toml').write_text('[lead]\nforbid = ["claude-opus-5-5"]\n')
+        settings = settings_.load(repo=self.repo, env={})
+        self.assertEqual(settings.get('lead.forbid'), [])
+        self.assertIn('lead.forbid is taken only from your own', ' '.join(settings.problems))
+
+
 class Layout(Choices):
     def places(self):
         return [(t['labels']['stampede.pane'], t['labels'].get('stampede.split'), t['labels'].get('stampede.beside'))

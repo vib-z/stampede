@@ -8,6 +8,9 @@
 # 0.1.18 to 0.1.20 changed (a core older than the recommended one, terminals older than the core's bundle on macOS, a
 # core started from inside an agent). One line per check:
 #   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
+# HERDR_EVENTS_LAUNCHD (default local) is the label prefix of the two macOS launchd jobs. HERDR_DOCTOR_EXTRA (default
+# unset) is an absolute path to an executable of your own that runs last: its lines print as they are, and each line
+# that starts PROBLEM counts; a missing or failing one is one warn.
 # Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing, never starts a core; never prints route files or settings values.
 usage(){ echo 'usage: herdr-doctor [--relay] [--tui|--core] [-h|--help]'; }
 relay=0; only=""
@@ -190,8 +193,9 @@ EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"
 R="${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}"
 # Codex's notify array, from its line to the closing bracket (it may span lines)
 codex_notify=$(awk '/^notify *=/{f=1} f{print} f && /]/{exit}' "$HOME/.codex/config.toml" 2>/dev/null)
-if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/local.herdr-event-watchdog.plist" ] \
-  || [ -e "$HOME/Library/LaunchAgents/local.herdr-events-flush.plist" ] \
+LD="${HERDR_EVENTS_LAUNCHD:-local}"   # the label prefix of the two launchd jobs (macOS)
+if [ -d "$R" ] || [ -e "$HOME/Library/LaunchAgents/$LD.herdr-event-watchdog.plist" ] \
+  || [ -e "$HOME/Library/LaunchAgents/$LD.herdr-events-flush.plist" ] \
   || grep -q 'herdr-event-claude-hook' "$HOME/.claude/settings.json" 2>/dev/null \
   || grep -q 'herdr-event-codex-notify' <<<"$codex_notify"; then relay=1; fi
 
@@ -221,7 +225,7 @@ done
 # Timers: launchd on macOS; on Linux, systemd --user when that bus answers, else the flock loop.
 if [ "$(uname -s)" = Darwin ]; then
   lj=$(launchctl list 2>/dev/null)
-  for j in local.herdr-event-watchdog local.herdr-events-flush; do
+  for j in "$LD.herdr-event-watchdog" "$LD.herdr-events-flush"; do
     line=$(awk -v j="$j" '$3==j' <<<"$lj")
     if [ -z "$line" ]; then problem "launchd $j not loaded: launchctl load ~/Library/LaunchAgents/$j.plist"
     elif [ "$(awk '{print $2}' <<<"$line")" != 0 ]; then warn "launchd $j last exit $(awk '{print $2}' <<<"$line"): see ~/Library/Logs/herdr-events*.log"
@@ -305,5 +309,18 @@ fi
 free=$(df -k "$HOME" | awk 'NR==2{print int($4/1048576)}')
 if [ "$free" -lt 10 ]; then problem "${free} GB free on the home disk: clear space before starting agents"
 else ok "${free} GB free"; fi
+
+# your own checks, last: never through a shell string; each line that starts PROBLEM counts
+extra=${HERDR_DOCTOR_EXTRA:-}
+if [ -n "$extra" ]; then
+  if [[ "$extra" != /* ]] || [ ! -f "$extra" ] || [ ! -x "$extra" ]; then
+    warn "HERDR_DOCTOR_EXTRA is not an absolute path to an executable file: fix it or unset it"
+  else
+    out=$("$extra" </dev/null 2>&1); status=$?
+    [ -n "$out" ] && printf '%s\n' "$out"
+    grep -q '^PROBLEM' <<<"$out" && bad=1
+    [ "$status" = 0 ] || warn "HERDR_DOCTOR_EXTRA exited $status: run it by hand to see why"
+  fi
+fi
 
 exit $bad

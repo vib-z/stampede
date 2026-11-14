@@ -53,7 +53,7 @@ class Settings(unittest.TestCase):
     def test_defaults_are_todays_values(self):
         s = self.load()
         self.assertEqual(s.values, {
-            'backend': 'auto', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude',
+            'backend': 'auto', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude', 'lead.forbid': [],
             'lead.claude.model': 'claude-opus-5-5', 'lead.claude.effort': 'xhigh',
             'lead.codex.model': 'gpt-6-astra', 'lead.codex.effort': 'ultra',
             'ask.command': 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h',
@@ -99,12 +99,13 @@ class Settings(unittest.TestCase):
                                        ('FLEET_JOBS_ROOT', 'jobs_root', '~/j', '~/j'),
                                        ('FLEET_TRUST_ROOT', 'trust_root', '~/t', '~/t'),
                                        ('STAMPEDE_MAX_HELPERS', 'helpers.max', '3', 3),
-                                       ('STAMPEDE_TAB_PANES', 'helpers.tab_panes', '2', 2)):
+                                       ('STAMPEDE_TAB_PANES', 'helpers.tab_panes', '2', 2),
+                                       ('FLEET_LEAD_FORBID', 'lead.forbid', ' gpt-x, claude-y ,', ['gpt-x', 'claude-y'])):
             with self.subTest(name=name):
                 s = self.load({name: text})
                 self.assertEqual((s.get(key), s.source(key)), (value, 'env:' + name))
                 self.assertEqual(self.load({name: ''}).source(key), 'default', 'an empty one means unset')
-        self.assertEqual(set(st.ENV), {'FLEET_LEAD_KIND', 'FLEET_ASK_CMD', 'FLEET_JOBS_ROOT', 'FLEET_TRUST_ROOT',
+        self.assertEqual(set(st.ENV), {'FLEET_LEAD_KIND', 'FLEET_LEAD_FORBID', 'FLEET_ASK_CMD', 'FLEET_JOBS_ROOT', 'FLEET_TRUST_ROOT',
                                        'STAMPEDE_MAX_HELPERS', 'STAMPEDE_TAB_PANES'})
 
     def test_the_lead_model_and_effort_set_the_pair_of_the_cli_their_model_names(self):
@@ -157,9 +158,11 @@ class Settings(unittest.TestCase):
 
     def test_a_user_only_key_in_a_repo_file_is_skipped(self):
         repo = self.write('repo', 'jobs_root = "/x"\ntrust_root = "/"\n[ask]\ncommand = "rm -rf ~"\n[gates]\nmerge = false\n'
-                                  '[helpers]\nmax = 2\n')
+                                  '[helpers]\nmax = 2\n[lead]\nforbid = ["claude-opus-5-5"]\n')
         s = self.load()
-        self.assertEqual([p.split(':')[1].split()[0] for p in s.problems], ['jobs_root', 'trust_root', 'ask.command', 'gates.merge'])
+        self.assertEqual([p.split(':')[1].split()[0] for p in s.problems], ['jobs_root', 'trust_root', 'ask.command', 'gates.merge',
+                                                                           'lead.forbid'])
+        self.assertEqual(s.get('lead.forbid'), [], 'a repo never weakens it, nor sets it')
         self.assertTrue(all(p.startswith(f'{repo}: ') and 'never from a repo' in p for p in s.problems))
         self.assertEqual((s.get('jobs_root'), s.get('ask.command'), s.get('helpers.max')),
                          ('~/code/herdr-jobs', st.DEFAULTS['ask.command'], 2))
@@ -361,12 +364,13 @@ class Review(Wired):
         (self.job / 'settings.json').write_text(json.dumps({'values': values, 'sources': sources, 'version': 'x'}))
 
     def test_b1_a_job_snapshot_never_decides_a_user_only_key(self):
-        self.snapshot({'ask.command': '/usr/bin/true', 'jobs_root': '/forged', 'trust_root': '/', 'gates.merge': False},
-                      {'ask.command': 'user', 'jobs_root': 'user', 'trust_root': 'env:FLEET_TRUST_ROOT', 'gates.merge': 'user'})
+        self.snapshot({'ask.command': '/usr/bin/true', 'jobs_root': '/forged', 'trust_root': '/', 'gates.merge': False, 'lead.forbid': []},
+                      {'ask.command': 'user', 'jobs_root': 'user', 'trust_root': 'env:FLEET_TRUST_ROOT', 'gates.merge': 'user',
+                       'lead.forbid': 'user'})
         self.assertEqual(owner_.ask_command(self.job), st.DEFAULTS['ask.command'], 'the forged source grants nothing')
         s = st.current(self.job)
-        self.assertEqual({k: (s.get(k), s.source(k)) for k in ('ask.command', 'jobs_root', 'trust_root')},
-                         {k: (st.DEFAULTS[k], 'default') for k in ('ask.command', 'jobs_root', 'trust_root')})
+        self.assertEqual({k: (s.get(k), s.source(k)) for k in ('ask.command', 'jobs_root', 'trust_root', 'lead.forbid')},
+                         {k: (st.DEFAULTS[k], 'default') for k in ('ask.command', 'jobs_root', 'trust_root', 'lead.forbid')})
         self.config('[ask]\ncommand = "ask-mine"\n')
         out = subprocess.run([str(SCRIPTS / 'fleet-job'), 'config', 'show', '--job', str(self.job)], capture_output=True,
                              text=True, env=dict(os.environ))

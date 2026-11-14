@@ -6,5 +6,6 @@ Thank you for helping. The short version:
 - **Run the tests:** `stampede check` runs the fast part in seconds, and `stampede check --full` (or `python3 -m unittest discover tests`) runs them all, on Python 3.9 or later. They use fakes and never touch a live Herdr.
 - **A front door or a client:** add its row to `CLIENTS` in `tests/test_clients.py` and to [docs/CLIENTS.md](docs/CLIENTS.md), and run `python3 -m unittest tests.test_clients`.
 - **A worker kind (an agent CLI):** follow the README's Contribute steps, then add it to `WORKERS` in `tests/test_clients.py` under each backend that takes it, with the refusal `start` gives in `REFUSED` for a backend that does not, and in `HANDED` when a Core job hands it to a Herdr TUI pane (`--pane`); the suite then starts it for every client.
+- **A change to a skill** goes here: this repo is the source of the four skills. Behaviour only some setups want is a setting with a default in [config.example](config.example), not a private edit.
 - **Open a pull request** with what changed, why, and how you checked it. Keep it to one change.
 - **Report a bug** with an issue: what you ran, what you saw, and `stampede --version`. Security problems go through [SECURITY.md](SECURITY.md), not an issue.
