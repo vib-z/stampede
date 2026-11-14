@@ -14,7 +14,7 @@ from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 from quiet import quiet  # noqa: E402
 
 ORDER = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'next', 'tree', 'approve', 'approve-gate', 'gate-ok', 'cancel',
-         'finish', 'snapshot', 'reopen', 'close', 'doctor', 'check', 'update')
+         'finish', 'snapshot', 'reopen', 'close', 'config', 'doctor', 'check', 'update')
 HIDDEN = ('hook', '_reopen', '_deliver', '_wake', '_ask')
 
 
@@ -160,9 +160,8 @@ class Cli(unittest.TestCase):
         self.assertEqual((code, report['ok']), (1, False))
         missing = [m for m in report['modules'] if m['name'] == 'test_no_such_module']
         self.assertEqual([m['output'] for m in missing], ['tests/test_no_such_module.py is missing from this checkout'])
-        code, report = self.check('check.FAST = ("test_version", "test_no_such_module"); check.OPTIONAL = {"test_no_such_module"}')
-        self.assertEqual((code, report['ok']), (0, True), 'only an optional module may be absent')
-        self.assertEqual(check_.OPTIONAL, {'test_settings'})
+        self.assertIn('test_settings', check_.FAST)
+        self.assertFalse(hasattr(check_, 'OPTIONAL'), 'every fast module is required: test_settings comes with the config')
         (self.home / 'tests').mkdir()
         with mock.patch.object(check_, 'ROOT', self.home), quiet():
             self.assertEqual(check_.main(full=True), 1, 'a full run of no tests is no pass')

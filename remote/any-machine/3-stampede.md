@@ -15,12 +15,12 @@ stampede is three skills and a command, plus a Herdr plugin for events. Install 
 git clone https://github.com/vib-z/stampede.git ~/stampede && cd ~/stampede
 ./install.sh --dry-run                              # read what it would do
 ./install.sh                                        # on Linux this also starts the event timers
-mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config   # then edit HERDR_EVENTS_MACHINE
-echo '. ~/.config/stampede/config' >> ~/.zshrc       # bash: ~/.bashrc
+mkdir -p ~/.config/stampede && echo 'export HERDR_EVENTS_MACHINE=<this machine>' >> ~/.config/stampede/config
+echo '. ~/.config/stampede/config' >> ~/.zshrc       # bash: ~/.bashrc; the plugin event reads this file too
 herdr plugin link . && herdr plugin list            # only when a bot should hear events
 ```
 
 - **Install:** [README, Install](../../README.md#install) and [docs/SETUP.md](../../docs/SETUP.md).
-- **Settings:** every key and its default is in [config.example](../../config.example); never write a value into a script.
+- **Settings:** every key and its default is in [config.example](../../config.example) (keys go in `~/.config/stampede/config.toml`, the environment-only variables in the shell file above); `stampede config show` prints them all. Never write a value into a script.
 - **Events to a bot on this machine:** a route file, as in [events.md](../events.md).
 - **Next:** [4-agents.md](4-agents.md).

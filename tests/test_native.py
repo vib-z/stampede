@@ -77,6 +77,30 @@ class New(NativeCase):
         self.assertEqual((job / 'max-helpers').read_text().strip(), '3')
         self.assertEqual(self.labels(self.runs()[0])['herdr.space'], 'login')
 
+    def test_b4_set_beats_max_helpers_in_the_cap_file(self):
+        from stampede import settings as settings_
+        with mock.patch.object(settings_, 'SETS', ['helpers.max=6']):
+            job = self.started(max_helpers=3)
+        self.assertEqual(((job / 'max-helpers').read_text().strip(), native_.cap(job)), ('6', 6))
+        (job / 'max-helpers').write_text('2\n')  # a later edit of the file still wins
+        self.assertEqual(native_.cap(job), 2)
+        self.setUp()
+        with mock.patch.object(settings_, 'SETS', ['helpers.max=5']):
+            job = self.started()
+        self.assertEqual(((job / 'max-helpers').exists(), native_.cap(job)), (False, 5), 'a --set alone: the saved cap')
+
+    def test_b2_a_start_reads_the_brief_sections_the_job_saved(self):
+        from stampede import settings as settings_
+        job = self.started()
+        saved = json.loads((job / 'settings.json').read_text())
+        saved['values']['brief.sections'], saved['sources']['brief.sections'] = ['Goal'], 'repo'
+        (job / 'settings.json').write_text(json.dumps(saved))
+        brief = job / 'briefs' / 'goal-only.md'
+        brief.write_text('## Goal\nShip it.\n')
+        code, out = self.quiet(cli_.start, job, 'goal-only', 'claude', None, str(brief))
+        self.assertIn('STARTED goal-only', out)
+        self.assertEqual(settings_.current().get('brief.sections')[:2], ['Goal', 'Why'], 'the live layers keep seven')
+
     def test_relay_makes_the_earlier_kind_and_space_needs_native(self):
         with mock.patch.object(relay_, 'new_core', return_value=0) as core:
             self.new(relay=True)
@@ -556,6 +580,108 @@ class FrontDoor(NativeCase):
         self.assertEqual(self.quiet(owner_.wait, self.job, 0, 0)[0], 3)
 
 
+class Timeouts(NativeCase):
+    """Review round 2, B2: every hc call of a native command is timed by its own job's timeouts.hc_call, whatever the
+    process targeted before (a fresh command targets nothing; one process may serve two jobs)."""
+
+    def connect_timeouts(self, call, *args):
+        reply = subprocess.CompletedProcess([], 0, '{"jsonrpc":"2.0","result":{"terminals":[]}}', '')
+        with mock.patch.object(subprocess, 'run', return_value=reply) as run:
+            self.quiet(call, *args)
+        return [c.kwargs.get('timeout') for c in run.call_args_list if 'connect' in c.args[0]]
+
+    def test_post_and_finish_in_a_fresh_command_use_the_jobs_timeout(self):
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 1\n')
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
+            self.started()
+        for call, args in ((owner_.post, (self.job, 'a post')), (owner_.finish, (self.job, 'all done'))):
+            with self.subTest(call=call.__name__), mock.patch.object(hcapi_, 'TARGET', []):
+                found = self.connect_timeouts(call, *args)
+                self.assertTrue(found, 'it lists Core')
+                self.assertEqual(set(found), {1})
+
+    def test_two_jobs_in_one_process_each_use_their_own(self):
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 2\n')
+        first = self.started()
+        self.setUp()
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 9\n')
+        second = self.started()
+        with mock.patch.object(hcapi_, 'TARGET', [first]):
+            self.assertEqual((hcapi_.hc_call(), hcapi_.hc_call(second)), (2, 9), 'no job given: the targeted one')
+            self.assertEqual(set(self.connect_timeouts(native_.caller_ids, second)), {9})
+            self.assertEqual(set(self.connect_timeouts(native_.lead_alive, second)), {9})
+            self.assertEqual(set(self.connect_timeouts(native_.tree, first)), {2})
+
+    def test_a_front_door_job_saves_its_settings_and_wait_reads_them(self):
+        (self.repo / '.stampede.toml').write_text('[timeouts]\nwait = 0\nhc_call = 4\n')
+        self.started(front=True)
+        saved = json.loads((self.job / 'settings.json').read_text())
+        self.assertEqual((saved['values']['timeouts.wait'], saved['sources']['timeouts.wait']), (0, 'repo'))
+        (self.repo / '.stampede.toml').unlink()  # the job keeps what it saved
+        with mock.patch.object(hcapi_, 'TARGET', []):
+            code, out = self.quiet(owner_.wait, self.job)
+        self.assertEqual(code, 3)
+        self.assertIn('after 0s;', out)
+        self.assertEqual(hcapi_.hc_call(self.job), 4)
+
+    TIMED = {'hc': {'job', 'limit'}, 'listing': {'job', 'seconds'}, 'hc_call': {'job'}, 'core_env': {'timeout'},
+             'core_hold': {'timeout'}, 'hc_version': {'timeout'}, 'typing_guard': {'timeout'}, 'typing_unsafe': {'timeout'},
+             'send_limit': {'timeout'}}  # each call that reaches Core, and the argument that times it
+    UNTIMED = {  # (module, function, call): a call that truly has neither, each the last resort for a caller outside
+        ('hcapi', 'core_env', 'hc_call'),     # core_env(timeout=None): timeout or hc_call(), for a caller outside the package
+        ('hcapi', 'hc_version', 'hc_call'),   # the same in hc_version
+    }
+
+    def test_every_call_that_reaches_core_is_timed_by_its_job(self):
+        """By construction: every call in the package of hc, listing, hc_call or a helper that runs hc passes its job or
+        an explicit timeout (by keyword, or listing's and hc_call's first argument), so none can read another job's
+        timeout or the default. The fallback to target()'s job is only for callers outside the package (UNTIMED)."""
+        import ast
+        bad, allowed = [], set()
+        for path in sorted((SCRIPTS / 'stampede').glob('*.py')):
+            for fn in [n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n, ast.FunctionDef)]:
+                for call in [c for c in ast.walk(fn) if isinstance(c, ast.Call)]:
+                    name = getattr(call.func, 'attr', getattr(call.func, 'id', ''))
+                    if name not in self.TIMED:
+                        continue
+                    given = {k.arg for k in call.keywords} | ({'job'} if name in ('listing', 'hc_call') and call.args else set())
+                    if name == 'send_limit' and len(call.args) > 1 or given & self.TIMED[name]:
+                        continue
+                    if (path.stem, fn.name, name) in self.UNTIMED:
+                        allowed.add((path.stem, fn.name, name))
+                        continue
+                    bad.append(f'{path.name}:{call.lineno} {fn.name} calls {name} with no job or timeout')
+        self.assertEqual(bad, [])
+        self.assertEqual(allowed, self.UNTIMED, 'an entry that no longer matches a call goes')
+
+    def test_a_codex_front_door_new_times_its_preflight_with_the_jobs_timeout(self):
+        """Review round 3: new with a Codex lead asks Core for its version and environment before the job folder exists;
+        those calls take the timeouts.hc_call just resolved, whatever this process targeted before."""
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 1\n[lead]\nkind = "codex"\n')
+        real = subprocess.run
+        seen = []
+
+        def run(argv, *args, **kw):
+            seen.append((Path(str(argv[0])).name, argv[1] if len(argv) > 1 else '', kw.get('timeout')))
+            return real(argv, *args, **kw)
+        other = self.root / 'other-job'
+        other.mkdir()
+        (other / 'settings.json').write_text(json.dumps({'values': {'timeouts.hc_call': 7}, 'sources': {'timeouts.hc_call': 'user'}}))
+        for targeted in ([], [other]):
+            with self.subTest(targeted=targeted), mock.patch.object(hcapi_, 'TARGET', list(targeted)), \
+                    mock.patch.object(subprocess, 'run', run):
+                seen.clear()
+                hcapi_.typing_unsafe(timeout=1)
+                self.assertTrue(seen)
+                self.assertEqual({t for _, _, t in seen}, {1}, seen)
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 1\n')  # and the real new, with its preflight
+        with mock.patch.object(hcapi_, 'TARGET', [other]), mock.patch.object(subprocess, 'run', run), \
+                mock.patch.object(hcapi_, 'typing_unsafe', wraps=hcapi_.typing_unsafe) as preflight:
+            seen.clear()
+            self.new(front=True, kind='codex')
+        self.assertEqual(preflight.call_args.kwargs, {'timeout': 1})
+        self.assertEqual({t for _, verb, t in seen if verb in ('exec', '--version', '--core-version')}, {1}, seen)
+
 class Fake(CoreCase):
     def test_a_parent_from_parent_or_the_caller_and_its_end_ends_its_branch(self):
         hcapi_.hc('run', '--bg', '--no-parent', '--name', 'a', '--', 'x')
@@ -566,7 +692,7 @@ class Fake(CoreCase):
         self.assertEqual([hcapi_.hc('get', t)['parent'] for t in ('t1', 't2', 't3', 't4')], [None, 't1', 't2', 't2'])
         hcapi_.hc('kill', 't1')
         self.assertEqual([hcapi_.hc('get', t)['state'] for t in ('t1', 't2', 't3', 't4')], ['finished', 'finished', 'finished', 'live'])
-        self.assertEqual({t['address'] for t in native_.listing()}, {'t1', 't2', 't3', 't4'})
+        self.assertEqual({t['address'] for t in native_.listing(self.job)}, {'t1', 't2', 't3', 't4'})
 
 
 class Record(NativeCase):

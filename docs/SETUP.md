@@ -80,14 +80,14 @@ Agents start and run without a visit to their pane only after two one-time steps
 
 ## Configure
 
-Every key is an environment variable with a default. Copy [config.example](../config.example) to `~/.config/stampede/config`, change only what you need, and source it from your shell profile:
+Every setting has a default; nothing needs setting. [config.example](../config.example) lists each key with its default. Copy it to `~/.config/stampede/config.toml` and keep only what you change; a project can commit its own `.stampede.toml`. See what a job would use, and which layer set each value:
 
 ```bash
-mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config
-echo '. ~/.config/stampede/config' >> ~/.zshrc   # bash: ~/.bashrc
+mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config.toml
+stampede config show
 ```
 
-The full table: [README, Configure](../README.md#configure). `stampede`, the hooks and the helpers read the variables from their environment, so set them where your Herdr panes' shells pick them up; the plugin event reads the file itself.
+The layers, every key and the environment names that still work: [README, Configure](../README.md#configure). The environment-only variables (`HC`, `HC_SESSION`, `HC_SOCKET`, `HERDR_EVENTS_*`, `FLEET_WATCH_*` and the others at the end of config.example) stay environment variables: export them in your shell profile, or in the shell file `~/.config/stampede/config` sourced from it, which the plugin event also reads. A shell file you already source keeps working: every variable in it is read as before.
 
 ## The event relay, for a remote bot
 
@@ -105,7 +105,7 @@ Optional: a job can run on [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or
 - Claude Code 2.1.295 or later, which reports its status (OSC 7501); Codex with `--no-daemon`, if installed. Cursor is a `warn`: `cursor-agent reports no OSC 7501 status on Herdr Core: a Core-native job runs it as a program (stampede start <job> <name> -- cursor-agent ...), a --core --relay job hands it to a Herdr TUI pane`.
 - Warns, each with what to do: on macOS, terminals opened before the core's current bundle was installed (reopen each once: they keep the old holder, so the local network, the microphone and what an update fixed may not reach them); a core that was started from inside an agent or a pane (run `hc server restart --fresh` yourself from a terminal outside Herdr, Herdr Core 0.1.20 on). The doctor never starts, stops or restarts a core.
 
-The rest of the setup is the same: `herdr-trust` for each repo, and the [unattended settings](../skills/herdr-fleet/references/unattended-setup.md). `HC`, `HC_SESSION` and `HC_SOCKET` go in your config like every other key; stampede passes them, with the rest of your settings, to every terminal of a Core job; a setting left empty (as `HC_SOCKET=` in config.example) is not passed, and Herdr Core reads an empty `HC_SOCKET` as unset too. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events.md](../remote/events.md#a-herdr-core-job)).
+The rest of the setup is the same: `herdr-trust` for each repo, and the [unattended settings](../skills/herdr-fleet/references/unattended-setup.md). `HC`, `HC_SESSION` and `HC_SOCKET` are environment-only: export them with the others; stampede passes them, with the rest of your settings, to every terminal of a Core job; a setting left empty (as config.example's `HC_SOCKET=`) is not passed, and Herdr Core reads an empty `HC_SOCKET` as unset too. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events.md](../remote/events.md#a-herdr-core-job)).
 
 ## Uninstall
 

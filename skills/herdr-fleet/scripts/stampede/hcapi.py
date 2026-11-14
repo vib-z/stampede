@@ -2,7 +2,7 @@
 import json, math, os, re, subprocess
 from pathlib import Path
 
-from . import base as base_, job as job_
+from . import base as base_, job as job_, settings as settings_
 
 
 def default_socket(session):
@@ -27,6 +27,7 @@ def target(job):
             os.environ[name] = want
         else:
             os.environ.pop(name, None)
+    TARGET[:] = [job]
 
 
 class HcError(RuntimeError):
@@ -35,7 +36,15 @@ class HcError(RuntimeError):
         self.kind, self.code = kind, code
 
 
-HC_CALL = 60  # seconds one hc call may take on top of what the command itself waits for
+TARGET = []  # the job target() pointed this process at: its saved settings time every hc call
+
+
+def hc_call(job=None):
+    """Seconds one hc call may take on top of what the command itself waits for: that job's timeouts.hc_call (else the
+    job target() last pointed this process at, else the live layers). Every call for a job passes its job."""
+    return settings_.current(job if job is not None else TARGET[-1] if TARGET else None).get('timeouts.hc_call')
+
+
 # A send is stopped SEND_MARGIN seconds before Core's draft hold could run out, so it never goes in after a draft someone
 # began after stampede looked at the prompt and then left: Core types after a draft only once its hold is over, and a
 # send stopped while held types nothing. SEND_FLOOR is what a send needs with no draft (Core's quiet pause, then its
@@ -75,13 +84,13 @@ def draft_config(env=None):
     return 'set', max(0.0, float(value))
 
 
-def core_hold():
+def core_hold(timeout=None):
     """(seconds, where it is set): how long the running Herdr Core (0.1.20 on) holds a send while a person's draft sits
     unsent, resolved as Core resolves it, from the core's own environment (core_env): draft_wait in the config.toml
     that environment names, else its HC_DRAFT_MS (a setting for Core's tests, and still what it would use), else
     Core's 60. (None, why) when that cannot be established. The one value both decides whether lines may be typed
     unattended and limits every send, so the two never disagree. An older core holds nothing."""
-    env = core_env()
+    env = core_env(timeout=timeout)
     if env is None:
         return None, 'the running core\'s environment cannot be read (hc exec), so how long it holds a message for a draft is not known'
     kind, seconds = draft_config(env)
@@ -101,12 +110,13 @@ def core_hold():
     return seconds, 'by Herdr Core\'s default'
 
 
-def core_env():
+def core_env(timeout=None):
     """The running core's own environment, as a program it runs sees it (hc exec, read only, as herdr-doctor reads it):
     {name: value}, or None when it cannot be read. Core reads its config from the folders this names, which need not
     be this process's."""
     try:
-        shown = subprocess.run([os.environ.get('HC') or 'hc', 'exec', '--', '/usr/bin/env'], capture_output=True, text=True, timeout=HC_CALL)
+        shown = subprocess.run([os.environ.get('HC') or 'hc', 'exec', '--', '/usr/bin/env'], capture_output=True, text=True,
+                               timeout=timeout or hc_call())  # last resort: a caller outside the package
     except (OSError, subprocess.TimeoutExpired):
         return None
     if shown.returncode:
@@ -114,37 +124,38 @@ def core_env():
     return dict(row.split('=', 1) for row in shown.stdout.splitlines() if '=' in row)
 
 
-def send_limit(seconds=None):
+def send_limit(seconds=None, timeout=None):
     """Seconds a send may take, for a hold of that many seconds (default: core_hold's): up to SEND_MARGIN before the
     hold could run out, and never under SEND_FLOOR, which is also the limit when the hold cannot be established."""
-    seconds = core_hold()[0] if seconds is None else seconds
+    seconds = core_hold(timeout=timeout)[0] if seconds is None else seconds
     return SEND_FLOOR if seconds is None else max(seconds - SEND_MARGIN, SEND_FLOOR)
 
 
-def hc_version():
+def hc_version(timeout=None):
     """Herdr Core's version as a tuple: the running core's own, asked on its socket (never started), since it is the core
     that holds a send and an hc on PATH may be newer than it; with no core up, what hc --version prints. None when
     neither says."""
     try:
-        shown = subprocess.run([str(base_.FOLLOWER), '--core-version'], capture_output=True, text=True, timeout=HC_CALL).stdout.strip()
-        shown = shown or subprocess.run([os.environ.get('HC') or 'hc', '--version'], capture_output=True, text=True, timeout=HC_CALL).stdout
+        timeout = timeout or hc_call()  # last resort: a caller outside the package
+        shown = subprocess.run([str(base_.FOLLOWER), '--core-version'], capture_output=True, text=True, timeout=timeout).stdout.strip()
+        shown = shown or subprocess.run([os.environ.get('HC') or 'hc', '--version'], capture_output=True, text=True, timeout=timeout).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
     found = re.search(r'(\d+)\.(\d+)\.(\d+)', shown)
     return tuple(int(n) for n in found.groups()) if found else None
 
 
-def typing_guard():
+def typing_guard(timeout=None):
     """(why, seconds): why lines must not be typed into a Codex lead's Core terminal on their own ('' when they may),
     and the hold that was resolved for it, which the send that follows is limited by. Only Core's draft hold keeps a
     person's typing apart from a typed line, so it has to be there (0.1.20 on) and long enough for a send to end
     before it runs out."""
-    version = hc_version()
+    version = hc_version(timeout=timeout)
     if version is None or version < HOLD_SINCE:
         return ('Herdr Core ' + ('.'.join(map(str, version)) if version else 'of an unknown version') + ' does not hold a message while '
                 'a person is typing (0.1.20 on does): hc update, or run the lead on Claude'), None
     need = SEND_FLOOR + SEND_MARGIN + 5
-    seconds, where = core_hold()
+    seconds, where = core_hold(timeout=timeout)
     if seconds is None:
         return f'{where}: set draft_wait to a number of {need} or more in Herdr Core\'s config.toml, or run the lead on Claude', None
     if seconds < need:
@@ -153,17 +164,17 @@ def typing_guard():
     return '', seconds
 
 
-def typing_unsafe():
+def typing_unsafe(timeout=None):
     """typing_guard's reason alone: '' when lines may be typed into a Codex lead's Core terminal on their own."""
-    return typing_guard()[0]
+    return typing_guard(timeout=timeout)[0]
 
 
-def hc(*args, wait=0, limit=None):
+def hc(*args, wait=0, limit=None, job=None):
     """One Herdr Core command (HC names the binary) and its JSON answer; on failure Core's error kind and exit code.
-    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer HC_CALL seconds after that
+    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer hc_call(job) seconds after that
     (or after limit seconds, when given) is stopped, kind 'timeout': a hung hc never holds a lock or a lead. Core
     cancels a send whose caller is gone before it typed anything."""
-    limit = limit or HC_CALL + wait
+    limit = limit or hc_call(job) + wait
     try:
         result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True,
                                 timeout=limit)
@@ -234,7 +245,7 @@ def start_failed(job, key, relay, reason):
     address = job_.core_entries(job).get(relay, {}).get('address')
     for verb in ('kill', 'rm'):
         try:
-            hc(verb, address) if address else None
+            hc(verb, address, job=job) if address else None
         except HcError:
             pass
     for agent, entry in job_.core_entries(job).items():

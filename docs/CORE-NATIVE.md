@@ -41,7 +41,7 @@ Read the tree from Core, never from stampede's files: one full listing, then fol
 Labels only. Core stays the source of truth, and the tree above never depends on them.
 
 - The lead is pane 1 of tab `main`.
-- A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job, at the lowest pane number none of them holds. `STAMPEDE_TAB_PANES` changes the 4. A terminal without `stampede.pane` holds a place but no number.
+- A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job, at the lowest pane number none of them holds. The setting `helpers.tab_panes` (or `STAMPEDE_TAB_PANES`) changes the 4. A terminal without `stampede.pane` holds a place but no number.
 - `stampede start --tab <label>` names a workstream tab instead; it overflows to `<label>-2`, `<label>-3` by the same rule.
 - Pane 2 splits pane 1 right. Pane 3 splits pane 2 down. Pane 4 splits pane 1 down. Each pane from 5 on splits the pane before it right.
 - When the pane a split names is not live, panes 2 and 3 split pane 1 right and pane 4 splits it down; with pane 1 free too, a pane has no split labels.
@@ -93,6 +93,7 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `endpoint` | the core the job was made on (`HC_SESSION`, `HC_SOCKET`) |
 | `lead`, `space`, `workdir` | the lead's name, the space's name, the repo |
 | `max-helpers` | the cap, only when the owner set one |
+| `settings.json` | the settings `stampede new` resolved (not the user-only keys, which always come from your own layers), with the layer that set each and the stampede version; every later command of the job reads it (`stampede config show --job <job>`) |
 | `tree.json` | the reopen record, `{"space", "key", "nodes": {<name>: node}}`: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, pane, split, beside, `argv` (how to start it again), `outlive`, `address` and its last seen `state` |
 | `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree (`fleet-job reopen <job> "$@"` of this checkout, else `stampede reopen`); both are rendered from `tree.json` alone each time it changes |
 | `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog raises no alarm for a lead closed on purpose |
@@ -120,7 +121,7 @@ Every command's flags, what it prints and its exit code: [CLI.md](CLI.md), with 
 
 ### The cap
 
-At most 12 helpers run at once in one lead's tree, at any depth. The owner changes it per job: `--max-helpers <n>` at `new`, or the number in `<job>/max-helpers`; `STAMPEDE_MAX_HELPERS` changes the default.
+At most 12 helpers run at once in one lead's tree, at any depth. The owner changes it per job: `--max-helpers <n>` at `new`, or the number in `<job>/max-helpers`; the setting `helpers.max` (or `STAMPEDE_MAX_HELPERS`) changes the default, and a `--set helpers.max=<n>` at `new` is saved in the job's `settings.json` ([README, Configure](../README.md#configure)).
 
 A helper counts while Core would call it working: its terminal is live and it has not yet gone `idle` or `done` after its task. A plain program counts while it lives. The lead and plain children never count.
 

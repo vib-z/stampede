@@ -2,16 +2,14 @@
 import json, os, re, shlex, shutil, subprocess
 from pathlib import Path
 
-from . import base as base_, job as job_
-
-BRIEF_SECTIONS = ('Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked')
+from . import base as base_, job as job_, settings as settings_
 
 
-def missing_sections(text):
-    """Required brief headings whose section has no non-blank line, or is absent."""
+def missing_sections(text, job=None):
+    """Required brief headings (the job's brief.sections) whose section has no non-blank line, or is absent."""
     parts = re.split(r'(?m)^ {0,3}#{1,6}[ \t]+([^\n]*)\n?', text)
     filled = [parts[i].strip().lower() for i in range(1, len(parts), 2) if parts[i + 1].strip()]
-    return [name for name in BRIEF_SECTIONS if not any(heading.startswith(name.lower()) for heading in filled)]
+    return [name for name in settings_.current(job).get('brief.sections') if not any(heading.startswith(name.lower()) for heading in filled)]
 
 
 def hook_command(job, agent, action):
@@ -28,7 +26,7 @@ def linked_worktree(folder):
 
 
 YOLO = {'claude': ['--dangerously-skip-permissions'], 'codex': ['--yolo'], 'cursor': ['--yolo'], 'hermes': ['--yolo']}
-LEAD = {'claude': ('claude-opus-5-5', 'xhigh'), 'codex': ('gpt-6-astra', 'ultra')}  # the lead's model and effort per CLI
+LEAD = ('claude', 'codex')  # the CLIs a lead runs on; its model and effort are the settings lead.<cli>.model and .effort
 AUTO = {'claude': ['--permission-mode', 'auto'], 'codex': ['--approve-for-me'], 'cursor': ['--auto-review'], 'hermes': [],
         'kimi': ['-y']}  # Kimi 2.2's -y asks only for risky actions; its never-ask --auto is not an approved flag
 
@@ -80,14 +78,12 @@ def cli_args(job, agent, kind, model, effort, reports, lead=False, yolo_in=None)
                      + ' by hand and record it with herdr-reopen-snapshot')
 
 
-def lead_model(kind, model=None, effort=None):
-    """The lead's model and effort: those given; else FLEET_LEAD_MODEL and FLEET_LEAD_EFFORT, as a pair, for the CLI that
-    model belongs to (a gpt-... model is Codex's; any other, or none, Claude's, as before the lead had a choice); else
-    LEAD's model and effort for the CLI. So settings for a Claude lead never reach a Codex one, nor the other way round."""
-    named = os.environ.get('FLEET_LEAD_MODEL') or ''
-    fits = named.startswith('gpt') == (kind == 'codex')
-    return (model or (fits and named) or LEAD[kind][0],
-            effort or (fits and os.environ.get('FLEET_LEAD_EFFORT')) or LEAD[kind][1])
+def lead_model(kind, model=None, effort=None, job=None):
+    """The lead's model and effort: those given; else the settings lead.<kind>.model and lead.<kind>.effort (the job's).
+    FLEET_LEAD_MODEL and FLEET_LEAD_EFFORT set the pair of the CLI the model belongs to (settings.lead_env), so settings
+    for a Claude lead never reach a Codex one, nor the other way round."""
+    settings = settings_.current(job)
+    return model or settings.get(f'lead.{kind}.model'), effort or settings.get(f'lead.{kind}.effort')
 
 
 def lead_brief_for(job, lead, kind, brief):

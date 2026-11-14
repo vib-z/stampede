@@ -2,7 +2,7 @@
 import contextlib, fcntl, hashlib, json, os, re, subprocess
 from pathlib import Path
 
-from . import base as base_
+from . import base as base_, settings as settings_
 
 
 def roster(job):
@@ -185,7 +185,7 @@ def slug(ask):
 
 def jobs_root():
     """Every job folder lives under <root>/jobs, never in the repo it works on (owner, 25 Oct 2026)."""
-    return Path(os.environ.get('FLEET_JOBS_ROOT') or '~/code/herdr-jobs').expanduser().absolute()
+    return Path(settings_.current().get('jobs_root')).expanduser().absolute()
 
 
 def make_job(repo, job, ask, owner, review, name=None, front=False):
@@ -220,7 +220,7 @@ def core_repo(cwd):
             raise ValueError('new --core needs --cwd <repo>, or run it inside a git repo')
         cwd = top.stdout.strip()
     repo = Path(cwd).expanduser().resolve()
-    root = Path(os.environ.get('FLEET_TRUST_ROOT') or '~/code').expanduser().resolve()
+    root = Path(settings_.current().get('trust_root')).expanduser().resolve()
     if not repo.is_dir() or (repo != root and root not in repo.parents):
         raise ValueError(f'{repo} is not a folder under FLEET_TRUST_ROOT ({root}): run herdr-trust on a repo there first')
     return repo

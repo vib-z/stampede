@@ -209,10 +209,12 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 <details>
 <summary><b>The job folder</b></summary>
 
-`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (`FLEET_JOBS_ROOT` moves the root), never inside your repo, so nothing lands in git (a Herdr Core job, on either path, is the one exception: its folder is `<repo>/.herdr-<slug>`, which stampede adds to the repo's git exclude); the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
+`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (the setting `jobs_root`, or `FLEET_JOBS_ROOT`, moves the root), never inside your repo, so nothing lands in git (a Herdr Core job, on either path, is the one exception: its folder is `<repo>/.herdr-<slug>`, which stampede adds to the repo's git exclude); the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
 
 ```text
 ask.md        your ask, word for word
+settings.json the settings stampede new resolved (not the user-only ones), and the layer that set each; every later
+              command of the job reads it (stampede config show --job <job>)
 workdir       the repo the agents work in
 lead          the lead's name
 plan.md       the lead's plan
@@ -644,19 +646,57 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 
 ## Configure
 
-Every key is an environment variable with a default; nothing needs setting. To change one, copy [config.example](config.example) to `~/.config/stampede/config`, edit it, and source it from your shell profile (`. ~/.config/stampede/config`). The Herdr plugin event reads the same file.
+Nothing needs setting: every setting has a default. Each one is resolved from layers, and the last layer that sets it wins:
+
+1. the defaults, in [defaults.toml](skills/herdr-fleet/scripts/stampede/defaults.toml), the list of every key;
+2. yours: `~/.config/stampede/config.toml` (`$XDG_CONFIG_HOME/stampede/config.toml` when that is set);
+3. the project's: `.stampede.toml` at the repo root, which a repo can commit;
+4. the environment: the variable names stampede has always read, which keep working;
+5. the command's own flags (`--lead`, `--max-helpers`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, and a bare word is a string).
+
+[config.example](config.example) is every key with its default: copy it to `~/.config/stampede/config.toml` and keep only what you change.
+
+```bash
+mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config.toml
+stampede config show                     # every setting and the layer that set it; exit 1 when the config has problems
+stampede config show --json              # {values, sources, files, environment, problems}
+stampede config show --job <job>         # what that job saved at new
+stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
+```
+
+`stampede new` saves what it resolved in `<job>/settings.json`, with the layer of each value and the stampede version, and every later command of that job reads it there. A job remembers what was set when it started. Anything that was not set then follows your current config. A later command's own `--set` still wins for that command, a job made before `settings.json` existed reads the live layers, and `<job>/max-helpers` still wins for its job. The user-only keys below are never saved there: the job's agents can write its folder, so a job always reads them from your own file, environment and flags. A `settings.json` that is not a stampede settings file is one problem line, and the live layers apply.
+
+**User only.** `jobs_root`, `trust_root` and `ask.command` run a command or widen what is trusted, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml`; there each is skipped with a problem line.
+
+**Problems.** A key that is not a setting, a value of the wrong type or a file that does not parse is skipped and named in one line by `stampede config show`. `stampede new` refuses to start a job while there is one (exit 2, each line, then `fix it or remove the key: stampede config show`); no other command fails on them.
 
 <details>
 <summary><b>Every key, with its default</b></summary>
 
-| key | default | what it does |
+| key | default | environment | what it does |
+|---|---|---|---|
+| `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | job folders go in `<root>/jobs/`, never in a repo (user only) |
+| `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | a Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
+| `lead.kind` | `claude` | `FLEET_LEAD_KIND` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
+| `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
+| `lead.codex.model`, `lead.codex.effort` | GPT-6 Astra (its id is in config.example), `ultra` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. Worker models and effort are chosen per start with `--model` and `--effort` |
+| `ask.command` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | `FLEET_ASK_CMD` | what `stampede ask` runs, for a question or a gate, in a job started locally (a bot-started job asks its bot); the options and question are appended (user only) |
+| `brief.sections` | the seven headings of the [hand-off template](skills/herdr-fleet/references/brief.md) | | the sections every worker's brief must fill |
+| `helpers.max` | `12` | `STAMPEDE_MAX_HELPERS` | a Core job: how many helpers may work at once in the lead's tree, at any depth; a start over it is queued (`--max-helpers` or `<job>/max-helpers` per job) |
+| `helpers.tab_panes` | `4` | `STAMPEDE_TAB_PANES` | a Core job: live terminals per layout tab label (`main`, `main-2`, ...) before a helper goes to the next |
+| `timeouts.wait` | `3600` | | seconds `stampede wait` waits before exit 3 (`--timeout` per call) |
+| `timeouts.hc_call` | `60` | | seconds one `hc` call may take on top of what the command itself waits for |
+| `timeouts.leave` | `15` | | seconds an idle agent has to leave after `/exit` or `/quit` at `stampede close` |
+| `timeouts.hold_settle` | `5` | | seconds a `--relay` terminal must have been at rest before its turn count can start a hold |
+</details>
+
+<details>
+<summary><b>Environment only, with defaults</b></summary>
+
+Other programs read these, so they stay environment variables. Export them in your shell profile, or in the shell file `~/.config/stampede/config` sourced from it, which the Herdr plugin event also reads; a file you already source that way keeps working for every variable in it. `stampede config show` lists them with their current values. A Core job passes them, and the environment names above, to every terminal it starts.
+
+| variable | default | what it does |
 |---|---|---|
-| `FLEET_LEAD_KIND` | `claude` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
-| `FLEET_LEAD_MODEL` | Claude Opus 5.5 (its id is in config.example); for a Codex lead GPT-6 Astra (its id is in config.example too) | the lead's model, for the CLI it belongs to: a `gpt-...` model sets a Codex lead, any other a Claude lead, and the other CLI's lead keeps its default. Worker models and effort are chosen per start with `--model` and `--effort`, so lead and workers swap independently |
-| `FLEET_LEAD_EFFORT` | `xhigh`; for a Codex lead `ultra` | the lead's effort, for the same CLI as `FLEET_LEAD_MODEL` (with no `FLEET_LEAD_MODEL`, a Claude lead's) |
-| `FLEET_ASK_CMD` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | what `stampede ask` runs, for a question or a gate, in a job started locally (a bot-started job asks its bot); the options and question are appended |
-| `FLEET_JOBS_ROOT` | `~/code/herdr-jobs` | job folders go in `<root>/jobs/`, never in a repo |
-| `FLEET_TRUST_ROOT` | `~/code` | `herdr-trust` trusts repos only under it; `herdr-doctor` checks worktrees there |
 | `FLEET_WATCH_INTERVAL` | `30` | seconds between `fleet-watch.sh` passes (a bot outside Herdr) |
 | `FLEET_WATCH_PASSES` | `0` | stop the watch after this many passes; 0 runs until stopped |
 | `FLEET_WATCH_NOTIFY` | `1` | `0` turns off the watch's phone push. A `--core --relay` job's follower pushes stalls and ended terminals to the phone (`moshi-hook notify`) only when it is `1`; unset, it does not |
@@ -666,13 +706,11 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HERDR_EVENTS_STALE_MINUTES` | `30` | the watchdog's sweep of a Core job's lead, and a `--core --relay` job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
 | `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), handed panes' marks (`handed/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
-| `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in the config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
+| `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in a config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
 | `HC` | `hc` | the Herdr Core binary, 0.1.13 or later |
 | `HC_SESSION` | `default` | Herdr Core's own: which core; each name is a separate core with its own terminals and state. A Core job keeps the one it was made with (`<job>/endpoint`) and passes it to every terminal; a command from a shell set to another is refused |
 | `HC_SOCKET` | Core's default path for the session | Herdr Core's own: that core's socket; passed on like `HC_SESSION`. Set to the default socket's own path, it is the default core |
 | `STAMPEDE_APP_SPACE` | `0` | `1`: every `stampede new --core --relay` job labels its lead and workers for the Herdr app, as `--app-space` does ([core-relay.md](skills/herdr-fleet/references/core-relay.md#in-the-herdr-app)); a Core job always carries the app's labels |
-| `STAMPEDE_MAX_HELPERS` | `12` | a Core job: how many helpers may work at once in the lead's tree, at any depth; a start over it is queued (`--max-helpers` or `<job>/max-helpers` per job) |
-| `STAMPEDE_TAB_PANES` | `4` | a Core job: live terminals per layout tab label (`main`, `main-2`, ...) before a helper goes to the next |
 | `STAMPEDE_NO_UPDATE_CHECK` | `0` | `1` turns off the daily check for a newer release ([Updating](#updating)) |
 | `STAMPEDE_UPDATE_URL` | `https://api.github.com/repos/vib-z/stampede/releases/latest` | where the check reads the latest release; the tests point it at a local file |
 </details>
@@ -699,7 +737,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `HELD: a send to <lead> got no answer ...` in `<job>/hooks/deliver.log`, or a `blocked` event with `kind` `held` | a line for a Codex lead on a `--relay` job was stopped unanswered, most often because text sits typed in its prompt: send or clear that text in its terminal. Delivery goes on after the lead's next turn; if you cleared the text without sending anything, remove `<job>/hooks/deliver-held.json` once its prompt is empty |
 | `stampede new: ...; Herdr Core answers here, so this job can run on it: new --core ...` | the Herdr TUI could not take the job (no server, no `herdr`, or no workspace outside Herdr) and a Herdr Core is running: start Herdr, or run the job on Core with `--core`; nothing was made |
 | a Codex lead does not react to a worker's report or your `tell` | its lines are typed only while it is idle or done, unfocused, with nothing typed in its prompt: leave its pane, clear a draft, and see `<job>/hooks/deliver.log` (`GAVE UP` after 4 h, `CANNOT REACH HERDR`); `stampede _wake <job>` starts the deliverer again. With Codex 0.167.1 or later, stampede 0.1.9 and older took its empty prompt for a draft and typed nothing: update stampede to 0.2.0 or later |
-| no `.herdr-<slug>` folder in the repo any more | job folders now live in `~/code/herdr-jobs/jobs/` (`FLEET_JOBS_ROOT`); `stampede new` prints the path. An old in-repo `.herdr-*` job still works with every command |
+| no `.herdr-<slug>` folder in the repo any more | job folders now live in `~/code/herdr-jobs/jobs/` (`jobs_root`, or `FLEET_JOBS_ROOT`); `stampede new` prints the path. An old in-repo `.herdr-*` job still works with every command |
+| `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, then `stampede new: fix it or remove the key: stampede config show` (exit 2) | a config file, the environment or a `--set` holds a key stampede does not have, a value of the wrong type (`helpers.max must be int, not 'six'`), a file that is not TOML, or a user-only key in a repo's `.stampede.toml` (`... is taken only from your own ...`): fix or remove what the line names, check with `stampede config show` (exit 0 when clean), then run `new` again; nothing was made |
 | `stampede start: brief ... is missing: ...` or `brief ... does not exist` | write the brief on the [hand-off template](skills/herdr-fleet/references/brief.md), fill every missing or empty section, then start again |
 | `stampede start: fleet-job starts claude, codex or cursor (and hermes or kimi in a Herdr Core job); ...` | stampede starts only those kinds; start another agent by hand and record it with `herdr-reopen-snapshot` |
 | `stampede start: hermes runs only as a handed agent of a Herdr Core job ...` (or kimi) | a TUI-only job refuses them: run the job with `stampede new --core --relay` and hand them to a pane with `--pane`, or run them as a program in a Core job |
@@ -808,7 +847,8 @@ skills/herdr-fleet/     the job: SKILL.md, references/ (core.md: a Core job; cor
                         the commands, one module per concern: base, job (the job folder), hcapi (Herdr Core),
                         herdrapi (Herdr), agents (per CLI), owner (questions, gates, tell, finish), hooks, tui,
                         native (a Core job), relay and handed (the --relay path), cli (the parser and help),
-                        doctor and check (stampede doctor and stampede check);
+                        doctor and check (stampede doctor and stampede check),
+                        settings (the layered config) with defaults.toml (every key and its default);
                         core_native.py re-exports native for one release
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor,
                         the relay, herdr-event-sweep: the Core sweep and probes,
@@ -913,6 +953,8 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 **Unreleased, 14 Nov 2026. A command that teaches itself:** bare `stampede` and `stampede --help` list the commands grouped in the order an agent meets them, each `--help` has its flags and an example, and a refusal names the next step (a job folder that is not there, an agent not in the job, a missing ask file, a post nobody hears). `stampede doctor` checks Python, the checkout and the commands on PATH before `herdr-doctor`'s own lines, `stampede check` runs the fast tests in seconds, and the suite runs quietly on Python 3.9 in CI. Every command and its exit codes: [docs/CLI.md](docs/CLI.md).
 
 **Unreleased, 14 Nov 2026. A native front door on Herdr Core:** `stampede new --core --front-door` makes a chat outside Herdr and Core the owner's only contact on a Core-native job, as on the TUI: the lead posts, asks and asks gates through `<job>/outbox`, `stampede wait` hands each item on (and says `BLOCKED <lead>: <kind>` with its screen, or `LEAD_GONE`), and answers, `approve` and `approve-gate` reach the lead through `hc send`. Tested with the fake `hc` (the front-door loop for every client outside Herdr on all three backends in the cross-client suite) and on a real scratch core (`tests/core_smoke.py`, hc 0.1.21: `new --core --front-door`, `post`, `wait`, `finish`). No live agent has run it yet.
+
+**Unreleased, 14 Nov 2026. Layered config:** every setting stampede reads comes from one module, resolved from the defaults, your `config.toml`, a repo's `.stampede.toml`, the environment names that always worked, and a command's flags and `--set`; `stampede config show` prints each value with the layer that set it, and `stampede new` saves them in `<job>/settings.json` so a job keeps its choices. Tested with the unit suite (on Python 3.9 too) and against a scratch HOME. Next for config, planned: a `backend` key, one jobs root for Core, role defaults, the layout and the review step.
 
 **Next:**
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.

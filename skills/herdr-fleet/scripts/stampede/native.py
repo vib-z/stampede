@@ -4,21 +4,22 @@ is the contract."""
 import contextlib, fcntl, json, os, shlex, subprocess, time, uuid
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_
+from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_, settings as settings_
 
-CAP, PANES = 12, 4  # helpers running at once in a lead's tree, live terminals of the job per tab (the defaults)
 KINDS = ('claude', 'codex')
 
 
-def listing():
+def listing(job, seconds=None):
     """Every terminal Core holds, finished ones too, as full records: one terminal.list through hc connect, since
-    hc ls --json shows no labels. HcError when Core does not answer."""
+    hc ls --json shows no labels. HcError when Core does not answer. job: whose timeouts.hc_call applies (seconds, when
+    there is no job folder yet)."""
+    seconds = seconds or hcapi_.hc_call(job)
     request = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'terminal.list', 'params': {'all': True}})
     try:
         done = subprocess.run([os.environ.get('HC') or 'hc', 'connect'], input=request + '\n', capture_output=True, text=True,
-                              timeout=hcapi_.HC_CALL)
+                              timeout=seconds)
     except subprocess.TimeoutExpired:
-        raise hcapi_.HcError(f'hc connect: no answer in {hcapi_.HC_CALL} s, so it was stopped', 'timeout', 124) from None
+        raise hcapi_.HcError(f'hc connect: no answer in {seconds} s, so it was stopped', 'timeout', 124) from None
     except OSError as error:
         raise ValueError('Herdr Core is not installed (' + base_.line(error) + '): install hc, or set HC') from None
     try:
@@ -103,29 +104,29 @@ def running(terminal):
     return word != 'done' and not (word == 'idle' and (terminal.get('turn') or 0) >= 1)
 
 
-def setting(job, file, name, default):
-    """A whole number of at least 1: <job>/<file>, else the environment's name, else default."""
-    path = Path(job) / file if file else None
-    where = path if path and path.is_file() else name
-    value = path.read_text().strip() if where == path else os.environ.get(name) or str(default)
+def setting(job, file, key):
+    """A whole number of at least 1: <job>/<file> when there is one, else the setting key (the job's)."""
+    path = Path(job) / file if job and file else None
+    where = path if path and path.is_file() else key
+    value = path.read_text().strip() if where == path else str(settings_.current(job).get(key))
     if not value.isdigit() or int(value) < 1:
         raise ValueError(f'{where} holds {value!r}, not a whole number of 1 or more')
     return int(value)
 
 
 def cap(job):
-    return setting(job, 'max-helpers', 'STAMPEDE_MAX_HELPERS', CAP)
+    return setting(job, 'max-helpers', 'helpers.max')
 
 
 SPLITS = {2: (1, 'right'), 3: (2, 'down'), 4: (1, 'down')}  # the owner's 2x2: 1 top left, 2 top right, 3 bottom right, 4 bottom left
 
 
-def place(key, terminals, base, want=None):
+def place(key, terminals, base, want=None, job=None):
     """A terminal's place: (tab, pane, labels). The tab is the first of base, base-2, ... that holds fewer than
-    STAMPEDE_TAB_PANES live terminals of the job; the pane is the lowest number none of them holds (want, a recorded
+    helpers.tab_panes live terminals of the job; the pane is the lowest number none of them holds (want, a recorded
     (tab, pane), when that place is still free). Pane 2 splits pane 1 right, 3 splits 2 down, 4 splits 1 down, and each
     from 5 the one before it right; when that pane is free, panes 2 and 3 split pane 1 right and 4 splits it down."""
-    panes, mine = setting(None, None, 'STAMPEDE_TAB_PANES', PANES), live(key, terminals)
+    panes, mine = setting(job, None, 'helpers.tab_panes'), live(key, terminals)
 
     def held(name):
         on = [t for t in mine if labels(t).get('herdr.tab') == name]
@@ -243,7 +244,7 @@ def run(job, name, tags, cwd, program, parent=None, outlive=False):
     names = [name, name[:27] + '-' + key[3:7]] + [name[:23] + '-' + uuid.uuid4().hex[:8] for _ in range(2)]
     for each in names:
         try:
-            return hcapi_.hc('run', '--bg', '--name', each, '--cwd', str(cwd), *flags, '--', *hcapi_.launch_env(job), *program)
+            return hcapi_.hc('run', '--bg', '--name', each, '--cwd', str(cwd), *flags, '--', *hcapi_.launch_env(job), *program, job=job)
         except hcapi_.HcError as error:
             if error.kind != 'name_taken' or each == names[-1]:
                 raise
@@ -300,7 +301,7 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
             + f'When the job is done or stopped for good, run {s} finish {job} "<one line on where it ended>" once.\n')
 
 
-def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, front=False):
+def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, front=False, settings=None):
     """The job folder, its record and marker, then the lead as a root Core terminal with the space's name.
     front: a chat outside Herdr and Core stays the owner's only contact (<job>/front-door), never in a bot's job."""
     if fork is not None and not base_.SESSION.fullmatch(fork):
@@ -310,6 +311,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     if max_helpers is not None and max_helpers < 1:
         raise ValueError('--max-helpers takes 1 or more')
     repo, program = job_.core_repo(cwd), agents_.cli(kind)
+    settings = settings or settings_.for_new(repo, {'lead.kind': kind, 'helpers.max': max_helpers})
     ask = Path(ask_file).expanduser().read_text()
     owner = job_.starter(os.environ.get('HERDR_WORKSPACE_ID'))
     if front and owner:
@@ -321,7 +323,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
         raise ValueError(f'{job} already exists: a job folder is used once; start another job with --name')
     key = job_.job_key(job)
     try:
-        terminals = listing()
+        terminals = listing(None, settings.get('timeouts.hc_call'))
     except hcapi_.HcError as error:
         raise ValueError(f'Herdr Core did not answer ({base_.line(error)}): nothing was made') from None
     if live(key, terminals):
@@ -331,12 +333,13 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
            for t in terminals):
         space += '-' + key[3:7]
     lead = job_.make_job(repo, job, ask, owner, review, front=front)
+    settings_.save(job, settings)
     (job / 'backend').write_text('native\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
                                               'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')
     (job / 'space').write_text(space + '\n')
-    if max_helpers:
-        (job / 'max-helpers').write_text(f'{max_helpers}\n')
+    if max_helpers:  # the cap file holds the resolved cap: a --set helpers.max comes after the flag
+        (job / 'max-helpers').write_text(f'{settings.get("helpers.max")}\n')
     hcapi_.target(job)
     job_.mark_job(key, job)
     (job_.events_dir() / 'owners' / key).unlink(missing_ok=True)  # a folder used before (same path, same key) had its own
@@ -345,7 +348,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     brief = job / 'briefs' / (lead + '.md')
     brief.parent.mkdir()
     brief.write_text(lead_brief(job, lead, owner, review, fork, key, space, cap(job), front))
-    model, effort = agents_.lead_model(kind)
+    model, effort = agents_.lead_model(kind, job=job)
     session = str(uuid.uuid4()) if kind == 'claude' else ''
     again = ([program] + agent_args(job, lead, kind, model, effort, lead=True) + (['--session-id', session] if session else [])
              + [f'You are {lead}. Read {brief} and do everything it says.'])  # the fork stays out: a reopen resumes its own session
@@ -368,11 +371,11 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
 def outcome(job, key, lead, address, brief):
     """new's last lines, from the lead's own status after up to 30 s, as new --core --relay prints them."""
     try:
-        hcapi_.hc('wait', address, '--timeout', '30', wait=30)
+        hcapi_.hc('wait', address, '--timeout', '30', wait=30, job=job)
     except hcapi_.HcError:
         pass
     try:
-        terminal = hcapi_.hc('get', address)
+        terminal = hcapi_.hc('get', address, job=job)
     except hcapi_.HcError as error:
         print(f'NOT READY {lead}: {base_.line(error)}; read it with hc read {address} once Herdr Core answers')
         return 1
@@ -418,7 +421,7 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
         raise ValueError(f'brief {brief} does not exist' if brief else 'start needs --brief <file>, or a program after --')
     else:
         brief = str(Path(brief).expanduser().absolute())
-        missing = agents_.missing_sections(Path(brief).read_text())
+        missing = agents_.missing_sections(Path(brief).read_text(), job)
         if missing:
             raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
                              'fill them in on skills/herdr-fleet/references/brief.md and start again')
@@ -427,7 +430,7 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
         raise PermissionError('yolo is only for a Claude or Codex helper whose --cwd is its own git worktree')
     key, lead = job_.core_key(job), read(job, 'lead')
     with locked(job) as queue:
-        terminals = listing()
+        terminals = listing(job)
         waiting = [request for _, request in queued(job)]
         if name == lead or agent(key, terminals, name) or any(r['name'] == name for r in waiting):
             raise ValueError(f'{name} is taken: a live terminal of this job or a queued start holds it')
@@ -507,7 +510,7 @@ def launch(job, key, request, parent, terminals, existing=None):
     when Core stopped answering before its outcome was known."""
     name, kind = request['name'], request['kind']
     want = (request['place'][0], request['place'][1]) if request.get('place') else None
-    _, _, spot = place(key, terminals, request['tab'] or 'main', want)
+    _, _, spot = place(key, terminals, request['tab'] or 'main', want, job)
     report = request['report']
     session = labels(existing).get('stampede.session') or '' if existing else str(uuid.uuid4()) if kind == 'claude' else ''
     tags = {'stampede.job': key, 'stampede.role': 'helper', 'stampede.agent': name, 'stampede.kind': kind,
@@ -527,7 +530,7 @@ def launch(job, key, request, parent, terminals, existing=None):
         return None
     except hcapi_.HcError as error:
         try:
-            found = agent(key, listing(), name)
+            found = agent(key, listing(job), name)
         except hcapi_.HcError as silent:
             print(f'UNKNOWN {name}: {base_.line(error)}, then {base_.line(silent)}; run stampede next once Herdr Core answers')
             return 'unknown'
@@ -558,7 +561,7 @@ def next_(job):
     hcapi_.target(job)
     unfinished(job)
     with locked(job):
-        started, failed, count, limit = drain(job, listing())
+        started, failed, count, limit = drain(job, listing(job))
         left = len(queued(job))
     if left:
         print(f'WAITING {left} queued ({count} running, cap {limit})')
@@ -570,7 +573,7 @@ def next_(job):
 def tree(job, as_json=False):
     """stampede tree: the lead, then every terminal under it by Core's parent links, then the queue."""
     hcapi_.target(job)
-    key, terminals = job_.core_key(job), listing()
+    key, terminals = job_.core_key(job), listing(job)
     lead = lead_of(key, terminals)
     rows = []
     for depth, t, outlived in job_tree(key, terminals):
@@ -602,13 +605,13 @@ def tell(job, name, text):
     lead = read(job, 'lead')
     name = lead if name == 'lead' else name
     try:
-        terminals = listing()
+        terminals = listing(job)
         found = agent(job_.core_key(job), terminals, name)
         if not found:
             names = {labels(t).get('stampede.agent') for t in live(job_.core_key(job), terminals)} - {lead, None}
             print(f'FAILED {name} (no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))})')
             return 2
-        hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit())
+        hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
     except hcapi_.HcError as error:
         print(f'FAILED {name} ({base_.line(error)})')
         return 2
@@ -628,7 +631,7 @@ def caller_ids(job):
     """An event's workspace (the key) and the lead's terminal, as hc:<key>/<address> when Core shows it."""
     key = job_.core_key(job)
     try:
-        lead = lead_of(key, listing())
+        lead = lead_of(key, listing(job))
     except (hcapi_.HcError, ValueError):
         lead = None
     return {'workspace': key, **({'lead_pane': f'hc:{key}/{lead["address"]}'} if lead and lead.get('state') == 'live' else {})}
@@ -638,7 +641,7 @@ def lead_alive(job):
     """False only when Core answers and holds no live lead of the job."""
     try:
         hcapi_.target(job)
-        lead = lead_of(job_.core_key(job), listing())
+        lead = lead_of(job_.core_key(job), listing(job))
     except (hcapi_.HcError, ValueError):
         return True
     return bool(lead) and lead.get('state') == 'live'
@@ -649,13 +652,13 @@ def lead_blocked(job):
     not answer is None, and a screen it does not give is ''."""
     try:
         hcapi_.target(job)
-        lead = lead_of(job_.core_key(job), listing())
+        lead = lead_of(job_.core_key(job), listing(job))
     except (hcapi_.HcError, ValueError):
         return None
     if not lead or lead.get('state') != 'live' or hcapi_.core_status(lead) != 'blocked':
         return None
     try:
-        screen = hcapi_.hc('read', lead['address'], '--lines', '40').get('text', '')
+        screen = hcapi_.hc('read', lead['address'], '--lines', '40', job=job).get('text', '')
     except (hcapi_.HcError, ValueError):
         screen = ''
     return (lead.get('status') or {}).get('kind') or 'blocked', lead['address'], screen
@@ -680,7 +683,7 @@ def refresh(job):
     key = job_.core_key(job)
     with held(job) as tree:
         seen = set()
-        for name, t, parent in branch(key, listing()):
+        for name, t, parent in branch(key, listing(job)):
             tags, node = labels(t), tree['nodes'].setdefault(name, {'name': name})
             seen.add(name)
             node.update(address=t['address'], terminal=t.get('name'), state=t.get('state'), parent=parent, cwd=t.get('cwd'))
@@ -729,7 +732,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                          'work again')
     key, lead, space, failed, told = job_.core_key(job), read(job, 'lead'), read(job, 'space'), False, []
     with locked(job) as queue:
-        terminals = listing()
+        terminals = listing(job)
         if not finished:  # an unfinished job is open again; a finished one is reopened for reading only
             job_.mark_job(key, job)
             owner = job_.job_owner(job)
@@ -815,20 +818,20 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                 told.append((name, shown['address'], f'[stampede] You were reopened. Your parent is {parent} at {under}: read '
                                                      f'{node["brief"]} again and carry on.'))
         if later:
-            _, fails, count, limit = drain(job, listing())
+            _, fails, count, limit = drain(job, listing(job))
             failed = failed or bool(fails)
             for _, request in queued(job):
                 if request['name'] in later:
                     print(f'QUEUED {request["name"]} ({count} running, cap {limit})')
     for name, address, text in told:
         try:
-            hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit())
+            hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
         except hcapi_.HcError as error:
             print(f'NOT TOLD {name} ({base_.line(error)})')
     return 1 if failed else 0
 
 
-LEAVE_FOR = 15  # seconds an idle agent has to leave after /exit or /quit
+LEAVE_FOR = None  # a test's stand-in for the setting timeouts.leave: seconds an idle agent has to leave after /exit or /quit
 LEAVE = {'claude': ['/', 'e', 'x', 'i', 't', 'enter'], 'codex': ['/', 'q', 'u', 'i', 't', 'enter']}
 
 
@@ -838,7 +841,7 @@ def close(job, name=None):
     hcapi_.target(job)
     key, lead = job_.core_key(job), read(job, 'lead')
     name = lead if name in (None, 'lead') else name
-    terminals = listing()
+    terminals = listing(job)
     ofname = [t for t in terminals if labels(t).get('stampede.job') == key and labels(t).get('stampede.agent') == name]
     target = next((t for t in ofname if t.get('state') == 'live'), ofname[-1] if ofname else None)
     if not target:
@@ -854,15 +857,15 @@ def close(job, name=None):
         try:
             if t.get('state') == 'live':
                 if tags.get('stampede.kind') in LEAVE and hcapi_.core_status(t) in ('idle', 'done'):
-                    hcapi_.hc('keys', address, *LEAVE[tags['stampede.kind']])
-                    gone = time.monotonic() + LEAVE_FOR  # hc wait returns at once for an idle terminal: look until it ends
-                    while time.monotonic() < gone and hcapi_.hc('get', address).get('state') == 'live':
+                    hcapi_.hc('keys', address, *LEAVE[tags['stampede.kind']], job=job)
+                    gone = time.monotonic() + (settings_.current(job).get('timeouts.leave') if LEAVE_FOR is None else LEAVE_FOR)  # hc wait returns at once for an idle terminal: look until it ends
+                    while time.monotonic() < gone and hcapi_.hc('get', address, job=job).get('state') == 'live':
                         time.sleep(0.5)
-                if hcapi_.hc('get', address).get('state') == 'live':
-                    hcapi_.hc('kill', address)
+                if hcapi_.hc('get', address, job=job).get('state') == 'live':
+                    hcapi_.hc('kill', address, job=job)
                     with contextlib.suppress(hcapi_.HcError):  # until Core has the exit, so rm takes it
-                        hcapi_.hc('wait', address, '--timeout', '5', wait=5)
-            hcapi_.hc('rm', address)
+                        hcapi_.hc('wait', address, '--timeout', '5', wait=5, job=job)
+            hcapi_.hc('rm', address, job=job)
         except hcapi_.HcError as error:
             failed = True
             print(f'FAILED {shown} ({base_.line(error)})')

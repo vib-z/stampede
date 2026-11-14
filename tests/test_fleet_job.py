@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_
+from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_, settings as settings_
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quiet import setUpModule, tearDownModule  # noqa: E402,F401: commands run in-process print status lines
 
@@ -24,7 +24,7 @@ def valid_brief(job, agent='build-x', omit=()):
     brief = job / 'briefs' / (agent + '.md')
     brief.parent.mkdir(exist_ok=True)
     brief.write_text('\n'.join('## ' + name + '\nDo the assigned work.\n'
-                              for name in agents_.BRIEF_SECTIONS if name not in omit))
+                              for name in settings_.DEFAULTS['brief.sections'] if name not in omit))
     return brief
 
 
@@ -318,7 +318,7 @@ class Briefs(unittest.TestCase):
         out, job, _ = Fixes.run_new(self, 'idle')
         lead = job_.roster(job)[1]
         brief = job / 'briefs' / (lead + '.md')
-        self.assertEqual(agents_.missing_sections(brief.read_text()), list(agents_.BRIEF_SECTIONS))
+        self.assertEqual(agents_.missing_sections(brief.read_text()), list(settings_.DEFAULTS['brief.sections']))
         error, log = ReviewRound1.start(self, job, lead, job.parent)
         self.assertIsNone(error)
         self.assertIn('agent start ' + lead, log)
@@ -327,7 +327,7 @@ class Briefs(unittest.TestCase):
     def test_the_template_matches_the_required_sections_and_is_complete(self):
         import re
         template = (SCRIPTS.parent / 'references/brief.md').read_text()
-        self.assertEqual(tuple(re.findall(r'^## (.+)$', template, re.M)), agents_.BRIEF_SECTIONS)
+        self.assertEqual(tuple(re.findall(r'^## (.+)$', template, re.M)), tuple(settings_.DEFAULTS['brief.sections']))
         self.assertEqual(agents_.missing_sections(template), [])
 
 

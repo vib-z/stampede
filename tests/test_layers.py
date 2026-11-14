@@ -7,7 +7,8 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/herdr-fleet/scripts'
 PACKAGE = SCRIPTS / 'stampede'
-LOWER = {'base': set(), 'job': {'base'}, 'hcapi': {'base', 'job'}, 'herdrapi': {'base'}}  # all they may import at load
+LOWER = {'settings': set(), 'base': set(), 'job': {'base', 'settings'}, 'hcapi': {'base', 'job', 'settings'},
+         'herdrapi': {'base'}}  # all they may import at load: settings is the bottom layer, it imports nothing of the package
 NEVER = {'native': {'tui', 'relay', 'handed', 'hooks'}, 'tui': {'relay', 'handed', 'native'}}
 DELETED = {'relay', 'handed'}  # deleted in v0.3.0: only these reach them, each inside the function, besides each other
 LAZY = {
