@@ -437,6 +437,125 @@ class Shared(NativeCase):
         self.assertEqual(self.cli('tree', self.job).returncode, 0)
 
 
+class FrontDoor(NativeCase):
+    """new --core --front-door: a chat outside Herdr and Core is the owner's only contact. The lead posts to
+    <job>/outbox, stampede wait hands each item to the chat, and answers, approve and approve-gate reach the lead
+    through Core (hc send), never an inbox file."""
+
+    def setUp(self):
+        super().setUp()
+        self.started(front=True, review=True)
+
+    def item(self, n):
+        return (self.job / 'outbox' / f'{n:03d}.md').read_text()
+
+    def answer_line(self, n):
+        """The command an outbox item says to run, as the chat runs it (shlex), without the trailing no line."""
+        return shlex.split(self.item(n).split('Answer with: ', 1)[1].split('   (a no:', 1)[0])
+
+    def heard(self):
+        return self.state()['terminals']['t1']['sent']
+
+    def test_new_writes_the_file_and_a_brief_with_no_card_and_the_plan_posted(self):
+        self.assertTrue((self.job / 'front-door').is_file())
+        brief = (self.job / 'briefs' / (LEAD + '.md')).read_text()
+        for said in ('talks only to the chat that started this job', f'post {self.job} "PLAN READY: <one line>" --file',
+                     'reaches no one from a Core terminal', 'Core types the answer into this terminal',
+                     'posted to the chat with its approve line', 'Post your report first', 'gate-ok'):
+            self.assertIn(said, brief)
+        self.assertFalse({chr(0x2013), chr(0x2014)} & set(brief))
+
+    def test_new_refuses_it_with_relay_and_for_a_bot(self):
+        for kw, env, says in (({'relay': True}, {}, 'drop --relay'), ({}, {'HERDR_EVENTS_OWNER': 'alpha'}, 'a bot relays its own jobs')):
+            super().setUp()  # a fresh scratch each
+            with mock.patch.dict(os.environ, env), self.assertRaises(ValueError) as refused:
+                self.new(front=True, **kw)
+            self.assertIn(says, str(refused.exception))
+            self.assertFalse(self.job.exists(), 'nothing is made')
+            self.assertEqual(self.runs(), [])
+        result = self.cli('new', '--core', '--relay', '--front-door', '--file', self.root / 'ask.md', '--cwd', self.repo)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+
+    def test_post_ask_gate_and_finish_write_outbox_items_and_wait_hands_them_on(self):
+        self.assertIn('POSTED 001 for the front door to relay', self.quiet(owner_.post, self.job, 'PLAN READY: two helpers')[1])
+        ident, out = self.quiet(owner_.ask, self.job, 'Which db?', ['postgres', 'sqlite'])
+        self.assertIn('posted to the front door as outbox 002', out)
+        self.assertIn('Core types the answer into your terminal', out)
+        self.assertNotIn('inbox', out)
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #3', SHA, 3)
+        self.assertFalse((self.job / 'asks').exists(), 'no phone card')
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertEqual(code, 0)
+        for said in ('# 001 post', '# 002 question', '- postgres', '# 003 gate', 'approve-gate'):
+            self.assertIn(said, out)
+        self.assertEqual(self.quiet(owner_.wait, self.job, 0, 0)[0], 3, 'each item once, then a timeout')
+        self.assertIn('TIMEOUT', self.quiet(owner_.wait, self.job, 0, 0)[1])
+        self.quiet(owner_.finish, self.job, 'all done')
+        self.assertIn('# 004 done', self.item(4))
+        self.assertEqual(self.queue_events(), [], 'no bot hears a front-door job')
+
+    def queue_events(self):
+        return list((self.root / 'queue/queue').glob('*.json')) if (self.root / 'queue/queue').is_dir() else []
+
+    def test_an_answer_and_approve_reach_the_lead_through_core(self):
+        ident, _ = self.quiet(owner_.ask, self.job, 'Which db?', [])
+        argv = self.answer_line(1)
+        self.assertEqual(argv[:4], ['fleet-job', 'tell', str(self.job), 'lead'])
+        code, out = self.quiet(owner_.tell, self.job, 'lead', argv[4].replace('<their words>', 'postgres'))
+        self.assertEqual((code, out.strip()), (0, f'SUBMITTED {LEAD} (t1)'))
+        self.assertEqual(self.heard()[-1], f'ANSWER {ident} Which db?: postgres')
+        self.assertFalse((self.job / 'inbox').exists(), 'no inbox file on Core')
+        (self.job / 'plan.md').write_text('two helpers\n')
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False), self.assertRaises(PermissionError):
+            owner_.approve(self.job, 'owner')  # not posted yet
+        self.quiet(owner_.post, self.job, 'PLAN READY', [str(self.job / 'plan.md')])
+        self.quiet(owner_.wait, self.job, 5, 0)
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=True), self.assertRaises(PermissionError):
+            owner_.approve(self.job, 'owner')  # the lead's own approve
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            self.quiet(owner_.approve, self.job, "owner in desktop chat: 'go'")
+        self.assertIn('Start the helpers the plan names', self.heard()[-1])
+        self.assertEqual(self.quiet(owner_.require_approval, self.job)[0], None)
+
+    def test_the_gate_loop_opens_only_on_the_chat_s_approve_gate(self):
+        self.quiet(owner_.ask_gate, self.job, 'Merge PR #3', SHA, 3)
+        ident = next((self.job / 'gates').glob('*.json')).stem
+        self.assertEqual(owner_.load_gate(self.job, ident)['route'], 'front-door')
+        self.quiet(owner_.wait, self.job, 5, 0)
+        argv = self.answer_line(1)
+        self.assertEqual(argv[1:3], ['approve-gate', str(self.job)])
+        self.quiet(owner_.tell, self.job, 'lead', 'yes')  # typed into the lead: never a yes
+        with self.assertRaises(PermissionError):
+            owner_.gate_ok(self.job, ident, SHA)
+        by = argv[-1].replace('<chat>: <their exact words>', "desktop chat: 'merge it'")
+        inside = self.cli(*argv[1:-1], by, env={'HC_TERMINAL_ID': 't9'})  # from a Core terminal
+        self.assertEqual(inside.returncode, 2)
+        self.assertIn("an agent's own say-so never counts", inside.stderr)
+        self.assertFalse((self.job / 'gates' / (ident + '.approved')).exists())
+        with mock.patch.object(herdrapi_, 'inside_herdr', return_value=False):
+            flags = dict(zip(argv[4::2], argv[5::2]))
+            self.assertIn('APPROVED', self.quiet(owner_.approve_gate, self.job, ident, flags['--sha'], by, flags['--digest'])[1])
+        self.assertIn(f'GATE {ident} APPROVED by owner in desktop chat', self.heard()[-1])
+        self.assertIn('APPROVED', self.quiet(owner_.gate_ok, self.job, ident, SHA)[1])
+
+    def test_wait_says_blocked_with_the_screen_and_lead_gone(self):
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'}, screen='Allow this command?\n  1. Yes\n')
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith(f'BLOCKED {LEAD}: permission. Core says it waits at a dialog in its terminal t1'), out)
+        self.assertIn('Allow this command?', out)
+        self.assertNotIn('BLOCKED_ON_CARD', out)
+        self.terminal('t1', status={'state': 'idle'})
+        self.assertEqual(self.quiet(owner_.wait, self.job, 0, 0)[0], 3)
+        self.terminal('t1', state='finished', reason='killed', status=None)
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith(f'LEAD_GONE {LEAD}: Herdr Core holds no live lead'), out)
+        self.shape(ls_error='unavailable')  # Core does not answer: no news, not gone
+        self.assertEqual(self.quiet(owner_.wait, self.job, 0, 0)[0], 3)
+
+
 class Fake(CoreCase):
     def test_a_parent_from_parent_or_the_caller_and_its_end_ends_its_branch(self):
         hcapi_.hc('run', '--bg', '--no-parent', '--name', 'a', '--', 'x')

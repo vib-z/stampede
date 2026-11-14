@@ -425,13 +425,48 @@ APPROVED 83307febaa1a at <commit>
 
 The front door shows you the plan file itself, and a yes to its own summary is never an approval. A gate's item carries the exact `approve-gate` line, which the front door runs with your words quoted. If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `BLOCKED_ON_CARD` instead of pretending the message was read. The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead, so the front door is never left waiting on a job that ended. The front door's loop: [skills/stampede](skills/stampede/SKILL.md#relay-a---front-door-job); the lead's side: [front-door.md](skills/herdr-fleet/references/front-door.md).
 
+**On Herdr Core** the same loop runs with `stampede new --core --front-door`, against the test suite's fake `hc` here (the chat's `approve` and `approve-gate` ran from outside Herdr; `<repo>` is the repo's path):
+
+```console
+$ stampede new --core --file ask.md --name login --front-door --review
+STARTED lead-login (t1)
+lead-login <repo>/.herdr-login
+$ J=<repo>/.herdr-login
+$ stampede post $J "PLAN READY: two helpers" --file $J/plan.md                     # the lead
+POSTED 001 for the front door to relay (<repo>/.herdr-login/outbox/001.md)
+$ stampede wait $J                                                                # the chat, in the background
+# 001 post
+...
+$ stampede approve $J --by "owner in desktop chat: 'go'"
+SUBMITTED lead-login (t1)
+$ stampede ask $J --gate --sha <commit> --pr 12 "merge PR #12"                    # the lead
+GATE 66185eb7d9f5 posted to the front door as outbox 002; act after fleet-job gate-ok <repo>/.herdr-login 66185eb7d9f5 --sha <the commit you act on> prints APPROVED
+$ stampede wait $J                                                                # the chat
+# 002 gate
+
+Gate 66185eb7d9f5: merge PR #12 (PR #12) at <commit, 12 hex>?
+One exact action, yes or no. Show the owner this action as written.
+
+Answer with: fleet-job approve-gate <repo>/.herdr-login 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell <repo>/.herdr-login lead 'GATE 66185eb7d9f5 NO: <their words>')
+
+$ stampede approve-gate $J 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
+SUBMITTED lead-login (t1)
+APPROVED 66185eb7d9f5 at <commit>
+$ stampede wait $J                                                                # the lead waits at a permission dialog
+BLOCKED lead-login: permission. Core says it waits at a dialog in its terminal t1 (hc read t1). Its screen:
+Allow this command?
+...
+```
+
+`SUBMITTED` means Core typed the line into the lead's terminal: there is no inbox file. The lead has no hooks there, so its brief tells it never to use a question card or a file-send tool. [Front door](docs/CORE-NATIVE.md#front-door) has the whole contract.
+
 ## Herdr Core
 
 [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime: programs in persistent terminals that report their own status (OSC 7501), with parent links, labels and an event stream, and no workspaces, tabs or panes. `stampede new --core` runs a job there the way Core itself works: Core holds the tree of terminals, and stampede adds only the space's name, the owner tag, the reopen record, the owner's gates, a cap on helpers and the layout labels. The Herdr TUI stays the default backend, and every TUI command works as before. The shape a client reads (labels, parent links, events): [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The lead's playbook: [references/core.md](skills/herdr-fleet/references/core.md). For Core's own basics read `hc --skill`.
 
 **The tree and the roles.**
 - **The owner** asks, answers questions and gives every gate's yes.
-- **The front door** writes the ask, runs `stampede new --core`, passes the owner's words to the lead with `stampede tell <job> lead "..."` and records a gate's yes with `approve-gate`. It reads the lead or a helper with `hc read <address>` and never types into one.
+- **The front door** writes the ask, runs `stampede new --core`, passes the owner's words to the lead with `stampede tell <job> lead "..."` and records a gate's yes with `approve-gate`. It reads the lead or a helper with `hc read <address>` and never types into one. A chat outside Herdr that is your only contact adds `--front-door` and relays the job by `stampede wait`, as on the TUI ([Front door](docs/CORE-NATIVE.md#front-door)): `wait` says `BLOCKED <lead>: <kind>` with the lead's screen where the TUI says `BLOCKED_ON_CARD`.
 - **The lead** is the root: one Core terminal with no parent, one per job. The space has no terminal of its own: its name is the lead's `stampede.space` label.
 - **Helpers** are the lead's real Core children, started with `stampede start`: Claude, Codex or any program. A helper may start its own helpers, at any depth. Core ends a branch when its parent ends, unless a helper was started with `--outlive-parent`. Core sets a parent once, so such a helper still names its old parent after a lead is reopened: `stampede tree` shows it at depth 1 as `outlived <its old parent>`, the cap counts it, and a whole-job `close` ends it with the rest.
 - **The reviewer** is one helper on another model.
@@ -586,7 +621,7 @@ Every front door writes the ask and runs `stampede new`; none plans or runs the 
 | any other bot | the same as Grok Bot | its webhook | [remote/other.md](remote/other.md) |
 | a whole remote computer | Herdr, the CLIs and stampede on one box | any of the above | [remote/any-machine/](remote/any-machine/README.md) |
 
-Any of them can run the job on Herdr Core instead: it passes `--core --cwd <repo>` in place of `--pane` or `--workspace` ([Herdr Core](#herdr-core)). It then hears a question, a gate, a post and done from the lead's own commands, and blocked, error, dead or stale for the lead from the machine's watchdog within about 5 minutes.
+Any of them can run the job on Herdr Core instead: it passes `--core --cwd <repo>` in place of `--pane` or `--workspace` ([Herdr Core](#herdr-core)). It then hears a question, a gate, a post and done from the lead's own commands, and blocked, error, dead or stale for the lead from the machine's watchdog within about 5 minutes. A chat outside Herdr adds `--front-door` on Core too, and relays the outbox with `stampede wait` ([Front door](docs/CORE-NATIVE.md#front-door)); only `--core --relay` refuses it.
 
 Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 
@@ -596,7 +631,7 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 - **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`:
   - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.
   - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
-  - **started by a front door** (`--front-door`): a post in `<job>/outbox/`. The front door shows you the exact action and, on your yes in its chat, runs `stampede approve-gate ... --by "owner in <chat>: '<your words>'"`. An explicit order you already gave there for that exact action counts, quoted; anything vaguer goes back to you.
+  - **started by a front door** (`--front-door`, on the Herdr TUI or on Herdr Core): a post in `<job>/outbox/`. The front door shows you the exact action and, on your yes in its chat, runs `stampede approve-gate ... --by "owner in <chat>: '<your words>'"`. An explicit order you already gave there for that exact action counts, quoted; anything vaguer goes back to you.
   - **either way, on the Herdr TUI,** a yes typed in a Claude lead's Herdr pane works.
 - **The lead acts on your yes typed in its pane for that exact action (a Claude lead on the Herdr TUI only), or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge also passes `--match-head-commit` on that commit, so a push after your yes means asking again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
 - **A yes covers the gate as you were asked it.** The record holds a digest of the gate's action, PR, commit and route: a gate changed after your yes makes `gate-ok` refuse, and the bot's `approve` command carries the same digest (`--digest`), so a gate changed between the question and your yes takes none. `stampede finish` cancels every question of the job still waiting on your phone.
@@ -656,6 +691,8 @@ Every key is an environment variable with a default; nothing needs setting. To c
 | `stampede start: the owner asked to see this plan` | a `--review` job: approve the plan as it stands with `stampede approve <job> --by <who>` |
 | `stampede approve: the owner has not been shown this plan` | a `--front-door` job: the lead posts `plan.md` (`stampede post <job> "PLAN READY" --file <job>/plan.md`), the front door sends that file to you, and only your yes to it is approved; post again after any change |
 | `stampede approve: the front door has not received this plan.md yet` | the lead posted the plan, but the front door has not run `stampede wait` since: run it, send the owner the file it names, and approve only their yes to that file |
+| `stampede new: --front-door on Herdr Core is for a native job: drop --relay` (exit 2) | a `--core --relay` job has no front door: start it with `stampede new --core --front-door` (no `--relay`); nothing was made |
+| `BLOCKED <lead>: <kind>` from `stampede wait` on a Core job | Core says the lead waits at a dialog (a permission, a trust prompt): show the owner the screen `wait` printed, and clear it only as they say, with `hc keys <address> <keys>`; run `wait` again |
 | `BLOCKED_ON_CARD <agent>` from `stampede tell` or `stampede wait` | the agent waits at a question card in its pane and reads nothing else until it is answered; your message is queued. Answer the card in its pane, or have the front door type your answer there. In a `--front-door` job the lead's own cards become posts, so this is rare |
 | `stampede new: --fork forks a Claude chat, so it takes a Claude lead` (exit 2) | a Codex lead never starts as a fork: drop `--lead codex` (or unset `FLEET_LEAD_KIND`), or start it without `--fork`; nothing was made |
 | `stampede new: a Codex lead on Herdr Core gets its inbox typed into its terminal, and ...` (exit 2) | a Codex lead on a `--relay` job needs Core's draft hold: update to Herdr Core 0.1.20 or later (`hc update`) and keep `draft_wait` at 30 or more (a plain number in Core's `config.toml`), or use `--lead claude`; nothing was made. A deliverer that finds this later types nothing and says `NOT TYPED` in `<job>/hooks/deliver.log` |
@@ -875,12 +912,14 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **Unreleased, 14 Nov 2026. A command that teaches itself:** bare `stampede` and `stampede --help` list the commands grouped in the order an agent meets them, each `--help` has its flags and an example, and a refusal names the next step (a job folder that is not there, an agent not in the job, a missing ask file, a post nobody hears). `stampede doctor` checks Python, the checkout and the commands on PATH before `herdr-doctor`'s own lines, `stampede check` runs the fast tests in seconds, and the suite runs quietly on Python 3.9 in CI. Every command and its exit codes: [docs/CLI.md](docs/CLI.md).
 
+**Unreleased, 14 Nov 2026. A native front door on Herdr Core:** `stampede new --core --front-door` makes a chat outside Herdr and Core the owner's only contact on a Core-native job, as on the TUI: the lead posts, asks and asks gates through `<job>/outbox`, `stampede wait` hands each item on (and says `BLOCKED <lead>: <kind>` with its screen, or `LEAD_GONE`), and answers, `approve` and `approve-gate` reach the lead through `hc send`. Tested with the fake `hc` (the front-door loop for every client outside Herdr on all three backends in the cross-client suite) and on a real scratch core (`tests/core_smoke.py`, hc 0.1.21: `new --core --front-door`, `post`, `wait`, `finish`). No live agent has run it yet.
+
 **Next:**
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.
 - On Linux: the systemd user timers on a real user manager, x86_64 live (CI covers it with fakes and a Core smoke run), a signed-in Claude and Codex, Moshi paired, and a bot over SSH.
 - A Herdr server restart: `reopen.sh` into the workspace Herdr restores, starting the agents in its plain shells, instead of asking to close it first.
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
-- On Herdr Core, planned: workers on a second machine (`hc run --on`; a job is local to one machine today), a native front door for a Core job, from a chat or a bot over `hc` (today `new --core` refuses `--front-door`: [what is true today](docs/CORE-NATIVE.md#not-in-a-core-native-job)), a look at an `--app-space` job in the Herdr app and a name for its space set through the app, Kimi as a Core agent (Kimi 2.5.3 reports its status on Herdr Core 0.1.20) once a signed-in run shows its turns and its empty prompt, Hermes and Kimi workers on a TUI-only job, and Hermes's empty prompt, so a handed one is briefed and told without a hand.
+- On Herdr Core, planned: opt-in alerts to the owner for helpers (blocked, error, stale, dead), as the watchdog sends for the lead today, workers on a second machine (`hc run --on`; a job is local to one machine today), a look at an `--app-space` job in the Herdr app and a name for its space set through the app, Kimi as a Core agent (Kimi 2.5.3 reports its status on Herdr Core 0.1.20) once a signed-in run shows its turns and its empty prompt, Hermes and Kimi workers on a TUI-only job, and Hermes's empty prompt, so a handed one is briefed and told without a hand.
 - Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.
 - Workers on a second machine over Tailscale.
 - Cursor as the lead, and a signed-in Codex leading a live Herdr Core job.

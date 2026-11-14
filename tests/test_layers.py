@@ -17,11 +17,13 @@ LAZY = {
     ('owner', 'finish'): {'handed', 'native'},
     # Exceptions, each a function that branches on the backend and is called from a layer below cli, so a load-time
     # import would be a cycle: tell and notify_lead (owner and hooks call them), lead_alive and caller_ids reach native;
-    # tell reaches a relay job's Codex and handed agents; the deliverer types into a relay job's Core terminal.
+    # tell reaches a relay job's Codex and handed agents; the deliverer types into a relay job's Core terminal; the
+    # front door's wait asks native whether the lead is blocked.
     ('owner', 'tell'): {'relay', 'handed', 'native'},
     ('owner', 'notify_lead'): {'native'},
     ('owner', 'lead_alive'): {'native'},
     ('owner', 'caller_ids'): {'native'},
+    ('owner', 'wait'): {'native'},
     ('tui', 'deliver'): {'relay'},
     ('tui', 'type_unread'): {'relay'},
 }

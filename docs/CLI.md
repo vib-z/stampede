@@ -14,7 +14,7 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 | command | flags | prints |
 |---|---|---|
 | `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--lead claude\|codex` (default `$FLEET_LEAD_KIND`, else claude), `--fork <session id>` (Claude only), `--front-door` | `<lead> <job folder>` once its brief pointer went in; `BLOCKED <lead>: clear the startup dialog, then stampede tell ...` |
-| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--fork`, `--space <name>`, `--max-helpers <n>` (default `$STAMPEDE_MAX_HELPERS`, else 12) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
+| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--fork`, `--space <name>`, `--max-helpers <n>` (default `$STAMPEDE_MAX_HELPERS`, else 12), `--front-door` (refused with `--relay` and in a bot's job) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
 | `new --core --relay --file <ask.md>` | `--cwd`, `--name`, `--review`, `--lead`, `--fork`, `--app-space` | as `new --core`, for the earlier path |
 
 ## Work in it
@@ -27,7 +27,7 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 | `ask <job> <question>` | `--option <a>` (repeatable) | `ASKED <id> ...`, saying where the answer comes back |
 | `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option` | `GATE <id> ...; act after stampede gate-ok ... prints APPROVED` |
 | `post <job> <text>` | `--file <path>` (repeatable) | `POSTED <n> to <bot> (and <item>)` in a job a bot started; `POSTED <n> for the front door to relay (<item>)` in a `--front-door` job; otherwise `POSTED <n> to the outbox only (<item>): no bot or front door hears it`, with how the owner would be told |
-| `wait <job>` | `--timeout <s>` (default 3600) | every outbox item not shown yet, `BLOCKED_ON_CARD` with the lead's screen, or `LEAD_GONE <lead>: ...`; `TIMEOUT nothing new ...` |
+| `wait <job>` | `--timeout <s>` (default 3600) | every outbox item not shown yet, `BLOCKED_ON_CARD` with the lead's screen, or `LEAD_GONE <lead>: ...`; on a Core job `BLOCKED <lead>: <kind>. Core says it waits at a dialog in its terminal <address> (hc read <address>)` and its screen, or `LEAD_GONE <lead>: Herdr Core holds no live lead of this job ...`; `TIMEOUT nothing new ...` |
 | `next <job>` (a Core job) | | `STARTED` per queued helper, `DROPPED <name>: its parent ... is gone`, then `WAITING <k> queued (...)` or `NOTHING QUEUED` |
 | `tree <job>` (a Core job) | `--json` | `space <name> (<key>)`, then one line per terminal, indented by depth, then the queue; `NO LEAD` |
 
@@ -91,6 +91,7 @@ A Core job's commands, one by one (what each does: [CORE-NATIVE.md](CORE-NATIVE.
 | `start` | `STARTED` or `QUEUED` | a `FAILED` start, during the drain too | a refusal: the name taken, `--pane`, a bad brief or kind, an unknown parent, a finished job, a job that is not native |
 | `next` | `STARTED`, `WAITING`, `NOTHING QUEUED`, `DROPPED` | a `FAILED` start, or `UNKNOWN` | a finished job; not a native job |
 | `tree` | the tree | `NO LEAD` | not a native job |
+| `wait` (`--front-door`) | the items, `BLOCKED <lead>: <kind>`, `LEAD_GONE` (exit 3: `TIMEOUT`) | | |
 | `tell` | `SUBMITTED` | | `FAILED` (nothing typed) |
 | `snapshot` | the record's path | `FAILED snapshot`: Core did not answer | not a native job |
 | `reopen` | only `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` | any `FAILED` restart | not a native job; `--fresh` or `--rerun-programs` on a finished job |

@@ -24,7 +24,7 @@ stampede new --file <ask.md> --pane "$P" --name <job> --front-door   # add --lea
 - `--lead codex`: only when the owner asks for a Codex (Astra) lead. It is refused with `--fork`; with `--core` it runs a Codex lead in a Core terminal.
 - `--fork "$CLAUDE_CODE_SESSION_ID"`: only when the owner worked the plan out with you in this chat and the lead is Claude. The lead starts with this conversation; a Codex lead starts from the ask file.
 - `--review`: only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).
-- `--core`: only when the owner asks for Herdr Core. Then no workspace, no `--pane` and no `--front-door` ([what a front door does instead](../../docs/CORE-NATIVE.md#not-in-a-core-native-job)): `stampede new --core --file <ask.md> --cwd "$R" --name <job>` after `herdr-trust "$R"` (`--fork` and `--review` work there too). It prints `<lead> <job dir>`, the folder `$R/.herdr-<job>`. The lead is a root Core terminal and its helpers are its Core children ([core.md](../herdr-fleet/references/core.md)). The owner hears a question, a gate, a post and done from the lead's own commands, and blocked, error, dead or stale for the lead from the machine's watchdog within about 5 minutes. Pass the owner's words with `stampede tell <job> lead "<their words>"`. Read the lead or a helper with `hc read <address>` (`stampede tree <job>` lists them); never type into one. Only when the owner asks to hand Cursor, Hermes or Kimi to a TUI pane: `--core --relay` ([core-relay.md](../herdr-fleet/references/core-relay.md)).
+- `--core`: only when the owner asks for Herdr Core. Then no workspace and no `--pane`: `stampede new --core --file <ask.md> --cwd "$R" --name <job> --front-door` after `herdr-trust "$R"` (`--fork` and `--review` work there too; drop `--front-door` only when the owner will watch the lead's terminal). It prints `<lead> <job dir>`, the folder `$R/.herdr-<job>`. The lead is a root Core terminal and its helpers are its Core children ([core.md](../herdr-fleet/references/core.md)). The owner hears a question, a gate, a post and done from the lead's own commands, and blocked, error, dead or stale for the lead from the machine's watchdog within about 5 minutes. Relay it as below ([Front door on Core](../../docs/CORE-NATIVE.md#front-door)); pass the owner's words with `stampede tell <job> lead "<their words>"`. Read the lead or a helper with `hc read <address>` (`stampede tree <job>` lists them); never type into one. Only when the owner asks to hand Cursor, Hermes or Kimi to a TUI pane: `--core --relay` ([core-relay.md](../herdr-fleet/references/core-relay.md)).
 
 6. It prints `<lead> <job dir>`. On `BLOCKED ...`, read the lead's pane (`herdr agent read <lead> --source visible --lines 30`), clear the startup dialog, then send the `stampede tell` line it printed. Tell the owner the lead's name and the workspace label.
 
@@ -48,5 +48,11 @@ Start it again after each return until the job is finished. Each item is `<job d
 **Passing something on:** `stampede tell <job dir> lead "<the owner's words, verbatim>"`. `DELIVERED` means the lead will read it; `BLOCKED_ON_CARD` (exit 3) means it is queued behind a card: handle the card first.
 
 **The lead's pane is not the owner.** In `herdr agent read`, the grey text in its input line is Claude's own prompt suggestion, not the owner typing, and `.focused` can read true while nobody types. Go by the outbox, `plan.md` and `reports/`.
+
+**On Herdr Core** the loop is the same, with these differences:
+
+- No pane: read the lead with `hc read <address>` (`stampede tree <job>` lists the addresses).
+- `wait` says `BLOCKED <lead>: <kind>` with its screen, in place of `BLOCKED_ON_CARD`: show the owner the screen, and clear the dialog only as they say, with `hc keys <address> <keys>`.
+- `tell` prints `SUBMITTED`: Core typed the line into the lead's terminal. `LEAD_GONE` means Core holds no live lead: `stampede tree <job>`, then `stampede reopen <job>` or tell the owner.
 
 **Gates** are always the owner's own yes, never your decision: the list, and how a yes is recorded with `approve-gate`, are in [gates.md](../herdr-fleet/references/gates.md).
