@@ -899,13 +899,15 @@ def v02():
     ev = Ev('V02')
     doctor_text = (SCRIPTS / 'herdr-doctor').read_text()
     readme = (ROOT / 'README.md').read_text()
+    setup = (ROOT / 'docs/SETUP.md').read_text()  # the tested versions
     plugin = (ROOT / 'herdr-plugin.toml').read_text()
     seen = {'herdr': {'plugin': minimum(r'min_herdr_version = "([0-9.]+)"', plugin),
                       'readme': minimum(r'Herdr\]\([^)]*\) ([0-9.]+) or later', readme),
+                      'setup': minimum(r'Herdr\]\([^)]*\) \| [0-9.]+ \(([0-9.]+) or later', setup),
                       'doctor': minimum(r'HERDR_MIN=([0-9.]+)', doctor_text)},
-            'hc': {'readme': minimum(r'`hc` ([0-9.]+) or later', readme),
+            'hc': {'setup': minimum(r'`hc` ([0-9.]+) or later', setup),
                    'doctor': minimum(r'HC_MIN=([0-9.]+)', doctor_text) or minimum(r'newer "\$hcv" ([0-9.]+)', doctor_text)},
-            'claude': {'readme': minimum(r'([0-9.]+) or later on Herdr Core', readme),
+            'claude': {'setup': minimum(r'([0-9.]+) or later on Herdr Core', setup),
                        'doctor': minimum(r'CLAUDE_CORE_MIN=([0-9.]+)', doctor_text) or minimum(r'newer "\$cv" ([0-9.]+)', doctor_text)}}
     ev.cmds.append(json.dumps(seen))
     bad = {tool: places for tool, places in seen.items() if None in places.values() or len(set(places.values())) != 1}

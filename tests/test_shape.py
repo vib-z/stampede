@@ -34,6 +34,11 @@ MODEL_OK = ("config.example", "skills/", "tests/")  # the only places a model na
 SKILL_BYTES, PLAYBOOK_BYTES, LINE_CHARS = 6000, 8000, 400  # a playbook is read whole by an agent: short in bytes, not only lines
 # core-relay.md describes the deprecated --core --relay path and is deleted in v0.3.0: no byte or line-length limit until then.
 LONG_OK = {"skills/herdr-fleet/references/core-relay.md"}
+# History is left as written: its links into README sections that moved to docs/ keep their old anchors.
+HISTORY_FILES = {"CHANGELOG.md", "docs/RUNS.md"}
+README_LINES, README_CHARS = 100, 200  # AGENTS.md section 1: the README is a short front page
+PAGES = ("docs/GUIDE.md", "docs/SETUP.md", "docs/CORE.md", "docs/SAFETY.md", "docs/CONFIGURE.md", "docs/TROUBLESHOOT.md",
+         "docs/REFERENCE.md", "docs/STATUS.md", "USING.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE")
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 HISTORY = re.compile(r"\b20[0-9]{2}-[01][0-9]-[0-3][0-9]\b|\b[0-3]?[0-9] (?:" + MONTHS + r")[a-z]* 20[0-9]{2}\b"
                      r"|owner's rule|owner-approved|Seen 20", re.I)
@@ -199,6 +204,8 @@ class Shape(unittest.TestCase):
                 dest = (p.parent / path).resolve() if path else p
                 if not dest.exists():
                     bad.append(f"{rel(p)}: broken link {target}")
+                elif rel(p) in HISTORY_FILES and dest == ROOT / "README.md":
+                    continue
                 elif anchor and dest.suffix == ".md" and anchor not in anchors(dest):
                     bad.append(f"{rel(p)}: missing anchor {target}")
         self.assertEqual(bad, [], "\n".join(bad))
@@ -259,7 +266,7 @@ class Shape(unittest.TestCase):
 
     def test_front_doors_outside_herdr_name_a_target(self):
         """Outside Herdr there is no current workspace, so `stampede new` needs --workspace or --pane (review round 1, R3)."""
-        for name in ("skills/stampede/SKILL.md", "README.md", "remote/other.md"):
+        for name in ("skills/stampede/SKILL.md", "docs/GUIDE.md", "remote/other.md"):
             lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
             self.assertTrue(any("outside Herdr" in l and "--workspace" in l and "--pane" in l for l in lines), name)
 
@@ -271,6 +278,18 @@ class Shape(unittest.TestCase):
         self.assertEqual([l for l in text.splitlines() if len(l) > 300], [])
         for name in ("README.md", "AGENTS.md", "CLAUDE.md", "SKILL.md"):
             self.assertIn("](USING.md)", (ROOT / name).read_text(encoding="utf-8"), name)
+
+    def test_the_readme_is_a_short_front_page(self):
+        """At most README_LINES lines, none over README_CHARS characters but the badge and image HTML, and a link to
+        each page that holds the rest."""
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        lines = text.splitlines()
+        self.assertLessEqual(len(lines), README_LINES)
+        long = [f"README.md:{i}: {len(l)} characters" for i, l in enumerate(lines, 1)
+                if len(l) > README_CHARS and not l.lstrip().startswith(("<a href=", "<img ", '<p align="center"><img '))]
+        self.assertEqual(long, [], "\n".join(long))
+        for page in PAGES:
+            self.assertIn("](" + page + ")", text, page)
 
     def test_one_gate_list(self):
         """The gate list lives in gates.md alone; every other playbook links to it ("sitemap" marks a copy of the list)."""

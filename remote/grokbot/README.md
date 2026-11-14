@@ -17,4 +17,4 @@ A Grok Bot is an agent with a computer of its own. It reaches your machine over 
 ## Run
 Give the bot the skill: [skills/grokbot-herdr/SKILL.md](../../skills/grokbot-herdr/SKILL.md) (its Steps are the per-job steps), with [herdr-fleet](../../skills/herdr-fleet/SKILL.md) beside it for the rules after the hand-off.
 
-`<host>` is the SSH alias from [ssh.md](ssh.md). The rules every front door follows: [README.md](../README.md). The gates: [README, Safety](../../README.md#safety).
+`<host>` is the SSH alias from [ssh.md](ssh.md). The rules every front door follows: [README.md](../README.md). The gates: [Safety](../../docs/SAFETY.md).

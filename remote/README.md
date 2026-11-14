@@ -33,7 +33,7 @@ stampede approve-gate <job dir> <gate> --sha <commit> --digest <d> --by "owner i
 
 | front door | what it is | guide |
 |---|---|---|
-| a chat in Herdr | a Claude pane on the machine | [README, Use](../README.md#use-one-job-start-to-finish) |
+| a chat in Herdr | a Claude pane on the machine | [the guide, one job](../docs/GUIDE.md#use-one-job-start-to-finish) |
 | Grok Bot (preferred bot) | setup A: a bot with its own computer drives your machine by SSH over Tailscale | [grokbot/](grokbot/README.md) |
 | any machine | setup B: everything on one remote computer | [any-machine/](any-machine/README.md) |
 | Claude | a Claude Code session on the machine, from the Claude app | [claude-code.md](claude-code.md) |
@@ -42,4 +42,4 @@ stampede approve-gate <job dir> <gate> --sha <commit> --digest <d> --by "owner i
 | Moshi | the phone; pairs with every front door above | [moshi.md](moshi.md) |
 | phone apps | other people's Herdr apps for a phone, linked | [phone-clients.md](phone-clients.md) |
 
-How a bot hears back: [events.md](events.md), on Core [events-core.md](events-core.md). What watches the watchers: [watchdogs.md](watchdogs.md). Every command's output: [docs/CLI.md](../docs/CLI.md). The gates: [README, Safety](../README.md#safety).
+How a bot hears back: [events.md](events.md), on Core [events-core.md](events-core.md). What watches the watchers: [watchdogs.md](watchdogs.md). Every command's output: [docs/CLI.md](../docs/CLI.md). The gates: [Safety](../docs/SAFETY.md).

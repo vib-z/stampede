@@ -128,7 +128,7 @@ Every command's flags, what it prints and its exit code: [CLI.md](CLI.md), with 
 
 ### The cap
 
-At most 12 helpers run at once in one lead's tree, at any depth. The owner changes it per job: `--max-helpers <n>` at `new`, or the number in `<job>/max-helpers`; the setting `helpers.max` (or `STAMPEDE_MAX_HELPERS`) changes the default, and a `--set helpers.max=<n>` at `new` is saved in the job's `settings.json` ([README, Configure](../README.md#configure)).
+At most 12 helpers run at once in one lead's tree, at any depth. The owner changes it per job: `--max-helpers <n>` at `new`, or the number in `<job>/max-helpers`; the setting `helpers.max` (or `STAMPEDE_MAX_HELPERS`) changes the default, and a `--set helpers.max=<n>` at `new` is saved in the job's `settings.json` ([Configure](CONFIGURE.md)).
 
 A helper counts while Core would call it working: its terminal is live and it has not yet gone `idle` or `done` after its task. A plain program counts while it lives. The lead and plain children never count.
 

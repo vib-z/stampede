@@ -21,7 +21,7 @@ Every command an agent runs takes `--json`: one JSON object on stdout, `{"ok", "
 | `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--lead-model`, `--lead-effort`, `--fork`, `--space <name>`, `--max-helpers <n>` (default: the setting `helpers.max`, 12), `--front-door` (refused with `--relay` and in a bot's job) | `on Herdr Core (--core), repo <repo>` (`(--core --relay)` for the earlier path; the `repo` fact with `--json`), `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
 | `new --core --relay --file <ask.md>` | `--cwd`, `--name`, `--review`, `--lead`, `--fork`, `--app-space` | as `new --core`, for the earlier path |
 
-Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=false`): that gate is off for this job only, recorded outside the job folder and logged in `<job>/gates.log`; an unknown name exits 2 with the list. With `gates.push_default_branch` on, `new` installs the `pre-push` hook in the repo's own hooks folder when there is no `pre-push` and `core.hooksPath` is unset, and says so on stderr (`hook pre-push installed in <repo>/.git/hooks/pre-push: ...`); otherwise it prints `stampede new: the push gate is not enforced by a hook in this repo, because it has its own (...)`. [README, Safety](../README.md#safety).
+Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=false`): that gate is off for this job only, recorded outside the job folder and logged in `<job>/gates.log`; an unknown name exits 2 with the list. With `gates.push_default_branch` on, `new` installs the `pre-push` hook in the repo's own hooks folder when there is no `pre-push` and `core.hooksPath` is unset, and says so on stderr (`hook pre-push installed in <repo>/.git/hooks/pre-push: ...`); otherwise it prints `stampede new: the push gate is not enforced by a hook in this repo, because it has its own (...)`. [Safety](SAFETY.md).
 
 ## Work in it
 
@@ -66,7 +66,7 @@ Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=fa
 
 `new` and `start` take `--set key=value` (repeatable): a setting for that command, above every other layer; the value is read as TOML, a bare word is a string. A pair without `=` or a value exits 2. At `new` it is saved with the rest.
 
-`new` writes `<job>/settings.json`: `{"values", "sources", "version"}`, every setting it resolved except the user-only keys (`ask.command`, `jobs_root`, `trust_root`, `lead.forbid`, `backend`, `gates.*`), which every command reads from your own file, environment and flags. Every later command of the job starts from it. `new` refuses, exit 2, while the config has a problem: each problem line, then `stampede new: fix it or remove the key: stampede config show`. The new keys of this kind are `backend`, `roles.<role>.kind|model|effort` (any role name), `helpers.layout` and `review.step`; a value outside a key's choices is a problem too. The layers and every key: [README, Configure](../README.md#configure).
+`new` writes `<job>/settings.json`: `{"values", "sources", "version"}`, every setting it resolved except the user-only keys (`ask.command`, `jobs_root`, `trust_root`, `lead.forbid`, `backend`, `gates.*`), which every command reads from your own file, environment and flags. Every later command of the job starts from it. `new` refuses, exit 2, while the config has a problem: each problem line, then `stampede new: fix it or remove the key: stampede config show`. The new keys of this kind are `backend`, `roles.<role>.kind|model|effort` (any role name), `helpers.layout` and `review.step`; a value outside a key's choices is a problem too. The layers and every key: [Configure](CONFIGURE.md).
 
 ## The machine
 
@@ -91,7 +91,7 @@ Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what
 - `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, or a value outside a key's choices (`lead.kind must be one of claude, codex, not 'claud'; skipped`; also `backend`, `review.step`, `helpers.layout`, `merge.method` and every `roles.<role>.kind`), then `stampede new: fix it or remove the key: stampede config show`. `config show` and `doctor` report the same lines and exit 1.
 - `stampede: error: ...` with the usage line, for a flag or command it does not know; bare `stampede` prints the help.
 
-The full list, each with its fix, is the README's [Troubleshoot](../README.md#troubleshoot).
+The full list, each with its fix, is in [TROUBLESHOOT.md](TROUBLESHOOT.md).
 
 ## Exit codes
 

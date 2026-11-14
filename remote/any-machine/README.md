@@ -22,4 +22,4 @@ This guide is written for an agent to follow, step by step. Setup A, where a bot
 Read <stampede>/remote/any-machine/README.md and set this machine up for stampede, part by part. Ask me before each install.
 ```
 
-The owner gates hold here too: [README, Safety](../../README.md#safety). Every setting and its default: [config.example](../../config.example).
+The owner gates hold here too: [Safety](../../docs/SAFETY.md). Every setting and its default: [config.example](../../config.example).

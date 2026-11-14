@@ -4,22 +4,30 @@ To run a job with stampede, read [USING.md](USING.md); the rules below are for c
 
 These rules apply to every agent that edits this repo: Claude, Codex, Cursor, Hermes, Grok Bot or any other.
 
-The current contract is the [README](README.md) and [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The original design, kept as history, is [docs/superpowers/specs/2026-10-21-stampede-lean-design.md](docs/superpowers/specs/2026-10-21-stampede-lean-design.md).
+The current contract is the [README](README.md), the pages under `docs/` it links, and [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The original design, kept as history, is [docs/superpowers/specs/2026-10-21-stampede-lean-design.md](docs/superpowers/specs/2026-10-21-stampede-lean-design.md).
 
-## 1. The README is the product's front page. Keep it current at every step
+## 1. The README is a short front page, and the pages under `docs/` hold the rest. Keep both current at every step
 
-- **Same commit:** any change to behaviour, commands, scripts, skills, front doors, the layout or the status updates README.md in that commit. It also updates every doc under `docs/` and `remote/` that the change affects.
-- **Incomplete otherwise:** a change without its README update is not done.
+- **The README:** at most 100 lines (`test_shape.py`), in plain words a reader with no coding background can follow: short sentences, everyday words, each term explained in half a sentence or behind a link, no sales words. It has seven parts, in this order, and nothing else:
+  1. The name, one sentence that says what it is, the version badge and at most two more, and at most one picture with its caption.
+  2. What it is, in three to five sentences.
+  3. What you need, with versions.
+  4. Install: the quick start, ending with the `stampede --version` line and `stampede doctor`.
+  5. Your first job, step by step.
+  6. How it keeps you safe, in a few lines, linking to [docs/SAFETY.md](docs/SAFETY.md).
+  7. Read more: one list of links to the pages under `docs/`, the changelog, contributing and the license.
+- **Same commit:** any change to behaviour, commands, scripts, skills, front doors, the layout or the status updates, in that commit, every page under `docs/` and `remote/` that describes it, and README.md when one of its seven parts changes.
+- **Incomplete otherwise:** a change without its docs update is not done.
 - **True today:**
-  - Every claim, command and number in the README is true of the current code.
-  - Every command in it was run, against a scratch job folder with a fake Herdr when it would otherwise touch real panes.
-  - Anything not built yet goes under the roadmap, marked as planned.
-- **Roadmap and status:** update them at every milestone: what works, what was tested, what is next.
+  - Every claim, command and number in the README and the docs is true of the current code.
+  - Every command in them was run, against a scratch job folder with a fake Herdr when it would otherwise touch real panes.
+  - Anything not built yet goes under the roadmap in [docs/STATUS.md](docs/STATUS.md), marked as planned.
+- **Roadmap and status:** update [docs/STATUS.md](docs/STATUS.md) at every milestone: what works, what was tested, what is next.
 - **The cross-client suite:** any change to behaviour, a front door, a client or a worker kind updates, in that same commit, the suite (`tests/test_clients.py`, `tests/clients_run.py`) and [docs/CLIENTS.md](docs/CLIENTS.md) (its matrix, what differs, and the live runbook). A front door or a client is a row in `CLIENTS` and in that doc; a worker kind is an entry in `WORKERS` under each backend that takes it, with its refusal in `REFUSED` for one that does not, and in `HANDED` when a Core job hands it to a Herdr TUI pane. A client that does worse gets a finding there and a test marked as an expected failure.
 - **Standard:** short, true and complete. A stranger can understand, install, use, configure, troubleshoot and extend stampede from the README and its docs alone, with no questions to anyone.
 
 ### What the README and docs must cover
-Shape the sections to fit the content; no template is fixed. Together, the README, `docs/`, `remote/` and the skills answer all of these:
+Shape the pages under `docs/` to fit the content; no template is fixed there. Together, the README, `docs/`, `remote/` and the skills answer all of these, each in one place:
 - **What and why:** what stampede is, the problem it solves, and who it is for.
 - **See it:** real screenshots of a run, with captions.
 - **How it works:** the flow from ask to report and reopen, the roles (owner, front door, lead, workers, reviewer), and what lives where.
@@ -39,7 +47,7 @@ Shape the sections to fit the content; no template is fixed. Together, the READM
 - **Contribute:** how to add a front door or an agent CLI, and how to run the tests.
 - **Roadmap, status and license.**
 
-The README is the front door. It covers every point at least briefly, then links to the doc with the depth.
+The README covers what stampede is, what you need, the install, a first job and safety in short. For the rest it links to the page that holds it, and [docs/REFERENCE.md](docs/REFERENCE.md#docs) lists every doc.
 
 ### Imagery and video
 - **Images** go in `docs/images/`, 1800 px wide.
@@ -55,7 +63,7 @@ The README is the front door. It covers every point at least briefly, then links
 
 ### Before each commit that touches the README or docs
 - `python3 -m unittest discover tests` passes. This includes `test_shape.py`: links, anchors, line limits, frontmatter, no em or en dashes, and no personal details (home paths, private paths, private names), in `docs/superpowers` too.
-- Render the README the way GitHub does (`gh api markdown -F text=@README.md`) and look at it. Fix overflow, stacked badges and broken images.
+- Render the README, and each page the commit changed, the way GitHub does (`gh api markdown -F text=@README.md`) and look at it. Fix overflow, stacked badges and broken images.
 
 ## 2. The skills and the playbooks
 - **Where they live:** the playbooks are `skills/` (the four skills) and `remote/` (the front-door guides).
