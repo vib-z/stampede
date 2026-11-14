@@ -67,6 +67,8 @@ def ask_now(job, question, options, command=None, gate=None, ident=None):
     and a line hc send refuses (the lead is blocked or gone) stays in asks/<ident>.answer, mode 0600, and the ask fails.
     A gate always asks FLEET_ASK_CMD itself, with the question made from its own record, and its yes (exit 0, a yes or
     nothing on stdout) is recorded for gate-ok, only while the record is still the one asked about."""
+    if ident is not None and not base_.GATE.fullmatch(ident):
+        raise ValueError(f'--ident takes a question id as ask makes it (12 hex), not {base_.line(ident)!r}')
     asked = load_gate(job, gate) if gate else None
     if asked:
         if asked['route'] != 'local':
@@ -95,12 +97,8 @@ def ask_now(job, question, options, command=None, gate=None, ident=None):
             status, answer = 'GATE NOT RECORDED', base_.line(error)
     line = status + ' ' + base_.line(question) + ': ' + answer
     if job_.backend(job) == 'native':
-        kept = Path(job).absolute() / 'asks' / ((ident or uuid.uuid4().hex[:12]) + '.answer')
-        kept.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(kept, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # first, so the answer outlives a failed send
-        os.fchmod(fd, 0o600)  # the owner's words, private whatever the umask, and when an earlier try left the file
-        with os.fdopen(fd, 'w') as out:
-            out.write(line + '\n')
+        kept = asks_folder(job) / ((ident or uuid.uuid4().hex[:12]) + '.answer')
+        keep(kept, line + '\n')  # first, so the answer outlives a send that fails or never returns
         if notify_lead(job, line, kept):
             return 1
         kept.unlink()
@@ -109,13 +107,34 @@ def ask_now(job, question, options, command=None, gate=None, ident=None):
     return 0 if status == 'ANSWER' else 1
 
 
+def asks_folder(job):
+    """<job>/asks, private (0700) whatever the umask, and made so when it is more open: a kept answer is the owner's words."""
+    folder = Path(job).absolute() / 'asks'
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(folder, 0o700)
+    return folder
+
+
+def keep(path, text):
+    """Write text to path whole and private: a new 0600 file of its own beside it, then os.replace onto path, so a reader
+    of the old file sees only the old text and a crash leaves one of the two whole."""
+    temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}')
+    try:
+        with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as out:
+            out.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
+
+
 def ask_background(job, question, options, command=None, gate=None):
     """Detach the question in its own process group, so cancel stops it and its child card together."""
     job = Path(job).absolute()
     command = command or ask_command(job)
     require_ask_command(command)
-    folder = job / 'asks'
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = asks_folder(job)
     ident = uuid.uuid4().hex[:12]
     argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command,
             *(['--gate', gate] if gate else []), *['--option=' + option for option in options], '--', question]

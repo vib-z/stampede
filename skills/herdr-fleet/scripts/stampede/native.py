@@ -46,16 +46,10 @@ def agent(key, terminals, name):
     return next((t for t in live(key, terminals) if labels(t).get('stampede.agent') == name), None)
 
 
-def standing(terminal):
-    """How a terminal ranks among those that carry one agent's name: the agent itself before a shell Core put in its
-    lost program's place, then live before ended."""
-    return not hcapi_.shelled(terminal), terminal.get('state') == 'live'
-
-
-def pick(terminals, shells=False):
-    """Of the terminals that carry one agent's name: the live one, else the last one Core still keeps. A shell Core put
-    in a lost program's place is the agent no longer: it is picked only with shells, when no other is there."""
-    agents = [t for t in terminals if standing(t)[0]] or (terminals if shells else [])
+def pick(terminals):
+    """Which of the terminals that carry one agent's labels is the agent: the first live one, else the last one Core
+    still keeps. A shell Core put in a lost program's place is the agent no longer, so it never counts."""
+    agents = [t for t in terminals if not hcapi_.shelled(t)]
     return next((t for t in agents if t.get('state') == 'live'), agents[-1] if agents else None)
 
 
@@ -84,12 +78,12 @@ def name_of(terminal):
     return (tags.get('stampede.agent') if tags.get('stampede.role') else None) or terminal.get('name') or terminal['address']
 
 
-def job_tree(key, terminals):
+def job_tree(key, terminals, lead=None):
     """The job's terminals as (depth, terminal, outlived): the lead and everything under it, then each live terminal of
     the job that its chain no longer joins to the lead (Core sets parent once, so an --outlive-parent child of a dead lead
     still names it) at depth 1 with its old parent's name, and everything under it. A job's terminal is one labelled
-    stampede.job=<key> or one under such a terminal."""
-    lead = lead_of(key, terminals)
+    stampede.job=<key> or one under such a terminal. lead: the root to start from, by default lead_of."""
+    lead = lead or lead_of(key, terminals)
     rows = ([(0, lead, None)] + [(d, t, None) for d, t in descendants(terminals, lead['address'])]) if lead else []
     seen, by = {t['address'] for _, t, _ in rows}, {t['address']: t for t in terminals}
     members = {t['address'] for t in terminals if labels(t).get('stampede.job') == key}
@@ -698,16 +692,24 @@ def lead_blocked(job):
 
 
 def branch(key, terminals):
-    """The lead and every terminal under it by Core's parent links: (name, terminal, parent name), the lead first. A
-    terminal with no stampede.role is named by its Core name, else its address; of two with one name, the one of higher
-    standing (the later of two equal)."""
+    """The lead and every terminal under it by Core's parent links: (name, terminal, parent name), the lead first. Of the
+    terminals that carry one agent's labels, the agent is the one pick takes, and a name with only shells left has none.
+    A terminal with no stampede.role is named by its Core name, else its address; of two with one name, the live one."""
     lead, by = lead_of(key, terminals), {t['address']: t for t in terminals}
-    chosen = {}
+    named, plain, order = {}, {}, {}
     for _, t, _ in job_tree(key, terminals):
-        name, parent = name_of(t), by.get(t.get('parent'))
-        if name not in chosen or standing(t) >= standing(chosen[name][0]):
-            chosen[name] = (t, (name_of(parent) if parent else t.get('parent')) if t is not lead else None)
-    return [(name, t, parent) for name, (t, parent) in chosen.items()]
+        name = order.setdefault(name_of(t), name_of(t))
+        if labels(t).get('stampede.role'):
+            named.setdefault(name, []).append(t)
+        elif name not in plain or t.get('state') == 'live' or plain[name].get('state') != 'live':
+            plain[name] = t
+    rows = []
+    for name in order:  # the order Core's tree gives
+        t = pick(named[name]) if name in named else plain[name]
+        if t:
+            parent = by.get(t.get('parent'))
+            rows.append((name, t, (name_of(parent) if parent else t.get('parent')) if t is not lead else None))
+    return rows
 
 
 def refresh(job):
@@ -883,11 +885,11 @@ def close(job, name=None):
     name = lead if name in (None, 'lead') else name
     terminals = listing(job)
     ofname = [t for t in terminals if labels(t).get('stampede.job') == key and labels(t).get('stampede.agent') == name]
-    target = pick(ofname, shells=True)
+    target = next((t for t in ofname if t.get('state') == 'live'), ofname[-1] if ofname else None)
     if not target:
         raise ValueError(f'no terminal of this job is {name}')
-    whole = name == lead  # the whole job: every terminal of its tree, a shell left in a lost agent's place too
-    under = [(d, t) for d, t, _ in job_tree(key, terminals) if t is not target] if whole else descendants(terminals, target['address'])
+    whole = name == lead  # the whole job: its tree from the terminal it ends last, a shell left in a lost lead's place too
+    under = [(d, t) for d, t, _ in job_tree(key, terminals, target)][1:] if whole else descendants(terminals, target['address'])
     if os.environ.get('HC_TERMINAL_ID') in [target['address']] + [t['address'] for _, t in under]:
         raise ValueError(f'close {name} from outside its tree: this terminal is {name} or under it')
     failed, closed, foreign = False, [], set()
