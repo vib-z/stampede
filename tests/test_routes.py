@@ -104,16 +104,24 @@ class Routes(unittest.TestCase):
                 self.assertIsNone(self.sent_to({'source': 'codex-desktop', 'state': 'agent-turn-complete', 'thread_id': f't{n}'},
                                                HERDR_EVENTS_FALLBACK_ROUTE=bad))
 
-    def test_a_fallback_route_that_is_a_link_or_an_odd_name_is_ignored(self):
-        self.route('default', 'https://default.invalid/hook')
+    def test_a_fallback_route_is_read_as_any_route_is(self):
+        # a link in the routes folder is followed, as for the default route: the folder is the user's own
         outside = self.home / 'outside'
         outside.write_text('URL=https://outside.invalid/hook\n')
-        (self.routes / 'link-out').symlink_to(outside)
-        self.route('inside', 'https://inside.invalid/hook')
-        (self.routes / 'link-in').symlink_to(self.routes / 'inside')
-        for name in ('with space', 'with\nnewline', '.dotted'):
+        (self.routes / 'linked').symlink_to(outside)
+        (self.routes / 'default').symlink_to(outside)
+        event = {'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}
+        self.assertEqual(self.sent_to(event)[0], 'https://outside.invalid/hook')
+        url, payload = self.sent_to({**event, 'pane': 'w1:p2'}, HERDR_EVENTS_FALLBACK_ROUTE='linked')
+        self.assertEqual((url, payload['route']), ('https://outside.invalid/hook', 'linked'))
+        self.assertNotIn('ignored HERDR_EVENTS_FALLBACK_ROUTE', self.log())
+
+    def test_a_fallback_route_with_an_odd_name_is_ignored(self):
+        self.route('default', 'https://default.invalid/hook')
+        (self.routes / 'sub').mkdir()
+        for name in ('with space', 'with\nnewline', '.dotted', 'sub/inner'):
             self.route(name, 'https://odd.invalid/hook')
-        for n, bad in enumerate(('link-out', 'link-in', 'with space', 'with\nnewline', '.dotted')):
+        for n, bad in enumerate(('with space', 'with\nnewline', '.dotted', 'sub/inner')):
             with self.subTest(bad=bad):
                 before = self.log().count('ignored HERDR_EVENTS_FALLBACK_ROUTE')
                 url, payload = self.sent_to({'source': 'test', 'pane': f'w1:p{n}', 'state': 'blocked'}, HERDR_EVENTS_FALLBACK_ROUTE=bad)

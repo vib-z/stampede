@@ -269,25 +269,52 @@ echo disabled; exit 1
         config.write_text(f'HERDR_DOCTOR_EXTRA={extra}\n')
         self.assertIn('ok half done', self.doctor().stdout)
 
-    def test_an_extra_check_that_hangs_is_ended_with_all_it_started(self):
-        copy = self.home / 'short/herdr-doctor'                    # the same doctor, its limit 2 s for the test
-        copy.parent.mkdir()
-        copy.write_text((ROOT / 'skills/grokbot-herdr/scripts/herdr-doctor').read_text().replace('EXTRA_SECS=30', 'EXTRA_SECS=2'))
-        copy.chmod(0o755)
-        shutil.copy(ROOT / 'skills/grokbot-herdr/scripts/herdr-platform', copy.parent / 'herdr-platform')
+    def short_doctor(self, extra):
+        """The same doctor with its extra check's limit 2 s, run with that check, and how long it took."""
+        copy = self.home / 'short/herdr-doctor'
+        if not copy.exists():
+            copy.parent.mkdir()
+            copy.write_text((ROOT / 'skills/grokbot-herdr/scripts/herdr-doctor').read_text().replace('EXTRA_SECS=30', 'EXTRA_SECS=2'))
+            copy.chmod(0o755)
+            shutil.copy(ROOT / 'skills/grokbot-herdr/scripts/herdr-platform', copy.parent / 'herdr-platform')
+        began = time.monotonic()
+        result = subprocess.run([str(copy)], env={**self.env, 'HERDR_DOCTOR_EXTRA': str(extra)}, capture_output=True, text=True, timeout=15)
+        return result, time.monotonic() - began
+
+    def test_an_extra_check_that_hangs_is_ended_with_its_process_group(self):
         pids = self.home / 'pids'
         extra = self.home / 'doctor-extra'
         extra.write_text(f'#!/bin/bash\necho "ok started"\nsleep 60 &\necho $$ $! > {pids}\nwait\n')
         extra.chmod(0o755)
-        began = time.monotonic()
-        result = subprocess.run([str(copy)], env={**self.env, 'HERDR_DOCTOR_EXTRA': str(extra)}, capture_output=True, text=True, timeout=15)
-        self.assertLess(time.monotonic() - began, 10)
+        result, took = self.short_doctor(extra)
+        self.assertLess(took, 10)
+        self.assertIn('ok started', result.stdout)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout.splitlines()[-1], 'warn HERDR_DOCTOR_EXTRA did not finish in 2 s: run it by hand to see why')
+        self.assertEqual(result.stdout.splitlines()[-1], 'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why')
         self.assertEqual(result.stdout.count('HERDR_DOCTOR_EXTRA'), 1)
         for pid in pids.read_text().split():
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pid), 0)
+
+    def test_what_a_hanging_extra_check_said_still_counts(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text('#!/bin/bash\necho "PROBLEM my disk is full: clear it"\nexec sleep 60\n')
+        extra.chmod(0o755)
+        result, _ = self.short_doctor(extra)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['PROBLEM my disk is full: clear it',
+                         'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
+
+    def test_an_extra_check_whose_escaped_child_holds_the_pipe_cannot_hold_the_doctor(self):
+        pid = self.home / 'escaped'
+        extra = self.home / 'doctor-extra'
+        extra.write_text(f'#!/bin/bash\necho "ok started"\npython3 -c "import os, time; os.setsid(); open(\'{pid}\', \'w\').write(str(os.getpid())); time.sleep(30)" &\nwait\n')
+        extra.chmod(0o755)
+        self.addCleanup(lambda: pid.exists() and subprocess.run(['kill', pid.read_text()], capture_output=True))
+        result, took = self.short_doctor(extra)
+        self.assertLess(took, 8)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['ok started',
+                         'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
 
     def test_an_extra_checks_control_bytes_never_reach_the_output(self):
         extra = self.home / 'doctor-extra'

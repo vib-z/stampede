@@ -106,11 +106,11 @@ herdr_events_log() {
   esac
 }
 
-# herdr_fallback_route <routes folder>: HERDR_EVENTS_FALLBACK_ROUTE when it is a plain name (letters, digits, dot,
-# underscore, dash; no leading dot) of a regular file in that folder that is not a link; otherwise nothing, status 1.
+# herdr_fallback_route <routes folder>: HERDR_EVENTS_FALLBACK_ROUTE when it is the name of a route in that folder (letters,
+# digits, dot, underscore, dash; no leading dot), read as any route is; otherwise nothing, status 1.
 herdr_fallback_route() {
   local n=${HERDR_EVENTS_FALLBACK_ROUTE:-}
-  [[ "$n" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] && [ -f "$1/$n" ] && [ ! -L "$1/$n" ] && printf '%s\n' "$n"
+  [[ "$n" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] && [ -r "$1/$n" ] && printf '%s\n' "$n"
 }
 
 # hostname -s where it exists; otherwise the name before the first dot.

@@ -50,7 +50,7 @@ if [ "$malformed" = 1 ]; then
   log "dropped malformed workspace $(printf '%q' "$ws" | cut -c1-60): $summary"
   ws=""; payload=$(jq -c 'del(.workspace)' <<<"$payload")
 fi
-# The fallback route is only a plain name of a regular file in the routes folder (herdr_fallback_route); anything else
+# The fallback route is only the name of a route in the routes folder (herdr_fallback_route); anything else
 # is ignored, and events go as they would without it.
 fallback=$(herdr_fallback_route "$RD")
 if [ -n "${HERDR_EVENTS_FALLBACK_ROUTE:-}" ] && [ -z "$fallback" ]; then

@@ -108,9 +108,9 @@ method = "squash"  # how stampede merge merges: squash, merge or rebase
 # HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes  # one file per route, holding URL= and KEY=
 # HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log  # the flusher's log
 # HERDR_EVENTS_DIR=~/.config/herdr-events  # owner tags, job markers, handed panes
-# HERDR_EVENTS_FALLBACK_ROUTE=  # a route's name (a file in the routes folder): an owner with no route file goes there instead of default, and a Codex turn outside Herdr (the Codex desktop app) is sent there as source codex-desktop instead of skipped; unset, or not a plain name (letters, digits, dot, underscore, dash; no leading dot) of a regular file there that is not a link, neither happens; a question or a gate never uses it
+# HERDR_EVENTS_FALLBACK_ROUTE=  # a route's name (a file in the routes folder): an owner with no route file goes there instead of default, and a Codex turn outside Herdr (the Codex desktop app) is sent there as source codex-desktop instead of skipped; unset, or not the name of a route in the routes folder, neither happens; a question or a gate never uses it
 # HERDR_EVENTS_LAUNCHD=local  # macOS: the label prefix of the two launchd jobs herdr-doctor checks (<prefix>.herdr-event-watchdog, <prefix>.herdr-events-flush)
-# HERDR_DOCTOR_EXTRA=  # an absolute path to an executable of your own that herdr-doctor runs last, with empty stdin: its lines print with control bytes removed, each PROBLEM line counts, and one not done in 30 seconds is ended with all it started (one warn)
+# HERDR_DOCTOR_EXTRA=  # an absolute path to an executable of your own that herdr-doctor runs last, with empty stdin: its lines print with control bytes removed, each PROBLEM line counts, and one not done in 30 seconds is ended with its process group (one warn)
 # HERDR_EVENTS_STALE_MINUTES=30  # minutes a working terminal's screen may stay unchanged before stale
 # HC=hc  # the Herdr Core binary
 # HC_SESSION=default  # which core

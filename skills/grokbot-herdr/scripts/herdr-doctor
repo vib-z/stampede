@@ -10,8 +10,8 @@
 #   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
 # HERDR_EVENTS_LAUNCHD (default local) is the label prefix of the two macOS launchd jobs. HERDR_DOCTOR_EXTRA (default
 # unset) is an absolute path to an executable of your own that runs last, with empty stdin: its lines print with no
-# control bytes, and each line that starts PROBLEM counts; a missing or failing one, or one not done in 30 s (it and all
-# it started are ended), is one warn.
+# control bytes, and each line that starts PROBLEM counts; a missing or failing one, or one not done in 30 s (it and the
+# process group it runs in are ended), is one warn.
 # Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing, never starts a core; never prints route files or settings values.
 usage(){ echo 'usage: herdr-doctor [--relay] [--tui|--core] [-h|--help]'; }
 relay=0; only=""
@@ -312,8 +312,8 @@ if [ "$free" -lt 10 ]; then problem "${free} GB free on the home disk: clear spa
 else ok "${free} GB free"; fi
 
 # your own checks, last: never through a shell string; each line that starts PROBLEM counts
-# run_extra <program> <seconds>: the program in its own session, it and all it started ended after <seconds>; the first
-# line out is its exit status (or timeout), then its output with no control bytes but newline and tab.
+# run_extra <program> <seconds>: the program in its own session, it and that process group ended after <seconds>; the
+# first line out is its exit status (or timeout), then what it wrote, with no control bytes but newline and tab.
 run_extra(){ python3 - "$@" <<'PY'
 import os, re, signal, subprocess, sys
 try:
@@ -328,8 +328,12 @@ except subprocess.TimeoutExpired:
         os.killpg(p.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    out, status = b'', 'timeout'
-    p.wait()
+    status = 'timeout'
+    try:   # what it wrote before; a process that left the group may still hold the pipe, so wait 2 s at most
+        out = p.communicate(timeout=2)[0]
+    except subprocess.TimeoutExpired as late:
+        out = late.output or b''
+        p.wait()
 if isinstance(status, int) and status < 0:
     status = 128 - status
 text = out.decode('utf-8', 'replace')
@@ -346,7 +350,7 @@ if [ -n "$extra" ]; then
     status=${res%%$'\n'*}; out=""; [ "$res" = "$status" ] || out=${res#*$'\n'}
     [ -n "$out" ] && printf '%s\n' "$out"
     grep -q '^PROBLEM' <<<"$out" && bad=1
-    if [ "$status" = timeout ]; then warn "HERDR_DOCTOR_EXTRA did not finish in $EXTRA_SECS s: run it by hand to see why"
+    if [ "$status" = timeout ]; then warn "HERDR_DOCTOR_EXTRA did not finish in $EXTRA_SECS s, so it and its process group were ended: run it by hand to see why"
     elif [ "$status" != 0 ]; then warn "HERDR_DOCTOR_EXTRA exited $status: run it by hand to see why"; fi
   fi
 fi
