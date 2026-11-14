@@ -2,11 +2,12 @@
 # Yours: copy this file to ~/.config/stampede/config.toml ($XDG_CONFIG_HOME/stampede/config.toml when that is set).
 # A project: commit a .stampede.toml at the repo root with the keys every job there should use.
 # User only: jobs_root, trust_root, ask.command, lead.forbid and every gates key run a command, widen what is trusted
-# or lower a rule, so they are read from your file, the environment or a flag, never from a repo's .stampede.toml.
+# or lower a rule, and backend is your own choice, so they are read from your file, the environment or a flag, never
+# from a repo's .stampede.toml.
 # Last one wins: these defaults, your file, the repo's file, the environment (the names below), then a command's flags
 # and --set key=value. stampede new saves the result in <job>/settings.json. See it all: stampede config show
 
-backend = "auto"                 # where new runs a job given no --core, --pane or --workspace: auto (the Herdr TUI inside a Herdr pane, else Herdr Core), tui or core
+backend = "tui"                  # where new runs a job given no --core, --pane or --workspace: tui (the Herdr TUI; outside a Herdr pane new refuses), or core (Herdr Core), or auto if you ask for it (the TUI inside a Herdr pane, else Core) (user only)
 jobs_root = "~/code/herdr-jobs"  # every job folder goes in <root>/jobs/<date>-<owner or local>-<slug>, never in a repo (user only; env FLEET_JOBS_ROOT)
 trust_root = "~/code"            # herdr-trust trusts repos only under this folder; a Core job's repo must be there (user only; env FLEET_TRUST_ROOT)
 

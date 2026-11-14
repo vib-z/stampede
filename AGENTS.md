@@ -26,6 +26,7 @@ Shape the sections to fit the content; no template is fixed. Together, the READM
 - **Every option:**
   - Every front door: a Herdr chat, Claude, Codex or Cursor, Grok Bot (preferred bot), Moshi with any of them, or others.
   - Every agent CLI the lead can start: Claude, Codex, Cursor.
+  - The backend: the Herdr TUI is the default; Herdr Core runs a job only when the user asks, with `--core` or the setting `backend`, and no page says Core is picked for anyone.
 - **Install:**
   - Prerequisites, with versions.
   - A copy-paste quick start.

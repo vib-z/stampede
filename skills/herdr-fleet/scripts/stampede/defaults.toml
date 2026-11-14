@@ -1,7 +1,7 @@
 # Every stampede setting, with its default. This file is the list of keys: a key not here is not a setting.
 # Set one in ~/.config/stampede/config.toml (you), <repo>/.stampede.toml (a project), the environment or --set key=value.
 
-backend = "auto"                 # where new runs a job given no --core, --pane or --workspace: auto (the Herdr TUI inside a Herdr pane, else Herdr Core), tui or core
+backend = "tui"                  # where new runs a job given no --core, --pane or --workspace: tui (the Herdr TUI; outside a Herdr pane new refuses), or core (Herdr Core), or auto if you ask for it (the TUI inside a Herdr pane, else Core) (user only)
 jobs_root = "~/code/herdr-jobs"  # every job folder goes in <root>/jobs/<date>-<owner or local>-<slug>, never in a repo (user only; env FLEET_JOBS_ROOT)
 trust_root = "~/code"            # herdr-trust trusts repos only under this folder; a Core job's repo must be there (user only; env FLEET_TRUST_ROOT)
 

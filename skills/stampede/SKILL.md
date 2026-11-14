@@ -24,7 +24,7 @@ stampede new --file "$ASK" --pane "$P" --name <job> --front-door            # ou
 stampede new --core --file "$ASK" --cwd "$R" --name <job> --front-door      # outside Herdr, on Herdr Core
 ```
 
-   - A chat outside Herdr has no current workspace: pass `--pane` or `--workspace <id>` for the TUI, or `--core`. With none, the setting `backend` decides (`auto`: Herdr Core outside Herdr).
+   - The TUI is the default; Herdr Core only when the owner asks: `--core`, or for every job `stampede config set backend core`; outside Herdr the TUI needs `--pane` or `--workspace <id>`.
    - `--lead codex` only when the owner asks for a Codex lead; else the setting `lead.kind` decides.
    - `--fork "$CLAUDE_CODE_SESSION_ID"` only when the plan was worked out in this chat and the lead is Claude (refused with `--lead codex`).
    - `--review` only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).

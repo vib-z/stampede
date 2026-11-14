@@ -53,7 +53,7 @@ class Settings(unittest.TestCase):
     def test_defaults_are_todays_values(self):
         s = self.load()
         self.assertEqual(s.values, {
-            'backend': 'auto', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude', 'lead.forbid': [],
+            'backend': 'tui', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude', 'lead.forbid': [],
             'lead.claude.model': 'claude-opus-5-5', 'lead.claude.effort': 'xhigh',
             'lead.codex.model': 'gpt-6-astra', 'lead.codex.effort': 'ultra',
             'ask.command': 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h',

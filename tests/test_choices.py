@@ -44,15 +44,50 @@ class Backend(Choices):
         a = Namespace(**{'core': False, 'pane': None, 'workspace': None, 'cwd': str(self.repo), **flags})
         return cli_.backend_for(a)
 
-    def test_auto_is_the_tui_inside_a_herdr_pane_and_core_elsewhere(self):
+    def test_the_tui_is_the_default_and_core_runs_only_when_asked(self):
+        """The rule: the Herdr TUI is the default; Herdr Core runs a job only with --core or the setting backend."""
+        self.assertEqual(settings_.load(repo=self.repo).get('backend'), 'tui')
+        self.assertEqual(self.choice(), (False, ''), 'no flag, no setting: the TUI')
+        with mock.patch.dict(os.environ, {'HERDR_WORKSPACE_ID': 'w1'}):
+            self.assertEqual(self.choice(), (False, ''), 'inside a Herdr pane: the TUI')
+        self.assertEqual(self.choice(core=True), (True, ''), '--core is Core')
+        code, out, err = self.main('new', '--file', self.ask, '--json')  # bare new outside a pane: refused, nothing made
+        self.assertEqual(code, 2, err)
+        refusal = ('stampede new: new runs the job on the Herdr TUI and needs a Herdr pane: run it inside Herdr, or pass '
+                   '--workspace or --pane; to run the job on Herdr Core instead, add --core, or for every job: '
+                   'stampede config set backend core')
+        self.assertEqual(json.loads(out), {'ok': False, 'command': 'new', 'status': None, 'backend': 'tui', 'error': refusal, 'retry': None})
+        code, out, err = self.main('new', '--file', self.ask)
+        self.assertEqual((code, out, err.strip()), (2, '', refusal))
+        self.assertFalse(self.job.exists())
+        self.assertEqual(self.calls('run'), [])
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[0], f'on Herdr Core (--core), repo {self.repo.resolve()}')
+        self.assertEqual(job_.backend(self.job), 'native')
+
+    def test_auto_in_the_users_file_is_the_tui_inside_a_herdr_pane_and_core_elsewhere(self):
+        self.config('backend = "auto"\n')
         self.assertEqual(self.choice(), (True, 'backend auto: not inside a Herdr pane'))
         with mock.patch.dict(os.environ, {'HERDR_WORKSPACE_ID': 'w1'}):
-            self.assertEqual(self.choice(), (False, ''), 'inside Herdr, as today')
+            self.assertEqual(self.choice(), (False, ''), 'inside Herdr, as before')
         self.assertEqual(self.choice(pane='w1:p1'), (False, ''), 'a TUI target is the TUI')
         code, out, err = self.new()
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines()[0], f'on Herdr Core (backend auto: not inside a Herdr pane), repo {self.repo.resolve()}')
         self.assertEqual(out.splitlines()[-1], f'{LEAD} {self.job}')
+        self.assertEqual(job_.backend(self.job), 'native')
+        self.user.unlink()  # the default tui comes back: the open job keeps the backend <job>/backend recorded
+        self.assertEqual(job_.backend(self.job), 'native')
+        code, out, err = self.main('start', self.job, 'prog', '--', 'sleep', '60')
+        self.assertEqual(code, 0, err)
+        self.assertTrue(out.startswith(f'STARTED prog (t2) under {LEAD}'), out)
+
+    def test_core_in_the_users_file_runs_core_with_no_flag(self):
+        self.config('backend = "core"\n')
+        code, out, err = self.new()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[0], f'on Herdr Core (backend core), repo {self.repo.resolve()}')
         self.assertEqual(job_.backend(self.job), 'native')
 
     def test_tui_is_todays_error_and_core_runs_core_unless_a_tui_target_is_named(self):
@@ -60,7 +95,7 @@ class Backend(Choices):
         self.assertEqual(self.choice(), (False, ''))
         code, _, err = self.main('new', '--file', self.ask)
         self.assertEqual(code, 2)
-        self.assertIn('new needs --workspace or --pane, or run it inside Herdr', err)
+        self.assertIn('new runs the job on the Herdr TUI and needs a Herdr pane', err)
         self.config('backend = "core"\n')
         with mock.patch.dict(os.environ, {'HERDR_WORKSPACE_ID': 'w1'}):
             self.assertEqual(self.choice(), (True, 'backend core'))
@@ -68,9 +103,6 @@ class Backend(Choices):
         settings_.SETS[:] = ['backend=tui']
         self.assertEqual(self.choice(), (False, ''), '--set beats the file')
         settings_.SETS.clear()
-        (self.repo / '.stampede.toml').write_text('backend = "auto"\n')
-        with mock.patch.dict(os.environ, {'HERDR_WORKSPACE_ID': 'w1'}):
-            self.assertEqual(self.choice(), (False, ''), 'a repo\'s file beats the user\'s')
 
     def test_a_bad_value_is_a_problem_and_new_refuses(self):
         self.config('backend = "cloud"\n')
@@ -101,12 +133,163 @@ class Backend(Choices):
         self.assertIn("lead.kind must be one of claude, codex, not 'claud'", err)
 
     def test_core_not_answering_says_what_to_start_or_pass(self):
+        self.config('backend = "auto"\n')
         with mock.patch.dict(os.environ, {'HC': '/nonexistent/hc'}):
             code, _, err = self.new()
         self.assertEqual(code, 2)
         self.assertIn('Herdr Core is not installed', err)
         self.assertIn('start Herdr Core (hc server start)', err)
         self.assertIn('pass --workspace or --pane', err)
+
+
+    def test_a_repo_file_never_puts_a_job_on_core(self):
+        for value in ('core', 'auto'):
+            with self.subTest(value=value):
+                (self.repo / '.stampede.toml').write_text(f'backend = "{value}"\n')
+                self.assertEqual(self.choice(), (False, ''))
+                shown = settings_.show(settings_.load(repo=self.repo), False)  # what config show prints in that repo
+                self.assertIn('backend = "tui"  (default)', shown)
+                self.assertIn(f'.stampede.toml: backend is taken only from your own {self.user}', shown)
+                code, _, err = self.main('new', '--file', self.ask, '--cwd', self.repo, '--core')
+                self.assertEqual(code, 2)
+                self.assertIn('backend is taken only from your own', err)
+                self.assertFalse(self.job.exists())
+        (self.repo / '.stampede.toml').unlink()
+        self.config('backend = "core"\n')
+        self.assertEqual(self.choice(), (True, 'backend core'), 'the user\'s own file still chooses')
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('backend', json.loads((self.job / 'settings.json').read_text())['values'], 'never saved in the job')
+
+
+class SetBackend(Choices):
+    """config set backend: one line in the user's own file, every other byte kept, and new follows it."""
+    def set(self, *argv):
+        return self.main('config', 'set', *argv)
+
+    def test_a_missing_file_is_made_and_new_follows_it(self):
+        self.user.parent.rmdir()
+        code, out, err = self.set('backend', 'core')
+        self.assertEqual((code, out, err), (0, f'backend = "core" ({self.user})\n', ''))
+        self.assertEqual(self.user.read_text(), 'backend = "core"\n')
+        code, out, _ = self.main('config', 'show')
+        self.assertIn('backend = "core"  (user)', out)
+        code, out, err = self.new()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[0], f'on Herdr Core (backend core), repo {self.repo.resolve()}')
+        code, out, _ = self.set('backend', 'tui', '--json')
+        self.assertEqual((code, json.loads(out)), (0, {'ok': True, 'command': 'config', 'status': None, 'path': str(self.user)}))
+
+    def test_an_existing_line_is_replaced_and_every_other_byte_kept(self):
+        before = '# mine\n\nbackend = "auto"   # was auto\njobs_root = "~/jobs"\n\n[lead]\nkind = "codex"  # backend = no\n'
+        self.config(before)
+        self.assertEqual(self.set('backend', 'tui')[0], 0)
+        self.assertEqual(self.user.read_text(), before.replace('backend = "auto"   # was auto', 'backend = "tui"'))
+
+    def test_with_tables_and_no_line_it_goes_first_and_the_file_still_parses(self):
+        self.config('[lead]\nkind = "codex"\n[roles.build]\nbackend = "x"\n')
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual(self.user.read_text(), 'backend = "core"\n[lead]\nkind = "codex"\n[roles.build]\nbackend = "x"\n')
+        found = settings_.load(repo=self.repo)
+        self.assertEqual((found.get('backend'), found.get('lead.kind'), found.sources['backend']), ('core', 'codex', 'user'))
+
+    def test_bytes_are_kept_and_a_crlf_file_stays_crlf(self):
+        self.user.write_bytes(b'# a\r\nbackend = "auto"  \r\n\r\n[lead]\r\nkind = "codex"\r\n')
+        self.assertEqual(self.set('backend', 'tui')[0], 0)
+        self.assertEqual(self.user.read_bytes(), b'# a\r\nbackend = "tui"\r\n\r\n[lead]\r\nkind = "codex"\r\n')
+        self.user.write_bytes(b'[lead]\r\nkind = "codex"\r\n')
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual(self.user.read_bytes(), b'backend = "core"\r\n[lead]\r\nkind = "codex"\r\n')
+
+    def test_a_linked_file_stays_a_link_and_its_target_changes(self):
+        real = self.root / 'dotfiles/stampede.toml'
+        real.parent.mkdir()
+        real.write_text('backend = "auto"\n')
+        self.user.symlink_to(real)
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertTrue(self.user.is_symlink())
+        self.assertEqual(real.read_text(), 'backend = "core"\n')
+
+    def test_the_mode_is_kept(self):
+        for mode in (0o600, 0o400):
+            with self.subTest(mode=oct(mode)):
+                self.user.write_text('backend = "auto"\n')
+                self.user.chmod(mode)
+                self.assertEqual(self.set('backend', 'core')[0], 0)
+                self.assertEqual((self.user.stat().st_mode & 0o7777, self.user.read_text()), (mode, 'backend = "core"\n'))
+                self.user.chmod(0o600)
+                self.user.unlink()
+
+    def test_a_planted_temporary_name_is_never_followed(self):
+        other = self.root / 'other.toml'
+        other.write_text('keep me\n')
+        for name in ('config.toml.new', 'config.toml.tmp', '.config.toml.tmp'):
+            (self.user.parent / name).symlink_to(other)
+        self.config('backend = "auto"\n')
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual((other.read_text(), self.user.read_text()), ('keep me\n', 'backend = "core"\n'))
+        self.assertEqual(sorted(p.name for p in self.user.parent.iterdir()),
+                         ['.config.toml.tmp', 'config.toml', 'config.toml.new', 'config.toml.tmp'])
+
+    def test_a_file_it_cannot_change_safely_is_refused_byte_for_byte(self):
+        for text in ('"backend" = "auto"\n', 'backend = """\nauto"""\n', "backend = 'auto'\n", 'backend = \n', '[lead\nkind = 1\n',
+                     'backend = "auto"\r\nx = "\xff"\n'):
+            with self.subTest(text=text):
+                self.user.write_bytes(text.encode('latin-1'))
+                code, out, err = self.set('backend', 'core')
+                self.assertEqual((code, out), (2, ''), err)
+                self.assertIn(str(self.user), err)
+                self.assertIn('nothing was changed', err)
+                self.assertEqual(self.user.read_bytes(), text.encode('latin-1'))
+                self.assertEqual([p.name for p in self.user.parent.iterdir()], ['config.toml'])
+
+    def test_a_look_alike_line_inside_another_value_is_never_taken_for_the_setting(self):
+        """3.13's tomllib reads each and the whole-file check refuses it; 3.9's fallback parser refuses multi-line strings
+        before that. Either way: exit 2, bytes unchanged."""
+        for text in ('lead.claude.model = """\nbackend = "auto"\n"""\n"backend" = "core"\n',
+                     "lead.claude.model = \'\'\'\nbackend = \"auto\"\n\'\'\'\nbackend = \'core\'\n",
+                     'x = """\nbackend = "tui"\n"""\nbackend = """auto"""\n'):
+            with self.subTest(text=text):
+                self.user.write_text(text)
+                code, _, err = self.set('backend', 'core')
+                self.assertEqual(code, 2, err)
+                self.assertIn('nothing was changed', err)
+                self.assertEqual(self.user.read_text(), text)
+
+    def test_with_no_backend_a_look_alike_inside_a_string_stays_as_it_is(self):
+        """The line goes first and the string keeps its text; 3.9's fallback parser refuses the file: exit 2, unchanged."""
+        for text in ('lead.claude.model = """\nbackend = "auto"\n"""\n', "lead.claude.model = \'\'\'\nbackend = \"auto\"\n\'\'\'\n"):
+            with self.subTest(text=text):
+                self.user.write_text(text)
+                code, _, err = self.set('backend', 'core')
+                if settings_.tomllib:
+                    self.assertEqual((code, self.user.read_text()), (0, 'backend = "core"\n' + text), err)
+                    self.assertEqual(settings_.parse(self.user.read_text())['lead'], settings_.parse(text)['lead'])
+                else:
+                    self.assertEqual((code, self.user.read_text()), (2, text), err)
+
+    def test_the_plain_line_is_replaced_and_every_other_value_is_the_same(self):
+        self.config('# mine\njobs_root = "~/jobs"\nbackend = "auto"\ntrust_root = "~/src"\n\n[lead]\nkind = "codex"\nforbid = ["a", "b"]\n'
+                    '[lead.codex]\nmodel = "m"\n[roles.build]\nkind = "claude"\neffort = "high"\n[helpers]\nmax = 6\n')
+        before = settings_.parse(self.user.read_text())
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual(settings_.parse(self.user.read_text()), {**before, 'backend': 'core'})
+
+    def test_a_failure_before_the_rename_leaves_the_file_whole_and_no_temporary_file(self):
+        self.config('backend = "auto"\n')
+        with mock.patch.object(settings_.os, 'replace', side_effect=OSError('disk full')):
+            code, _, err = self.set('backend', 'core')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.user.read_text(), 'backend = "auto"\n')
+        self.assertEqual([p.name for p in self.user.parent.iterdir()], ['config.toml'])
+
+    def test_another_key_or_a_bad_value_is_refused_and_writes_nothing(self):
+        code, out, err = self.set('lead.kind', 'codex')
+        self.assertEqual((code, out, err.strip()), (2, '', f'stampede config: config set takes backend only; for lead.kind, edit {self.user}'))
+        code, _, err = self.set('backend', 'cloud')
+        self.assertEqual((code, err.strip()), (2, "stampede config: backend must be one of auto, tui, core, not 'cloud'"))
+        self.assertFalse(self.user.exists())
+        self.assertFalse((self.repo / '.stampede.toml').exists())
 
 
 class Folder(Choices):
@@ -366,7 +549,7 @@ class Review(Choices):
 class Shown(Choices):
     def test_config_show_lists_every_new_key(self):
         result = subprocess.run([str(FLEET), 'config', 'show'], capture_output=True, text=True, cwd=self.root)
-        for line in ('backend = "auto"  (default)', 'roles.build.kind = "claude"  (default)', 'roles.review.model = "gpt-6-astra"  (default)',
+        for line in ('backend = "tui"  (default)', 'roles.build.kind = "claude"  (default)', 'roles.review.model = "gpt-6-astra"  (default)',
                      'helpers.layout = "grid"  (default)', 'review.step = "end"  (default)'):
             self.assertIn(line, result.stdout)
 

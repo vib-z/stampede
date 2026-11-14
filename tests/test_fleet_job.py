@@ -647,14 +647,13 @@ class StampedeReview1(unittest.TestCase):
         no_core = str(ask.parent / 'no-core.sock')   # this machine's own Herdr Core is not asked
         result = self.cli('new', '--file', str(ask), '--set', 'backend=tui', drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr, HC_SOCKET=no_core)
         self.assertEqual((result.returncode, result.stderr.strip()),
-                         (2, 'stampede new: new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui); to run it here on Herdr Core, '
-                             f'run the next line\nstampede new --core --file {ask} --cwd {ROOT}'))
+                         (2, 'stampede new: new runs the job on the Herdr TUI and needs a Herdr pane: run it inside Herdr, or pass --workspace or --pane; to run the job on Herdr Core instead, add --core, or for every job: stampede config set backend core'))
         self.assertFalse(log.exists())
 
     def test_new_names_core_when_herdr_cannot_take_the_job_and_a_core_answers(self):
-        """D2: the Herdr TUI stays the default backend. When it is not there (no target outside Herdr, a server that is
-        not running, no herdr at all) and a Herdr Core answers on its socket, the error names new --core; with no core,
-        or a Herdr that answers, nothing changes. Nothing is made either way."""
+        """D2: the Herdr TUI stays the default backend. When it is not there (a server that is not running, no herdr at
+        all) and a Herdr Core answers on its socket, the error names new --core; with no core, or a Herdr that answers,
+        nothing changes. Nothing is made either way. With no target outside Herdr the refusal names --core itself."""
         import socket, threading
         folder = Path(tempfile.mkdtemp(dir='/tmp'))   # a Unix socket path is short
         ask = folder / 'ask.md'
@@ -679,9 +678,7 @@ class StampedeReview1(unittest.TestCase):
         down.chmod(0o755)
         hint = 'Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
         env = {'FLEET_JOBS_ROOT': str(folder / 'jobs-root'), 'HC_SOCKET': str(folder / 'core.sock')}
-        cases = ((('new', '--file', str(ask), '--set', 'backend=tui'), {'drop': ('HERDR_WORKSPACE_ID',)}, 2,
-                  'new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui); '),
-                 (('new', '--file', str(ask), '--workspace', 'w9'), {'path_herdr': down}, 1, 'no herdr server is running'),
+        cases = ((('new', '--file', str(ask), '--workspace', 'w9'), {'path_herdr': down}, 1, 'no herdr server is running'),
                  (('new', '--file', str(ask), '--workspace', 'w9'), {'HERDR': str(folder / 'no-herdr')}, 2, 'did not answer'))
         for argv, kw, code, said in cases:
             with self.subTest(argv=argv[2:], kw=sorted(kw)):
@@ -689,8 +686,7 @@ class StampedeReview1(unittest.TestCase):
                 self.assertEqual(result.returncode, code, result.stderr)
                 self.assertIn(said, result.stderr)
                 self.assertIn(hint, result.stderr)
-                lines = result.stderr.strip().splitlines()   # one line, and a refusal's own command to run on the next
-                self.assertEqual(len(lines), 2 if lines[-1].startswith('stampede new --core ') else 1, lines)
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
                 quiet = self.cli(*argv, **kw, **{**env, 'HC_SOCKET': str(folder / 'none.sock')})
                 self.assertEqual(quiet.returncode, code)
                 self.assertNotIn('Herdr Core answers', quiet.stderr)
