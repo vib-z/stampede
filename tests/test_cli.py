@@ -138,6 +138,13 @@ class Cli(unittest.TestCase):
         self.assertEqual([c['name'] for c in report['checks'][:3]], ['python', 'checkout', 'commands'])
         self.assertIn('herdr-doctor', {c['name'] for c in report['checks']}, 'its lines are passed through')
         self.assertEqual(self.stampede('doctor', '--core', '--tui').returncode, 2)
+        old = self.home / 'old-bin'
+        old.mkdir()
+        (old / 'stampede').write_text('#!/bin/bash\necho an older copy\n')
+        (old / 'stampede').chmod(0o755)
+        report = json.loads(self.stampede('doctor', '--json', PATH=f'{old}:/usr/bin:/bin').stdout)
+        elsewhere = next(c for c in report['checks'] if c['text'].startswith('on PATH from another checkout: stampede ('))
+        self.assertIn(f'{ROOT}/install.sh --replace (it backs up', elsewhere['fix'])
 
     def check(self, setup):
         """stampede check in its own process, as --json, with check.py changed by setup first."""

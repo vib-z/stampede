@@ -56,8 +56,10 @@ def commands():
     elsewhere = [f'{name} ({os.path.realpath(path)})' for name, path in found.items()
                  if path and os.path.realpath(path) != os.path.realpath(wanted[name])]
     fix = f'run {ROOT}/install.sh and put ~/.local/bin first on PATH'
+    replace = (f'run {ROOT}/install.sh --replace (it backs up each older copy or link first, with a rollback.sh) '
+               'and put ~/.local/bin first on PATH')
     out = ([check('commands', 'PROBLEM', 'not on PATH: ' + ', '.join(missing), fix)] if missing else []) + \
-          ([check('commands', 'PROBLEM', 'on PATH from another checkout: ' + ', '.join(elsewhere), fix)] if elsewhere else [])
+          ([check('commands', 'PROBLEM', 'on PATH from another checkout: ' + ', '.join(elsewhere), replace)] if elsewhere else [])
     return out or [check('commands', 'ok', f'stampede, fleet-job and {len(wanted) - 2} herdr helpers on PATH point into this checkout')]
 
 
