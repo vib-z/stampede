@@ -825,6 +825,14 @@ class Reopen(NativeCase):
         native_.record(self.job, 'watch-ci', state='finished', exit_code=0)
         self.assertIn('DONE watch-ci (exited 0)', self.reopen('--rerun-programs')[1])
 
+    def test_tree_after_reopen_shows_a_skipped_helper_as_ended(self):
+        self.reopen()
+        code, out = self.quiet(native_.tree, self.job)
+        self.assertEqual(code, 0, out)
+        row = next(line for line in out.splitlines() if line.strip().startswith('watch-ci (t5)'))
+        self.assertNotIn('live', row.split())
+        self.assertEqual(sum(line.strip().startswith('build-api ') for line in out.splitlines()), 1)  # its old terminal is not shown again
+
     def test_a_failed_parent_s_children_are_skipped(self):
         self.shape(run_error={'build-api': 'spawn_failed'})
         code, out = self.reopen()
@@ -1147,7 +1155,7 @@ class Wording(NativeCase):
         self.assertIn("lead names the job's lead", str(refused.exception))
 
     def test_ask_says_core_types_the_answer_into_the_terminal(self):
-        with mock.patch.object(subprocess, 'Popen') as spawned:
+        with mock.patch.object(subprocess, 'Popen') as spawned, mock.patch.object(owner_, 'ASK_CMD', 'true'):
             spawned.return_value.pid = 1
             _, out = self.quiet(owner_.ask, self.job, 'Which db?', [])
         self.assertNotIn('inbox', out)

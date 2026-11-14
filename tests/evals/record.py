@@ -157,7 +157,7 @@ class Run:
         if any(r['id'] == case_id for r in self.rows):
             raise ValueError(f'{case_id} already has a result in this run')
         row = {'id': case_id, 'status': status, 'measured': measured, 'expected': scrub(self.dataset[case_id]['expect']), 'actual': scrub(actual),
-               'commands': [scrub(c) for c in commands], 'log': scrub(str(log)[-LOG_TAIL:]),
+               'commands': [scrub(c) for c in commands], 'log': scrub(log)[-LOG_TAIL:],  # scrubbed whole, then cut: a cut path is past scrubbing
                'seconds': None if seconds is None else round(seconds, 2), 'notes': scrub(notes)}
         self.rows.append(row)
         with (self.dir / 'results.jsonl').open('a') as out:

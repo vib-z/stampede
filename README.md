@@ -381,7 +381,7 @@ When the reviewer writes `reports/review-hello.md` with `Status: PASS` in its fi
 ```console
 $ stampede ask $J "Keep the file in the repo root?" \
     --option Yes --option No
-ASKED 1fecfa0be4dc (the answer goes to the lead inbox; cancel with: fleet-job cancel <job> 1fecfa0be4dc)
+ASKED 1fecfa0be4dc (the answer goes to the lead inbox; cancel with: stampede cancel <job> 1fecfa0be4dc)
 ```
 
 Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging the draft PR) goes back to whoever started the job ([Safety](#safety)); you started this one in Herdr, so it goes to your phone. The lead merges only with `stampede merge`, which checks the review report and the PR head first and names the gate it needs:
@@ -390,9 +390,9 @@ Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging th
 $ sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
 $ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md
 stampede merge: the merge gate is on: ask the owner with the next line, then run this again with --gate <id>
-stampede ask <job> --gate --kind merge --sha 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766 --pr 12 'merge PR 12 at 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766'
-$ stampede ask $J --gate --kind merge --sha $sha --pr 12 "merge PR 12 at $sha"
-GATE 3288fa0757e0 on the phone; act after fleet-job gate-ok <job> 3288fa0757e0 --sha <the commit you act on> prints APPROVED
+stampede ask <job> --gate --kind merge --sha 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766 --pr 12 'merge PR 12'
+$ stampede ask $J --gate --kind merge --sha $sha --pr 12 "merge PR 12"
+GATE 3288fa0757e0 on the phone; act after stampede gate-ok <job> 3288fa0757e0 --sha <the commit you act on> prints APPROVED
 $ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md --gate 3288fa0757e0     # after your tap
 MERGED 12 9c2d7e1f0a4b6c8d3e5f7a9b1c2d4e6f8a0b1c3d
 ```
@@ -442,7 +442,7 @@ Files:
 $ stampede approve $J --by "owner in desktop chat: 'approve as written'"
 DELIVERED lead-seller-copy (inbox file)
 $ stampede ask $J --gate --sha <commit> --pr 12 "mark PR #12 ready for review"        # the lead
-GATE 83307febaa1a posted to the front door as outbox 002; act after fleet-job gate-ok ... prints APPROVED, or on the owner's yes typed in your pane
+GATE 83307febaa1a posted to the front door as outbox 002; act after stampede gate-ok ... prints APPROVED, or on the owner's yes typed in your pane
 $ stampede approve-gate $J 83307febaa1a --sha <commit> --by "owner in desktop chat: 'mark it ready'"
 APPROVED 83307febaa1a at <commit>
 ```
@@ -453,7 +453,7 @@ The front door shows you the plan file itself, and a yes to its own summary is n
 
 ```console
 $ stampede new --file ask.md --name login --front-door --review
-on Herdr Core (backend auto: not inside a Herdr pane)
+on Herdr Core (backend auto: not inside a Herdr pane), repo <repo>
 STARTED lead-login (t1)
 lead-login ~/code/herdr-jobs/jobs/2026-11-14-local-login
 $ J=~/code/herdr-jobs/jobs/2026-11-14-local-login
@@ -465,7 +465,7 @@ $ stampede wait $J                                                              
 $ stampede approve $J --by "owner in desktop chat: 'go'"
 SUBMITTED lead-login (t1)
 $ stampede ask $J --gate --kind merge --sha <commit> --pr 12 "merge PR #12"       # the lead
-GATE daf2e0132e56 posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login daf2e0132e56 --sha <the commit you act on> prints APPROVED
+GATE daf2e0132e56 posted to the front door as outbox 002; act after stampede gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login daf2e0132e56 --sha <the commit you act on> prints APPROVED
 $ stampede wait $J                                                                # the chat
 # 002 gate
 
@@ -526,7 +526,8 @@ These commands ran against the test suite's fake `hc` in a scratch home (`<repo>
 
 ```console
 $ cd ~/code/my-app && stampede new --file ask.md --name add-health
-on Herdr Core (backend auto: not inside a Herdr pane)
+on Herdr Core (backend auto: not inside a Herdr pane), repo ~/code/my-app
+hook pre-push installed in ~/code/my-app/.git/hooks/pre-push: a job's agent cannot push to the default branch without the gate
 STARTED lead-add-health (t1)
 lead-add-health ~/code/herdr-jobs/jobs/2026-11-14-local-add-health
 ```
@@ -574,10 +575,10 @@ A question for the owner, or a gate, goes out with `stampede ask`; on a Core job
 
 ```console
 $ stampede ask $J "Keep the route at /health?" --option Yes --option No
-ASKED 188e888a8640 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 188e888a8640)
+ASKED 188e888a8640 (Core types the answer into the lead's terminal; cancel with: stampede cancel $J 188e888a8640)
 $ stampede ask $J --gate --kind merge --sha <commit> --pr 12 "merge PR #12"
-ASKED 439e979b6d65 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 439e979b6d65)
-GATE 8b6cf83c386c on the phone; act after fleet-job gate-ok $J 8b6cf83c386c --sha <the commit you act on> prints APPROVED
+ASKED 439e979b6d65 (Core types the answer into the lead's terminal; cancel with: stampede cancel $J 439e979b6d65)
+GATE 8b6cf83c386c on the phone; act after stampede gate-ok $J 8b6cf83c386c --sha <the commit you act on> prints APPROVED
 ```
 
 A message from an agent arrives in a terminal as `<hc from="t7 name">...</hc>`; one from a plain program arrives as bare text. Neither is ever the owner's approval.
@@ -788,7 +789,7 @@ Other programs read these, so they stay environment variables. Export them in yo
 | `stampede new: --fork forks a Claude chat, so it takes a Claude lead` (exit 2) | a Codex lead never starts as a fork: drop `--lead codex` (or unset `FLEET_LEAD_KIND`), or start it without `--fork`; nothing was made |
 | `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, then `stampede new: fix it or remove the key: stampede config show` (exit 2) | a config file, the environment or a `--set` holds an unknown key, a value of the wrong type, a file that is not TOML, or a user-only key in a repo's `.stampede.toml`: fix or remove what the line names, check with `stampede config show` (exit 0 when clean), then run `new` again; nothing was made |
 | `stampede new: new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui) ...` | your config says `backend = "tui"` and you ran `new` outside Herdr with no target: pass `--workspace <id>` or `--pane <id>`, run the printed line for Herdr Core, or drop the key |
-| `on Herdr Core (backend auto: not inside a Herdr pane)` then `stampede new: Herdr Core did not answer ...` (or `is not installed`, or `needs --cwd`) | `new` chose Herdr Core, which is not running: start it (`hc server start`), pass `--cwd <repo>` outside a git repo, or for the Herdr TUI run `new` inside a Herdr pane or pass `--workspace` or `--pane`; nothing was made |
+| `on Herdr Core (backend auto: not inside a Herdr pane), repo <path>` then `stampede new: Herdr Core did not answer ...` (or `is not installed`, or `needs --cwd`) | `new` chose Herdr Core, which is not running: start it (`hc server start`), pass `--cwd <repo>` outside a git repo, or for the Herdr TUI run `new` inside a Herdr pane or pass `--workspace` or `--pane`; nothing was made |
 | `stampede new: ...; Herdr Core answers here, so this job can run on it: new --core ...` | the Herdr TUI could not take the job and a Herdr Core is running: start Herdr, or run the job on Core with `--core`; nothing was made |
 | `stampede new: the ask file <path> does not exist` | write what the job is for in that file, then run `new` again |
 | `stampede <command>: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>` | pass the folder `stampede new` printed (`<jobs_root>/jobs/<date>-<owner>-<name>`, or `<repo>/.herdr-<name>` for an older job) |

@@ -12,6 +12,16 @@ def ask_command(job):
     return ASK_CMD or settings_.current(job).get('ask.command')
 
 
+def require_ask_command(command):
+    """A local job's question or gate is answered only through ask.command: refuse it when that program is not installed,
+    so a gate never looks asked when no one can ever answer it. A command that runs and fails later stays an ASK FAILED."""
+    argv = shlex.split(command or '')
+    if not argv or not shutil.which(argv[0]):
+        raise ValueError(f'the ask command is not installed ({base_.line(argv[0] if argv else "empty")} is not on PATH), so the owner '
+                         'could never answer: install it, or set ask.command in your config (stampede config show names '
+                         'the file; env FLEET_ASK_CMD) to a command that asks the owner and prints their answer')
+
+
 def tell(job, name, text):
     from . import handed as handed_, native as native_, relay as relay_
     if job_.backend(job) == 'native':
@@ -88,17 +98,19 @@ def ask_now(job, question, options, command=None, gate=None):
 def ask_background(job, question, options, command=None, gate=None):
     """Detach the question in its own process group, so cancel stops it and its child card together."""
     job = Path(job).absolute()
+    command = command or ask_command(job)
+    require_ask_command(command)
     folder = job / 'asks'
     folder.mkdir(parents=True, exist_ok=True)
     ident = uuid.uuid4().hex[:12]
-    argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command or ask_command(job),
+    argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command,
             *(['--gate', gate] if gate else []), *['--option=' + option for option in options], '--', question]
     with (folder / (ident + '.log')).open('a') as output:
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True)
     (folder / (ident + '.pid')).write_text(str(process.pid) + '\n')
     (folder / (ident + '.txt')).write_text(base_.line(question) + '\n')
     where = 'Core types the answer into the lead\'s terminal' if job_.backend(job) == 'native' else 'the answer goes to the lead inbox'
-    out_.emit('ASKED', 'ASKED ' + ident + ' (' + where + '; cancel with: fleet-job cancel ' + str(job) + ' ' + ident + ')', id=ident)
+    out_.emit('ASKED', 'ASKED ' + ident + ' (' + where + '; cancel with: stampede cancel ' + str(job) + ' ' + ident + ')', id=ident)
     return ident
 
 
@@ -112,9 +124,10 @@ def own_waiter(job, pid, ident):
     return 'fleet_job.py _ask ' in args and f' _ask {Path(job).absolute()} --ident {ident} ' in args + ' '
 
 
-def cancel(job, ident):
+def cancel(job, ident, waiting_only=False):
     """Stop an answered or unwanted question: its waiter and its card, as one process group. A record whose pid no
-    longer runs this job's waiter (it answered, or the pid was reused) is dropped without a signal."""
+    longer runs this job's waiter (it answered, or the pid was reused) is dropped without a signal, and with
+    waiting_only (finish) without a line."""
     path = Path(job) / 'asks' / (str(ident) + '.pid')
     if not base_.GATE.fullmatch(str(ident)) or not path.is_file():
         raise ValueError('no phone card ' + base_.line(ident) + ' waiting in this job (a question sent to a bot is answered in its chat)')
@@ -125,7 +138,7 @@ def cancel(job, ident):
         except ProcessLookupError:
             pass
         out_.emit('CANCELLED', 'CANCELLED ' + ident, id=ident)
-    else:
+    elif not waiting_only:
         out_.emit('CANCELLED', 'CANCELLED ' + ident + ' (its waiter had already gone)', id=ident)
     path.unlink()
 
@@ -288,7 +301,7 @@ def finish(job, summary):
         stamp.write_text(summary + '\n')
     for waiter in sorted((job / 'asks').glob('*.pid')) if (job / 'asks').is_dir() else []:
         try:
-            cancel(job, waiter.stem)
+            cancel(job, waiter.stem, waiting_only=True)
         except (ValueError, OSError) as error:  # one bad record never keeps the next waiter alive
             out_.emit('NOT CANCELLED', 'NOT CANCELLED ' + waiter.stem + ': ' + base_.line(error), id=waiter.stem, reason=base_.line(error))
     if (job / 'workspace').is_file():
@@ -359,7 +372,7 @@ def ask_gate(job, action, sha, pr=None, kind=None):
             'asked': datetime.now().strftime('%Y-%m-%d %H:%M'), **({'kind': kind} if kind else {})}
     (job / 'gates').mkdir(exist_ok=True)
     (job / 'gates' / (ident + '.json')).write_text(json.dumps(gate) + '\n')
-    check = f'fleet-job gate-ok {job} {ident} --sha <the commit you act on>'
+    check = f'stampede gate-ok {job} {ident} --sha <the commit you act on>'
     typed = ', or on the owner\'s yes typed in your pane' if pane_yes(job) and kind not in HELD else ''
     if route == 'front-door':
         n = outbox_post(job, 'gate', gate_question(gate) + '\nOne exact action, yes or no. Show the owner this action as written.',
@@ -369,7 +382,11 @@ def ask_gate(job, action, sha, pr=None, kind=None):
         return out_.emit('GATE', f'GATE {ident} posted to the front door as outbox {n}; act after {check} prints APPROVED{typed}', id=ident,
                          sha=sha, pr=pr, kind=kind, outbox=n)
     if not owner:
-        ask_background(job, gate_question(gate), [], gate=ident)
+        try:
+            ask_background(job, gate_question(gate), [], gate=ident)
+        except ValueError:
+            (job / 'gates' / (ident + '.json')).unlink()  # a gate no one can answer is no gate
+            raise
         return out_.emit('GATE', f'GATE {ident} on the phone; act after {check} prints APPROVED{typed}', id=ident, sha=sha, pr=pr, kind=kind)
     try:
         post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
@@ -427,6 +444,9 @@ def approve_gate(job, ident, sha, by, digest=None):
     """The starting bot's command, run outside Herdr: the owner said yes in its chat to this gate at this commit.
     digest: the gate as the bot was handed it (its approve command carries it); a gate changed since then takes no yes."""
     core = job_.backend(job) != 'tui'
+    if load_gate(job, ident)['route'] == 'local':  # what is wrong with the gate first, then where this runs
+        raise PermissionError(f'gate {ident} belongs to a job started locally: the owner answers on the phone'
+                              + (' or in Herdr' if pane_yes(job) else ''))
     if herdrapi_.inside_herdr():
         if core:
             raise PermissionError('approve-gate runs only outside Herdr and Herdr Core (over plain ssh, never hc exec), from '
@@ -434,9 +454,6 @@ def approve_gate(job, ident, sha, by, digest=None):
         raise PermissionError('approve-gate runs only outside Herdr, from the bot that started the job: an agent\'s own '
                               'say-so never counts. The owner answers the bot in chat'
                               + (', or types yes in the lead\'s pane' if pane_yes(job) else ''))
-    if load_gate(job, ident)['route'] == 'local':
-        raise PermissionError(f'gate {ident} belongs to a job started locally: the owner answers on the phone'
-                              + (' or in Herdr' if pane_yes(job) else ''))
     if not base_.line(by):
         raise ValueError('--by says who said yes and where, e.g. "owner in Grok Bot chat"')
     if not digest:

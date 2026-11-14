@@ -560,7 +560,8 @@ def run(a):
             raise ValueError('--relay is for new --core')
         if core:
             if why:
-                print(f'on Herdr Core ({why})')
+                repo = repo_of(a.cwd)  # flushed: a refusal on stderr comes after it, as it happened
+                print(f'on Herdr Core ({why})' + (f', repo {repo}' if repo else ''), flush=True)
             try:
                 return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,
                            app=a.app_space, relay=a.relay, space=a.space, max_helpers=a.max_helpers, lead_model=a.lead_model,

@@ -19,6 +19,7 @@ for option in "$@"; do
     *) usage >&2; exit 2;;
   esac
 done
+CALLER_PATH=$PATH   # the PATH it was given: a program found only on the PATH below says where
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
@@ -30,6 +31,7 @@ ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }
 problem(){ echo "PROBLEM $*"; bad=1; }
 gap(){ echo "GAP $*"; }   # a backend's own gap: a PROBLEM, or a warn while the other backend is usable (see emit)
+found(){ local p; p=$(command -v "$1"); if (PATH=$CALLER_PATH; hash -r; command -v "$1" >/dev/null); then echo "$1 on PATH"; else echo "$1 (found in ${p%/*})"; fi; }   # after command -v "$1" passed: where it is, when not on the caller's PATH
 
 # the backends this run checks: the one asked for, else each one installed (the TUI when neither is, so the line names it)
 tui=0; core=0
@@ -38,7 +40,7 @@ case "$only" in
   *) command -v herdr >/dev/null && tui=1; command -v "${HC:-hc}" >/dev/null && core=1; [ "$tui$core" = 00 ] && tui=1;;
 esac
 for t in jq git python3; do
-  if command -v "$t" >/dev/null; then ok "$t on PATH"; else problem "$t not on PATH: install it"; fi
+  if command -v "$t" >/dev/null; then ok "$(found "$t")"; else problem "$t not on PATH: install it"; fi
 done
 
 # Herdr Core: the CLI, the selected core (asked on its socket, never started), and agents that report OSC 7501 status
@@ -48,7 +50,7 @@ tui_checks(){   # herdr on PATH, its version, and a running server of the same v
   if ! command -v herdr >/dev/null; then
     gap "herdr not on PATH: install Herdr $HERDR_MIN or later (or Herdr Core, hc, and run jobs with stampede new --core)"; return
   fi
-  ok "herdr on PATH"
+  ok "$(found herdr)"
   local hv st status_result cv sv
   hv=$(version_of herdr)
   if [ -z "$hv" ]; then gap "herdr --version printed no version: reinstall Herdr $HERDR_MIN or later"

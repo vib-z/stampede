@@ -211,6 +211,9 @@ class Cli(unittest.TestCase):
         self.assertNotIn(str(ROOT.parent), said)
         self.assertEqual(doctor_.shown('/elsewhere/x'), '/elsewhere/x')
 
+    def test_doctor_strips_another_program_s_control_bytes(self):
+        self.assertEqual(doctor_.shown('claude \x1b]7501;state=idle\x07said \x1b[31mred\x1b[0m\x00\tok'), 'claude said red\tok')
+
     def test_doctor_redacts_an_errors_own_text_by_both_spellings_of_home(self):
         physical = self.home / 'physical home'
         physical.mkdir()
