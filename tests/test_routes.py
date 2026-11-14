@@ -66,6 +66,144 @@ class Routes(unittest.TestCase):
         routes = [l for l in doctor.stdout.splitlines() if 'route' in l]
         self.assertTrue(routes and all(l.startswith('ok ') for l in routes), doctor.stdout)
 
+    # HERDR_EVENTS_FALLBACK_ROUTE: where an owner with no route of its own, and a Codex turn outside Herdr, go
+    def sent_to(self, event, *flags, **env):
+        """The URL and payload of the one event this post sent, or None when it sent nothing."""
+        before = self.sent.read_text().count('\n') if self.sent.exists() else 0
+        subprocess.run([str(SCRIPTS / 'herdr-event-post'), *flags, json.dumps(event)], env={**self.env, **env},
+                       capture_output=True, timeout=30)
+        lines = self.sent.read_text().splitlines() if self.sent.exists() else []
+        if len(lines) == before:
+            return None
+        return re.search(r'https://\S+', lines[-1]).group(0), json.loads(self.body.read_text().splitlines()[-1])
+
+    def log(self):
+        return ''.join(p.read_text() for p in self.home.rglob('herdr-events.log'))
+
+    def test_an_owner_with_no_route_goes_to_default_unless_a_fallback_route_is_set(self):
+        self.route('default', 'https://default.invalid/hook')
+        self.route('bot-fallback', 'https://fallback.invalid/hook')
+        event = {'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}
+        self.assertEqual(self.sent_to(event)[0], 'https://default.invalid/hook')
+        url, payload = self.sent_to({**event, 'pane': 'w1:p2'}, HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback')
+        self.assertEqual((url, payload['route'], payload['owner']), ('https://fallback.invalid/hook', 'bot-fallback', 'bot-alpha'))
+        untagged = {'source': 'test', 'pane': 'w2:p1', 'state': 'blocked'}   # no owner: default, with or without it
+        self.assertEqual(self.sent_to(untagged, HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback')[1]['route'], 'default')
+        self.route('bot-alpha', 'https://alpha.invalid/hook')                  # its own route wins
+        self.assertEqual(self.sent_to({**event, 'pane': 'w1:p3'}, HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback')[1]['route'], 'bot-alpha')
+
+    def test_a_fallback_route_that_is_not_a_route_files_name_is_ignored(self):
+        self.route('default', 'https://default.invalid/hook')
+        (self.home / '.hidden').write_text('URL=https://hidden.invalid/hook\n')
+        (self.routes / '.hidden').write_text('URL=https://hidden.invalid/hook\n')
+        for n, bad in enumerate(('../.hidden', '.hidden', f'{self.routes}/default', 'missing')):
+            with self.subTest(bad=bad):
+                event = {'source': 'test', 'pane': f'w1:p{n}', 'state': 'blocked'}
+                self.assertEqual(self.sent_to(event, HERDR_EVENTS_FALLBACK_ROUTE=bad)[1]['route'], 'default')
+                self.assertIn('ignored HERDR_EVENTS_FALLBACK_ROUTE', self.log())
+                self.assertIsNone(self.sent_to({'source': 'codex-desktop', 'state': 'agent-turn-complete', 'thread_id': f't{n}'},
+                                               HERDR_EVENTS_FALLBACK_ROUTE=bad))
+
+    def test_a_fallback_route_is_read_as_any_route_is(self):
+        # a link in the routes folder is followed, as for the default route: the folder is the user's own
+        outside = self.home / 'outside'
+        outside.write_text('URL=https://outside.invalid/hook\n')
+        (self.routes / 'linked').symlink_to(outside)
+        (self.routes / 'default').symlink_to(outside)
+        event = {'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}
+        self.assertEqual(self.sent_to(event)[0], 'https://outside.invalid/hook')
+        url, payload = self.sent_to({**event, 'pane': 'w1:p2'}, HERDR_EVENTS_FALLBACK_ROUTE='linked')
+        self.assertEqual((url, payload['route']), ('https://outside.invalid/hook', 'linked'))
+        self.assertNotIn('ignored HERDR_EVENTS_FALLBACK_ROUTE', self.log())
+
+    def test_a_fallback_route_with_an_odd_name_is_ignored(self):
+        self.route('default', 'https://default.invalid/hook')
+        (self.routes / 'sub').mkdir()
+        for name in ('with space', 'with\nnewline', '.dotted', 'sub/inner'):
+            self.route(name, 'https://odd.invalid/hook')
+        for n, bad in enumerate(('with space', 'with\nnewline', '.dotted', 'sub/inner')):
+            with self.subTest(bad=bad):
+                before = self.log().count('ignored HERDR_EVENTS_FALLBACK_ROUTE')
+                url, payload = self.sent_to({'source': 'test', 'pane': f'w1:p{n}', 'state': 'blocked'}, HERDR_EVENTS_FALLBACK_ROUTE=bad)
+                self.assertEqual((url, payload['route']), ('https://default.invalid/hook', 'default'))
+                self.assertEqual(self.log().count('ignored HERDR_EVENTS_FALLBACK_ROUTE'), before + 1)
+                tag = subprocess.run([str(SCRIPTS / 'herdr-events-owner'), 'w1', 'bot-beta'], capture_output=True, text=True,
+                                     timeout=30, env={**self.env, 'HERDR_EVENTS_FALLBACK_ROUTE': bad})
+                self.assertIn('events relay via the default route', tag.stderr)
+
+    def test_a_desktop_turn_whose_queue_write_failed_goes_when_posted_again(self):
+        self.route('bot-fallback', 'https://fallback.invalid/hook')
+        not_a_folder = self.home / 'not-a-folder'
+        not_a_folder.write_text('x')
+        event = {'source': 'codex-desktop', 'state': 'agent-turn-complete', 'thread_id': 'thread-1', 'turn_id': 'turn-1'}
+        self.assertIsNone(self.sent_to(event, HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback', HERDR_EVENTS_HOME=str(not_a_folder)))
+        self.assertIn('queue-write-failed', self.log())
+        self.assertEqual(self.sent_to(event, HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback')[0], 'https://fallback.invalid/hook')
+
+    def test_any_other_event_whose_queue_write_failed_is_still_taken_as_sent(self):   # as before the desktop source
+        self.route('default', 'https://default.invalid/hook')
+        not_a_folder = self.home / 'not-a-folder'
+        not_a_folder.write_text('x')
+        event = {'source': 'test', 'pane': 'w2:p1', 'state': 'blocked'}
+        self.assertIsNone(self.sent_to(event, HERDR_EVENTS_HOME=str(not_a_folder)))
+        self.assertIsNone(self.sent_to(event))
+        self.assertIn('dedupe-skip', self.log())
+
+    def test_strict_never_uses_the_fallback_route(self):
+        self.route('bot-fallback', 'https://fallback.invalid/hook')
+        refused = subprocess.run([str(SCRIPTS / 'herdr-event-post'), '--strict', json.dumps(
+            {'source': 'stampede', 'state': 'gate', 'owner': 'bot-alpha', 'gate': 'a' * 12})],
+            env={**self.env, 'HERDR_EVENTS_FALLBACK_ROUTE': 'bot-fallback'}, capture_output=True, text=True, timeout=30)
+        self.assertEqual(refused.returncode, 3, refused.stdout + refused.stderr)
+        self.assertIn('no route of its own for owner bot-alpha', refused.stderr)
+        self.assertFalse(self.sent.exists())
+
+    def codex_turn(self, thread, **env):
+        """A Codex turn as the Codex desktop app's notify runs it, with no Herdr pane and no Core terminal: the URL and
+        payload it sent, or None."""
+        link = self.home / '.local/bin/herdr-event-codex-notify'
+        if not link.exists():
+            link.symlink_to(SCRIPTS / 'herdr-event-codex-notify')
+        rollouts = self.home / 'codex/sessions/2026/11/11'
+        rollouts.mkdir(parents=True, exist_ok=True)
+        (rollouts / f'rollout-x-{thread}.jsonl').write_text('{"payload":{}}\n')
+        before = self.sent.read_text().count('\n') if self.sent.exists() else 0
+        subprocess.run([str(link), json.dumps({'type': 'agent-turn-complete', 'thread-id': thread, 'turn-id': 'turn-1',
+                                               'cwd': '/somewhere', 'last-assistant-message': 'hi'})],
+                       env={**self.env, 'CODEX_HOME': str(self.home / 'codex'), 'HERDR_EVENTS_OWNER': 'bot-alpha', **env},
+                       check=True, capture_output=True, timeout=30)
+        lines = self.sent.read_text().splitlines() if self.sent.exists() else []
+        return None if len(lines) == before else (re.search(r'https://\S+', lines[-1]).group(0), json.loads(self.body.read_text().splitlines()[-1]))
+
+    def test_a_codex_turn_outside_herdr_is_skipped_unless_a_fallback_route_is_set(self):
+        self.route('default', 'https://default.invalid/hook')
+        self.route('bot-fallback', 'https://fallback.invalid/hook')
+        self.assertIsNone(self.codex_turn('desk-1'))
+        self.assertIn('skip: codex turn with no herdr pane', self.log())
+        url, event = self.codex_turn('desk-2', HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback')
+        self.assertEqual((url, event['route'], event['source'], event.get('owner')),
+                         ('https://fallback.invalid/hook', 'bot-fallback', 'codex-desktop', None))  # never the owner in its environment
+        self.assertNotIn('workspace', event)
+        self.assertNotIn('pane', event)
+        self.assertIsNone(self.codex_turn('desk-3', HERDR_EVENTS_FALLBACK_ROUTE='a/b'))   # not a route's name: skipped, as unset
+        _, in_pane = self.codex_turn('desk-4', HERDR_EVENTS_FALLBACK_ROUTE='bot-fallback', HERDR_PANE_ID='w1:p4')
+        self.assertEqual((in_pane['source'], in_pane['owner'], in_pane['route']), ('codex', 'bot-alpha', 'bot-fallback'))
+
+    def test_two_codex_desktop_turns_are_two_events_and_the_same_one_twice_is_one(self):
+        self.route('bot-fallback', 'https://fallback.invalid/hook')
+        env = {**self.env, 'HERDR_EVENTS_FALLBACK_ROUTE': 'bot-fallback'}
+        for thread, turn in (('thread-1', 'turn-1'), ('thread-2', 'turn-1'), ('thread-2', 'turn-2'), ('thread-2', 'turn-2')):
+            subprocess.run([str(SCRIPTS / 'herdr-event-post'), json.dumps({
+                'source': 'codex-desktop', 'state': 'agent-turn-complete', 'thread_id': thread, 'turn_id': turn})],
+                env=env, check=True, timeout=30)
+        self.assertEqual(self.sent.read_text().count('https://fallback.invalid/hook'), 3)
+
+    def test_the_owner_tag_names_the_fallback_route_when_the_bot_has_none(self):
+        self.route('bot-fallback', 'https://fallback.invalid/hook')
+        tag = subprocess.run([str(SCRIPTS / 'herdr-events-owner'), 'w1', 'bot-beta'], capture_output=True, text=True, timeout=30,
+                             env={**self.env, 'HERDR_EVENTS_FALLBACK_ROUTE': 'bot-fallback'})
+        self.assertIn('no route for bot-beta yet; events relay via the bot-fallback route', tag.stderr)
+
     # The settings file, ~/.config/stampede/config: herdr-platform reads its plain NAME=value lines as data, so a
     # script a timer starts with no environment sees them. It never runs the file. The environment wins.
     def settings(self, text):
@@ -188,7 +326,8 @@ class Routes(unittest.TestCase):
         names = sorted(set(re.findall(r'(?m)^# ([A-Z][A-Z0-9_]*)=', text))) + ['HERDR', 'HERDR_BIN_PATH', 'HERDR_PLUGIN_STATE_DIR']
         identity = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_PLUGIN_EVENT_JSON',
                     'HERDR_EVENTS_OWNER', 'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'STAMPEDE_JOB_KEY', 'FLEET_JOB_DIR']
-        self.assertIn('HERDR_EVENTS_ROUTES_DIR', names)
+        for name in ('HERDR_EVENTS_ROUTES_DIR', 'HERDR_EVENTS_FALLBACK_ROUTE', 'HERDR_EVENTS_LAUNCHD', 'HERDR_DOCTOR_EXTRA'):
+            self.assertIn(name, names)
         self.settings(''.join(f'{n}=v-{n}\n' for n in names + identity + ['PATH', 'OTHER']))
         got = self.read_back('/bin/bash', names + identity + ['OTHER'])
         self.assertEqual({n: got[n] for n in names}, {n: f'v-{n}' for n in names})

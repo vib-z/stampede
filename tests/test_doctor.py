@@ -29,7 +29,8 @@ class Doctor(unittest.TestCase):
                     if not k.startswith(('HERDR_', 'FLEET_', 'STAMPEDE_'))}
         self.env.update(HOME=str(self.home), PATH=f'{self.bin}:/opt/homebrew/bin:/usr/bin:/bin',
                         STAMPEDE_NO_UPDATE_CHECK='1', HC_SOCKET=str(self.home / 'no-core.sock'))  # never this machine's own core
-        self.env.pop('XDG_STATE_HOME', None)
+        for name in ('XDG_STATE_HOME', 'XDG_CONFIG_HOME'):   # a GitHub Linux runner sets both: the settings file is HOME's
+            self.env.pop(name, None)
         subprocess.run(['bash', str(ROOT / 'install.sh')], env=self.env, check=True,
                        capture_output=True, timeout=15)
         self.fake('herdr', '''case "$1 $2" in
@@ -44,7 +45,7 @@ esac
 exit 0
 ''')
         self.fake('launchctl', '''echo launchctl >> "$HOME/calls"
-[ "${TEST_LAUNCHD:-0}" = 1 ] && printf '%s\n' '- 0 local.herdr-event-watchdog' '- 0 local.herdr-events-flush'
+[ "${TEST_LAUNCHD:-0}" = 1 ] && printf '%s\n' "- 0 ${TEST_LAUNCHD_PREFIX:-local}.herdr-event-watchdog" "- 0 ${TEST_LAUNCHD_PREFIX:-local}.herdr-events-flush"
 exit 0
 ''')
         self.fake('df', "printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 99999999 0 %s 0%% /\\n' \"${TEST_DISK_KB:-52428800}\"\n")
@@ -222,6 +223,127 @@ echo disabled; exit 1
         self.assert_problem(self.doctor(), 'stampede --version does not match VERSION')
         (self.bin / 'stampede').unlink()
         self.assert_problem(self.doctor(), 'stampede not on PATH')
+
+    def test_the_launchd_label_prefix_is_a_setting(self):
+        if platform.system() != 'Darwin':
+            self.skipTest('launchd is the macOS timer')
+        plist = self.home / 'Library/LaunchAgents/org.example.herdr-events-flush.plist'   # its plist alone turns the relay checks on
+        plist.parent.mkdir(parents=True)
+        plist.write_text('')
+        self.assertIn('ok event relay not installed', self.doctor().stdout)              # unset: the prefix local, as before
+        self.assert_problem(self.doctor(HERDR_EVENTS_LAUNCHD='org.example'), 'launchd org.example.herdr-event-watchdog not loaded')
+        env = {**self.configure_relay(), 'TEST_LAUNCHD_PREFIX': 'org.example'}
+        self.assert_problem(self.doctor(**env), 'launchd local.herdr-event-watchdog not loaded')
+        result = self.doctor(**env, HERDR_EVENTS_LAUNCHD='org.example')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('ok launchd org.example.herdr-events-flush loaded', result.stdout)
+
+    def test_the_extra_check_runs_last_and_its_problems_count(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text('#!/bin/bash\necho "ok my watchdog loaded"\necho "warn my updater is old: update it"\n')
+        extra.chmod(0o755)
+        plain = self.doctor()
+        result = self.doctor(HERDR_DOCTOR_EXTRA=str(extra))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines(), plain.stdout.splitlines() + ['ok my watchdog loaded', 'warn my updater is old: update it'])
+        extra.write_text('#!/bin/bash\necho "PROBLEM route mine missing: restore it"\n')
+        self.assert_problem(self.doctor(HERDR_DOCTOR_EXTRA=str(extra)), 'route mine missing: restore it')
+        extra.write_text('#!/bin/bash\necho "ok half done"\nexit 4\n')                   # a failing one: one warn, no crash
+        result = self.doctor(HERDR_DOCTOR_EXTRA=str(extra))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['ok half done', 'warn HERDR_DOCTOR_EXTRA exited 4: run it by hand to see why'])
+        marker = self.home / 'ran'
+        not_run = [str(self.home / 'nowhere'), 'doctor-extra', str(self.home), f'touch {marker}', f'{extra}; touch {marker}']
+        extra.chmod(0o644)
+        not_run.append(str(extra))                                                   # not executable
+        for value in not_run:
+            with self.subTest(value=value):
+                result = self.doctor(HERDR_DOCTOR_EXTRA=value)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.stdout.splitlines()[-1],
+                                 'warn HERDR_DOCTOR_EXTRA is not an absolute path to an executable file: fix it or unset it')
+                self.assertFalse(marker.exists())
+        extra.chmod(0o755)
+        config = self.home / '.config/stampede/config'   # the settings file reaches the doctor with no shell profile line
+        config.parent.mkdir(parents=True)
+        config.write_text(f'HERDR_DOCTOR_EXTRA={extra}\n')
+        self.assertIn('ok half done', self.doctor().stdout)
+
+    def short_doctor(self, extra):
+        """The same doctor with its extra check's limit 2 s, run with that check, and how long it took."""
+        copy = self.home / 'short/herdr-doctor'
+        if not copy.exists():
+            copy.parent.mkdir()
+            copy.write_text((ROOT / 'skills/grokbot-herdr/scripts/herdr-doctor').read_text().replace('EXTRA_SECS=30', 'EXTRA_SECS=2'))
+            copy.chmod(0o755)
+            shutil.copy(ROOT / 'skills/grokbot-herdr/scripts/herdr-platform', copy.parent / 'herdr-platform')
+        began = time.monotonic()
+        result = subprocess.run([str(copy)], env={**self.env, 'HERDR_DOCTOR_EXTRA': str(extra)}, capture_output=True, text=True, timeout=15)
+        return result, time.monotonic() - began
+
+    def test_an_extra_check_that_hangs_is_ended_with_its_process_group(self):
+        pids = self.home / 'pids'
+        extra = self.home / 'doctor-extra'
+        extra.write_text(f'#!/bin/bash\necho "ok started"\nsleep 60 &\necho $$ $! > {pids}\nwait\n')
+        extra.chmod(0o755)
+        result, took = self.short_doctor(extra)
+        self.assertLess(took, 10)
+        self.assertIn('ok started', result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], 'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why')
+        self.assertEqual(result.stdout.count('HERDR_DOCTOR_EXTRA'), 1)
+        for pid in pids.read_text().split():
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid), 0)
+
+    def test_what_a_hanging_extra_check_said_still_counts(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text('#!/bin/bash\necho "PROBLEM my disk is full: clear it"\nexec sleep 60\n')
+        extra.chmod(0o755)
+        result, _ = self.short_doctor(extra)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['PROBLEM my disk is full: clear it',
+                         'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
+
+    def test_a_flood_from_a_hanging_extra_check_is_cut_and_still_counted(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text('#!/usr/bin/env python3\nimport sys, time\nprint("PROBLEM first: fix it")\n'
+                         'sys.stdout.write(("x" * 99 + "\\n") * 52429)\n'   # 5 MiB
+                         'print("PROBLEM last: fix it")\nsys.stdout.flush()\ntime.sleep(60)\n')
+        extra.chmod(0o755)
+        result, took = self.short_doctor(extra)
+        self.assertLess(took, 8)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[-2:], ['HERDR_DOCTOR_EXTRA output cut at 64 KB: run it by hand to see the rest',
+                                      'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
+        self.assertLess(len(result.stdout.encode()), 70000)
+        self.assertIn('PROBLEM first: fix it', lines)
+        self.assertNotIn('PROBLEM last: fix it', lines)      # past the cut, yet counted: exit 1 without the first one
+        extra.write_text(extra.read_text().replace('print("PROBLEM first: fix it")\n', ''))
+        self.assertEqual(self.short_doctor(extra)[0].returncode, 1)
+        extra.write_text(extra.read_text().replace('print("PROBLEM last: fix it")\n', ''))
+        self.assertEqual(self.short_doctor(extra)[0].returncode, 0)
+
+    def test_an_extra_check_whose_escaped_child_holds_the_pipe_cannot_hold_the_doctor(self):
+        pid = self.home / 'escaped'
+        extra = self.home / 'doctor-extra'
+        extra.write_text(f'#!/bin/bash\necho "ok started"\npython3 -c "import os, time; os.setsid(); open(\'{pid}\', \'w\').write(str(os.getpid())); time.sleep(30)" &\nwait\n')
+        extra.chmod(0o755)
+        self.addCleanup(lambda: pid.exists() and subprocess.run(['kill', pid.read_text()], capture_output=True))
+        result, took = self.short_doctor(extra)
+        self.assertLess(took, 8)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['ok started',
+                         'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
+
+    def test_an_extra_checks_control_bytes_never_reach_the_output(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text("#!/bin/bash\nprintf '\\033[2J\\033[Hok clean\\b!\\r\\n\\033]0;title\\007ok\\ttab\\n'\n")
+        extra.chmod(0o755)
+        result = self.doctor(HERDR_DOCTOR_EXTRA=str(extra))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['ok clean!', 'ok\ttab'])
+        self.assertFalse(set(result.stdout) & {'\x1b', '\b', '\r', '\x07'})
 
     def test_a_copy_outside_a_checkout_needs_only_a_working_version(self):
         copy = self.home / 'skill-copy/scripts/herdr-doctor'  # no VERSION three folders up

@@ -27,7 +27,8 @@ herdr-event-flush                                    # send what is queued, olde
 ```
 
 ## Routes
-- A tagged workspace's events go to the route named after its tag. An untagged workspace, or a bot with no route file, uses the `default` route for its turn events. With neither, an event is logged only.
+- A tagged workspace's events go to the route named after its tag. An untagged workspace, or a bot with no route file, uses the `default` route for its turn events; with `HERDR_EVENTS_FALLBACK_ROUTE` set to a route's name, a bot with no route file uses that one instead. With neither, an event is logged only.
+- A Codex turn with no Herdr pane and no Core terminal (the Codex desktop app) is skipped. With `HERDR_EVENTS_FALLBACK_ROUTE` set, it goes to that route as source `codex-desktop`, with no workspace or owner; each thread and turn is its own event.
 - A question, a gate or a post, and `stampede finish` in a job a bot started, go only through that bot's own route, with `herdr-event-post --strict`.
   - No route of its own: exit 3. Not queued: exit 4. Either is a refusal the lead sees.
   - A route with no URL holds it instead of dropping it. The lead hears one `UNDELIVERED` line when it is held, and another if it is still undelivered after 24 h (in `inbox.log`; in a Core job, through `stampede tell <job> lead`).
@@ -36,7 +37,7 @@ herdr-event-flush                                    # send what is queued, olde
 - **Log:** `~/Library/Logs/herdr-events.log` on macOS, `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux.
 
 ## What a message holds
-- **Every event:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`.
+- **Every event:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`; a `codex-desktop` event (a Codex turn outside Herdr) has no `pane` and no `workspace`.
 - **From Herdr** also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines). **From Claude and Codex** `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (its first 2000 characters).
 - **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat, then run `answer` with their words.
 - **A gate:** `job`, `agent`, `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and two commands:

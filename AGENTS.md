@@ -58,7 +58,7 @@ The README is the front door. It covers every point at least briefly, then links
 
 ## 2. The skills and the playbooks
 - **Where they live:** the playbooks are `skills/` (the four skills) and `remote/` (the front-door guides).
-- **The four skills are copies.** `skills/stampede`, `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` come from the owner's own skills, which are their source. Change a skill there first, then copy it here and scrub it (section 3); never edit it here first. Only what makes the copy public (a scrubbed name or path, a setting with a default) differs from the source.
+- **This repo is the one source.** `skills/stampede`, `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan` are changed here first, and every machine runs their code from a checkout through `install.sh` (`--replace` takes over an older install). What one owner wants and others do not is a setting with a default in [config.example](config.example), never a private edit; that owner's values live in their own config.
 - **One context per agent:** every skill, guide and brief stands on its own. An agent gets only its own file plus its brief, never the whole repo.
 - **Line limits:** a skill's `SKILL.md` at most 140 lines, every other playbook file at most 160 (`test_shape.py`).
 - **Credit:** a linked role or skill from someone else names its owner, its license and a pinned commit.

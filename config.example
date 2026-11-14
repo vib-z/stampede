@@ -1,8 +1,8 @@
 # stampede's settings, as TOML. Every key is optional: the value shown is its default, so keep only what you change.
 # Yours: copy this file to ~/.config/stampede/config.toml ($XDG_CONFIG_HOME/stampede/config.toml when that is set).
 # A project: commit a .stampede.toml at the repo root with the keys every job there should use.
-# User only: jobs_root, trust_root, ask.command and every gates key run a command, widen what is trusted or lower a
-# gate, so they are read from your file, the environment or a flag, never from a repo's .stampede.toml.
+# User only: jobs_root, trust_root, ask.command, lead.forbid and every gates key run a command, widen what is trusted
+# or lower a rule, so they are read from your file, the environment or a flag, never from a repo's .stampede.toml.
 # Last one wins: these defaults, your file, the repo's file, the environment (the names below), then a command's flags
 # and --set key=value. stampede new saves the result in <job>/settings.json. See it all: stampede config show
 
@@ -12,6 +12,7 @@ trust_root = "~/code"            # herdr-trust trusts repos only under this fold
 
 [lead]
 kind = "claude"  # the lead's CLI when stampede new has no --lead: claude or codex; --fork takes claude (env FLEET_LEAD_KIND)
+forbid = []      # models that may not lead a job: stampede new refuses one, however it was chosen (user only; env FLEET_LEAD_FORBID, comma-separated)
 
 [lead.claude]
 model = "claude-opus-5-5"  # a Claude lead's model (env FLEET_LEAD_MODEL, when it is not a gpt-... model)
@@ -107,6 +108,9 @@ method = "squash"  # how stampede merge merges: squash, merge or rebase
 # HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes  # one file per route, holding URL= and KEY=
 # HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log  # the flusher's log
 # HERDR_EVENTS_DIR=~/.config/herdr-events  # owner tags, job markers, handed panes
+# HERDR_EVENTS_FALLBACK_ROUTE=  # a route's name (a file in the routes folder): an owner with no route file goes there instead of default, and a Codex turn outside Herdr (the Codex desktop app) is sent there as source codex-desktop instead of skipped; unset, or not the name of a route in the routes folder, neither happens; a question or a gate never uses it
+# HERDR_EVENTS_LAUNCHD=local  # macOS: the label prefix of the two launchd jobs herdr-doctor checks (<prefix>.herdr-event-watchdog, <prefix>.herdr-events-flush)
+# HERDR_DOCTOR_EXTRA=  # an absolute path to an executable of your own that herdr-doctor runs last, with empty stdin: its first 64 KB print with control bytes removed, each PROBLEM line counts (all of them), and one not done in 30 seconds is ended with its process group (one warn)
 # HERDR_EVENTS_STALE_MINUTES=30  # minutes a working terminal's screen may stay unchanged before stale
 # HC=hc  # the Herdr Core binary
 # HC_SESSION=default  # which core

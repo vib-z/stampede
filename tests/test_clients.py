@@ -628,5 +628,23 @@ class Outcomes(unittest.TestCase):
         self.assertEqual(finishing, 0, 'the bot heard the finishing turn after its done')
 
 
+
+class CodexDesktopTurn(unittest.TestCase):
+    """The codex client's own turns, in the Codex desktop app, have no Herdr pane and no Core terminal: skipped, as
+    ever, unless HERDR_EVENTS_FALLBACK_ROUTE names a route, then sent there as source codex-desktop (docs/CLIENTS.md)."""
+
+    def test_the_codex_clients_own_turn_is_skipped_unless_a_fallback_route_is_set(self):
+        import test_routes
+        self.assertEqual(CLIENTS['codex']['where'], 'outside')
+        relay = test_routes.Routes('test_a_bots_route_needs_no_default')
+        relay.setUp()
+        self.addCleanup(relay.doCleanups)
+        relay.route('default', 'https://default.invalid/hook')
+        relay.route('example', 'https://example.invalid/hook')
+        self.assertIsNone(relay.codex_turn('desk-1'))
+        url, event = relay.codex_turn('desk-2', HERDR_EVENTS_FALLBACK_ROUTE='example')
+        self.assertEqual((url, event['source'], event['route']), ('https://example.invalid/hook', 'codex-desktop', 'example'))
+
+
 if __name__ == '__main__':
     unittest.main()
