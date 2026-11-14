@@ -16,9 +16,9 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 - `status`: the status word of the command's last line, the word or words that start it (`STARTED`, `NOT READY`, `NOTHING QUEUED`), or null when the line has none.
 - The facts of that last line, at the top level, named the same everywhere (below). `job` is the absolute job folder, on every command given one.
 - `results`: every line as an object with its own `status` and facts, in order, when the command printed more than one, and always for `next`, `reopen`, `close` and `wait`. The top level repeats the last one.
-- A refusal: `error`, the one line the command prints on stderr without `--json` (`stampede <command>: ...`), and `retry`, the command it prints on the next line, or null. A usage error is a refusal too.
+- A refusal: `error`, the one line the command prints on stderr without `--json` (`stampede <command>: ...`), and `retry`, the command it prints on the next line, or null. A usage error is a refusal too. A `retry` never moves a job to another backend: `new` refused outside a Herdr pane on the default Herdr TUI has `"backend": "tui"` and `"retry": null`, since Herdr Core runs a job only when the user asks for it (`--core`).
 - An unexpected error or an interrupt: `{"ok": false, "error": "<type>: <message>", "retry": null}`, the traceback on stderr as without `--json`, exit 1 (130 for an interrupt).
-- `notes`: any other line stampede printed, such as `on Herdr Core (backend auto: ...)` before `new`'s result, `gates off: <names>` before `FINISHED`, or the problems `new` refuses on. What a program stampede runs writes goes to stderr, never into the object.
+- `notes`: any other line stampede printed, such as `on Herdr Core (--core), repo <repo>` before `new`'s result, `gates off: <names>` before `FINISHED`, or the problems `new` refuses on. What a program stampede runs writes goes to stderr, never into the object.
 
 ## Facts
 
@@ -30,7 +30,7 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 | `parent` | the agent a Core helper runs under |
 | `id` | a question's or a gate's id (12 hex) |
 | `sha`, `pr`, `kind` | a gate's commit, PR number and kind (`merge`, `push_default_branch`, null); in `wait`, an item's kind; in `start`, the agent's CLI |
-| `outbox`, `path`, `text` | an outbox item's number (`"003"`), its file, its text |
+| `outbox`, `path`, `text` | an outbox item's number (`"003"`), its file, its text; in `config set`, `path` is your config file |
 | `running`, `cap`, `queued` | helpers running in the tree, the cap, starts waiting |
 | `reason` | why: the error, the dialog's kind, or for `SKIPPED` and `DONE` a short code (below) |
 | `retry` | the command to run next, where the line names one |
@@ -58,6 +58,7 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 | `gate-ok` | `APPROVED` | `id`, `sha`, `by`, `at`, `action`, `kind` |
 | `cancel` | `CANCELLED` | `id` |
 | `merge` | `MERGED` | `pr`, `sha`, `merge_commit`, `method`, `gate` |
+| `config set` | none (`status` is null: the line is `backend = "<value>" (<file>)`) | `path`, your config file |
 
 ## Always present
 

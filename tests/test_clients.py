@@ -41,7 +41,7 @@ KINDS = tuple(dict.fromkeys(kind for kinds in WORKERS.values() for kind in kinds
 REFUSED = {'tui': {kind: kind + ' runs only as a handed agent of a Herdr Core job' for kind in ('hermes', 'kimi')},
            'native': {kind: f'a native job starts claude or codex helpers; run {kind} as a program' for kind in HANDED}}
 # why a backend that does not take a kind refuses it
-AUTO_CORE = 'on Herdr Core (backend auto: not inside a Herdr pane)'  # new's first line when no flag named the backend
+ASKED_CORE = 'on Herdr Core (--core)'  # a native job's first line: every client asks for Herdr Core, never gets it by default
 UNHANDED = 'hand it to a Herdr TUI pane at its shell prompt with --pane'
 NATIVE_PANE = 'a native job hands nothing to a Herdr TUI pane: run that CLI as a program'
 OUTCOMES = {
@@ -183,8 +183,8 @@ class Outcomes(unittest.TestCase):
         def check(job):
             out = self.ok(job, 'new')
             self.assertEqual(out.strip().splitlines()[-1], f'{Job.LEAD} {job.job}')
-            if job.backend == 'native' and job.row['where'] != 'inside':  # new with no --core, outside a Herdr pane
-                self.assertEqual(out.splitlines()[0], f'{AUTO_CORE}, repo {Path(job.repo).resolve()}', 'backend auto says it chose Herdr Core, and the repo')
+            if job.backend == 'native':
+                self.assertEqual(out.splitlines()[0], f'{ASKED_CORE}, repo {Path(job.repo).resolve()}', '--core names Herdr Core, and the repo')
             self.assertEqual((job.job / 'workdir').read_text().strip(), str(job.repo), 'the job folder is in the jobs root')
             self.assertIn('plan.md', (job.job / 'briefs' / (Job.LEAD + '.md')).read_text())
             self.assertEqual(job.marked, str(job.job), 'the job is marked open until finish')

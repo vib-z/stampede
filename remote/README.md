@@ -23,7 +23,7 @@ A front door is anything that can run a command on the machine where Herdr runs:
 stampede doctor                                       # first: a PROBLEM line stops the job
 stampede new --file <ask.md>                          # add --review when the owner asks to see the plan first
 stampede new --file <ask.md> --lead codex             # a Codex lead; the setting lead.kind is the default
-stampede new --core --file <ask.md> --cwd <repo>      # the whole job on Herdr Core; outside Herdr the setting backend may pick it
+stampede new --core --file <ask.md> --cwd <repo>      # the whole job on Herdr Core, only when the owner asks for it
 stampede new --core --relay --file <ask.md> --cwd <repo>      # only when the owner asks to hand Cursor, Hermes or Kimi to a TUI pane
 stampede tell <job dir> lead "<the owner's words>"    # a change or an answer, word for word
 stampede approve <job dir> --by "<front door>"        # only in a review job, after the owner's yes to the plan

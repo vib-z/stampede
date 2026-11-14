@@ -1,6 +1,6 @@
 # A job on Herdr Core
 
-A job started with `stampede new --core` (or `stampede new` outside a Herdr pane, with `backend = auto`) runs the way Core works: you, the lead, are a root terminal, and every helper you start is your Core child.
+A job started with `stampede new --core` (or with the setting `backend` set to `core` or `auto`) runs the way Core works: you, the lead, are a root terminal, and every helper you start is your Core child.
 The shape a client reads, the job folder and every command's output are in [docs/CORE-NATIVE.md](../../../docs/CORE-NATIVE.md); Core's own basics in `hc --skill`. The plan, briefs, questions and finish are as in [SKILL.md](../SKILL.md); this page says what differs.
 
 ## Before you start

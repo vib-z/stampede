@@ -258,10 +258,7 @@ class Job:
         ask.write_text(f'Write hello-{self.client}-{self.backend}.txt with one worker.\n')
         lead = ('--lead', self.lead_kind) if self.lead_kind else ()
         lead += ('--front-door',) if self.door else ()
-        if self.backend == 'native' and self.row['where'] != 'inside':  # backend auto: no --core outside a Herdr pane is Core
-            self.front('new', 'new', '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
-            return
-        if self.on_core:
+        if self.on_core:  # every client asks for Herdr Core with --core: the default is the Herdr TUI
             relay = ('--relay',) if self.backend == 'core' else ()
             self.front('new', 'new', '--core', *relay, '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
             return

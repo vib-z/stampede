@@ -110,8 +110,8 @@ class Play(Job):
         self.lead('merge no gate', 'merge', job, '3', '--sha', SHA, '--review', report)
         self.lead('merge', 'merge', job, '3', '--sha', SHA, '--review', report, '--gate', self.ident)
         self.front('new no ask', 'new', '--file', self.root / 'nope.md')
-        if (self.client, self.backend) == ('claude-code', 'native'):  # outside Herdr, no flag: backend auto picks Core
-            self.front('new auto', 'new', '--file', self.root / 'ask.md', '--cwd', self.repo, '--name', 'xd')
+        if (self.client, self.backend) == ('claude-code', 'native'):  # outside Herdr, no flag, the user's backend auto: Core
+            self.front('new auto', 'new', '--file', self.root / 'ask.md', '--cwd', self.repo, '--name', 'xd', '--set', 'backend=auto')
         if self.backend == 'native':
             self.lead('start own flag', 'start', job, 'prog-own', '--', 'sleep', '60', '--json')  # plain: no flag; --json: after start
             self.lead('next', 'next', job)

@@ -242,5 +242,6 @@ WantedBy=timers.target' && n=$((n+1))
 }
 linux_timers
 echo "Next, once per repo: herdr-trust <repo dir>   (pre-trusts it for Claude and Codex, so agents start without a dialog)"
+echo "New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core"
 [ -z "$UNITS" ] || echo "timer unit files written: $UNITS. They are stampede's own and a rollback leaves them"
 if [ "$JOURNAL" = 1 ] && [ -s "$BACKUP/journal" ]; then echo "rollback: bash $(printf %q "$BACKUP/rollback.sh")"; fi

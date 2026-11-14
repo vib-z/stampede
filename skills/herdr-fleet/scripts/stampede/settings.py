@@ -240,12 +240,36 @@ def parse_set(pair):
         return key, text
 
 
+def user_file(env=None, home=None):
+    env = os.environ if env is None else env
+    return Path(env.get('XDG_CONFIG_HOME') or Path(home or Path.home()) / '.config') / 'stampede' / 'config.toml'
+
+
+def set_backend(key, value):
+    """config set: writes backend, the one key it takes, to the user's own file, whole (a new file, then os.replace). An
+    existing top-level backend line is replaced; else the line goes first, valid before any table. Returns the file."""
+    path = user_file()
+    if key != 'backend':
+        raise ValueError(f'config set takes backend only; for {key}, edit {path}')
+    if value not in CHOICES['backend']:
+        raise ValueError(f'backend must be one of {", ".join(CHOICES["backend"])}, not {value!r}')
+    text, line = path.read_text() if path.is_file() else '', f'backend = "{value}"'
+    table = re.search(r'^[ \t]*\[', text, re.M)
+    top, rest = (text[:table.start()], text[table.start():]) if table else (text, '')
+    top, found = re.subn(r'^[ \t]*backend[ \t]*=.*$', line, top, count=1, flags=re.M)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = path.with_name(path.name + '.new')
+    new.write_text(top + rest if found else line + '\n' + text)
+    os.replace(new, path)
+    return path
+
+
 def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
     """Every setting with the layer it came from. saved: a job's settings.json, whose values beat the files and the
     environment; a key it holds as a default follows them, as before the job had the file. A user-only key never comes
     from it: the job's agents can write the job folder, so its source labels grant nothing."""
     env = os.environ if env is None else env
-    user = Path(env.get('XDG_CONFIG_HOME') or Path(home or Path.home()) / '.config') / 'stampede' / 'config.toml'
+    user = user_file(env, home)
     paths = {'user': user} if repo is None else {'user': user, 'repo': Path(repo) / '.stampede.toml'}
     values, sources, problems = dict(DEFAULTS), dict.fromkeys(DEFAULTS, 'default'), []
 

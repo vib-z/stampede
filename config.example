@@ -6,7 +6,7 @@
 # Last one wins: these defaults, your file, the repo's file, the environment (the names below), then a command's flags
 # and --set key=value. stampede new saves the result in <job>/settings.json. See it all: stampede config show
 
-backend = "auto"                 # where new runs a job given no --core, --pane or --workspace: auto (the Herdr TUI inside a Herdr pane, else Herdr Core), tui or core
+backend = "tui"                  # where new runs a job given no --core, --pane or --workspace: tui (the Herdr TUI; outside a Herdr pane new refuses), or core (Herdr Core), or auto if you ask for it (the TUI inside a Herdr pane, else Core)
 jobs_root = "~/code/herdr-jobs"  # every job folder goes in <root>/jobs/<date>-<owner or local>-<slug>, never in a repo (user only; env FLEET_JOBS_ROOT)
 trust_root = "~/code"            # herdr-trust trusts repos only under this folder; a Core job's repo must be there (user only; env FLEET_TRUST_ROOT)
 

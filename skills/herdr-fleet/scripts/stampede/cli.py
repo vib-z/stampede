@@ -121,10 +121,6 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings)
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
-    if not (workspace or pane):
-        raise base_.Retry('new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui)' + relay_.core_hint()
-                    + '; to run it here on Herdr Core, run the next line',
-                    ' '.join(['stampede', 'new', '--core', '--file', shlex.quote(str(ask_file)), '--cwd', git_root()]))
     if fork is not None and not base_.SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     ask = Path(ask_file).expanduser().read_text()
@@ -191,7 +187,7 @@ GROUPS = (  # the top-level help, in the order an agent meets the commands; hook
                         ('snapshot', 'a native job: save how to reopen it'),
                         ('reopen', 'a native job: start again what is not live'),
                         ('close', "a native job: end an agent's subtree, or the whole job"))),
-    ('settings', (('config', 'config show: every setting, and the layer that set it'),)),
+    ('settings', (('config', 'config show: every setting, and the layer that set it; config set backend: your default'),)),
     ('the machine', (('doctor', 'check this machine and this checkout, with the fix for each problem'),
                      ('check', "run this checkout's fast tests (--full: all of them)"),
                      ('update', 'update this checkout to the latest release'))),
@@ -201,17 +197,17 @@ TOP = ('Run a team of AI agents on one job: a lead plans, workers build in their
        'checks, and the owner answers questions and gates from a chat or a phone.\n\ncommands:\n'
        + '\n'.join(f'  {group}:\n' + '\n'.join(f'    {name:<13} {text}' for name, text in commands) for group, commands in GROUPS))
 TOP_EPILOG = '''start a job:
-  stampede new --file ask.md                    inside Herdr: the lead gets a tab of this workspace; anywhere
-                                                else: the job runs on Herdr Core (the setting backend, auto)
-  stampede new --core --file ask.md --cwd .     on Herdr Core wherever it runs
+  stampede new --file ask.md                    on the Herdr TUI (the default): inside Herdr, the lead gets a tab
+                                                of this workspace; outside it, pass --workspace or --pane
+  stampede new --core --file ask.md --cwd .     on Herdr Core, only when asked: --core or the setting backend
 Each command takes the job folder new prints. `stampede <command> --help` has its flags and examples;
 USING.md in the stampede checkout has the whole flow.'''
 EXAMPLES = {
     'new': '''examples:
   stampede new --file ask.md
-  stampede new --file ask.md --cwd ~/code/app --lead-model claude-fable-5-1 --lead-effort max
+  stampede new --file ask.md --lead-model claude-fable-5-1 --lead-effort max
   stampede new --core --file ask.md --cwd ~/code/app --lead codex
-  stampede new --file ask.md --cwd ~/code/app --front-door     # a chat outside Herdr runs it, on Herdr Core''',
+  stampede new --core --file ask.md --cwd ~/code/app --front-door     # a chat outside Herdr runs it, on Herdr Core''',
     'start': '''examples:
   stampede start <job> build-api --brief <job>/briefs/build-api.md --pane w1:p3     # the role build: its kind, model, effort
   stampede start <job> review-api --brief <job>/briefs/review-api.md     # a Core job: the role review
@@ -261,8 +257,9 @@ def repo_of(cwd=None):
     return Path(top.stdout.strip()) if top.returncode == 0 else None
 
 
+# the commands --json turns into one object (out.py), and config set; tree, doctor, check and config show print their own
 JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapshot', 'reopen', 'close', 'approve', 'approve-gate',
-        'gate-ok', 'cancel', 'merge')  # the commands --json turns into one object (out.py); tree, doctor, check, config print their own
+        'gate-ok', 'cancel', 'merge')
 
 
 def subcommand(argv):
@@ -277,8 +274,8 @@ def subcommand(argv):
 def main(argv):
     """argparse owns --json; whether to wrap the whole call in one object, its own usage error included, is decided
     before it parses: --json as a word before any -- (out.asks), on a command in JSON."""
-    name = subcommand(argv)[1]
-    if out_.asks(argv) and (name is None or name in JSON):
+    at, name = subcommand(argv)
+    if out_.asks(argv) and (name is None or name in JSON or argv[at:at + 2] == ['config', 'set']):
         return out_.as_json(name, lambda: parse_and_run(argv))
     return parse_and_run(argv)
 
@@ -300,9 +297,9 @@ def parse_and_run(argv):
         return sub.add_parser(name, description=description or SUMMARY[name][0].upper() + SUMMARY[name][1:] + '.',
                               epilog=EXAMPLES.get(name), formatter_class=form)
 
-    p = command('new', 'Make a job folder and start its lead. Inside Herdr the lead gets a tab of this workspace (or --pane);\n'
-                       'anywhere else the whole job runs on Herdr Core (the setting backend: auto, tui or core; --core forces\n'
-                       'it). The folder is <jobs_root>/jobs/<date>-<owner or local>-<name>. Prints the lead\'s name and the folder.')
+    p = command('new', 'Make a job folder and start its lead. On the Herdr TUI (the default) the lead gets a tab of this\n'
+                       'workspace (or --workspace, --pane). On Herdr Core, only when asked (--core, or the setting backend), the\n'
+                       'whole job runs there. The folder is <jobs_root>/jobs/<date>-<owner or local>-<name>. Prints the lead\'s name and the folder.')
     p.add_argument('--file', required=True, help='the ask: a file with what the job is for')
     p.add_argument('--workspace', help='the Herdr workspace for the lead\'s tab (default: $HERDR_WORKSPACE_ID; Herdr TUI only)')
     p.add_argument('--core', action='store_true', help='run the job on Herdr Core (hc) in --cwd: every agent is a Core terminal and '
@@ -416,8 +413,14 @@ def parse_and_run(argv):
     p = command('config', 'The settings: config show prints every setting as key = value (source), the source being the layer\n'
                           'that set it (default, user, repo, env:<NAME>, flag or set), then the environment-only variables,\n'
                           'then any problems. Exit 1 when the config has problems.')
-    p = p.add_subparsers(dest='action', metavar='show')
+    p = p.add_subparsers(dest='action', metavar='show|set')
     p.required = True
+    s = p.add_parser('set', description='Set your default backend in your own config file (stampede config show names it):\n'
+                     'tui (the Herdr TUI, the default), core (Herdr Core) or auto. It takes backend only.',
+                     epilog='examples:\n  stampede config set backend core\n  stampede config set backend tui', formatter_class=form)
+    s.add_argument('key', help='backend')
+    s.add_argument('value', help='tui, core or auto')
+    json_flag(s)
     p = p.add_parser('show', description='Every setting and the layer that set it; exit 1 when the config has problems.',
                      epilog=EXAMPLES['config'], formatter_class=form)
     json_flag(p, '{"values", "sources", "files", "environment", "problems"}')
@@ -480,11 +483,6 @@ def parse_and_run(argv):
         return 1
 
 
-def git_root():
-    done = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
-    return shlex.quote(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else '<repo>'  # printed in a command
-
-
 def require_job(job):
     """Every command but new and hook: the job folder exists and is one (new writes lead and ask.md; either will do, so a
     job that lost one can still be finished or reopened), before anything reads its backend."""
@@ -496,9 +494,10 @@ def require_job(job):
 
 
 def backend_for(a):
-    """new's backend: (core, why). --core is Core and --pane or --workspace the Herdr TUI; else the setting backend: tui,
-    core, or auto, the Herdr TUI inside a Herdr pane (HERDR_WORKSPACE_ID) and Herdr Core everywhere else. why says why
-    Core was chosen when no flag asked for it, so the choice is never silent; '' otherwise."""
+    """new's backend: (core, why). --core is Core and --pane or --workspace the Herdr TUI; else the setting backend: tui
+    (the default), core, or auto when the user sets it, the Herdr TUI inside a Herdr pane (HERDR_WORKSPACE_ID) and Herdr
+    Core everywhere else. why says which setting chose Core when no flag asked for it, so the choice is never silent; ''
+    otherwise."""
     if a.core or a.pane or a.workspace:
         return a.core, ''
     choice = settings_.load(repo=repo_of(a.cwd), env=os.environ, sets=settings_.SETS).get('backend')
@@ -545,6 +544,10 @@ def run(a):
     for pair in getattr(a, 'set', None) or []:
         settings_.parse_set(pair)  # a bad pair is refused before anything runs
     settings_.SETS[:] = getattr(a, 'set', None) or []
+    if a.cmd == 'config' and a.action == 'set':
+        path = settings_.set_backend(a.key, a.value)
+        out_.emit(None, f'backend = "{a.value}" ({path})', path=str(path))
+        return 0
     if a.cmd == 'config':
         found = gates_.overlay(settings_.current(a.job), a.job) if a.job else settings_.load(repo=repo_of())
         print(settings_.show(found, a.json).rstrip('\n'))
@@ -557,6 +560,9 @@ def run(a):
             raise ValueError(f'--no-gate {unknown[0]} is no gate: it takes ' + ', '.join(gates_.names()))
         core, why = backend_for(a)
         out_.fact(backend=('core' if a.relay else 'native') if core else 'tui')  # as <job>/backend names it
+        if not (core or a.workspace or a.pane or os.environ.get('HERDR_WORKSPACE_ID')):  # no retry: Core only when asked
+            raise ValueError('new runs the job on the Herdr TUI and needs a Herdr pane: run it inside Herdr, or pass --workspace '
+                             'or --pane; to run the job on Herdr Core instead, add --core, or for every job: stampede config set backend core')
         if a.cwd and not core:
             raise ValueError('--cwd is for a job on Herdr Core (new --core)')
         if a.relay and not core:

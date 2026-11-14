@@ -1,6 +1,6 @@
 """The stampede command teaches itself: grouped help with examples, errors that name the next step, stampede doctor and
 stampede check. Everything runs in a scratch HOME with fakes; nothing reaches a live Herdr or Herdr Core."""
-import contextlib, io, json, os, re, shlex, subprocess, sys, tempfile, unittest
+import contextlib, io, json, os, re, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -243,33 +243,6 @@ class Cli(unittest.TestCase):
             self.assertNotIn('rev-parse HEAD', text)
         self.assertIn('stampede gate-ok <job> 0123456789ab --sha "$sha"', texts[1])
         self.assertIn('stampede merge <job> 12 --sha "$sha" --review', texts[2])
-
-    def test_the_hint_outside_herdr_runs_as_printed_with_spaces_in_its_paths(self):
-        repo = self.home / 'repo with spaces'
-        repo.mkdir()
-        subprocess.run(['git', 'init', '-q', str(repo)], check=True)
-        ask = repo.parent / 'ask plan.md'
-        ask.write_text('Fix the login bug\n')
-        result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask), '--set', 'backend=tui'], capture_output=True, text=True,
-                                env=self.env, cwd=repo, timeout=60)
-        self.assertEqual(result.returncode, 2, result.stderr)
-        command = shlex.split(result.stderr.splitlines()[-1])
-        self.assertEqual(command, ['stampede', 'new', '--core', '--file', str(ask), '--cwd', str(repo.resolve())])
-
-    def test_the_hint_keeps_every_character_of_its_paths(self):
-        for name in ('two  spaces', 'a\ttab', "a 'quote'", 'a $dollar', 'all  \t\'"$ of it'):
-            with self.subTest(name=name):
-                repo = self.home / ('repo ' + name)
-                repo.mkdir()
-                subprocess.run(['git', 'init', '-q', str(repo)], check=True)
-                ask = self.home / ('ask ' + name + '.md')
-                ask.write_text('Fix the login bug\n')
-                result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask), '--set', 'backend=tui'], capture_output=True,
-                                        text=True, env=self.env, cwd=repo, timeout=60)
-                self.assertEqual(result.returncode, 2, result.stderr)
-                self.assertTrue(result.stderr.splitlines()[0].endswith('to run it here on Herdr Core, run the next line'))
-                self.assertEqual(shlex.split(result.stderr.split('run the next line\n', 1)[1]),
-                                 ['stampede', 'new', '--core', '--file', str(ask), '--cwd', str(repo.resolve())])
 
     def test_every_help_example_is_valid_shell(self):
         for name in ORDER[:-1]:

@@ -16,13 +16,14 @@ A job runs on the Herdr TUI (tabs and panes) or Herdr Core (a tree of terminals)
 ## Start a job
 
 ```bash
-stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr Core
+stampede new --file ask.md          # the Herdr TUI (default)
+stampede new --core --file ask.md   # Herdr Core, only when asked
 ```
 
-- On Core it works on the git root here (or `--cwd <repo>`) and names it first. `--core` or `--pane` forces one; the setting `backend` is the standing choice.
+- Outside Herdr the TUI needs `--pane` or `--workspace`. Core works on the git root (or `--cwd <repo>`) and names it first; `stampede config set backend core` makes it your default.
 - It prints `<lead> <job dir>` (on Core after `STARTED <lead> (<address>)`), exit 0. A refusal exits 2, before anything is made.
 - `BLOCKED` or `NOT READY`: the lead waits. Do what the line says; never start a second lead.
-- An agent chat that relays the owner's answers passes `--front-door`, on Core too. For the TUI it also passes `--pane` or `--workspace`: see [skills/stampede](skills/stampede/SKILL.md).
+- An agent chat that relays the owner's answers also passes `--front-door`: see [skills/stampede](skills/stampede/SKILL.md).
 
 ## Then
 
