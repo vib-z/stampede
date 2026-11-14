@@ -20,7 +20,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 `stampede new` saves what it resolved in `<job>/settings.json`, with the layer of each value, and every later command of that job reads it there: a job remembers what was set when it started, and anything not set then follows your current config. A later command's own `--set` still wins for that command, and `<job>/max-helpers` for its job.
 
-**User only.** `jobs_root`, `trust_root`, `ask.command`, `lead.forbid` and every `gates.` key run a command, widen what is trusted or lower a rule, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml` (there each is skipped with a problem line), and never saved in `settings.json`, which the job's agents can write. `lead.forbid` matches exact model names. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)); the other four follow your live config at every command.
+**User only.** `jobs_root`, `trust_root`, `ask.command`, `lead.forbid` and every `gates.` key run a command, widen what is trusted or lower a rule, and `backend` is the user's own choice, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml` (there each is skipped with a problem line), and never saved in `settings.json`, which the job's agents can write. `lead.forbid` matches exact model names. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)); the other four follow your live config at every command.
 
 **Problems.** An unknown key, a value of the wrong type or not one of the key's choices, or a file that does not parse is skipped and named in one line by `stampede config show`. `stampede new` refuses to start a job while there is one (exit 2); no other command fails on them.
 
@@ -28,7 +28,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 | key | default | environment | what it does |
 |---|---|---|---|
-| `backend` | `tui` | | where `stampede new` runs a job given no `--core`, `--pane` or `--workspace`: `tui` (the Herdr TUI; outside a Herdr pane `new` refuses), `core` (Herdr Core), or `auto` if you ask for it (the TUI inside a Herdr pane, Core anywhere else). `stampede config set backend <tui\|core\|auto>` writes it to your file |
+| `backend` | `tui` | | where `stampede new` runs a job given no `--core`, `--pane` or `--workspace`: `tui` (the Herdr TUI; outside a Herdr pane `new` refuses), `core` (Herdr Core), or `auto` if you ask for it (the TUI inside a Herdr pane, Core anywhere else). `stampede config set backend <tui\|core\|auto>` writes it to your file (user only: a repo's `.stampede.toml` cannot put a job on Herdr Core) |
 | `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | every job folder, on every backend, is `<root>/jobs/<date>-<owner or local>-<slug>`, never in a repo (user only) |
 | `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | a Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
 | `lead.kind` | `claude` | `FLEET_LEAD_KIND` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
