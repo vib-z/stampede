@@ -1,6 +1,6 @@
 # Other front doors: Cursor, ChatGPT Dots, or any bot with a computer of its own
 
-**Cursor** on the machine is a front door like a Herdr chat: ask it to read stampede's `SKILL.md` and start the job; it writes the ask to a file and runs `stampede new --file <ask.md>`.
+**Cursor** on the machine is a front door like a Herdr chat: ask it to read stampede's `SKILL.md` and start the job; it writes the ask to a file and runs `stampede new --file <ask.md> --pane <id>` (or `--workspace <id>`) for the Herdr TUI, or the same with `--core --cwd <repo>` in place of the pane for Herdr Core.
 
 A Cursor chat runs outside Herdr, so on the Herdr TUI it passes `--workspace` or `--pane`: it creates a workspace for the job and passes its root pane ([skills/stampede](../skills/stampede/SKILL.md)). Cursor cannot be woken by another agent, so the lead's questions reach you through Moshi. Cursor works as a worker, not yet as the lead.
 

@@ -77,8 +77,8 @@ class Backend(Choices):
         self.assertEqual(out.splitlines()[0], f'on Herdr Core (backend auto: not inside a Herdr pane), repo {self.repo.resolve()}')
         self.assertEqual(out.splitlines()[-1], f'{LEAD} {self.job}')
         self.assertEqual(job_.backend(self.job), 'native')
-        self.user.unlink()  # the default tui comes back: the open job keeps its backend and its settings
-        self.assertEqual((job_.backend(self.job), settings_.current(self.job).get('backend')), ('native', 'auto'))
+        self.user.unlink()  # the default tui comes back: the open job keeps the backend <job>/backend recorded
+        self.assertEqual(job_.backend(self.job), 'native')
         code, out, err = self.main('start', self.job, 'prog', '--', 'sleep', '60')
         self.assertEqual(code, 0, err)
         self.assertTrue(out.startswith(f'STARTED prog (t2) under {LEAD}'), out)
@@ -103,9 +103,6 @@ class Backend(Choices):
         settings_.SETS[:] = ['backend=tui']
         self.assertEqual(self.choice(), (False, ''), '--set beats the file')
         settings_.SETS.clear()
-        (self.repo / '.stampede.toml').write_text('backend = "auto"\n')
-        with mock.patch.dict(os.environ, {'HERDR_WORKSPACE_ID': 'w1'}):
-            self.assertEqual(self.choice(), (False, ''), 'a repo\'s file beats the user\'s')
 
     def test_a_bad_value_is_a_problem_and_new_refuses(self):
         self.config('backend = "cloud"\n')
@@ -145,6 +142,26 @@ class Backend(Choices):
         self.assertIn('pass --workspace or --pane', err)
 
 
+    def test_a_repo_file_never_puts_a_job_on_core(self):
+        for value in ('core', 'auto'):
+            with self.subTest(value=value):
+                (self.repo / '.stampede.toml').write_text(f'backend = "{value}"\n')
+                self.assertEqual(self.choice(), (False, ''))
+                shown = settings_.show(settings_.load(repo=self.repo), False)  # what config show prints in that repo
+                self.assertIn('backend = "tui"  (default)', shown)
+                self.assertIn(f'.stampede.toml: backend is taken only from your own {self.user}', shown)
+                code, _, err = self.main('new', '--file', self.ask, '--cwd', self.repo, '--core')
+                self.assertEqual(code, 2)
+                self.assertIn('backend is taken only from your own', err)
+                self.assertFalse(self.job.exists())
+        (self.repo / '.stampede.toml').unlink()
+        self.config('backend = "core"\n')
+        self.assertEqual(self.choice(), (True, 'backend core'), 'the user\'s own file still chooses')
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('backend', json.loads((self.job / 'settings.json').read_text())['values'], 'never saved in the job')
+
+
 class SetBackend(Choices):
     """config set backend: one line in the user's own file, every other byte kept, and new follows it."""
     def set(self, *argv):
@@ -175,6 +192,64 @@ class SetBackend(Choices):
         self.assertEqual(self.user.read_text(), 'backend = "core"\n[lead]\nkind = "codex"\n[roles.build]\nbackend = "x"\n')
         found = settings_.load(repo=self.repo)
         self.assertEqual((found.get('backend'), found.get('lead.kind'), found.sources['backend']), ('core', 'codex', 'user'))
+
+    def test_bytes_are_kept_and_a_crlf_file_stays_crlf(self):
+        self.user.write_bytes(b'# a\r\nbackend = "auto"  \r\n\r\n[lead]\r\nkind = "codex"\r\n')
+        self.assertEqual(self.set('backend', 'tui')[0], 0)
+        self.assertEqual(self.user.read_bytes(), b'# a\r\nbackend = "tui"\r\n\r\n[lead]\r\nkind = "codex"\r\n')
+        self.user.write_bytes(b'[lead]\r\nkind = "codex"\r\n')
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual(self.user.read_bytes(), b'backend = "core"\r\n[lead]\r\nkind = "codex"\r\n')
+
+    def test_a_linked_file_stays_a_link_and_its_target_changes(self):
+        real = self.root / 'dotfiles/stampede.toml'
+        real.parent.mkdir()
+        real.write_text('backend = "auto"\n')
+        self.user.symlink_to(real)
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertTrue(self.user.is_symlink())
+        self.assertEqual(real.read_text(), 'backend = "core"\n')
+
+    def test_the_mode_is_kept(self):
+        for mode in (0o600, 0o400):
+            with self.subTest(mode=oct(mode)):
+                self.user.write_text('backend = "auto"\n')
+                self.user.chmod(mode)
+                self.assertEqual(self.set('backend', 'core')[0], 0)
+                self.assertEqual((self.user.stat().st_mode & 0o7777, self.user.read_text()), (mode, 'backend = "core"\n'))
+                self.user.chmod(0o600)
+                self.user.unlink()
+
+    def test_a_planted_temporary_name_is_never_followed(self):
+        other = self.root / 'other.toml'
+        other.write_text('keep me\n')
+        for name in ('config.toml.new', 'config.toml.tmp', '.config.toml.tmp'):
+            (self.user.parent / name).symlink_to(other)
+        self.config('backend = "auto"\n')
+        self.assertEqual(self.set('backend', 'core')[0], 0)
+        self.assertEqual((other.read_text(), self.user.read_text()), ('keep me\n', 'backend = "core"\n'))
+        self.assertEqual(sorted(p.name for p in self.user.parent.iterdir()),
+                         ['.config.toml.tmp', 'config.toml', 'config.toml.new', 'config.toml.tmp'])
+
+    def test_a_file_it_cannot_change_safely_is_refused_byte_for_byte(self):
+        for text in ('"backend" = "auto"\n', 'backend = """\nauto"""\n', "backend = 'auto'\n", 'backend = \n', '[lead\nkind = 1\n',
+                     'backend = "auto"\r\nx = "\xff"\n'):
+            with self.subTest(text=text):
+                self.user.write_bytes(text.encode('latin-1'))
+                code, out, err = self.set('backend', 'core')
+                self.assertEqual((code, out), (2, ''), err)
+                self.assertIn(str(self.user), err)
+                self.assertIn('nothing was changed', err)
+                self.assertEqual(self.user.read_bytes(), text.encode('latin-1'))
+                self.assertEqual([p.name for p in self.user.parent.iterdir()], ['config.toml'])
+
+    def test_a_failure_before_the_rename_leaves_the_file_whole_and_no_temporary_file(self):
+        self.config('backend = "auto"\n')
+        with mock.patch.object(settings_.os, 'replace', side_effect=OSError('disk full')):
+            code, _, err = self.set('backend', 'core')
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.user.read_text(), 'backend = "auto"\n')
+        self.assertEqual([p.name for p in self.user.parent.iterdir()], ['config.toml'])
 
     def test_another_key_or_a_bad_value_is_refused_and_writes_nothing(self):
         code, out, err = self.set('lead.kind', 'codex')

@@ -2,7 +2,7 @@
 1 defaults.toml beside this file (the list of keys), 2 the user's config.toml, 3 <repo>/.stampede.toml, 4 the
 environment (the variable names stampede always read), 5 a command's flags, then its --set key=value pairs.
 A bad value, an unknown key or a file that does not parse is skipped and named in problems; it never stops a command."""
-import difflib, json, os, re, socket, sys
+import difflib, json, os, re, socket, sys, tempfile
 from pathlib import Path
 
 try:
@@ -14,7 +14,8 @@ DEFAULTS_FILE = Path(__file__).resolve().parent / 'defaults.toml'
 ENV = {'FLEET_LEAD_KIND': 'lead.kind', 'FLEET_LEAD_FORBID': 'lead.forbid', 'FLEET_ASK_CMD': 'ask.command', 'FLEET_JOBS_ROOT': 'jobs_root',
        'FLEET_TRUST_ROOT': 'trust_root', 'STAMPEDE_MAX_HELPERS': 'helpers.max', 'STAMPEDE_TAB_PANES': 'helpers.tab_panes'}
 # FLEET_LEAD_MODEL and FLEET_LEAD_EFFORT set the pair of the CLI the model belongs to: see lead_env.
-USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.', 'lead.forbid')  # run a command or lower a safety rule: never from a repo
+USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.', 'lead.forbid', 'backend')  # run a command, lower a safety rule or
+# pick Herdr Core: the user's own choice, never from a repo
 ENV_ONLY = (  # read by other programs too, so they stay environment variables: (name, default, what it does)
     ('FLEET_WATCH_INTERVAL', '30', 'seconds between passes of fleet-watch.sh'),
     ('FLEET_WATCH_PASSES', '0', 'fleet-watch.sh stops after this many passes; 0 runs until stopped'),
@@ -246,21 +247,47 @@ def user_file(env=None, home=None):
 
 
 def set_backend(key, value):
-    """config set: writes backend, the one key it takes, to the user's own file, whole (a new file, then os.replace). An
-    existing top-level backend line is replaced; else the line goes first, valid before any table. Returns the file."""
+    """config set: writes backend, the one key it takes, to the user's own file (through a link, to the file it names).
+    Exactly that change or none: bytes kept as they are, the one plain top-level line replaced (else put first, valid
+    before any table), the new text parsed back, then a unique temporary file with the old mode renamed over it."""
     path = user_file()
     if key != 'backend':
         raise ValueError(f'config set takes backend only; for {key}, edit {path}')
     if value not in CHOICES['backend']:
         raise ValueError(f'backend must be one of {", ".join(CHOICES["backend"])}, not {value!r}')
-    text, line = path.read_text() if path.is_file() else '', f'backend = "{value}"'
-    table = re.search(r'^[ \t]*\[', text, re.M)
-    top, rest = (text[:table.start()], text[table.start():]) if table else (text, '')
-    top, found = re.subn(r'^[ \t]*backend[ \t]*=.*$', line, top, count=1, flags=re.M)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new = path.with_name(path.name + '.new')
-    new.write_text(top + rest if found else line + '\n' + text)
-    os.replace(new, path)
+    target = path.resolve()
+    old = target.read_bytes() if target.is_file() else b''
+
+    def backend_of(data):
+        try:
+            return parse(data.decode()).get('backend')
+        except ValueError as error:  # TOML and UTF-8 errors are ValueErrors
+            raise ValueError(f'{path} does not parse ({str(error).splitlines()[0] if str(error) else type(error).__name__}): fix it by hand; nothing was changed') from None
+    table = re.search(rb'(?m)^[ \t]*\[', old)
+    top = old[:table.start()] if table else old
+    line = re.compile(rb'(?m)^[ \t]*backend[ \t]*=[ \t]*"[a-z]+"[ \t]*(?:#[^\r\n]*)?(?=\r?$)')
+    wanted = f'backend = "{value}"'.encode()
+    if backend_of(old) is None:
+        new = wanted + (b'\r\n' if b'\r\n' in old else b'\n') + old
+    elif len(line.findall(top)) == 1:
+        new = line.sub(wanted, top, count=1) + old[len(top):]
+    else:
+        raise ValueError(f'{path}: its backend is not one plain line backend = "<word>": edit the file by hand; nothing was changed')
+    if backend_of(new) != value:
+        raise ValueError(f'{path}: the change would not set backend to {value}: edit the file by hand; nothing was changed')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    umask = os.umask(0)
+    os.umask(umask)
+    mode = target.stat().st_mode & 0o7777 if target.is_file() else 0o666 & ~umask
+    fd, temp = tempfile.mkstemp(dir=target.parent, prefix='.' + target.name + '.')
+    try:
+        with os.fdopen(fd, 'wb') as out:
+            out.write(new)
+        os.chmod(temp, mode)
+        os.replace(temp, target)
+    except BaseException:
+        os.unlink(temp)
+        raise
     return path
 
 
