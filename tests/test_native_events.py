@@ -1,7 +1,7 @@
 """A Core-native job on the relay side: herdr-event-sweep (the lead's blocked, error, stale and dead, once each),
 the watchdog that runs it, flush's UNDELIVERED line through fleet-job tell, and herdr-reopen-snapshot's hand-over.
 Every script runs for real, against the fake hc and a socket that answers hello like a running core."""
-import json, os, shutil, subprocess, sys, unittest
+import json, os, shutil, subprocess, sys, time, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -256,6 +256,276 @@ class Sweep(NativeCase):
         self.shape(**state)
         self.sweep()
         self.assertEqual(self.queued(), [])
+
+
+class Helpers(NativeCase):
+    """alerts.helpers on (<job>/settings.json): each helper gets the lead's blocked, error, stale and dead, with agent its
+    own name; a plain child, a helper closed by stampede close or ended with its parent's branch never; off: only the lead."""
+
+    def setUp(self):
+        super().setUp()
+        self.setting(True)
+        self.lead(status={'state': 'idle'})
+
+    def setting(self, on):
+        (self.jd / 'settings.json').write_text(json.dumps({'values': {'alerts.helpers': on}}))
+
+    def helper(self, address='t2', name='h1', role='helper', parent='t1', **fields):
+        state = self.state()
+        labels = {'stampede.job': self.key, 'stampede.agent': name, **({'stampede.role': role} if role else {})}
+        state['terminals'][address] = {**state['terminals']['t1'], 'address': address, 'name': name, 'parent': parent,
+                                       'status': {'state': 'working'}, 'labels': labels, 'screen': 'building',
+                                       'die_with_parent': True, **fields}
+        self.shape(**state)
+
+    def posted(self):
+        return [(e['state'], e['agent'], e['event_id']) for e in self.queued()]
+
+    def test_blocked_and_error_once_per_episode_with_the_lead_s_shape(self):
+        self.helper(status={'state': 'blocked', 'kind': 'permission', 'msg': 'run rm?'}, screen='Allow rm?')
+        self.sweep()
+        self.sweep()
+        [event] = self.queued()
+        self.assertEqual({k: event[k] for k in ('source', 'state', 'pane', 'workspace', 'agent', 'kind', 'msg', 'output_tail', 'event_id',
+                                                'owner')},
+                         {'source': 'hc', 'state': 'blocked', 'pane': f'hc:{self.key}/t2', 'workspace': self.key, 'agent': 'h1',
+                          'kind': 'permission', 'msg': 'run rm?', 'output_tail': 'Allow rm?', 'event_id': f'{self.key}/t2|blocked|1',
+                          'owner': 'alpha'})
+        self.helper(status={'state': 'working'})
+        self.sweep()
+        self.helper(status={'state': 'error', 'msg': 'rate limited'})
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('blocked', 'h1', f'{self.key}/t2|blocked|1'), ('error', 'h1', f'{self.key}/t2|error|1')])
+        self.assertFalse((self.jd / 'inbox.log').exists(), 'a native job has no inbox')
+
+    def test_stale_after_the_limit(self):
+        self.helper()
+        self.sweep()
+        self.sweep()
+        state = self.sweep_state()
+        state['terminals']['t2']['stall']['since'] -= 31 * 60
+        (self.jd / 'sweep-state.json').write_text(json.dumps(state))
+        self.sweep()
+        self.sweep()
+        [event] = self.queued()
+        self.assertEqual((event['state'], event['agent'], event['event_id']), ('stale', 'h1', f'{self.key}/t2|stale|1'))
+        self.assertGreaterEqual(event['minutes_unchanged'], 31)
+
+    def test_dead_when_it_ended_working_or_blocked_or_a_shell_took_its_place(self):
+        self.helper()
+        self.helper('t3', 'h2', status={'state': 'blocked', 'kind': 'question'})
+        self.helper('t4', 'h3')
+        self.sweep()
+        self.terminal('t2', state='finished', status=None, exit_code=None, reason='killed')
+        self.terminal('t3', state='finished', status=None, exit_code=1, reason='exited')
+        self.terminal('t4', argv=['/bin/zsh', '-l'], status=None)
+        self.sweep()
+        self.sweep()
+        dead = [(e['agent'], e['reason'], e['last_state'], e['event_id']) for e in self.queued() if e['state'] == 'dead']
+        self.assertEqual(sorted(dead), [('h1', 'killed', 'working', f'{self.key}/t2|finished'),
+                                        ('h2', 'exited', 'blocked', f'{self.key}/t3|finished'),
+                                        ('h3', 'lost', 'working', f'{self.key}/t4|finished')])
+
+    def test_removed_from_core_by_anything_but_stampede_close_is_lost(self):
+        self.helper()
+        self.helper('t3', 'h2', status={'state': 'idle'})
+        self.sweep()
+        state = self.state()
+        del state['terminals']['t2'], state['terminals']['t3']
+        self.shape(**state)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(sorted((e['state'], e['agent'], e['reason']) for e in self.queued()), [('dead', 'h1', 'lost'), ('dead', 'h2', 'lost')])
+
+    def test_no_dead_for_its_own_exit_0_a_close_or_its_parent_s_end(self):
+        self.helper()
+        self.helper('t3', 'h2')
+        self.helper('t4', 'h3', parent='t3')
+        self.sweep()
+        self.terminal('t2', state='finished', status=None, exit_code=0, reason='exited')
+        closed = {'name': 'h2', 'role': 'helper', 'state': 'closed'}  # stampede close h2: its subtree, children first
+        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'h2': closed, 'h3': {**closed, 'name': 'h3'}}}))
+        state = self.state()
+        del state['terminals']['t3'], state['terminals']['t4']
+        self.shape(**state)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+        self.assertTrue(all(r['finished'] for a, r in self.sweep_state()['terminals'].items() if a != 't1'))
+
+    def test_the_lead_s_end_takes_its_branch_with_it(self):
+        self.helper()
+        self.sweep()
+        self.terminal('t1', state='finished', status=None, exit_code=None, reason='killed')
+        self.terminal('t2', state='finished', status=None, exit_code=None, reason='killed')
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'lead-x', f'{self.key}/t1|finished')])
+
+    def test_b1_a_helper_that_outlives_its_parent_still_reports_its_own_death(self):
+        self.helper(die_with_parent=False)
+        self.helper('t3', 'h2')
+        self.sweep()
+        self.terminal('t1', state='finished', status=None, exit_code=None, reason='killed')
+        self.terminal('t3', state='finished', status=None, exit_code=None, reason='killed')  # ended with its parent
+        self.sweep()  # t2 outlived it and still works
+        self.terminal('t2', state='finished', status=None, exit_code=1, reason='exited')
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'lead-x', f'{self.key}/t1|finished'), ('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def test_b1_a_helper_under_a_live_plain_child_is_no_branch_end(self):
+        self.helper('t2', 'ci-wait', role=None)
+        self.helper('t3', 'h2', parent='t2')
+        self.sweep()
+        self.terminal('t3', state='finished', status=None, exit_code=None, reason='killed')
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h2', f'{self.key}/t3|finished')])
+
+    def test_b2_off_after_on_posts_no_helper_event_and_keeps_no_stall_clock(self):
+        self.helper()
+        self.sweep()
+        self.sweep()
+        state = self.sweep_state()
+        state['terminals']['t2']['stall']['since'] -= 31 * 60  # saved while on
+        (self.jd / 'sweep-state.json').write_text(json.dumps(state))
+        self.setting(False)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [], 'off: no helper event of any kind')
+        self.assertNotIn('stall', self.sweep_state()['terminals']['t2'])
+        self.setting(True)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [], 'on again: the unwatched time is no stall')
+        self.assertFalse(self.sweep_state()['terminals']['t2']['stall']['told'])
+
+    def test_b3_a_helper_that_failed_between_two_passes_is_dead_once_and_its_exit_0_is_not(self):
+        self.sweep()  # a pass with no helper yet
+        now = int(time.time() * 1000)
+        self.helper(state='finished', status=None, exit_code=1, reason='exited', finished_ms=now)
+        self.helper('t3', 'h2', state='finished', status=None, exit_code=None, reason='killed')
+        self.helper('t4', 'h3', state='finished', status=None, exit_code=0, reason='exited')
+        self.helper('t5', 'h4', state='finished', status=None, exit_code=1, reason='exited')
+        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'h4': {'name': 'h4', 'role': 'helper', 'state': 'closed'}}}))
+        self.sweep()
+        self.sweep()
+        dead = sorted((e['agent'], e['reason'], e.get('last_state'), e['event_id']) for e in self.queued())
+        self.assertEqual(dead, [('h1', 'exited', None, f'{self.key}/t2|finished'), ('h2', 'killed', None, f'{self.key}/t3|finished')])
+
+    def test_b3_one_that_failed_before_the_job_s_first_pass_is_dead(self):
+        self.helper(state='finished', status=None, exit_code=1, reason='exited', finished_ms=1)  # on from the start
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def test_b3_one_that_ended_while_alerts_were_off_is_not(self):
+        self.setting(False)
+        self.sweep()
+        self.helper(state='finished', status=None, exit_code=1, reason='exited', finished_ms=int(time.time() * 1000) - 1000)
+        self.setting(True)
+        self.helper('t3', 'h2', state='finished', status=None, exit_code=1, reason='exited', finished_ms=int(time.time() * 1000) + 1000)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h2', f'{self.key}/t3|finished')])
+
+    def test_r1_off_and_on_again_a_new_blocked_episode_is_news(self):
+        self.helper(status={'state': 'blocked', 'kind': 'permission', 'msg': 'first question'})
+        self.sweep()
+        self.setting(False)
+        self.sweep()
+        self.terminal('t2', status={'state': 'working'})
+        self.sweep()
+        self.setting(True)
+        self.sweep()
+        self.terminal('t2', status={'state': 'blocked', 'kind': 'permission', 'msg': 'second question'})
+        self.sweep()
+        self.sweep()
+        self.assertEqual([(e['msg'], e['event_id']) for e in self.queued()],
+                         [('first question', f'{self.key}/t2|blocked|1'), ('second question', f'{self.key}/t2|blocked|2')])
+
+    def test_r1_off_and_on_again_a_new_stall_is_news(self):
+        self.helper()
+        self.sweep()
+        self.stall()
+        self.sweep()
+        self.setting(False)
+        self.sweep()
+        self.setting(True)
+        self.sweep()
+        self.stall()
+        self.sweep()
+        self.assertEqual([e['event_id'] for e in self.queued()], [f'{self.key}/t2|stale|1', f'{self.key}/t2|stale|2'])
+
+    def stall(self):
+        state = self.sweep_state()
+        state['terminals']['t2']['stall']['since'] -= 31 * 60
+        (self.jd / 'sweep-state.json').write_text(json.dumps(state))
+
+    def test_r2_its_own_failure_is_dead_though_its_parent_then_exits_0(self):
+        self.helper()
+        self.sweep()
+        ended = int(time.time() * 1000)
+        self.terminal('t2', state='finished', status=None, exit_code=1, reason='exited', finished_ms=ended)
+        self.terminal('t1', state='finished', status=None, exit_code=0, reason='exited', finished_ms=ended + 100)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def test_r2_a_kill_before_its_parent_ended_is_no_branch_end(self):
+        self.helper()
+        self.sweep()
+        ended = int(time.time() * 1000)
+        self.terminal('t2', state='finished', status=None, reason='killed', finished_ms=ended)
+        self.terminal('t1', state='finished', status=None, exit_code=0, reason='exited', finished_ms=ended + 100)
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def test_r3_a_parent_lookup_that_fails_leaves_the_helper_pending(self):
+        self.helper('t2', 'plain-parent', role=None)
+        self.helper('t3', 'child', parent='t2')
+        self.sweep()
+        self.terminal('t3', state='finished', status=None, reason='killed')
+        self.shape(get_error={'t2': 'unavailable'})
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+        self.assertFalse(self.sweep_state()['terminals']['t3']['finished'], 'pending, not finished')
+        self.shape(get_error={})
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'child', f'{self.key}/t3|finished')])
+
+    def test_r4_rewriting_unchanged_settings_loses_no_failure(self):
+        self.sweep()
+        self.helper(state='finished', status=None, exit_code=1, reason='exited', finished_ms=int(time.time() * 1000))
+        time.sleep(0.03)
+        path = self.jd / 'settings.json'
+        path.write_text(json.dumps(json.loads(path.read_text()), indent=2))
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def test_a_plain_child_is_never_reported(self):
+        self.helper('t5', 'ci-wait', role=None, status={'state': 'blocked', 'kind': 'permission'})
+        self.sweep()
+        self.terminal('t5', state='finished', status=None, exit_code=1, reason='exited')
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+
+    def test_off_posts_exactly_what_it_posts_today(self):
+        for value in (False, None):
+            self.setUp()
+            if value is None:
+                (self.jd / 'settings.json').unlink()
+            else:
+                self.setting(value)
+            self.lead(status={'state': 'blocked', 'kind': 'permission'})
+            self.helper(status={'state': 'blocked', 'kind': 'permission'})
+            self.sweep()
+            self.terminal('t2', state='finished', status=None, exit_code=None, reason='killed')
+            self.sweep()
+            self.assertEqual(self.posted(), [('blocked', 'lead-x', f'{self.key}/t1|blocked|1')], value)
+            self.assertEqual(list(self.sweep_state()['terminals']), ['t1'], 'no helper tracked')
+            self.assertFalse([c for c in self.calls('ls') if 'stampede.role=helper' in c], 'no helper listing')
 
 
 class Watchdog(NativeCase):

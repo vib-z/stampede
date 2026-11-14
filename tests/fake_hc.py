@@ -62,7 +62,7 @@ PRIVATE = ('sent', 'keys', 'draft', 'person', 'leaves', 'leave_at')  # the fake'
 
 def end(state, t, reason):
     """A terminal's program ends, and with it each live child that dies with its parent, as Core ends a branch."""
-    t.update(state='finished', reason=reason, status=None, signal=1)
+    t.update(state='finished', reason=reason, status=None, signal=1, finished_ms=int(time.time() * 1000))
     for child in state['terminals'].values():
         if child.get('parent') == t['address'] and child['state'] == 'live' and child.get('die_with_parent'):
             end(state, child, reason)  # Core 0.1.21 says killed for the child too
