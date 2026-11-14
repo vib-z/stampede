@@ -225,7 +225,7 @@ hooks/        each agent's hook settings and wake state; deliver.log for a Codex
 inbox.log     REPORT, TURN, QUESTION, GONE and UNDELIVERED lines that wake the lead (not on Core)
 inbox/        messages to each agent, one file per agent (not on Core)
 questions/    a worker's questions, as files for the lead
-asks/         questions out to your phone, while they wait
+asks/         questions out to your phone, while they wait; on Core, a phone answer the lead could not take
 owner         the bot that started the job, when one did: its gates go back to it
 workspace     the Herdr workspace id, or a Herdr Core job's key hc-<12 hex>; while the job is open,
               ~/.config/herdr-events/jobs/<id> names this job

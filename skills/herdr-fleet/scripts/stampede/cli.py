@@ -633,7 +633,7 @@ def run(a):
     if a.cmd == '_wake':
         return tui_.deliver_soon(a.job) if job_.lead_kind(a.job) == 'codex' else 0
     if a.cmd == '_ask':
-        return owner_.ask_now(a.job, ' '.join(a.question), a.option, a.command, a.gate)
+        return owner_.ask_now(a.job, ' '.join(a.question), a.option, a.command, a.gate, a.ident)
     raw = a.payload if a.payload is not None else sys.stdin.read()
     payload = json.loads(raw) if raw.strip() else {}
     lead = a.agent == job_.roster(a.job)[1]

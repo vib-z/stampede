@@ -51,48 +51,105 @@ def tell(job, name, text):
         raise SystemExit(2)  # herdr-send printed its one FAILED line (focused, blocked or gone); never a traceback
 
 
-def notify_lead(job, text):
-    """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed."""
+def notify_lead(job, text, kept=None):
+    """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed. On a native
+    job Core types it: 0, or 2 when it was not typed (kept names the file that holds it, in the FAILED line)."""
     from . import native as native_
     if job_.backend(job) == 'native':
-        return native_.notify_lead(job, text)
+        return native_.notify_lead(job, text, kept)
     base_.append(Path(job) / 'inbox.log', text)
     if job_.lead_kind(job) == 'codex':
         tui_.deliver_soon(job)
 
 
-def ask_now(job, question, options, command=None, gate=None):
-    """Ask the owner and wait; the answer, or why it failed, goes to the lead's inbox.
+def ask_now(job, question, options, command=None, gate=None, ident=None):
+    """Ask the owner and wait; the answer, or why it failed, goes to the lead's inbox. On a native job Core types it in,
+    and a line hc send refuses (the lead is blocked or gone) stays in asks/<ident>.answer, mode 0600, and the ask fails.
     A gate always asks FLEET_ASK_CMD itself, with the question made from its own record, and its yes (exit 0, a yes or
     nothing on stdout) is recorded for gate-ok, only while the record is still the one asked about."""
+    if ident is not None and not base_.GATE.fullmatch(ident):
+        raise ValueError(f'--ident takes a question id as ask makes it (12 hex), not {base_.line(ident)!r}')
     asked = load_gate(job, gate) if gate else None
     if asked:
         if asked['route'] != 'local':
             raise PermissionError(f'gate {gate} goes to {asked["route"]}, not to the phone')
         question, options = gate_question(asked), []
-    argv = shlex.split(ask_command(job) if gate else command or ask_command(job))
-    for option in options:
-        argv += ['--option', option]
-    yes = False
+    pin = pin_asks(job) if job_.backend(job) == 'native' else None  # before the question: keeping never gets in the way
     try:
-        result = subprocess.run([*argv, '--', question], stdin=subprocess.DEVNULL, capture_output=True, text=True)
-        yes = result.returncode == 0 and result.stdout.strip().lower() in ('', 'yes')
-        if result.returncode == 0 and result.stdout.strip():
-            status, answer = 'ANSWER', base_.line(result.stdout)
-        elif result.returncode == 1:
-            status, answer = 'ANSWER', 'no (denied or cancelled)'
-        else:
-            status, answer = 'ASK FAILED', 'exit ' + str(result.returncode) + ': ' + base_.line(result.stderr or result.stdout)
-    except OSError as error:
-        status, answer = 'ASK FAILED', 'exit 127: ' + base_.line(error)
-    if gate and yes:
+        argv = shlex.split(ask_command(job) if gate else command or ask_command(job))
+        for option in options:
+            argv += ['--option', option]
+        yes = False
         try:
-            record_yes(job, gate, asked['sha'], 'owner, through ' + Path(argv[0]).name, asked)
-            return 0
-        except PermissionError as error:
-            status, answer = 'GATE NOT RECORDED', base_.line(error)
-    tell(job, 'lead', status + ' ' + base_.line(question) + ': ' + answer)
-    return 0 if status == 'ANSWER' else 1
+            result = subprocess.run([*argv, '--', question], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            yes = result.returncode == 0 and result.stdout.strip().lower() in ('', 'yes')
+            if result.returncode == 0 and result.stdout.strip():
+                status, answer = 'ANSWER', base_.line(result.stdout)
+            elif result.returncode == 1:
+                status, answer = 'ANSWER', 'no (denied or cancelled)'
+            else:
+                status, answer = 'ASK FAILED', 'exit ' + str(result.returncode) + ': ' + base_.line(result.stderr or result.stdout)
+        except OSError as error:
+            status, answer = 'ASK FAILED', 'exit 127: ' + base_.line(error)
+        if gate and yes:
+            try:
+                record_yes(job, gate, asked['sha'], 'owner, through ' + Path(argv[0]).name, asked)
+                return 0
+            except PermissionError as error:
+                status, answer = 'GATE NOT RECORDED', base_.line(error)
+        line = status + ' ' + base_.line(question) + ': ' + answer
+        if job_.backend(job) != 'native':
+            tell(job, 'lead', line)
+            return 0 if status == 'ANSWER' else 1
+        name = (ident or uuid.uuid4().hex[:12]) + '.answer'
+        kept = Path(job).absolute() / 'asks' / name if pin is not None and keep(pin, name, line + '\n') else None
+        if notify_lead(job, line, kept):  # kept first, so the answer outlives a send that fails or never returns
+            return 1
+        if kept:
+            with contextlib.suppress(OSError):
+                os.unlink(name, dir_fd=pin)
+        return 0 if status == 'ANSWER' else 1
+    finally:
+        if pin is not None:
+            os.close(pin)
+
+
+def pin_asks(job):
+    """<job>/asks, made 0700 when missing, as a descriptor: the job's own folder, made private (0700), or None when it is a
+    link, not a folder, or not ours. Every kept answer is written through it, so a swap while the owner thinks changes
+    nothing."""
+    path = Path(job).absolute() / 'asks'
+    with contextlib.suppress(OSError):
+        os.mkdir(path, 0o700)
+    try:
+        pin = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        os.fchmod(pin, 0o700)
+    except OSError:
+        os.close(pin)
+        return None
+    return pin
+
+
+def keep(pin, name, text):
+    """Write text whole and private as name in the pinned folder: a new 0600 file of its own, then os.replace onto name,
+    so a reader of the old file sees only the old text and a crash leaves one of the two whole. False when it could not."""
+    temporary = f'.{name}.{uuid.uuid4().hex}'
+    try:
+        fd, data = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=pin), text.encode()
+        try:  # the descriptor is ours from open to close, so nothing in between can lose it
+            while data:
+                data = data[os.write(fd, data):]
+        finally:
+            os.close(fd)
+        os.replace(temporary, name, src_dir_fd=pin, dst_dir_fd=pin)
+        return True
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary, dir_fd=pin)
+        return False
 
 
 def ask_background(job, question, options, command=None, gate=None):
@@ -102,6 +159,9 @@ def ask_background(job, question, options, command=None, gate=None):
     require_ask_command(command)
     folder = job / 'asks'
     folder.mkdir(parents=True, exist_ok=True)
+    pin = pin_asks(job)  # private through a descriptor; a link or a file is left as it is
+    if pin is not None:
+        os.close(pin)
     ident = uuid.uuid4().hex[:12]
     argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command,
             *(['--gate', gate] if gate else []), *['--option=' + option for option in options], '--', question]

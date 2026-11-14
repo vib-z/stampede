@@ -1,6 +1,6 @@
 """A Core-native job (stampede new --core, docs/CORE-NATIVE.md): the lead as a root, helpers as Core children, the cap
 and its queue, the tabs, the tree, tell, and the shared commands. Every Core call goes to tests/fake_hc.py through HC."""
-import json, os, shlex, subprocess, sys, unittest
+import contextlib, json, os, shlex, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -430,6 +430,134 @@ class Shared(NativeCase):
             self.quiet(owner_.ask_now, self.job, 'q', [], None, gate)
         self.assertIn('APPROVED', self.quiet(owner_.gate_ok, self.job, gate, SHA)[1])
 
+    def test_an_answer_the_lead_cannot_take_is_kept_private_and_the_ask_fails(self):
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        kept = self.job / 'asks' / 'a1b2c3d4e5f6.answer'
+        old = os.umask(0)  # private whatever the umask
+        try:
+            code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+        finally:
+            os.umask(old)
+        self.assertEqual(code, 1)
+        self.assertIn('ANSWER Which db?: postgres', kept.read_text())
+        self.assertEqual(kept.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(out.startswith(f'FAILED {LEAD} (hc send: t1 is blocked; the line is kept in {kept})'), out)
+        self.assertIn(f'read {self.job / "asks"}/*.answer', (self.job / 'briefs' / f'{LEAD}.md').read_text())
+        kept.chmod(0o644)  # a second try with the same id replaces the file and keeps it private
+        self.terminal('t1', state='finished', reason='killed', status=None)
+        self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Again?', [], 'echo yes', ident='a1b2c3d4e5f6')[0], 1)
+        self.assertIn('ANSWER Again?: yes', kept.read_text())
+        self.assertEqual(kept.stat().st_mode & 0o777, 0o600)
+        self.shape(send_error={})
+        self.terminal('t1', state='live', status={'state': 'idle'})
+        self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Last?', [], 'echo ok', ident='c1b2c3d4e5f6')[0], 0)
+        self.assertFalse((self.job / 'asks' / 'c1b2c3d4e5f6.answer').exists())
+        self.assertIn('ANSWER Last?: ok', self.state()['terminals']['t1']['sent'][-1])
+
+    def test_an_answer_stays_whole_private_and_under_asks(self):
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        before, asked = sorted(self.root.rglob('*')), self.root / 'asked'
+        for ident in ('../escaped', str(self.root / 'outside'), 'nested/a1b2c3d4e5f6'):
+            with self.subTest(ident=ident), self.assertRaises(ValueError):
+                owner_.ask_now(self.job, 'Which db?', [], f'touch {asked}', ident=ident)
+        self.assertEqual((sorted(self.root.rglob('*')), asked.exists()), (before, False))  # nothing asked, nothing written
+        folder = self.job / 'asks'
+        folder.mkdir(mode=0o777)
+        folder.chmod(0o777)
+        old = os.umask(0)
+        try:
+            self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+        finally:
+            os.umask(old)
+        kept = folder / 'a1b2c3d4e5f6.answer'
+        self.assertEqual((folder.stat().st_mode & 0o777, kept.stat().st_mode & 0o777), (0o700, 0o600))
+        kept.chmod(0o644)
+        inode, reader = kept.stat().st_ino, kept.open()
+        self.quiet(owner_.ask_now, self.job, 'Again?', [], 'echo mysql', ident='a1b2c3d4e5f6')
+        self.assertNotEqual(kept.stat().st_ino, inode)  # a new file put in place: the old one's reader sees only the old answer
+        self.assertIn('postgres', reader.read())
+        reader.close()
+        self.assertEqual((kept.stat().st_mode & 0o777, 'mysql' in kept.read_text()), (0o600, True))
+        with mock.patch.object(owner_.os, 'replace', side_effect=OSError('disk full')):  # keeping fails: sent as main does
+            code, out = self.quiet(owner_.ask_now, self.job, 'Third?', [], 'echo sqlite', ident='a1b2c3d4e5f6')
+        self.assertEqual((code, 'kept in' in out), (1, False))
+        self.assertIn('mysql', kept.read_text())  # the old answer whole, and no temporary file left
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ['a1b2c3d4e5f6.answer'])
+        folder.chmod(0o777)  # the background ask makes the folder private too
+        with mock.patch.object(owner_.subprocess, 'Popen', return_value=mock.Mock(pid=1)):
+            self.quiet(owner_.ask_background, self.job, 'Later?', [], 'echo')
+        self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+
+    def outside(self):
+        """A folder outside the job holding an answer of the id the tests use, mode 0755: (folder, its listing)."""
+        folder = self.root / 'elsewhere'
+        folder.mkdir(exist_ok=True)
+        (folder / 'a1b2c3d4e5f6.answer').write_text('not the job\'s\n')
+        folder.chmod(0o755)
+        return folder, lambda: (folder.stat().st_mode & 0o777, {f.name: (f.stat().st_ino, f.read_text()) for f in folder.iterdir()})
+
+    def test_an_asks_link_is_not_followed_and_the_answer_still_goes(self):
+        folder, listing = self.outside()
+        before = listing()
+        (self.job / 'asks').symlink_to(folder)
+        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+        self.assertEqual(code, 0, out)
+        self.assertIn('ANSWER Which db?: postgres', self.state()['terminals']['t1']['sent'][-1])
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        code, out = self.quiet(owner_.ask_now, self.job, 'Again?', [], 'echo mysql', ident='a1b2c3d4e5f6')
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith(f'FAILED {LEAD} (hc send: t1 is blocked)'), out)
+        self.assertEqual(listing(), before)  # nothing made, replaced or chmodded there
+
+    def test_an_asks_file_does_not_stop_the_answer(self):
+        (self.job / 'asks').write_text('a file\n')
+        asked = self.root / 'asked'
+        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], f'sh -c "touch {asked}; echo postgres"', ident='a1b2c3d4e5f6')
+        self.assertEqual((code, asked.exists()), (0, True), out)
+        self.assertIn('ANSWER Which db?: postgres', self.state()['terminals']['t1']['sent'][-1])
+        self.assertEqual((self.job / 'asks').read_text(), 'a file\n')
+
+    def test_a_folder_swapped_for_a_link_while_the_owner_thinks_changes_nothing(self):
+        folder, listing = self.outside()
+        before, real, pin = listing(), self.job / 'asks.real', owner_.pin_asks
+
+        def pinned_then_swapped(job):
+            fd = pin(job)
+            (self.job / 'asks').rename(real)
+            (self.job / 'asks').symlink_to(folder)
+            return fd
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        with mock.patch.object(owner_, 'pin_asks', pinned_then_swapped):
+            self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')[0], 1)
+        self.assertIn('ANSWER Which db?: postgres', (real / 'a1b2c3d4e5f6.answer').read_text())
+        self.assertEqual(listing(), before)
+
+    def test_keeping_leaves_no_descriptor_open(self):
+        def descriptors():
+            return len(os.listdir('/dev/fd'))
+        keep = owner_.keep
+
+        def failing(pin, name, text):  # writing fails inside keep only, after the temporary file is open (os.fdopen too, the
+            # review's case: whatever wraps the descriptor, nothing may lose it)
+            with mock.patch.object(owner_.os, 'write', side_effect=OSError('disk full')), \
+                    mock.patch.object(owner_.os, 'fdopen', side_effect=OSError('no wrapper')):
+                return keep(pin, name, text)
+        for blocked in (True, False):
+            self.shape(send_error={'t1': 'blocked'} if blocked else {})
+            self.terminal('t1', status={'state': 'blocked' if blocked else 'idle'})
+            for fails in (True, False):
+                with self.subTest(blocked=blocked, fails=fails):
+                    before = descriptors()
+                    with mock.patch.object(owner_, 'keep', failing if fails else keep):
+                        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+                    self.assertEqual((descriptors(), code), (before, 1 if blocked else 0), out)
+                    self.assertEqual('kept in' in out, blocked and not fails)
+                    self.assertFalse([f for f in (self.job / 'asks').iterdir() if f.name.startswith('.')])  # no temporary file
+
     def test_approve_gate_for_a_bot_and_post_and_finish(self):
         (self.job / 'owner').write_text('alpha\n')
         self.quiet(owner_.ask_gate, self.job, 'Merge PR #3', SHA, 3)
@@ -487,6 +615,7 @@ class FrontDoor(NativeCase):
                      'reaches no one from a Core terminal', 'Core types the answer into this terminal',
                      'posted to the chat with its approve line', 'Post your report first', 'gate-ok'):
             self.assertIn(said, brief)
+        self.assertNotIn('.answer', brief)  # a front door's answer comes by tell, which keeps nothing
         self.assertFalse({chr(0x2013), chr(0x2014)} & set(brief))
 
     def test_new_refuses_it_with_relay_and_for_a_bot(self):
@@ -862,6 +991,178 @@ class Reopen(NativeCase):
         self.assertIn('QUEUED', self.start('more')[1])
         (self.job / 'max-helpers').write_text('2\n')
         self.assertIn('STARTED more', self.quiet(native_.next_, self.job)[1])
+
+
+class ReopenedLead(NativeCase):
+    """A lost lead whose terminal Core kept: a shell with the lead's labels at its old address, which no command takes
+    for the lead after a reopen."""
+
+    def setUp(self):
+        super().setUp()
+        self.started()
+        self.terminal('t1', status=None, argv=['/bin/zsh'])
+        self.assertEqual(self.quiet(native_.reopen, self.job, False, False, False)[0], 0)
+
+    def test_every_command_follows_the_new_lead_and_kills_nothing(self):
+        key = job_.core_key(self.job)
+        self.assertEqual(native_.lead_of(key, native_.listing(self.job))['address'], 't2')
+        self.assertEqual(native_.caller_ids(self.job)['lead_pane'], f'hc:{key}/t2')
+        self.assertTrue(native_.lead_alive(self.job))
+        self.quiet(native_.snapshot, self.job)
+        self.assertEqual(json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD]['address'], 't2')
+        self.terminal('t2', status={'state': 'blocked', 'kind': 'permission'}, screen='Allow this command?\n')
+        self.assertEqual(native_.lead_blocked(self.job)[:2], ('permission', 't2'))
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertTrue(out.startswith(f'BLOCKED {LEAD}: permission. Core says it waits at a dialog in its terminal t2'), out)
+        self.terminal('t2', state='finished', reason='killed', status=None)
+        self.assertFalse(native_.lead_alive(self.job))
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertTrue(out.startswith(f'LEAD_GONE {LEAD}: Herdr Core holds no live lead'), out)
+        self.assertEqual(self.state()['terminals']['t1']['state'], 'live')
+        self.assertFalse(self.calls('kill') + self.calls('rm'))
+        self.quiet(native_.snapshot, self.job)  # the finished new lead is still the lead's node, never the shell
+        node = json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD]
+        self.assertEqual((node['address'], node['state']), ('t2', 'finished'))
+
+    def test_close_ends_the_new_lead_its_helpers_and_the_shell(self):
+        self.start('build-api')
+        code, out = self.quiet(native_.close, self.job)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(out.splitlines()), sorted([f'CLOSED {LEAD} (t1)', 'CLOSED build-api (t3)', f'CLOSED {LEAD} (t2)']))
+        self.assertEqual(self.state()['terminals'], {})
+
+
+class Selection(NativeCase):
+    """Two terminals carrying one agent's labels (tA, then tB), in every pair of forms: which is the agent (lead_of,
+    lead_alive, lead_blocked, caller_ids, the record's node; a shell never counts, the first live one wins) and what close
+    ends (as main does). In a helper row the lead is t1, live and idle, so only the node and close vary."""
+    FORMS = {'live': {'status': {'state': 'blocked', 'kind': 'permission'}}, 'finished': {'state': 'finished', 'status': None},
+             'shell': {'argv': ['/bin/zsh'], 'status': None, 'keep': False}, 'kept': {'argv': ['/bin/zsh'], 'status': None, 'keep': True},
+             'noargv': {'argv': [], 'status': {'state': 'blocked', 'kind': 'permission'}}, 'gone': None}
+    # (lead_of, lead_alive, lead_blocked, caller_ids' terminal, node, closed by close <job>, by close <job> <name>; ! refused)
+    TABLE = {
+        'lead live live': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead live finished': ('tA', True, 'tA', 'tA', 'tA live', 'tA', 'tA'),
+        'lead live shell': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead live kept': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead live noargv': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead live gone': ('tA', True, 'tA', 'tA', 'tA live', 'tA', 'tA'),
+        'lead finished live': ('tB', True, 'tB', 'tB', 'tB live', 'tB', 'tB'),
+        'lead finished finished': ('tB', False, None, None, 'tB finished', 'tB', 'tB'),
+        'lead finished shell': ('tA', False, None, None, 'tA finished', 'tB', 'tB'),
+        'lead finished kept': ('tA', False, None, None, 'tA finished', 'tB', 'tB'),
+        'lead finished noargv': ('tB', True, 'tB', 'tB', 'tB live', 'tB', 'tB'),
+        'lead finished gone': ('tA', False, None, None, 'tA finished', 'tA', 'tA'),
+        'lead shell live': ('tB', True, 'tB', 'tB', 'tB live', 'tA tB', 'tA tB'),
+        'lead shell finished': ('tB', False, None, None, 'tB finished', 'tA', 'tA'),
+        'lead shell shell': (None, False, None, None, 'gone', 'tA tB', 'tA tB'),
+        'lead shell kept': (None, False, None, None, 'gone', 'tA tB', 'tA tB'),
+        'lead shell noargv': ('tB', True, 'tB', 'tB', 'tB live', 'tA tB', 'tA tB'),
+        'lead shell gone': (None, False, None, None, 'gone', 'tA', 'tA'),
+        'lead kept live': ('tB', True, 'tB', 'tB', 'tB live', 'tA tB', 'tA tB'),
+        'lead kept finished': ('tB', False, None, None, 'tB finished', 'tA', 'tA'),
+        'lead kept shell': (None, False, None, None, 'gone', 'tA tB', 'tA tB'),
+        'lead kept kept': (None, False, None, None, 'gone', 'tA tB', 'tA tB'),
+        'lead kept noargv': ('tB', True, 'tB', 'tB', 'tB live', 'tA tB', 'tA tB'),
+        'lead kept gone': (None, False, None, None, 'gone', 'tA', 'tA'),
+        'lead noargv live': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead noargv finished': ('tA', True, 'tA', 'tA', 'tA live', 'tA', 'tA'),
+        'lead noargv shell': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead noargv kept': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead noargv noargv': ('tA', True, 'tA', 'tA', 'tA live', 'tA tB', 'tA tB'),
+        'lead noargv gone': ('tA', True, 'tA', 'tA', 'tA live', 'tA', 'tA'),
+        'lead gone live': ('tB', True, 'tB', 'tB', 'tB live', 'tB', 'tB'),
+        'lead gone finished': ('tB', False, None, None, 'tB finished', 'tB', 'tB'),
+        'lead gone shell': (None, False, None, None, 'gone', 'tB', 'tB'),
+        'lead gone kept': (None, False, None, None, 'gone', 'tB', 'tB'),
+        'lead gone noargv': ('tB', True, 'tB', 'tB', 'tB live', 'tB', 'tB'),
+        'lead gone gone': (None, False, None, None, 'gone', '!', '!'),
+        'helper live live': ('tA live', 't1 tA tB', 'tA'),
+        'helper live finished': ('tA live', 't1 tA tB', 'tA'),
+        'helper live shell': ('tA live', 't1 tA tB', 'tA'),
+        'helper live kept': ('tA live', 't1 tA tB', 'tA'),
+        'helper live noargv': ('tA live', 't1 tA tB', 'tA'),
+        'helper live gone': ('tA live', 't1 tA', 'tA'),
+        'helper finished live': ('tB live', 't1 tA tB', 'tB'),
+        'helper finished finished': ('tB finished', 't1 tA tB', 'tB'),
+        'helper finished shell': ('tA finished', 't1 tA tB', 'tB'),
+        'helper finished kept': ('tA finished', 't1 tA tB', 'tB'),
+        'helper finished noargv': ('tB live', 't1 tA tB', 'tB'),
+        'helper finished gone': ('tA finished', 't1 tA', 'tA'),
+        'helper shell live': ('tB live', 't1 tA tB', 'tA'),
+        'helper shell finished': ('tB finished', 't1 tA tB', 'tA'),
+        'helper shell shell': ('gone', 't1 tA tB', 'tA'),
+        'helper shell kept': ('gone', 't1 tA tB', 'tA'),
+        'helper shell noargv': ('tB live', 't1 tA tB', 'tA'),
+        'helper shell gone': ('gone', 't1 tA', 'tA'),
+        'helper kept live': ('tB live', 't1 tA tB', 'tA'),
+        'helper kept finished': ('tB finished', 't1 tA tB', 'tA'),
+        'helper kept shell': ('gone', 't1 tA tB', 'tA'),
+        'helper kept kept': ('gone', 't1 tA tB', 'tA'),
+        'helper kept noargv': ('tB live', 't1 tA tB', 'tA'),
+        'helper kept gone': ('gone', 't1 tA', 'tA'),
+        'helper noargv live': ('tA live', 't1 tA tB', 'tA'),
+        'helper noargv finished': ('tA live', 't1 tA tB', 'tA'),
+        'helper noargv shell': ('tA live', 't1 tA tB', 'tA'),
+        'helper noargv kept': ('tA live', 't1 tA tB', 'tA'),
+        'helper noargv noargv': ('tA live', 't1 tA tB', 'tA'),
+        'helper noargv gone': ('tA live', 't1 tA', 'tA'),
+        'helper gone live': ('tB live', 't1 tB', 'tB'),
+        'helper gone finished': ('tB finished', 't1 tB', 'tB'),
+        'helper gone shell': ('gone', 't1 tB', 'tB'),
+        'helper gone kept': ('gone', 't1 tB', 'tB'),
+        'helper gone noargv': ('tB live', 't1 tB', 'tB'),
+        'helper gone gone': ('gone', 't1', '!'),
+    }
+
+    def cells(self, who, a, b):
+        saved, record = self.state(), (self.job / 'tree.json').read_text()
+        state = json.loads(json.dumps(saved))
+        base = state['terminals']['t1' if who == 'lead' else 't2']
+        state['terminals'] = {k: v for k, v in state['terminals'].items() if who == 'helper' and k == 't1'}
+        for address, form in (('tA', self.FORMS[a]), ('tB', self.FORMS[b])):
+            if form is not None:
+                state['terminals'][address] = {**json.loads(json.dumps(base)), 'address': address, **form}
+        (self.core / 'state.json').write_text(json.dumps(state))
+        lead, blocked = native_.lead_of(job_.core_key(self.job), native_.listing(self.job)), native_.lead_blocked(self.job)
+        self.quiet(native_.snapshot, self.job)
+        node = json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD if who == 'lead' else 'build-api']
+        got = [lead and lead['address'], native_.lead_alive(self.job), blocked and blocked[1],
+               native_.caller_ids(self.job).get('lead_pane', '').split('/')[-1] or None,
+               node['state'] if node['state'] == 'gone' else f"{node['address']} {node['state']}"]
+        for name in (None, LEAD if who == 'lead' else 'build-api'):
+            (self.core / 'state.json').write_text(json.dumps(state))
+            try:
+                code, said = self.quiet(native_.close, self.job, name)
+                self.assertEqual(code, 0, said)
+                got.append(' '.join(sorted(line.split('(')[1].split(')')[0] for line in said.splitlines() if line.startswith('CLOSED'))))
+            except ValueError:
+                got.append('!')
+        (self.core / 'state.json').write_text(json.dumps(saved))
+        (self.job / 'tree.json').write_text(record)
+        with contextlib.suppress(FileNotFoundError):
+            (self.job / 'closed').unlink()
+        return tuple(got[4:] if who == 'helper' else got)
+
+    def test_every_pair_of_forms(self):
+        self.started()
+        for who in ('lead', 'helper'):
+            if who == 'helper':
+                self.start('build-api')
+            for a in self.FORMS:
+                for b in self.FORMS:
+                    with self.subTest(who=who, pair=(a, b)), mock.patch.object(native_, 'LEAVE_FOR', 0):
+                        self.assertEqual(self.cells(who, a, b), self.TABLE[f'{who} {a} {b}'])
+
+    def test_a_finished_helper_whose_shell_has_a_live_child_is_closed_with_it(self):
+        self.started()
+        self.start('build-api')                                                   # t2, then a shell in its place at t3
+        self.add_terminal('t3', **{k: v for k, v in self.state()['terminals']['t2'].items() if k not in ('address', 'sent')})
+        self.terminal('t2', state='finished', status=None)
+        self.terminal('t3', argv=['/bin/zsh'], status=None)
+        self.add_terminal('t4', name='still-running', parent='t3', argv=['make', 'test'])
+        code, out = self.quiet(native_.close, self.job, 'build-api')
+        self.assertEqual((code, out.splitlines()), (0, ['CLOSED still-running (t4)', 'CLOSED build-api (t3)']))
 
 
 class NoWorkByItself(NativeCase):

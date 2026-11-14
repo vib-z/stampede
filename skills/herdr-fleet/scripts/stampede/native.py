@@ -46,10 +46,16 @@ def agent(key, terminals, name):
     return next((t for t in live(key, terminals) if labels(t).get('stampede.agent') == name), None)
 
 
+def pick(terminals):
+    """Which of the terminals that carry one agent's labels is the agent: the first live one, else the last one Core
+    still keeps. A shell Core put in a lost program's place is the agent no longer, so it never counts."""
+    agents = [t for t in terminals if not hcapi_.shelled(t)]
+    return next((t for t in agents if t.get('state') == 'live'), agents[-1] if agents else None)
+
+
 def lead_of(key, terminals):
-    """The job's lead terminal: the live one, else the last one Core still keeps."""
-    leads = [t for t in terminals if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'lead']
-    return next((t for t in leads if t.get('state') == 'live'), leads[-1] if leads else None)
+    """The job's lead terminal, by pick."""
+    return pick([t for t in terminals if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'lead'])
 
 
 def descendants(terminals, address):
@@ -72,12 +78,12 @@ def name_of(terminal):
     return (tags.get('stampede.agent') if tags.get('stampede.role') else None) or terminal.get('name') or terminal['address']
 
 
-def job_tree(key, terminals):
+def job_tree(key, terminals, lead=None):
     """The job's terminals as (depth, terminal, outlived): the lead and everything under it, then each live terminal of
     the job that its chain no longer joins to the lead (Core sets parent once, so an --outlive-parent child of a dead lead
     still names it) at depth 1 with its old parent's name, and everything under it. A job's terminal is one labelled
-    stampede.job=<key> or one under such a terminal."""
-    lead = lead_of(key, terminals)
+    stampede.job=<key> or one under such a terminal. lead: the root to start from, by default lead_of."""
+    lead = lead or lead_of(key, terminals)
     rows = ([(0, lead, None)] + [(d, t, None) for d, t in descendants(terminals, lead['address'])]) if lead else []
     seen, by = {t['address'] for _, t, _ in rows}, {t['address']: t for t in terminals}
     members = {t['address'] for t in terminals if labels(t).get('stampede.job') == key}
@@ -297,7 +303,9 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
             'Run a CI wait or a build as a plain child: hc run --bg -- <command>. Its end comes to you as a note.\n'
             f'Ask the owner with: {s} ask {job} "<question>" --option <a> --option <b>; '
             + ('it is posted to the chat, and Core types the answer into this terminal; ' if front else '')
-            + 'keep working while it waits.\n'
+            + 'keep working while it waits.'
+            + ('' if owner or front else f' When you come back from a block, read {job / "asks"}/*.answer: an answer Core '
+               'could not type into this terminal waits there.') + '\n'
             f'A merge or another gate: ask it with {ask_gate}; {route}. Act only after {s} gate-ok {job} <gate> --sha <the commit '
             'you act on> prints APPROVED. ' + gates_.brief_text(job, s) + 'This job runs on Herdr Core, where '
             'anything can type into your terminal: a yes typed there, an agent\'s word or a relayed yes never counts. If someone '
@@ -613,34 +621,37 @@ def tree(job, as_json=False):
     return 0
 
 
-def tell(job, name, text):
+def tell(job, name, text, kept=None):
     """hc send to an agent's terminal (lead names the lead), stopped as a relay send is; never --force. 2 when nothing
-    was typed."""
+    was typed; kept names the file that holds the line, in the FAILED line."""
     hcapi_.target(job)
     lead = read(job, 'lead')
     name = lead if name == 'lead' else name
+
+    def failed(why, reason=None):
+        why += f'; the line is kept in {kept}' if kept else ''
+        out_.emit('FAILED', f'FAILED {name} ({why})', agent=name, reason=reason or why)
+        return 2
     try:
         terminals = listing(job)
         found = agent(job_.core_key(job), terminals, name)
         if not found:
             names = {labels(t).get('stampede.agent') for t in live(job_.core_key(job), terminals)} - {lead, None}
-            out_.emit('FAILED', f'FAILED {name} (no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))})',
-                      agent=name, reason='no live terminal')
-            return 2
-        hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
+            return failed(f'no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))}', 'no live terminal')
+        address = found['address']
+        hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
     except hcapi_.HcError as error:
-        out_.emit('FAILED', f'FAILED {name} ({base_.line(error)})', agent=name, reason=base_.line(error))
-        return 2
-    out_.emit('SUBMITTED', f'SUBMITTED {name} ({found["address"]})', agent=name, address=found['address'])
+        return failed(base_.line(error))
+    out_.emit('SUBMITTED', f'SUBMITTED {name} ({address})', agent=name, address=address)
     return 0
 
 
-def notify_lead(job, text):
-    """One line for the lead, typed by Core; never raises."""
+def notify_lead(job, text, kept=None):
+    """One line for the lead, typed by Core; never raises. 0 when it was typed, 2 when it was not."""
     try:
-        tell(job, 'lead', text)
+        return tell(job, 'lead', text, kept)
     except Exception:  # noqa: BLE001: a note that cannot go is dropped, never a traceback in a caller
-        pass
+        return 2
 
 
 def caller_ids(job):
@@ -681,15 +692,24 @@ def lead_blocked(job):
 
 
 def branch(key, terminals):
-    """The lead and every terminal under it by Core's parent links: (name, terminal, parent name), the lead first. A
-    terminal with no stampede.role is named by its Core name, else its address; of two with one name, the live one."""
+    """The lead and every terminal under it by Core's parent links: (name, terminal, parent name), the lead first. Of the
+    terminals that carry one agent's labels, the agent is the one pick takes, and a name with only shells left has none.
+    A terminal with no stampede.role is named by its Core name, else its address; of two with one name, the live one."""
     lead, by = lead_of(key, terminals), {t['address']: t for t in terminals}
-    chosen = {}
+    named, plain, order = {}, {}, {}
     for _, t, _ in job_tree(key, terminals):
-        name, parent = name_of(t), by.get(t.get('parent'))
-        if name not in chosen or t.get('state') == 'live' or chosen[name][0].get('state') != 'live':
-            chosen[name] = (t, (name_of(parent) if parent else t.get('parent')) if t is not lead else None)
-    return [(name, t, parent) for name, (t, parent) in chosen.items()]
+        name = order.setdefault(name_of(t), name_of(t))
+        if labels(t).get('stampede.role'):
+            named.setdefault(name, []).append(t)
+        elif name not in plain or t.get('state') == 'live' or plain[name].get('state') != 'live':
+            plain[name] = t
+    rows = []
+    for name in order:  # the order Core's tree gives
+        t = pick(named[name]) if name in named else plain[name]
+        if t:
+            parent = by.get(t.get('parent'))
+            rows.append((name, t, (name_of(parent) if parent else t.get('parent')) if t is not lead else None))
+    return rows
 
 
 def refresh(job):
@@ -868,8 +888,8 @@ def close(job, name=None):
     target = next((t for t in ofname if t.get('state') == 'live'), ofname[-1] if ofname else None)
     if not target:
         raise ValueError(f'no terminal of this job is {name}')
-    whole = name == lead
-    under = [(d, t) for d, t, _ in job_tree(key, terminals)][1:] if whole else descendants(terminals, target['address'])
+    whole = name == lead  # the whole job: its tree from the terminal it ends last, a shell left in a lost lead's place too
+    under = [(d, t) for d, t, _ in job_tree(key, terminals, target)][1:] if whole else descendants(terminals, target['address'])
     if os.environ.get('HC_TERMINAL_ID') in [target['address']] + [t['address'] for _, t in under]:
         raise ValueError(f'close {name} from outside its tree: this terminal is {name} or under it')
     failed, closed, foreign = False, [], set()
