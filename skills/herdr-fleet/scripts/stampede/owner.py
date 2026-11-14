@@ -3,7 +3,7 @@ import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, subprocess, 
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, herdrapi as herdrapi_, tui as tui_, settings as settings_
+from . import base as base_, job as job_, herdrapi as herdrapi_, tui as tui_, settings as settings_, out as out_
 
 ASK_CMD = None  # a test's stand-in for the setting ask.command
 
@@ -25,17 +25,19 @@ def tell(job, name, text):
         if people[name] != 'claude':  # a Codex lead has no file hook: the line is typed into its pane once it is idle
             tui_.deliver_soon(job)
             where = 'terminal' if job_.backend(job) == 'core' else 'pane'
-            return print(f'DELIVERED {name} (inbox file; typed into its {where} once it is idle)')
+            return out_.emit('DELIVERED', f'DELIVERED {name} (inbox file; typed into its {where} once it is idle)', agent=name)
         # a pending card holds the turn: the inbox is read only once the card is answered (a Core agent has no pane to read)
         if job_.backend(job) != 'core' and agent_card(name):
-            print(f'BLOCKED_ON_CARD {name}: queued in its inbox, but it waits at a question card and reads nothing until '
-                  f'that is answered; read it with: herdr agent read {name} --source visible --lines 40')
+            out_.emit('BLOCKED_ON_CARD', f'BLOCKED_ON_CARD {name}: queued in its inbox, but it waits at a question card and reads '
+                      f'nothing until that is answered; read it with: herdr agent read {name} --source visible --lines 40', agent=name)
             return 3
-        return print('DELIVERED ' + name + ' (inbox file)')
+        return out_.emit('DELIVERED', 'DELIVERED ' + name + ' (inbox file)', agent=name)
     if job_.backend(job) == 'core':
         return (handed_.tell_handed if job_.core_entries(job).get(name, {}).get('backend') == 'tui' else relay_.tell_core)(job, name, text)
-    if subprocess.run([str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'), name, text],
-                      env={**os.environ, 'FLEET_JOB_DIR': str(Path(job).absolute())}).returncode:
+    sent = subprocess.run([str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'), name, text], stdout=subprocess.PIPE,
+                          text=True, env={**os.environ, 'FLEET_JOB_DIR': str(Path(job).absolute())})
+    out_.said(sent.stdout, end='')
+    if sent.returncode:
         raise SystemExit(2)  # herdr-send printed its one FAILED line (focused, blocked or gone); never a traceback
 
 
@@ -96,7 +98,7 @@ def ask_background(job, question, options, command=None, gate=None):
     (folder / (ident + '.pid')).write_text(str(process.pid) + '\n')
     (folder / (ident + '.txt')).write_text(base_.line(question) + '\n')
     where = 'Core types the answer into the lead\'s terminal' if job_.backend(job) == 'native' else 'the answer goes to the lead inbox'
-    print('ASKED ' + ident + ' (' + where + '; cancel with: fleet-job cancel ' + str(job) + ' ' + ident + ')')
+    out_.emit('ASKED', 'ASKED ' + ident + ' (' + where + '; cancel with: fleet-job cancel ' + str(job) + ' ' + ident + ')', id=ident)
     return ident
 
 
@@ -122,9 +124,9 @@ def cancel(job, ident):
             os.killpg(int(text), signal.SIGTERM)
         except ProcessLookupError:
             pass
-        print('CANCELLED ' + ident)
+        out_.emit('CANCELLED', 'CANCELLED ' + ident, id=ident)
     else:
-        print('CANCELLED ' + ident + ' (its waiter had already gone)')
+        out_.emit('CANCELLED', 'CANCELLED ' + ident + ' (its waiter had already gone)', id=ident)
     path.unlink()
 
 
@@ -159,15 +161,16 @@ def post(job, text, files=()):
     n = outbox_post(job, 'post', text, files)
     item = Path(job).absolute() / 'outbox' / (n + '.md')
     if not owner and job_.front_door(job):
-        return print(f'POSTED {n} for the front door to relay ({item})')
+        return out_.emit('POSTED', f'POSTED {n} for the front door to relay ({item})', outbox=n, path=str(item), to='front door')
     if not owner:  # a local job: the outbox is the only copy, and nothing reads it
-        return print(f'POSTED {n} to the outbox only ({item}): no bot or front door hears it. To have the owner told, a job a '
-                     'bot starts sets HERDR_EVENTS_OWNER=<bot> at new, and a chat outside Herdr starts it with --front-door')
+        return out_.emit('POSTED', f'POSTED {n} to the outbox only ({item}): no bot or front door hears it. To have the owner told, a '
+                         'job a bot starts sets HERDR_EVENTS_OWNER=<bot> at new, and a chat outside Herdr starts it with --front-door',
+                         outbox=n, path=str(item), to=None)
     copies = [str(item.parent / n / Path(f).name) for f in files]
     post_event(job, owner, {'state': 'post', 'text': str(text).strip(), 'outbox': n, 'item': str(item), 'files': copies},
                refused=lambda why: f'outbox {n} is written but {owner} never heard it: the relay refused it ({why}). '
                                    'Fix the route (herdr-doctor --relay), then post again')
-    print(f'POSTED {n} to {owner} (and {item})')
+    out_.emit('POSTED', f'POSTED {n} to {owner} (and {item})', outbox=n, path=str(item), to=owner)
 
 
 def lead_card(job):
@@ -212,30 +215,37 @@ def wait(job, timeout=None, every=5):
         rows = [r for r in (log.read_text().splitlines() if log.is_file() else []) if r[:3].isdigit() and int(r[:3]) > seen]
         if rows:
             for row in rows:
-                print((job / 'outbox' / (row[:3] + '.md')).read_text().rstrip() + '\n')
+                item = job / 'outbox' / (row[:3] + '.md')
+                out_.emit('ITEM', item.read_text().rstrip() + '\n', outbox=row[:3], path=str(item), kind=row[4:].split(' ')[0],
+                          text=item.read_text().rstrip())
             seen_path.write_text(rows[-1][:3] + '\n')
             return 0
         if checks % 6 == 0:
             if not lead_alive(job):
-                print(f'LEAD_GONE {job_.roster(job)[1]}: ' + (
+                out_.emit('LEAD_GONE', f'LEAD_GONE {job_.roster(job)[1]}: ' + (
                     f'Herdr Core holds no live lead of this job (crash, close or restart). Look with stampede tree {job}, '
                     f'then reopen it (stampede reopen {job}) or tell the owner.' if native else
                     'its agent no longer exists in Herdr (crash, closed pane or restart). Look at the workspace, then restart '
-                    'it or tell the owner.'))
+                    'it or tell the owner.'), lead=job_.roster(job)[1])
                 return 0
             blocked = native_.lead_blocked(job) if native else None
             if blocked:
                 kind, address, screen = blocked
-                print(f'BLOCKED {job_.roster(job)[1]}: {kind}. Core says it waits at a dialog in its terminal {address} '
-                      f'(hc read {address}). Its screen:\n' + '\n'.join(r for r in screen.splitlines() if r.strip())[-1500:])
+                shown = '\n'.join(r for r in screen.splitlines() if r.strip())[-1500:]
+                out_.emit('BLOCKED', f'BLOCKED {job_.roster(job)[1]}: {kind}. Core says it waits at a dialog in its terminal {address} '
+                          f'(hc read {address}). Its screen:\n' + shown,
+                          lead=job_.roster(job)[1], reason=kind, address=address, screen=shown)
                 return 0
             card = '' if native else lead_card(job)
             if card:
-                print(f'BLOCKED_ON_CARD {job_.roster(job)[1]}: it is waiting at a question card in its pane. Its screen:\n'
-                      + '\n'.join(r for r in card.splitlines() if r.strip())[-1500:])
+                shown = '\n'.join(r for r in card.splitlines() if r.strip())[-1500:]
+                out_.emit('BLOCKED_ON_CARD', f'BLOCKED_ON_CARD {job_.roster(job)[1]}: it is waiting at a question card in its pane. Its '
+                          'screen:\n' + shown, lead=job_.roster(job)[1], screen=shown)
                 return 0
         if time.monotonic() > deadline:
-            print(f'TIMEOUT nothing new in {job / "outbox"} after {timeout}s; run fleet-job wait again')
+            out_.emit('TIMEOUT', f'TIMEOUT nothing new in {job / "outbox"} after {timeout}s; run fleet-job wait again',
+                      path=str(job / 'outbox'),
+                      retry=f'fleet-job wait {job}')
             return 3
         checks += 1
         time.sleep(every)
@@ -280,13 +290,13 @@ def finish(job, summary):
         try:
             cancel(job, waiter.stem)
         except (ValueError, OSError) as error:  # one bad record never keeps the next waiter alive
-            print('NOT CANCELLED ' + waiter.stem + ': ' + base_.line(error))
+            out_.emit('NOT CANCELLED', 'NOT CANCELLED ' + waiter.stem + ': ' + base_.line(error), id=waiter.stem, reason=base_.line(error))
     if (job / 'workspace').is_file():
         job_.clear_job_marker((job / 'workspace').read_text().strip(), job)
     handed_.unmark_handed(job)
     if gone:
         print('gates off: ' + ', '.join(gone))
-    print('FINISHED ' + str(job))
+    out_.emit('FINISHED', 'FINISHED ' + str(job), gates_off=gone)
     if job_.backend(job) == 'native':
         with contextlib.suppress(Exception):  # the record is a copy: a refresh that fails never fails finish
             native_.refresh(job)
@@ -319,7 +329,7 @@ def ask(job, question, options):
                         answer=shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead',
                                            f'ANSWER {ident} {base_.line(question)}: <their words>']))
         where = 'Core types the answer into your terminal' if job_.backend(job) == 'native' else 'it comes to your inbox'
-        print(f'ASKED {ident} posted to the front door as outbox {n}; the owner answers there and {where}')
+        out_.emit('ASKED', f'ASKED {ident} posted to the front door as outbox {n}; the owner answers there and {where}', id=ident, outbox=n)
         return ident
     if not owner:
         return ask_background(job, question, options)
@@ -328,7 +338,7 @@ def ask(job, question, options):
                             'answer': shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead',
                                                   f"ANSWER {ident} {base_.line(question)}: <the owner's words>"])})
     where = 'Core types the answer into your terminal' if job_.backend(job) == 'native' else 'the answer comes to your inbox'
-    print(f'ASKED {ident} sent to {owner}, which asks the owner in chat; {where}')
+    out_.emit('ASKED', f'ASKED {ident} sent to {owner}, which asks the owner in chat; {where}', id=ident, to=owner)
     return ident
 
 
@@ -356,10 +366,11 @@ def ask_gate(job, action, sha, pr=None, kind=None):
                         answer=shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--digest', gate_digest(gate)])
                         + ' --by "owner in <chat>: <their exact words>"   (a no: '
                         + shlex.join(['fleet-job', 'tell', str(job), 'lead', f'GATE {ident} NO: <their words>']) + ')')
-        return print(f'GATE {ident} posted to the front door as outbox {n}; act after {check} prints APPROVED{typed}')
+        return out_.emit('GATE', f'GATE {ident} posted to the front door as outbox {n}; act after {check} prints APPROVED{typed}', id=ident,
+                         sha=sha, pr=pr, kind=kind, outbox=n)
     if not owner:
         ask_background(job, gate_question(gate), [], gate=ident)
-        return print(f'GATE {ident} on the phone; act after {check} prints APPROVED{typed}')
+        return out_.emit('GATE', f'GATE {ident} on the phone; act after {check} prints APPROVED{typed}', id=ident, sha=sha, pr=pr, kind=kind)
     try:
         post_event(job, owner, {'state': 'gate', **gate, 'options': ['yes', 'no'],
                                 'approve': shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--digest',
@@ -368,7 +379,8 @@ def ask_gate(job, action, sha, pr=None, kind=None):
     except ValueError:
         (job / 'gates' / (ident + '.json')).unlink()  # a gate its bot never hears is no gate
         raise
-    print(f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED{typed}')
+    out_.emit('GATE', f'GATE {ident} queued for {owner}, which asks the owner in chat; act after {check} prints APPROVED{typed}', id=ident,
+              sha=sha, pr=pr, kind=kind, to=owner)
 
 
 def gate_digest(gate):
@@ -431,7 +443,7 @@ def approve_gate(job, ident, sha, by, digest=None):
         raise PermissionError(f'approve-gate needs --digest, the gate {ident} as it was asked: run the approve command the gate '
                               'event or the front-door post gave you, as written')
     record_yes(job, ident, sha, by, digest)
-    print(f'APPROVED {ident} at {sha}')
+    out_.emit('APPROVED', f'APPROVED {ident} at {sha}', id=ident, sha=sha)
 
 
 def gate_ok(job, ident, sha):
@@ -452,7 +464,8 @@ def gate_ok(job, ident, sha):
     if record.get('digest') != gate_digest(gate):
         raise PermissionError(f'gate {ident} changed after the yes (its action, PR or route), or the yes predates that check: '
                               'the yes covers only what was asked; ask again')
-    print(f'APPROVED {ident} by {record["by"]} at {record["at"]}: {gate["action"]} at {sha}')
+    out_.emit('APPROVED', f'APPROVED {ident} by {record["by"]} at {record["at"]}: {gate["action"]} at {sha}', id=ident, sha=sha,
+              by=record['by'], at=record['at'], action=gate['action'], kind=gate.get('kind'))
 
 
 def plan_digest(job):

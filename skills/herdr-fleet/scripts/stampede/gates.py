@@ -6,7 +6,7 @@ import contextlib, io, json, os, re, shlex, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import base as base_, job as job_, owner as owner_, settings as settings_
+from . import base as base_, job as job_, owner as owner_, settings as settings_, out as out_
 
 REFUSED = 9  # stampede prepush's refusal: the one exit code that stops a push; anything else lets it through
 HOOK_MARK = '# stampede-hook'
@@ -251,7 +251,8 @@ def merge(job, pr, sha, review, gate=None):
         commit = ''
     with contextlib.suppress(OSError):
         base_.append(job / 'merges.log', f'{stamp()} MERGED {pr} {sha} {commit or "(merge commit not read)"} {how}')
-    print(f'MERGED {pr} {commit}'.rstrip())
+    out_.emit('MERGED', f'MERGED {pr} {commit}'.rstrip(),
+              pr=pr, sha=sha, merge_commit=commit or None, method=method, gate=gate if on else None)
     return {'pr': pr, 'sha': sha, 'merge_commit': commit or None, 'method': method, 'review': str(review),
             'gate': gate if on else None}
 

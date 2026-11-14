@@ -4,7 +4,7 @@ import json, os, shlex, subprocess, sys
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
-    doctor as doctor_, check as check_, settings as settings_, gates as gates_
+    doctor as doctor_, check as check_, settings as settings_, gates as gates_, out as out_
 
 
 def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
@@ -64,7 +64,8 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     snapshot = str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot')
     subprocess.run([snapshot, 'record', str(job), agent, kind, str(brief), '--', *args], check=True)
     if blocked:
-        print(f'BLOCKED {agent}: clear the startup dialog, then stampede tell {job} {agent} "Read {brief}"')
+        out_.emit('BLOCKED', f'BLOCKED {agent}: clear the startup dialog, then stampede tell {job} {agent} "Read {brief}"',
+                  agent=agent, pane=pane, retry=f'stampede tell {job} {agent} "Read {brief}"')
         return
     pointer = f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
     if lead and kind == 'codex':
@@ -159,13 +160,14 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
                     kind, str(brief), '--', *args], check=True)
     job_.mark_job(ws_id, job)
     if blocked:
-        return print(f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"')
+        return out_.emit('BLOCKED', f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"',
+                         agent=lead, lead=lead, job=str(job.absolute()), retry=f'stampede tell {job} lead "Read {brief}"')
     pointer = f'You are {lead}. Read {brief} and do everything it says.'
     if kind == 'codex' and tui_.type_pointer(job, lead, 'lead', brief, pointer):
         return 1
     if kind == 'claude':
         owner_.tell(job, lead, pointer)
-    print(lead + ' ' + str(job))
+    out_.emit('STARTED', lead + ' ' + str(job), agent=lead, lead=lead, job=str(job.absolute()))
 
 
 GROUPS = (  # the top-level help, in the order an agent meets the commands; hook and the _ commands stay out of it
@@ -256,13 +258,40 @@ def repo_of(cwd=None):
     return Path(top.stdout.strip()) if top.returncode == 0 else None
 
 
+JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapshot', 'reopen', 'close', 'approve', 'approve-gate',
+        'gate-ok', 'cancel', 'merge')  # the commands --json turns into one object (out.py); tree, doctor, check, config print their own
+
+
+def subcommand(argv):
+    """(index, name) of the subcommand: the first word after any --json. Any other flag before it, -h and --help
+    included, means none: argparse then gives the top-level help or its refusal, and nothing is dispatched."""
+    for i, word in enumerate(argv):
+        if word != '--json':
+            return (None, None) if word.startswith('-') else (i, word)
+    return None, None
+
+
 def main(argv):
+    """argparse owns --json; whether to wrap the whole call in one object, its own usage error included, is decided
+    before it parses: --json as a word before any -- (out.asks), on a command in JSON."""
+    name = subcommand(argv)[1]
+    if out_.asks(argv) and (name is None or name in JSON):
+        return out_.as_json(name, lambda: parse_and_run(argv))
+    return parse_and_run(argv)
+
+
+def parse_and_run(argv):
     import argparse
     form = argparse.RawDescriptionHelpFormatter
     parser = argparse.ArgumentParser(prog='stampede', usage='stampede <command> [<args>]', description=TOP, epilog=TOP_EPILOG,
                                      formatter_class=form)
     sub = parser.add_subparsers(dest='cmd', metavar='<command>', help=argparse.SUPPRESS)
     sub.required = True
+
+    def json_flag(p, text='print one JSON object instead of the lines (docs/CLI-JSON.md)'):
+        """--json, before or after the command: one dest, and a subcommand's own default never undoes the top level's."""
+        p.add_argument('--json', action='store_true', default=argparse.SUPPRESS, help=text)
+    parser.add_argument('--json', action='store_true', help='with a command: print one JSON object (docs/CLI-JSON.md)')
 
     def command(name, description=None):
         return sub.add_parser(name, description=description or SUMMARY[name][0].upper() + SUMMARY[name][1:] + '.',
@@ -342,7 +371,7 @@ def main(argv):
     p.add_argument('--timeout', type=int, help='seconds (default: the setting timeouts.wait, 3600); exit 3 when nothing came')
     for verb in ('next', 'snapshot'):
         command(verb).add_argument('job', help=JOB)
-    p = command('tree'); p.add_argument('job', help=JOB); p.add_argument('--json', action='store_true', help='one JSON document')
+    p = command('tree'); p.add_argument('job', help=JOB); json_flag(p, 'one JSON document')
     p = command('reopen', 'A native job: start what is not live, parents first. A finished job reopens for reading only.')
     p.add_argument('job', help=JOB)
     p.add_argument('--fresh', action='store_true', help='every Claude agent starts a new session with its brief')
@@ -376,11 +405,11 @@ def main(argv):
                           'Exit 1 when any line is a PROBLEM.')
     p.add_argument('--core', action='store_true', help='check Herdr Core only (passed to herdr-doctor)')
     p.add_argument('--tui', action='store_true', help='check the Herdr TUI only (passed to herdr-doctor)')
-    p.add_argument('--json', action='store_true', help='{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}')
+    json_flag(p, '{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}')
     p = command('check', 'Run the fast part of this checkout\'s unit tests (under 15 seconds) in a scratch HOME, with no herdr or hc\n'
                          'on PATH, so nothing reaches a live job. One line per test module, then the total. Exit 0 or 1.')
     p.add_argument('--full', action='store_true', help='run the whole suite (minutes)')
-    p.add_argument('--json', action='store_true', help='{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
+    json_flag(p, '{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
     p = command('config', 'The settings: config show prints every setting as key = value (source), the source being the layer\n'
                           'that set it (default, user, repo, env:<NAME>, flag or set), then the environment-only variables,\n'
                           'then any problems. Exit 1 when the config has problems.')
@@ -388,7 +417,7 @@ def main(argv):
     p.required = True
     p = p.add_parser('show', description='Every setting and the layer that set it; exit 1 when the config has problems.',
                      epilog=EXAMPLES['config'], formatter_class=form)
-    p.add_argument('--json', action='store_true', help='{"values", "sources", "files", "environment", "problems"}')
+    json_flag(p, '{"values", "sources", "files", "environment", "problems"}')
     p.add_argument('--job', help='a job folder: the settings it saved at new (else the repo is the git root here)')
     p = sub.add_parser('prepush'); p.add_argument('remote'); p.add_argument('url', nargs='?')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
@@ -397,6 +426,8 @@ def main(argv):
     p.add_argument('--lead', action='store_true', help='only the follower and the lead')
     p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
     p.add_argument('--fresh', action='store_true', help='each agent it starts begins a new session with its brief')
+    for name in JSON:
+        json_flag(sub.choices[name])
     sub.add_parser('_deliver').add_argument('job')
     sub.add_parser('_wake').add_argument('job')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
@@ -406,13 +437,14 @@ def main(argv):
     if not argv:
         parser.print_help(sys.stderr)
         return 2
-    if argv[0] == 'update':  # scripts/stampede runs it first; this is the same command under fleet-job's own entry
-        return subprocess.run([sys.executable, '-I', str(base_.SCRIPTS.parents[2] / 'scripts/stampede_update.py'), *argv[1:]]).returncode
-    if not argv[0].startswith('-') and argv[0] not in sub.choices:  # argparse would list hook and the _ commands too
-        parser.error(f'{argv[0]!r} is no stampede command: stampede --help lists them')
+    at, name = subcommand(argv)
+    if name == 'update':  # scripts/stampede runs it first; this is the same command under fleet-job's own entry
+        return subprocess.run([sys.executable, '-I', str(base_.SCRIPTS.parents[2] / 'scripts/stampede_update.py'), *argv[at + 1:]]).returncode
+    if name is not None and name not in sub.choices:  # argparse would list hook and the _ commands too
+        parser.error(f'{name!r} is no stampede command: stampede --help lists them')
     program = []
-    if argv[:1] == ['start'] and '--' in argv:  # a native job: a program after --; cut here, since argparse before 3.13
-        cut = argv.index('--')                    # loses it when a flag stands between the name and the --
+    if name == 'start' and '--' in argv[at + 1:]:  # a native job: a program after --; cut here, since argparse before 3.13
+        cut = argv.index('--', at + 1)             # loses it when a flag stands between the name and the --
         argv, program = argv[:cut], argv[cut + 1:]
     a = parser.parse_args(argv)
     a.program = program
@@ -424,8 +456,10 @@ def main(argv):
         elif a.cmd != 'hook' and getattr(a, 'job', None) is not None:
             require_job(a.job)
     except ValueError as error:
-        print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        out_.refuse('stampede ' + a.cmd + ': ' + base_.line(error))
         return 2
+    if getattr(a, 'job', None) and a.cmd != 'hook':
+        out_.fact(job=str(Path(a.job).expanduser().absolute()))
     if a.cmd == 'start' and job_.backend(a.job) != 'native':
         missing = [flag for flag, value in (('--brief', a.brief), ('--pane', a.pane or job_.backend(a.job) == 'core'))
                    if not value]
@@ -436,12 +470,10 @@ def main(argv):
     except (ValueError, PermissionError) as error:
         if a.cmd == 'hook':  # a hook's exit 2 blocks or wakes Claude; keep a hook's error a plain failure
             raise
-        print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
-        if isinstance(error, base_.Retry):
-            print(error.command, file=sys.stderr)
+        out_.refuse('stampede ' + a.cmd + ': ' + base_.line(error), error.command if isinstance(error, base_.Retry) else None)
         return 2
     except (hcapi_.HcError, herdrapi_.HerdrError, OSError) as error:  # Herdr, Herdr Core or a program failed: one line, never a traceback
-        print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        out_.refuse('stampede ' + a.cmd + ': ' + base_.line(error))
         return 1
 
 
@@ -521,6 +553,7 @@ def run(a):
         if unknown:
             raise ValueError(f'--no-gate {unknown[0]} is no gate: it takes ' + ', '.join(gates_.names()))
         core, why = backend_for(a)
+        out_.fact(backend=('core' if a.relay else 'native') if core else 'tui')  # as <job>/backend names it
         if a.cwd and not core:
             raise ValueError('--cwd is for a job on Herdr Core (new --core)')
         if a.relay and not core:
@@ -544,6 +577,8 @@ def run(a):
                    lead_effort=a.lead_effort, no_gate=a.no_gate)
     if a.cmd == 'start' and not a.program:
         a.kind, a.model, a.effort = role_defaults(a.job, a.agent, a.kind, a.model, a.effort)
+    if a.cmd == 'start':
+        out_.fact(kind='program' if a.program else a.kind, model=a.model, effort=a.effort)
     job = getattr(a, 'job', None)
     if a.cmd in NATIVE_ONLY and job_.backend(job) != 'native':
         raise ValueError(f'{a.cmd} is for a native job (new --core); {job} is a {job_.backend(job)} job')

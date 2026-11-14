@@ -53,6 +53,7 @@ stampede start <job> <agent> --kind claude|codex --brief <file> [--cwd <dir>] [-
 - `--cwd` defaults to the repo. `--yolo-in` must be the same folder as `--cwd`, a linked worktree. A relative `--brief` is made absolute, so it resolves from any `--cwd`.
 - Claude gets `--session-id` (recorded for reopen); Codex gets `--no-daemon`. The brief pointer is the first prompt.
 - `STARTED <agent> (<address>)`, exit 0. `BLOCKED` or `NOT READY`, exit 1: it is still the job's agent, so recover it as for the lead and never start a second. `UNKNOWN`, exit 1: as for the lead; a later `start` adopts it or says it is running. `FAILED <agent> (<reason>)`, exit 1: its terminal ended, or it never started.
+- With `--json`, every `stampede` command here prints one JSON object instead: the line's first word as `status`, what it names as facts (`docs/CLI-JSON.md`).
 - A worker has no parent, so it never ends with the lead.
 
 ## Hand an agent to a TUI pane

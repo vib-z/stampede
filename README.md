@@ -864,7 +864,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 <details>
 <summary><b><code>stampede</code> commands and exit codes</b></summary>
 
-Every command with its flags, the status words it prints (`STARTED`, `QUEUED`, `DELIVERED`, `SUBMITTED`, `BLOCKED`, `APPROVED`, `TIMEOUT`, `LEAD_GONE` and the rest) and one table of exit codes: [docs/CLI.md](docs/CLI.md). The command lists itself too: `stampede --help`, and `stampede <command> --help` for each one's flags and an example. `stampede` and `fleet-job` are the same command ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), the entry; the [stampede package](skills/herdr-fleet/scripts/stampede/) holds the commands). `stampede merge` and the hidden `stampede prepush` (the pre-push hook's) are there too. In short: 0 done, 1 Herdr, Herdr Core or a program failed (or `doctor` found a `PROBLEM`), 2 a usage error or a refusal with its reason on one line, 3 `tell` queued behind a question card or `wait` timed out.
+Every command with its flags, the status words it prints (`STARTED`, `QUEUED`, `DELIVERED`, `SUBMITTED`, `BLOCKED`, `APPROVED`, `TIMEOUT`, `LEAD_GONE` and the rest) and one table of exit codes: [docs/CLI.md](docs/CLI.md). Every command an agent runs takes `--json` and prints one JSON object instead (`ok`, `command`, `status` and the facts the line names, or `error` and `retry` for a refusal), with the same exit code: [docs/CLI-JSON.md](docs/CLI-JSON.md). The command lists itself too: `stampede --help`, and `stampede <command> --help` for each one's flags and an example. `stampede` and `fleet-job` are the same command ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), the entry; the [stampede package](skills/herdr-fleet/scripts/stampede/) holds the commands). `stampede merge` and the hidden `stampede prepush` (the pre-push hook's) are there too. In short: 0 done, 1 Herdr, Herdr Core or a program failed (or `doctor` found a `PROBLEM`), 2 a usage error or a refusal with its reason on one line, 3 `tell` queued behind a question card or `wait` timed out.
 </details>
 
 <details>
@@ -913,7 +913,7 @@ scripts/stampede        the command (also linked as fleet-job); answers --versio
 scripts/stampede_update.py   the daily release check and stampede update
 scripts/herdr-plugin-event   the Herdr plugin's event hook
 remote/                 front-door guides
-docs/                   SETUP.md, LINUX.md, RUNS.md, CLIENTS.md, CLI.md (every command), CORE-NATIVE.md (a Core job's shape),
+docs/                   SETUP.md, LINUX.md, RUNS.md, CLIENTS.md, CLI.md (every command), CLI-JSON.md (--json), CORE-NATIVE.md (a Core job's shape),
                         superpowers/specs/ (the design), images/ (screenshots, logos/)
 assets/                 the poster, the teaser and the demo GIF
 site/                   the hero site: index.html, assets/
@@ -935,6 +935,7 @@ tests/evals/            the evals: cases.json, run.py, record.py, live/, linux/,
 | [SKILL.md](SKILL.md) | the skill entry point, routing each role to its skill |
 | [skills/herdr-fleet](skills/herdr-fleet/SKILL.md) | the lead's playbook, with [failure modes](skills/herdr-fleet/references/failure-modes.md) [a job on Herdr Core](skills/herdr-fleet/references/core.md) and [the earlier `--core --relay` path](skills/herdr-fleet/references/core-relay.md) |
 | [docs/CLI.md](docs/CLI.md) | every command: its flags, the status words it prints, and the exit codes |
+| [docs/CLI-JSON.md](docs/CLI-JSON.md) | `--json`: the one object each command prints, its status values and facts |
 | [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md) | the shape of a Core job: the tree, labels, messages, events, the job folder and the commands, for a client that draws one |
 | [remote/](remote/README.md) | one guide per front door, Moshi and the event relay |
 | [docs/RUNS.md](docs/RUNS.md) | real runs, with timelines and what changed because of them |
@@ -1009,6 +1010,8 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 **Unreleased, 14 Nov 2026. A native front door on Herdr Core:** `stampede new --core --front-door` makes a chat outside Herdr and Core the owner's only contact on a Core-native job, as on the TUI: the lead posts, asks and asks gates through `<job>/outbox`, `stampede wait` hands each item on (and says `BLOCKED <lead>: <kind>` with its screen, or `LEAD_GONE`), and answers, `approve` and `approve-gate` reach the lead through `hc send`. Tested with the fake `hc` (the front-door loop for every client outside Herdr on all three backends in the cross-client suite) and on a real scratch core (`tests/core_smoke.py`, hc 0.1.21: `new --core --front-door`, `post`, `wait`, `finish`). No live agent has run it yet.
 
 **Unreleased, 14 Nov 2026. Layered config:** every setting stampede reads comes from one module, resolved from the defaults, your `config.toml`, a repo's `.stampede.toml`, the environment names that always worked, and a command's flags and `--set`; `stampede config show` prints each value with the layer that set it, and `stampede new` saves them in `<job>/settings.json` so a job keeps its choices. Tested with the unit suite (on Python 3.9 too) and against a scratch HOME. Next for config, planned: a `backend` key, one jobs root for Core, role defaults, the layout and the review step.
+
+**Unreleased, 14 Nov 2026. `--json` for agents:** every command an agent runs (`new`, `start`, `tell`, `ask`, `post`, `wait`, `finish`, `next`, `snapshot`, `reopen`, `close`, `approve`, `approve-gate`, `gate-ok`, `cancel`, `merge`) takes `--json` and prints one object with its status word and facts, or its refusal and the command to retry, so an agent reads no prose. The plain lines and exit codes are unchanged. Tested with the fakes on all three backends ([tests/test_json.py](tests/test_json.py), on Python 3.9 too), by comparing every plain line with the commit before, and on a real scratch core (`tests/core_smoke.py`).
 
 **Next:**
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.

@@ -9,6 +9,10 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 - **A Core job** (native): `stampede new --core`. Each agent is a Herdr Core terminal; its shape is [CORE-NATIVE.md](CORE-NATIVE.md).
 - **A `--relay` job:** `stampede new --core --relay`, the earlier Core path ([core-relay.md](../skills/herdr-fleet/references/core-relay.md)).
 
+## JSON output
+
+Every command an agent runs takes `--json`: one JSON object on stdout, `{"ok", "command", "status", ...facts}`, with the same exit code, and the lines below unchanged without it. A refusal is `{"ok": false, "error": "<the line>", "retry": "<the command to run, or null>"}`. The shape, the facts and each command's status values: [CLI-JSON.md](CLI-JSON.md). `tree`, `doctor`, `check` and `config show` have their own `--json` documents, named below.
+
 ## Start a job
 
 | command | flags | prints |
@@ -77,7 +81,7 @@ Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=fa
 
 ## Errors
 
-Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what to do>`, never a traceback; one that carries a command to run prints it on the next line, exactly as you would type it. Among them:
+Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what to do>`, never a traceback; one that carries a command to run prints it on the next line, exactly as you would type it. With `--json` they are the object's `error` and `retry`, and stderr holds only what a program stampede ran wrote. Among them:
 - `stampede tell: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>`, for every command given a job folder, before anything else.
 - `stampede tell: agent <name> is not in this job (it has: lead, <names>)`.
 - `stampede new: the ask file <path> does not exist: ...`, before any other check.

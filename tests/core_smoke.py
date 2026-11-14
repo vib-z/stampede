@@ -2,7 +2,8 @@
 """A smoke run on a real Herdr Core (hc 0.1.13 or later; CI pins 0.1.20 on macOS and Linux) in a scratch session of its own (HC_SESSION and XDG folders under a
 temporary folder), never the machine's own core. CI runs it after installing hc; it prints PASS or the first FAIL.
 The stampede parts run once herdr-event-core is in the checkout: the relay path (new --core --relay, tell, finish, the
-follower's exit) and the Core-native path (new --core --front-door, a program helper, tree, post and wait, close, finish)."""
+follower's exit) and the Core-native path (new --core --front-door, a program helper, tree, post and wait, close, finish),
+its commands with --json."""
 import json, os, queue, re, shutil, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
@@ -113,25 +114,25 @@ def stampede_native():
     ask = T / 'ask-native.md'
     ask.write_text('Smoke test the Core-native path\n')
     run = lambda *args: subprocess.run([str(SRC / 'scripts/stampede'), *args], capture_output=True, text=True, env=env, timeout=120)
-    made = run('new', '--core', '--front-door', '--file', str(ask), '--cwd', str(repo))
-    if made.returncode:
+    made = run('new', '--core', '--front-door', '--file', str(ask), '--cwd', str(repo), '--json')
+    if made.returncode or json.loads(made.stdout)['status'] != 'STARTED':
         fail(f'stampede new --core: exit {made.returncode}: {made.stdout} {made.stderr}')
-    lead, job = made.stdout.strip().splitlines()[-1].split(' ', 1)
+    lead, job = json.loads(made.stdout)['lead'], json.loads(made.stdout)['job']
     key = (Path(job) / 'workspace').read_text().strip()
-    started = run('start', job, 'watch-ci', '--', 'sleep', '300')
-    if started.returncode or not started.stdout.startswith('STARTED watch-ci'):
+    started = run('start', job, 'watch-ci', '--json', '--', 'sleep', '300')
+    if started.returncode or (json.loads(started.stdout)['status'], json.loads(started.stdout)['agent']) != ('STARTED', 'watch-ci'):
         fail(f'stampede start watch-ci: exit {started.returncode}: {started.stdout} {started.stderr}')
     shown = run('tree', job).stdout
     if not re.search(rf'^  {lead} \(t\d+\) lead claude', shown, re.M) or not re.search(r'^    watch-ci \(t\d+\) helper program', shown, re.M):
         fail(f'stampede tree shows {shown}')
-    posted, waited = run('post', job, 'PLAN READY: smoke'), run('wait', job, '--timeout', '20')
-    if posted.returncode or waited.returncode or '# 001 post' not in waited.stdout:
+    posted, waited = run('post', job, 'PLAN READY: smoke'), run('wait', job, '--timeout', '20', '--json')
+    if posted.returncode or waited.returncode or [i['outbox'] for i in json.loads(waited.stdout)['results']] != ['001']:
         fail(f'stampede post and wait: {posted.stdout} {posted.stderr} {waited.stdout} {waited.stderr}')
-    closed = run('close', job)
-    if closed.returncode or re.findall(r'^CLOSED (\S+)', closed.stdout, re.M) != ['watch-ci', lead]:
+    closed = run('close', job, '--json')
+    if closed.returncode or [r['agent'] for r in json.loads(closed.stdout)['results'] if r['status'] == 'CLOSED'] != ['watch-ci', lead]:
         fail(f'stampede close: exit {closed.returncode}: {closed.stdout} {closed.stderr}')
-    finished = run('finish', job, 'smoke done')
-    if finished.returncode:
+    finished = run('finish', job, 'smoke done', '--json')
+    if finished.returncode or json.loads(finished.stdout)['status'] != 'FINISHED':
         fail(f'stampede finish: exit {finished.returncode}: {finished.stdout} {finished.stderr}')
     if [t for t in hc('ls', '--all', '--json', '--label', 'stampede.job=' + key, env=env)['terminals'] if t['state'] == 'live']:
         fail('terminals of the native job still run')
