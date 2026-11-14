@@ -20,6 +20,8 @@ What is new:
 - **`stampede doctor`** names `install.sh --replace` as the fix for a command on PATH from another checkout.
 - **A timer honours the settings file.** A launchd or systemd timer starts with no environment; it now gets the settings from the file, with no values copied into a plist or a unit. The file is read as data and nothing in it runs: only plain `NAME=value` lines (with `$HOME` and a leading `~/`), settings only, at most 4 KB and 100 lines. A value worked out by a command belongs in your shell profile. `herdr-doctor --relay` names the lines the relay skips, or says why the file is not read. The Herdr plugin event still sources the file as shell, as before.
 
+Known issue: after a reopen, `stampede tree` still lists the shell Core left in the lost lead's place as a second lead row, shown as live. Every command follows the new lead, and the job's record holds only the new lead; only the view is wrong.
+
 Not in this release: refusing a message when a draft is already typed in an agent's prompt on a Core-native job (Herdr Core waits for a person's unfinished draft itself; a check from the screen could not tell a draft from a suggestion), alerts for a job's helpers (planned), and the removal of `--core --relay` (the next minor release).
 
 ## 0.2.1 (14 Nov 2026)
