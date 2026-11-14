@@ -114,6 +114,8 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `stampede close <job> [<agent>]` | ends that agent's subtree, deepest first; with no agent (or `lead`) the whole job, the lead last. Refused, exit 2, from a terminal in that subtree | `CLOSED <name> (<address>)` per terminal, in order; `FAILED <name> (<why>)`, exit 1, going on with the rest |
 | `stampede ask`, `ask --gate`, `gate-ok`, `approve-gate`, `post`, `finish` | as on every backend | as on every backend |
 
+Every command's flags, what it prints and its exit code: [CLI.md](CLI.md), with [a Core job's exit codes](CLI.md#exit-codes).
+
 ### The cap
 
 At most 12 helpers run at once in one lead's tree, at any depth. The owner changes it per job: `--max-helpers <n>` at `new`, or the number in `<job>/max-helpers`; `STAMPEDE_MAX_HELPERS` changes the default.

@@ -312,7 +312,7 @@ def core_outcome(job, agent, address, who, brief, plain=False):
     if word in ('working', 'idle', 'done'):
         print(f'STARTED {agent} ({address})')
         return 'started'
-    resend = f'then fleet-job tell {job} {who} "Read {brief}" if it went idle without its first prompt'
+    resend = f'then stampede tell {job} {who} "Read {brief}" if it went idle without its first prompt'
     if word == 'blocked':
         kind = (terminal.get('status') or {}).get('kind') or 'blocked'
         print(f'BLOCKED {agent}: {kind}; read it with hc read {address}, clear the dialog with hc keys {address} <keys>, {resend}')

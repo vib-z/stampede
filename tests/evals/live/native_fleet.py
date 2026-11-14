@@ -371,8 +371,8 @@ def rebuild(f, s):
     problems += [f'reopen --rerun-programs (exit {second.returncode}) started {started}, not {subs}'] \
         if second.returncode or sorted(started := re.findall(r'^STARTED (\S+)', second.stdout, re.M)) != subs else []
     third = f.stampede('reopen', job, '--rerun-programs', timeout=300)
-    problems += [f'a third reopen (exit {third.returncode}) started {re.findall(r"^STARTED (\S+)", third.stdout, re.M)}'] \
-        if third.returncode or re.search(r'^STARTED', third.stdout, re.M) else []
+    again = re.findall(r'^STARTED (\S+)', third.stdout, re.M)  # outside the f-string: a backslash in one is Python 3.12 on
+    problems += [f'a third reopen (exit {third.returncode}) started {again}'] if third.returncode or again else []
     named = f.by_name(key)
     address = {n: t['address'] for n, t in named.items()}
     want = {'help-a': lead, 'help-b': lead, 'sub-a1': 'help-a', 'sub-a2': 'help-a', 'sub-b1': 'help-b', 'sub-b2': 'help-b'}

@@ -6,6 +6,12 @@ import contextlib, io, json, os, subprocess, sys, time, unittest, uuid
 from pathlib import Path
 from unittest import mock
 
+try:
+    import tomllib  # noqa: F401: only to know whether this Python reads TOML
+    TOML = True
+except ImportError:  # Python 3.9 and 3.10: stampede cannot read draft_wait and says so; these tests need it read
+    TOML = False
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase
 from stampede import base as base_, job as job_, hcapi as hcapi_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, handed as handed_, cli as cli_
@@ -72,6 +78,7 @@ class DraftHold(Told):
         self.shape(send_started={'t1': None})  # a program that reports no status: nobody can tell, so no warning
         self.assertEqual(self.told()[0], 'SUBMITTED review-api (t1)')
 
+    @unittest.skipUnless(TOML, 'reading draft_wait needs tomllib, Python 3.11 and later')
     def test_a_send_is_stopped_before_core_s_hold_could_run_out(self):
         """Core types after a draft only once its hold (draft_wait since the person's last key) is over. stampede's
         send ends SEND_MARGIN seconds before that could happen, so it never goes in after a draft someone left."""
@@ -255,6 +262,7 @@ class CodexLeadOnCore(CoreCase):
         with mock.patch.object(tui_, 'DELIVER_FOR', wait), mock.patch.object(tui_, 'DELIVER_EVERY', 0.05):
             return self.quiet(tui_.deliver, job)
 
+    @unittest.skipUnless(TOML, 'reading draft_wait needs tomllib, Python 3.11 and later')
     def test_a_codex_lead_needs_core_s_draft_hold(self):
         """review-codex R3: its inbox is typed into its terminal with nobody watching, and only Core's hold keeps a
         person's typing apart from that. With no hold (before 0.1.20), or one too short to end a send inside, a Codex
@@ -660,6 +668,7 @@ class CodexLeadOnCore(CoreCase):
         self.assertFalse((job / 'hooks/ack-lead-demo.json').exists())
         self.assertTrue(relay_.owed(job), 'the lead is still owed the lines')
 
+    @unittest.skipUnless(TOML, 'reading draft_wait needs tomllib, Python 3.11 and later')
     def test_core_s_draft_wait_is_read_as_core_reads_it(self):
         """review-codex R8: the hold decides whether lines may be typed unattended, so it is Core's own reading of its
         config.toml (TOML numbers and keys, defaults for a file that is no TOML), and unknown is a refusal."""

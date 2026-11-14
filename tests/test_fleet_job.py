@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 sys.path.insert(0, str(SCRIPTS))
 from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quiet import setUpModule, tearDownModule  # noqa: E402,F401: commands run in-process print status lines
 
 
 def job_with(agents):
@@ -259,7 +261,7 @@ class Briefs(unittest.TestCase):
                     stderr = io.StringIO()
                     with contextlib.redirect_stderr(stderr):
                         self.assertEqual(cli_.main(argv), 2)
-                self.assertEqual(stderr.getvalue(), 'fleet-job start: ' + message + '\n')
+                self.assertEqual(stderr.getvalue(), 'stampede start: ' + message + '\n')
                 self.assertFalse(log.exists(), 'not even a Herdr read should run')
                 self.assertFalse((job / 'hooks').exists())
                 self.assertEqual((job / 'agents.tsv').read_bytes(), before)
@@ -274,7 +276,7 @@ class Briefs(unittest.TestCase):
                                 env={**os.environ, 'HERDR': herdr})
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, '')
-        self.assertEqual(result.stderr, f'fleet-job start: brief {brief} is missing: Done when; '
+        self.assertEqual(result.stderr, f'stampede start: brief {brief} is missing: Done when; '
                          'fill them in on skills/herdr-fleet/references/brief.md and start again\n')
         self.assertFalse(log.exists())
         self.assertFalse((job / 'hooks/build-x.json').exists())
@@ -423,7 +425,7 @@ class Fixes(unittest.TestCase):
 
     def test_new_holds_the_pointer_for_a_blocked_lead(self):
         out, job, _ = self.run_new('blocked')
-        self.assertIn('BLOCKED lead-fix-login-bug: clear the startup dialog, then fleet-job tell ' + str(job) + ' lead "Read '
+        self.assertIn('BLOCKED lead-fix-login-bug: clear the startup dialog, then stampede tell ' + str(job) + ' lead "Read '
                       + str(job / 'briefs/lead-fix-login-bug.md') + '"', out)
         self.assertFalse((job / 'inbox/lead-fix-login-bug.md').exists())
 
@@ -585,14 +587,14 @@ class LiveFixes(unittest.TestCase):
     def test_a_startup_dialog_at_start_is_blocked_not_a_crash(self):
         job = job_with([('lead-demo', 'claude')])
         out = self.run_start(job, 'build-x', 'agent_not_ready')
-        self.assertIn('BLOCKED build-x: clear the startup dialog, then fleet-job tell ' + str(job) + ' build-x "Read '
+        self.assertIn('BLOCKED build-x: clear the startup dialog, then stampede tell ' + str(job) + ' build-x "Read '
                       + str(job / 'briefs/build-x.md') + '"', out)
         self.assertIn('build-x', job_.roster(job)[0])  # the reopen record was written
         self.assertFalse((job / 'inbox/build-x.md').exists())
 
     def test_a_startup_dialog_at_new_is_blocked_not_a_crash(self):
         out, job, log = Fixes.run_new(self, 'idle', start_error='agent_not_ready')
-        self.assertIn('BLOCKED lead-fix-login-bug: clear the startup dialog, then fleet-job tell ' + str(job) + ' lead "Read '
+        self.assertIn('BLOCKED lead-fix-login-bug: clear the startup dialog, then stampede tell ' + str(job) + ' lead "Read '
                       + str(job / 'briefs/lead-fix-login-bug.md') + '"', out)
         self.assertIn('lead-fix-login-bug', job_.roster(job)[0])
         self.assertFalse((job / 'inbox/lead-fix-login-bug.md').exists())
@@ -645,7 +647,8 @@ class StampedeReview1(unittest.TestCase):
         no_core = str(ask.parent / 'no-core.sock')   # this machine's own Herdr Core is not asked
         result = self.cli('new', '--file', str(ask), drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr, HC_SOCKET=no_core)
         self.assertEqual((result.returncode, result.stderr.strip()),
-                         (2, 'fleet-job new: new needs --workspace or --pane, or run it inside Herdr'))
+                         (2, 'stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core: '
+                             f'stampede new --core --file {ask} --cwd {ROOT}'))
         self.assertFalse(log.exists())
 
     def test_new_names_core_when_herdr_cannot_take_the_job_and_a_core_answers(self):
@@ -880,7 +883,10 @@ class Gates(unittest.TestCase):
         self.assertEqual(list(queue.glob('*.json')) if queue.is_dir() else [], [])
 
     def test_a_post_in_a_local_or_front_door_job_sends_no_event(self):
-        self.assertIn('POSTED 001 for the front door to relay', self.quiet(owner_.post, self.job, 'local', []))
+        said = self.quiet(owner_.post, self.job, 'local', [])
+        self.assertIn('POSTED 001 to the outbox only', said)   # no one is told, and the line says so, with how to change it
+        for part in ('no bot or front door hears it', 'HERDR_EVENTS_OWNER=<bot>', '--front-door'):
+            self.assertIn(part, said)
         self.bot_job()
         (self.job / 'front-door').write_text('relay\n')  # a front door relays the outbox itself
         self.assertIn('POSTED 002 for the front door to relay', self.quiet(owner_.post, self.job, 'front', []))
@@ -1468,7 +1474,7 @@ class LeadChoice(unittest.TestCase):
             out, job, _ = self.new(kind='codex')
         self.assertEqual(self.code, 1)
         self.assertEqual(out, 'BLOCKED lead-fix-login-bug: its brief pointer did not go in (FAILED lead-fix-login-bug focused: the owner '
-                              f'is in that pane); fix that, then fleet-job tell {job} lead "Read {job / "briefs/lead-fix-login-bug.md"}"\n')
+                              f'is in that pane); fix that, then stampede tell {job} lead "Read {job / "briefs/lead-fix-login-bug.md"}"\n')
 
     def test_an_invalid_lead_is_refused_before_anything_is_made(self):
         for env, kw in (({}, {'kind': 'cursor'}), ({'FLEET_LEAD_KIND': 'fable'}, {})):

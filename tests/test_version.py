@@ -3,7 +3,10 @@ import os
 import re
 import subprocess
 import tempfile
-import tomllib
+try:
+    import tomllib
+except ImportError:  # Python 3.9 and 3.10: the manifest check below skips (stampede itself does without it)
+    tomllib = None
 import unittest
 from pathlib import Path
 
@@ -27,6 +30,7 @@ class Version(unittest.TestCase):
         version = (ROOT / 'VERSION').read_text().strip()
         self.assertIn('## ' + version, (ROOT / 'CHANGELOG.md').read_text())
 
+    @unittest.skipIf(tomllib is None, 'tomllib is in Python 3.11 and later')
     def test_the_plugin_manifest_names_the_version_file(self):
         """TOML cannot read another file, so this test keeps herdr-plugin.toml in step with VERSION (RELEASING.md)."""
         version = (ROOT / 'VERSION').read_text().strip()

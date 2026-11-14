@@ -28,7 +28,7 @@ def type_pointer(job, agent, who, brief, pointer):
     submitted, said = herdr_send(job, agent, pointer)
     if submitted:
         return print(said)
-    print(f'BLOCKED {agent}: its brief pointer did not go in ({base_.line(said)}); fix that, then fleet-job tell {job} {who} "Read {brief}"')
+    print(f'BLOCKED {agent}: its brief pointer did not go in ({base_.line(said)}); fix that, then stampede tell {job} {who} "Read {brief}"')
     return 1
 
 

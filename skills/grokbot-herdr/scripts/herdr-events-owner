@@ -5,6 +5,7 @@
 # The id is the literal workspace_id (e.g. w1K), never the JSON of .result.workspace, or a Herdr Core job's key
 # (hc-<12 hex>, in <job>/workspace): that tag is set only while the job is open (its marker in jobs/), never via herdr.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
+case "${1:-}" in -h|--help) echo 'usage: herdr-events-owner <workspace-id> [bot-slug|--clear]'; sed -n '2,6s/^# \{0,1\}//p' "$0"; exit 0;; esac
 set -e; EV="${HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}"; D="$EV/owners"; mkdir -p "$D"
 ws="$1"; [ -n "$ws" ] || { echo "usage: herdr-events-owner <workspace-id> [bot-slug|--clear]" >&2; exit 2; }
 core=0; [[ "$ws" =~ ^hc-[0-9a-f]{12}$ ]] && core=1

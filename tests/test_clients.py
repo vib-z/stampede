@@ -318,7 +318,7 @@ class Outcomes(unittest.TestCase):
                                  (job.bot, job.bot, POST, '001'))
                 self.assertNotIn('pane', event['payload'])
             else:
-                self.ok(job, 'post', 'POSTED 001 for the front door to relay')
+                self.ok(job, 'post', 'POSTED 001 to the outbox only')
                 self.assertEqual(self.events(job, 'post'), [])
             self.assertEqual(job.moshi(), '', 'no card went to the real phone command')
         self.outcome('O4', check)
@@ -517,7 +517,7 @@ class Outcomes(unittest.TestCase):
         code, out, err = job.run('start a taken name', argv, {**job.lead_env(), 'HERDR': herdr})
         self.assertNotEqual(code, 0)
         self.assertEqual(len(err.strip().splitlines()), 1, err)
-        self.assertTrue(err.startswith('fleet-job start: herdr agent start'), err)
+        self.assertTrue(err.startswith('stampede start: herdr agent start'), err)
 
     @unittest.expectedFailure
     def test_f5_a_tui_lead_asks_through_the_front_doors_command(self):

@@ -41,11 +41,11 @@ cd ~/stampede
 ```bash
 herdr plugin install vib-z/stampede  # --ref <tag> pins a release; --yes accepts the build non-interactively
 export PATH="$HOME/.local/bin:$PATH"
-herdr-doctor
+stampede doctor
 herdr-trust ~/code/my-app
 ```
 
-Herdr does not show the installer's output, and `herdr plugin log list` stays empty, so `herdr-doctor` is how you see it worked. Skills are linked only for agent home folders that already exist. Do not install over a locally linked plugin; unlink it first.
+Herdr does not show the installer's output, and `herdr plugin log list` stays empty, so `stampede doctor` is how you see it worked. Skills are linked only for agent home folders that already exist. Do not install over a locally linked plugin; unlink it first.
 
 **The event hook on a clone:** from the checkout, `herdr plugin link .` adds the event hook only; a clone needs it only for the event relay to a remote bot. Herdr then runs `scripts/herdr-plugin-event` on every agent status change. Check it with `herdr plugin list`. With no route configured, events are logged locally without sending.
 
@@ -64,7 +64,7 @@ bash "$M/install.sh"
 
 ## Health check
 
-Run `herdr-doctor` after installation with the Herdr server already running. It checks each backend that is installed (the Herdr TUI, and Herdr Core when `hc` is on PATH: one usable backend is enough, and the last backend line names it; `--tui` or `--core` checks one strictly, which is what a bot runs before a job on that backend). It checks `herdr`, `jq`, `git` and `python3`, client/server versions, `stampede --version` against the checkout's `VERSION`, all three skill links for each agent home that exists, owner tags, worktrees and disk. For a GitHub-managed plugin it also checks that `stampede` and the skill links resolve into the checkout `herdr plugin list --json` reports. A missing event plugin, and a missing `FLEET_TRUST_ROOT` folder (`warn no ~/code (FLEET_TRUST_ROOT): create it or set the key before herdr-trust`), are warnings for a core install.
+Run `stampede doctor` after installation with the Herdr server already running. It checks Python, this checkout (its VERSION, and that every module imports) and that `stampede`, `fleet-job` and the `herdr-*` helpers on PATH point into it, then passes on the lines of `herdr-doctor`, which you can also run alone with the flags below (`stampede doctor` passes `--core` and `--tui` on). `herdr-doctor` checks each backend that is installed (the Herdr TUI, and Herdr Core when `hc` is on PATH: one usable backend is enough, and the last backend line names it; `--tui` or `--core` checks one strictly, which is what a bot runs before a job on that backend). It checks `herdr`, `jq`, `git` and `python3`, client/server versions, `stampede --version` against the checkout's `VERSION`, all three skill links for each agent home that exists, owner tags, worktrees and disk. For a GitHub-managed plugin it also checks that `stampede` and the skill links resolve into the checkout `herdr plugin list --json` reports. A missing event plugin, and a missing `FLEET_TRUST_ROOT` folder (`warn no ~/code (FLEET_TRUST_ROOT): create it or set the key before herdr-trust`), are warnings for a core install.
 
 The relay is optional for a lead inside Herdr. Its checks run when a routes directory, either relay launchd plist, a Claude relay hook or a Codex relay notify line exists, or whenever you pass `--relay`. The routes key `HERDR_EVENTS_ROUTES_DIR` is respected. Helper scripts, an enabled plugin, or the Linux timers `install.sh` starts do not by themselves mark the relay installed.
 

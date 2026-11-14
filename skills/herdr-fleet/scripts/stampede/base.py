@@ -28,3 +28,4 @@ FOLLOWER = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-core'
 
 
 SESSION = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+MIN_PYTHON = (3, 9)  # the oldest Python the unit suite passes on (CI runs it); fleet_job.py refuses an older one

@@ -1068,8 +1068,9 @@ def l12():
     queued = [q['payload'].get('summary') for q in job.queued()]
     both = all(f'under a held lock {n}' in queued for n in (1, 2))
     said = job.relay_log().count('lock-not-taken') >= 2
-    return ev.done(both and kept == 'held|record\t1\n' and said,
-                   f'both queued {both}; de-dupe file untouched {kept == "held|record\t1\n"}; the log names the lock twice {said}')
+    untouched = kept == 'held|record\t1\n'  # outside the f-string: a backslash in one is Python 3.12 on
+    return ev.done(both and untouched and said,
+                   f'both queued {both}; de-dupe file untouched {untouched}; the log names the lock twice {said}')
 
 
 @case('L13')

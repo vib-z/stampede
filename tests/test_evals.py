@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EVALS = ROOT / 'tests/evals'
 sys.path.insert(0, str(EVALS))
 import record  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quiet import setUpModule, tearDownModule  # noqa: E402,F401: commands run in-process print status lines
 
 AREAS = {'G': 'gate', 'S': 'side-effects', 'L': 'lifecycle', 'P': 'portability', 'D': 'dependencies', 'V': 'versions',
          'I': 'linux-install', 'T': 'tui-live', 'C': 'core-live'}

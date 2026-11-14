@@ -147,7 +147,7 @@ def start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in,
                   f'once Herdr shows it, bash {job / "reopen.sh"} settles it')
             return 1
     if blocked:
-        print(f'BLOCKED {agent}: clear the startup dialog in pane {pane}, then fleet-job tell {job} {agent} "Read {brief}"')
+        print(f'BLOCKED {agent}: clear the startup dialog in pane {pane}, then stampede tell {job} {agent} "Read {brief}"')
         return 1
     why = prompt_handed(job, agent, agents_.pointer(agent, brief))
     if why:
