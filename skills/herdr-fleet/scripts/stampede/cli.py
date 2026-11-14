@@ -262,11 +262,22 @@ JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapsh
         'gate-ok', 'cancel', 'merge')  # the commands --json turns into one object (out.py); tree, doctor, check, config print their own
 
 
+TOP_FLAGS = ('--json', '-h', '--help')  # the top-level parser's only flags; none takes a value
+
+
+def subcommand(argv):
+    """(index, name) of the subcommand: the first word that is no top-level flag; (None, None) when there is none, or
+    when that word is some other flag (argparse refuses it)."""
+    for i, word in enumerate(argv):
+        if word not in TOP_FLAGS:
+            return (None, None) if word.startswith('-') else (i, word)
+    return None, None
+
+
 def main(argv):
     """argparse owns --json; whether to wrap the whole call in one object, its own usage error included, is decided
-    before it parses: --json as a word before any -- (out.asks), on a command in JSON. The command is the first word
-    that is no flag, since the top-level parser has no option that takes a value."""
-    name = next((word for word in argv if not word.startswith('-')), None)
+    before it parses: --json as a word before any -- (out.asks), on a command in JSON."""
+    name = subcommand(argv)[1]
     if out_.asks(argv) and (name is None or name in JSON):
         return out_.as_json(name, lambda: parse_and_run(argv))
     return parse_and_run(argv)
@@ -429,13 +440,14 @@ def parse_and_run(argv):
     if not argv:
         parser.print_help(sys.stderr)
         return 2
-    if argv[0] == 'update':  # scripts/stampede runs it first; this is the same command under fleet-job's own entry
-        return subprocess.run([sys.executable, '-I', str(base_.SCRIPTS.parents[2] / 'scripts/stampede_update.py'), *argv[1:]]).returncode
-    if not argv[0].startswith('-') and argv[0] not in sub.choices:  # argparse would list hook and the _ commands too
-        parser.error(f'{argv[0]!r} is no stampede command: stampede --help lists them')
+    at, name = subcommand(argv)
+    if name == 'update':  # scripts/stampede runs it first; this is the same command under fleet-job's own entry
+        return subprocess.run([sys.executable, '-I', str(base_.SCRIPTS.parents[2] / 'scripts/stampede_update.py'), *argv[at + 1:]]).returncode
+    if name is not None and name not in sub.choices:  # argparse would list hook and the _ commands too
+        parser.error(f'{name!r} is no stampede command: stampede --help lists them')
     program = []
-    if argv[:1] == ['start'] and '--' in argv:  # a native job: a program after --; cut here, since argparse before 3.13
-        cut = argv.index('--')                    # loses it when a flag stands between the name and the --
+    if name == 'start' and '--' in argv[at + 1:]:  # a native job: a program after --; cut here, since argparse before 3.13
+        cut = argv.index('--', at + 1)             # loses it when a flag stands between the name and the --
         argv, program = argv[:cut], argv[cut + 1:]
     a = parser.parse_args(argv)
     a.program = program

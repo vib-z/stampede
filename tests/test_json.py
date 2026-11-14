@@ -113,6 +113,7 @@ class Play(Job):
         if (self.client, self.backend) == ('claude-code', 'native'):  # outside Herdr, no flag: backend auto picks Core
             self.front('new auto', 'new', '--file', self.root / 'ask.md', '--cwd', self.repo, '--name', 'xd')
         if self.backend == 'native':
+            self.lead('start own flag', 'start', job, 'prog-own', '--', 'sleep', '60', '--json')  # plain: no flag; --json: after start
             self.lead('next', 'next', job)
             if self.json:  # a queued start that is no request: next crashes, and still prints one object
                 (job / 'queue').mkdir(exist_ok=True)
@@ -123,6 +124,8 @@ class Play(Job):
             self.front('reopen', 'reopen', job)
             self.front('close worker', 'close', job, 'build-claude')
             self.front('close nobody', 'close', job, 'nobody')
+            if self.json:  # the flag before the subcommand; the program keeps its own --json (last: it changes the tree)
+                self.lead('start flag first', '--json', 'start', job, 'prog-first', '--', 'sleep', '60', '--json')
         else:
             self.lead('next refused', 'next', job)
 
@@ -231,6 +234,15 @@ class Json(unittest.TestCase):
         usage = json.loads(native.steps['tell no text'][1])
         self.assertIn('the following arguments are required', usage['error'])
         self.assertEqual(json.loads(native.steps['wait timeout'][1])['results'][0]['status'], 'TIMEOUT')
+        plain_native = next(p for p in self.plain if (p.client, p.backend, p.door) == ('claude-code', 'native', False))
+        self.assertTrue(plain_native.steps['start own flag'][1].startswith('STARTED prog-own'))
+        for play, agent, step in ((plain_native, 'prog-own', 'start own flag'), (native, 'prog-own', 'start own flag'),
+                                  (native, 'prog-first', 'start flag first')):
+            run = next(r for r in play.calls('run') if play.labels(r).get('stampede.agent') == agent)
+            self.assertEqual(play.program(run), ['sleep', '60', '--json'], (step, 'the program and its own flag arrive unchanged'))
+            if play is native:
+                got = json.loads(play.steps[step][1])
+                self.assertEqual((got['status'], got['agent'], got['kind']), ('STARTED', agent, 'program'), step)
         code, out, err = native.steps['next crash']
         self.assertEqual((code, json.loads(out)['ok'], json.loads(out)['error'].split(':')[0]), (1, False, 'KeyError'))
         self.assertIn('Traceback', err)
