@@ -262,14 +262,11 @@ JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapsh
         'gate-ok', 'cancel', 'merge')  # the commands --json turns into one object (out.py); tree, doctor, check, config print their own
 
 
-TOP_FLAGS = ('--json', '-h', '--help')  # the top-level parser's only flags; none takes a value
-
-
 def subcommand(argv):
-    """(index, name) of the subcommand: the first word that is no top-level flag; (None, None) when there is none, or
-    when that word is some other flag (argparse refuses it)."""
+    """(index, name) of the subcommand: the first word after any --json. Any other flag before it, -h and --help
+    included, means none: argparse then gives the top-level help or its refusal, and nothing is dispatched."""
     for i, word in enumerate(argv):
-        if word not in TOP_FLAGS:
+        if word != '--json':
             return (None, None) if word.startswith('-') else (i, word)
     return None, None
 

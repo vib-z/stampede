@@ -500,6 +500,28 @@ class Calls(unittest.TestCase):
         code, got, _ = call(['post', str(self.job), 'hi', '--json'])
         self.assertEqual((code, got['status']), (0, 'POSTED'))
 
+    def test_a_help_flag_before_the_command_runs_nothing(self):
+        """-h or --help before the subcommand is the top-level help, as without --json, and nothing is dispatched: not
+        update, not start's program, not the unknown-command check."""
+        top = self.stampede('--help')
+        self.assertEqual(top[0], 0)
+        for argv in (('--help', 'update'), ('-h', 'update'), ('--help', 'start', self.job, 'x', '--', 'echo'), ('-h', 'nosuch'),
+                     ('--help', 'tell', self.job, 'lead', 'hi')):
+            self.assertEqual(self.stampede(*argv), top, argv)
+        for argv in (('--json', '--help', 'update'), ('--help', '--json', 'tell'), ('--json', '-h', 'start', self.job, 'x', '--', 'echo')):
+            code, out, err = self.stampede(*argv)
+            got = json.loads(out)
+            self.assertEqual((code, got['ok'], got['command'], err), (0, True, None, ''), argv)
+            self.assertEqual('\n'.join(got['notes']), '\n'.join(l for l in top[1].splitlines() if l.strip()), argv)
+        for argv in (['--help', 'update'], ['-h', 'update'], ['--json', '--help', 'update'], ['--help', 'start', str(self.job), 'x', '--', 'echo']):
+            with mock.patch.object(cli_.subprocess, 'run') as ran, mock.patch.object(cli_, 'run') as dispatched:
+                try:
+                    call(argv)
+                except SystemExit as stop:
+                    self.assertEqual(stop.code, 0)
+            self.assertFalse(ran.called or dispatched.called, argv)
+        self.assertFalse((self.job / 'outbox').exists() or (self.job / 'inbox').exists())
+
     def test_a_reader_that_goes_away_leaves_no_traceback(self):
         done = subprocess.run(['bash', '-c', '"$0" post "$1" hi --json | true; echo "exit ${PIPESTATUS[0]}" >&2',
                                str(clients_run.STAMPEDE), str(self.job)], capture_output=True, text=True, timeout=60)
