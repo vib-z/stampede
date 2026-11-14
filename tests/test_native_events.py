@@ -1,13 +1,15 @@
 """A Core-native job on the relay side: herdr-event-sweep (the lead's blocked, error, stale and dead, once each),
 the watchdog that runs it, flush's UNDELIVERED line through fleet-job tell, and herdr-reopen-snapshot's hand-over.
 Every script runs for real, against the fake hc and a socket that answers hello like a running core."""
-import json, os, shutil, subprocess, sys, time, unittest
+import contextlib, io, json, os, shutil, subprocess, sys, time, unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, ROOT
 from test_core_relay import core_socket
+from stampede import hcapi as hcapi_, native as native_  # noqa: E402
+from shlex import quote as shlex_quote  # noqa: E402
 
 RELAY = ROOT / 'skills/grokbot-herdr/scripts'
 
@@ -344,8 +346,8 @@ class Helpers(NativeCase):
         self.helper('t4', 'h3', parent='t3')
         self.sweep()
         self.terminal('t2', state='finished', status=None, exit_code=0, reason='exited')
-        closed = {'name': 'h2', 'role': 'helper', 'state': 'closed'}  # stampede close h2: its subtree, children first
-        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'h2': closed, 'h3': {**closed, 'name': 'h3'}}}))
+        closed = {'name': 'h2', 'role': 'helper', 'state': 'closed', 'address': 't3'}  # stampede close h2: its subtree
+        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'h2': closed, 'h3': {**closed, 'name': 'h3', 'address': 't4'}}}))
         state = self.state()
         del state['terminals']['t3'], state['terminals']['t4']
         self.shape(**state)
@@ -357,17 +359,18 @@ class Helpers(NativeCase):
     def test_the_lead_s_end_takes_its_branch_with_it(self):
         self.helper()
         self.sweep()
-        self.terminal('t1', state='finished', status=None, exit_code=None, reason='killed')
-        self.terminal('t2', state='finished', status=None, exit_code=None, reason='killed')
+        self.terminal('t1', state='finished', status=None, exit_code=None, reason='killed', finished_ms=1000)
+        self.terminal('t2', state='finished', status=None, exit_code=None, reason='killed', finished_ms=1000)
         self.sweep()
         self.assertEqual(self.posted(), [('dead', 'lead-x', f'{self.key}/t1|finished')])
+        self.assertTrue(self.sweep_state()['terminals']['t2']['finished'], 'quiet: judged, not pending')
 
     def test_b1_a_helper_that_outlives_its_parent_still_reports_its_own_death(self):
         self.helper(die_with_parent=False)
         self.helper('t3', 'h2')
         self.sweep()
-        self.terminal('t1', state='finished', status=None, exit_code=None, reason='killed')
-        self.terminal('t3', state='finished', status=None, exit_code=None, reason='killed')  # ended with its parent
+        self.terminal('t1', state='finished', status=None, exit_code=None, reason='killed', finished_ms=1000)
+        self.terminal('t3', state='finished', status=None, exit_code=None, reason='killed', finished_ms=1001)  # its branch
         self.sweep()  # t2 outlived it and still works
         self.terminal('t2', state='finished', status=None, exit_code=1, reason='exited')
         self.sweep()
@@ -407,7 +410,7 @@ class Helpers(NativeCase):
         self.helper('t3', 'h2', state='finished', status=None, exit_code=None, reason='killed')
         self.helper('t4', 'h3', state='finished', status=None, exit_code=0, reason='exited')
         self.helper('t5', 'h4', state='finished', status=None, exit_code=1, reason='exited')
-        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'h4': {'name': 'h4', 'role': 'helper', 'state': 'closed'}}}))
+        (self.jd / 'tree.json').write_text(json.dumps({'nodes': {'h4': {'name': 'h4', 'role': 'helper', 'state': 'closed', 'address': 't5'}}}))
         self.sweep()
         self.sweep()
         dead = sorted((e['agent'], e['reason'], e.get('last_state'), e['event_id']) for e in self.queued())
@@ -503,6 +506,135 @@ class Helpers(NativeCase):
         self.sweep()
         self.sweep()
         self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def bad_hc(self, script):
+        """Run the sweep's hc through a wrapper: script (sh) may answer first; otherwise the fake answers."""
+        wrapper = self.root / 'bad-hc'
+        wrapper.write_text(f'#!/bin/sh\n{script}\nexec {shlex_quote(os.environ["HC"])} "$@"\n')
+        wrapper.chmod(0o755)
+        return mock.patch.dict(os.environ, {'HC': str(wrapper)})
+
+    def node(self, name='h1', address='t2', **fields):
+        tree = json.loads((self.jd / 'tree.json').read_text()) if (self.jd / 'tree.json').is_file() else {'nodes': {}}
+        tree['nodes'][name] = {'name': name, 'role': 'helper', 'state': 'live', 'address': address, **fields}
+        (self.jd / 'tree.json').write_text(json.dumps(tree))
+
+    def gone_from_core(self, *addresses):
+        state = self.state()
+        for address in addresses:
+            del state['terminals'][address]
+        self.shape(**state)
+
+    def test_a1_a_failed_helper_list_on_the_first_on_pass_keeps_when_alerts_began(self):
+        self.setting(False)
+        self.sweep()
+        self.setting(True)
+        with self.bad_hc('case "$1 $*" in "ls "*stampede.role=helper*) exit 1;; esac'):
+            self.sweep()
+        began = self.sweep_state()['alerts']['since']
+        self.assertGreater(began, 0)
+        self.helper(state='finished', status=None, exit_code=1, reason='exited', finished_ms=int(time.time() * 1000))
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+        self.assertEqual(self.sweep_state()['alerts']['since'], began)
+
+    def test_a1_so_does_a_failed_lead_list(self):
+        self.setting(False)
+        self.sweep()
+        self.setting(True)
+        with self.bad_hc('[ "$1" = ls ] && exit 1'):
+            self.sweep()
+        self.assertGreater(self.sweep_state()['alerts']['since'], 0)
+
+    def test_a2_a_sweep_during_stampede_close_raises_no_alarm(self):
+        self.helper()
+        self.helper('t3', 'h2', parent='t2')
+        self.node()
+        self.node('h2', 't3', parent='h1')
+        self.sweep()
+        real = hcapi_.hc
+
+        def interleaved(*args, **kw):
+            result = real(*args, **kw)
+            if args[0] in ('kill', 'rm'):
+                self.sweep()  # a watchdog pass between close's kill or rm and its closed mark
+            return result
+        with mock.patch.object(hcapi_, 'hc', side_effect=interleaved), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(native_.close(self.jd, 'h1'), 0)
+        self.assertIn('CLOSED h1 (t2)', out.getvalue())
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+
+    def test_a2_close_s_intent_holds_when_its_last_write_never_came(self):
+        self.helper()
+        self.node()
+        self.sweep()
+        (self.jd / 'close-intent.log').write_text('t2\n')  # close got that far, then the tree write failed
+        self.gone_from_core('t2')
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+
+    def test_a3_an_incomplete_get_is_no_answer(self):
+        self.helper()
+        self.sweep()
+        for answer in ('{}', '{"address": "t9", "state": "finished", "reason": "exited", "exit_code": 1}',
+                       '{"address": "t2", "reason": "exited", "exit_code": 1}', 'not json'):
+            with self.bad_hc(f'[ "$1" = get ] && [ "$3" = t2 ] && {{ printf "%s\\n" {shlex_quote(answer)}; exit 0; }}'):
+                self.sweep()
+            self.assertEqual(self.queued(), [], answer)
+            self.assertFalse(self.sweep_state()['terminals']['t2']['finished'], answer)
+        self.terminal('t2', state='finished', status=None, exit_code=1, reason='exited', finished_ms=int(time.time() * 1000))
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'h1', f'{self.key}/t2|finished')])
+
+    def test_a4_a_helper_whose_end_is_pending_is_never_stale(self):
+        self.helper('t9', 'plain', role=None)
+        self.helper('t2', 'child', parent='t9')
+        self.sweep()
+        self.stall()
+        self.terminal('t2', state='finished', status=None, reason='killed', finished_ms=1234)
+        self.shape(get_error={'t9': 'unavailable'})
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+        self.assertNotIn('stall', self.sweep_state()['terminals']['t2'])
+        self.shape(get_error={})
+        self.sweep()
+        self.assertEqual(self.posted(), [('dead', 'child', f'{self.key}/t2|finished')], 'its parent is live: no branch end')
+
+    def test_a5_a_helper_killed_and_removed_between_passes_is_dead(self):
+        self.sweep()
+        self.helper()
+        self.node()
+        self.gone_from_core('t2')
+        self.sweep()
+        self.sweep()
+        self.assertEqual([(e['state'], e['agent'], e['reason']) for e in self.queued()], [('dead', 'h1', 'lost')])
+
+    def test_a5_but_not_one_gone_before_alerts_began(self):
+        self.setting(False)
+        self.node(state='gone')
+        self.sweep()
+        self.setting(True)
+        self.sweep()
+        self.sweep()
+        self.assertEqual(self.queued(), [])
+
+    def test_a6_a_branch_end_needs_both_times(self):
+        for child, parent in ((None, 1000), (1000, None)):
+            self.setUp()
+            self.helper()
+            self.sweep()
+            self.terminal('t2', state='finished', status=None, reason='killed', finished_ms=child)
+            self.terminal('t1', state='finished', status=None, reason='killed', finished_ms=parent)
+            self.sweep()
+            self.assertEqual(self.posted(), [('dead', 'lead-x', f'{self.key}/t1|finished')], (child, parent))
+            self.assertFalse(self.sweep_state()['terminals']['t2']['finished'], 'the order is unknown: pending')
+            self.gone_from_core('t1')
+            self.sweep()
+            self.assertEqual(self.posted()[1:], [('dead', 'h1', f'{self.key}/t2|finished')], 'Core no longer knows the parent')
 
     def test_a_plain_child_is_never_reported(self):
         self.helper('t5', 'ci-wait', role=None, status={'state': 'blocked', 'kind': 'permission'})

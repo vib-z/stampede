@@ -126,7 +126,7 @@ class Watcher:
         path = self.job / self.STATE
         state, self.first = (json.loads(path.read_text()), False) if path.is_file() else ({}, True)
         self.terminals, self.sent = state.get('terminals', {}), set(state.get('sent', []))
-        self.since, self.skip = state.get('helpers_since'), ('relay', 'wait')  # the sweep's: when helper alerts began
+        self.alerts, self.skip, self.pending = state.get('alerts'), ('relay', 'wait'), set()  # the sweep's helper alerts
         self.unsent, self.retried = state.get('unsent', {}), None  # identity -> event, for the bot, not yet taken
         self.checked, self.screens = None, {}  # each handed agent's screen, read with its identity
 
@@ -134,7 +134,7 @@ class Watcher:
         path = self.job / self.STATE
         temporary = path.with_name('.' + self.STATE + '.tmp')
         saved = {'terminals': self.terminals, 'sent': sorted(self.sent), 'unsent': self.unsent}
-        temporary.write_text(json.dumps({**saved, **({'helpers_since': self.since} if self.since is not None else {})}))
+        temporary.write_text(json.dumps({**saved, **({'alerts': self.alerts} if self.alerts is not None else {})}))
         os.replace(temporary, path)
 
     def track(self, address, agent, role):
@@ -233,7 +233,7 @@ class Watcher:
             return
         self.checked, now, limit = clock(), wall(), stale_after()
         for address, record in self.terminals.items():
-            if record['finished'] or record['role'] in self.skip or record['status'] != 'working':
+            if record['finished'] or record['role'] in self.skip or address in self.pending or record['status'] != 'working':
                 record.pop('stall', None)
                 continue
             if record.get('pane'):
@@ -263,9 +263,10 @@ class Sweep(Watcher):
     follower posts: blocked (kind, msg) and error once per episode, stale (with minutes_unchanged) once per stall, and
     dead once. The lead is dead when no live terminal carries its labels (stampede.job=<key>, stampede.role=lead), or the
     one that does is a shell in a lost program's place; never when it exited 0 by itself. A helper's end is judged by
-    Core's record of it (helper_end). <job>/sweep-state.json keeps what it saw and sent, which no setting ever clears,
-    helpers_since (when it first saw helper alerts on), and every event the relay did not take, tried again first on
-    the next pass, whatever the setting."""
+    Core's record of it (helper_end); what cannot be established stays pending. <job>/sweep-state.json keeps what it
+    saw and sent, which no setting ever clears; alerts (since: when a pass first saw helper alerts on; before: the
+    helpers not yet seen alive since then); and every event the relay did not take, tried again first on the next pass,
+    whatever the setting."""
     STATE = 'sweep-state.json'
 
     def tell(self, text):
@@ -273,18 +274,20 @@ class Sweep(Watcher):
 
     def look(self):
         self.retry(now=True)
-        if self.leads() is None:
-            return  # Core did not answer clearly: no news
         if not helpers_on(self.job):  # off: helpers are not looked at, and their stall clocks stop
-            self.since, self.skip = None, ('relay', 'wait', 'helper')
+            self.alerts, self.skip = None, ('relay', 'wait', 'helper')
             for record in self.terminals.values():
                 if record['role'] == 'helper':
                     record.pop('stall', None)
-        else:
-            if self.since is None:  # a job first seen with it on: all Core holds of it counts
-                self.since = 0 if self.first else int(wall() * 1000)
-            if self.helpers() is None:
-                return
+        elif self.alerts is None:  # saved before any call that can fail. A job first seen with it on: all Core holds counts
+            first = self.first
+            self.alerts = {'since': 0 if first else int(wall() * 1000), 'before': [] if first else sorted(
+                set(started_helpers(self.job)) | {a for a, r in self.terminals.items() if r['role'] == 'helper' and not r['finished']})}
+        self.save()
+        if self.leads() is None:
+            return  # Core did not answer clearly: no news
+        if self.alerts is not None and self.helpers() is None:
+            return
         self.stalls()
         self.save()
 
@@ -324,35 +327,52 @@ class Sweep(Watcher):
         return set()
 
     def helpers(self):
-        """Each helper's pass, beside the lead's; None when Core did not answer the list. A helper whose hc get, or whose
-        parent's, gives no clear answer stays as it is until a later pass."""
+        """Each helper's pass, beside the lead's; None when Core did not answer the list. A helper is judged only on a
+        complete answer; one Core gives no clear answer for stays pending (unjudged, no stall scan) until a later pass."""
         code, listed = hc('ls', '--all', '--label', 'stampede.job=' + self.key, '--label', 'stampede.role=helper')
         if code != 0 or not isinstance(listed.get('terminals'), list):
             return None
-        rows = {row['address']: row for row in listed['terminals'] if row.get('address')}
-        closed = closed_names(self.job)
-        for address, row in rows.items():
+        rows = {row['address'] for row in listed['terminals'] if isinstance(row, dict) and row.get('address')}
+        for address in rows:
             if self.terminals.get(address, {}).get('finished'):
                 continue
-            code, terminal = hc('get', address)
-            if code != 0:
+            terminal = complete(address, *hc('get', address))
+            if terminal is None:
+                self.hold(address)
                 continue
             self.track(address, (terminal.get('labels') or {}).get('stampede.agent') or address, 'helper')
-            if terminal.get('state') == 'live' and not shelled(terminal):
+            if terminal['state'] == 'live' and not shelled(terminal):
                 self.observe(address, terminal.get('status'), terminal.get('turn'))
+                self.alerts['before'] = [a for a in self.alerts['before'] if a != address]  # seen alive since alerts began
             else:
-                self.end(address, terminal if terminal.get('state') != 'live' else {'reason': 'lost'}, closed)
-        for address, record in list(self.terminals.items()):
-            if record['role'] == 'helper' and not record['finished'] and address not in rows:
-                self.end(address, {'reason': 'lost'}, closed)  # removed from Core
+                self.end(address, terminal if terminal['state'] == 'finished' else {'reason': 'lost'})
+        tracked = {a for a, r in self.terminals.items() if r['role'] == 'helper' and not r['finished']}
+        nodes = started_helpers(self.job)
+        for address, node in nodes.items():  # started, then gone from Core before a pass saw it
+            if address not in rows and address not in self.terminals:
+                self.track(address, node['name'], 'helper')
+                tracked.add(address)
+        for address in sorted(tracked - rows):  # removed from Core: its end as tree.json last recorded it, else lost
+            node = nodes.get(address, {})
+            if address in self.alerts['before']:
+                self.hold(address)  # not seen alive since alerts began: when it ended is unknown, so no news
+            else:
+                self.end(address, {'reason': node.get('reason'), 'exit_code': node.get('exit_code')}
+                         if node.get('state') == 'finished' and node.get('reason') else {'reason': 'lost'})
         return True
 
-    def end(self, address, terminal, closed):
-        verdict = helper_end(terminal, self.since, self.terminals[address]['agent'] in closed)
+    def hold(self, address):
+        self.pending.add(address)
+        self.terminals.get(address, {}).pop('stall', None)
+
+    def end(self, address, terminal):
+        verdict = helper_end(terminal, self.alerts['since'], address in closed_addresses(self.job))
         if verdict == 'quiet':
             self.terminals[address]['finished'] = True
         elif verdict == 'dead':
             self.gone(address, terminal)
+        else:
+            self.hold(address)
 
     def gone(self, address, data):
         record = self.terminals[address]
@@ -364,25 +384,38 @@ class Sweep(Watcher):
                     post={'state': 'dead', 'last_state': record['last'], 'exit_code': code, 'reason': reason})
 
 
+def complete(address, code, terminal):
+    """Core's record of a terminal, only when it is one: exit 0, the address asked for and an explicit live or finished
+    state; else None (no answer)."""
+    ok = code == 0 and isinstance(terminal, dict) and terminal.get('address') == address and terminal.get('state') in ('live', 'finished')
+    return terminal if ok else None
+
+
 def helper_end(terminal, since, closed):
     """dead, quiet or pending, from Core's record of a helper's end (reason, exit_code, finished_ms, die_with_parent,
-    parent). Quiet: stampede close ended it, it ended before helper alerts began (since, in ms), it exited 0 by itself,
-    or Core ended it with its parent's branch: it dies with its parent, and that parent finished no later than it did.
-    Its own non-zero exit is dead whatever its parent did. A kill or a loss is dead unless it was that branch end; a
-    parent lookup that is not a clear finished, live or not found is pending."""
+    parent). Quiet: stampede close is ending it, it ended before helper alerts began (since, in ms), it exited 0 by
+    itself, or Core ended it with its parent's branch: it dies with its parent, and that parent finished no later than
+    it did, both times recorded. Its own non-zero exit is dead whatever its parent did. Any other kill or loss is dead;
+    when the parent's record, or either time, is not there to tell, it is pending, and dead once Core no longer knows
+    the parent."""
     ended = terminal.get('finished_ms')
-    if closed or ended is not None and ended < since:
+    if closed or isinstance(ended, int) and ended < since:
         return 'quiet'
     if (terminal.get('reason') or 'exited') == 'exited':
         return 'quiet' if terminal.get('exit_code') == 0 else 'dead'
     if not terminal.get('die_with_parent') or not terminal.get('parent'):
         return 'dead'
-    code, parent = hc('get', terminal['parent'])
-    if code == 3 or code == 0 and parent.get('state') == 'live':
+    code, answer = hc('get', terminal['parent'])
+    if code == 3:
         return 'dead'
-    if code != 0 or parent.get('state') != 'finished':
+    parent = complete(terminal['parent'], code, answer)
+    if parent is None:
         return 'pending'
-    return 'quiet' if ended is None or (parent.get('finished_ms') or 0) <= ended else 'dead'
+    if parent['state'] == 'live':
+        return 'dead'
+    if not isinstance(ended, int) or not isinstance(parent.get('finished_ms'), int):
+        return 'pending'
+    return 'quiet' if parent['finished_ms'] <= ended else 'dead'
 
 
 def helpers_on(job):
@@ -393,13 +426,28 @@ def helpers_on(job):
         return False
 
 
-def closed_names(job):
-    """The helpers stampede close ended by name: their nodes in <job>/tree.json say closed."""
+def closed_addresses(job):
+    """The addresses stampede close ends or ended: those it wrote to <job>/close-intent.log before ending anything, and
+    the nodes in <job>/tree.json that say closed. Read at each judgement, so a close that began since the listing counts."""
+    try:
+        intent = set((job / 'close-intent.log').read_text().split())
+    except OSError:
+        intent = set()
+    return intent | {node.get('address') for node in tree_nodes(job).values() if node.get('state') == 'closed'}
+
+
+def started_helpers(job):
+    """{address: node} of every helper whose start <job>/tree.json records (the node with its name)."""
+    return {n['address']: {**n, 'name': n.get('name') or name} for name, n in tree_nodes(job).items()
+            if n.get('role') == 'helper' and n.get('address')}
+
+
+def tree_nodes(job):
     try:
         nodes = json.loads((job / 'tree.json').read_text()).get('nodes') or {}
-        return {name for name, node in nodes.items() if isinstance(node, dict) and node.get('state') == 'closed'}
+        return {name: node for name, node in nodes.items() if isinstance(node, dict)} if isinstance(nodes, dict) else {}
     except (OSError, ValueError, AttributeError):
-        return set()
+        return {}
 
 
 def started(job):

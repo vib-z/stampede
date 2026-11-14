@@ -853,6 +853,8 @@ def close(job, name=None):
     if os.environ.get('HC_TERMINAL_ID') in [target['address']] + [t['address'] for _, t in under]:
         raise ValueError(f'close {name} from outside its tree: this terminal is {name} or under it')
     failed, closed = False, []
+    with open(job / 'close-intent.log', 'a') as intent:  # before anything ends: the watchdog's sweep reads it (no alarm)
+        intent.write(''.join(t['address'] + '\n' for t in [target] + [t for _, t in under]))
     for _, t in sorted(under, key=lambda pair: -pair[0]) + [(0, target)]:
         tags, address = labels(t), t['address']
         shown = (tags.get('stampede.agent') if tags.get('stampede.role') else None) or t.get('name') or address

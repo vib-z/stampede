@@ -10,8 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / 'tests/fixtures/hc-schema-0.1.20.json'
-TERMINAL = ('address', 'argv', 'die_with_parent', 'exit_code', 'keep', 'labels', 'name', 'parent', 'reason', 'state', 'status', 'status_ms',
-            'turn')
+TERMINAL = ('address', 'argv', 'die_with_parent', 'exit_code', 'finished_ms', 'keep', 'labels', 'name', 'parent', 'reason', 'state', 'status',
+            'status_ms', 'turn')
 USES = {
     'run': ('terminal.run', ('argv', 'cwd', 'keep', 'labels', 'name', 'no_notify', 'no_parent', 'outlive_parent', 'parent'),
             ('name_taken', 'spawn_failed'), ('address', 'name')),
