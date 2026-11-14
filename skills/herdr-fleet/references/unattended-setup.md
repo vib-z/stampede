@@ -20,16 +20,16 @@ An agent cannot apply these: writing its own permission settings is refused as S
 - Extend `autoMode.allow` to "Claude, Codex, Hermes (`--yolo`), Kimi (`-y`) or Cursor agents" when those run. The classifier reads `autoMode` from user settings or `--settings` only, never from a project's settings.
 - **Never allowed:** `herdr pane run` and `herdr pane send-keys` (either types any command into any shell, a path around the classifier), the closing commands and `server stop`.
 
-It makes the file when it is missing, backs up one that exists, then merges and keeps every setting already there; safe to run again:
+It adds what is missing, sets `skillOverrides["auto-mode-setup"]` to `off`, and keeps everything else. It makes the file when there is none. Before it changes a file it copies it to a new backup beside it, never over an older one; when nothing would change it writes nothing and prints `already set`. Safe to run again:
 
 ```bash
 python3 - <<'EOF'
-import json, os, shutil, time
+import copy, json, os, shutil, time
 p = os.path.expanduser('~/.claude/settings.json')
 os.makedirs(os.path.dirname(p), exist_ok=True)
 t = open(p).read() if os.path.exists(p) else ''
-if os.path.exists(p): shutil.copy2(p, p + '.bak-' + time.strftime('%Y%m%d-%H%M%S'))
-s = json.loads(t) if t.strip() else {}
+old = json.loads(t) if t.strip() else {}
+s = copy.deepcopy(old)
 def add(l, xs): l.extend(x for x in xs if x not in l)
 R = os.environ.get('FLEET_TRUST_ROOT', '~/code')
 s.setdefault('skillOverrides', {})['auto-mode-setup'] = 'off'
@@ -46,8 +46,18 @@ add(M.setdefault('environment', ['$defaults']), [
 add(M.setdefault('allow', []), ['$defaults',
     'On this machine, starting Claude or Codex agents in herdr panes, prompting them, and answering their startup dialogs (folder trust '
     'for repos under ' + R + ', the Codex continue-without-trusting-hooks choice) is allowed.'])
-json.dump(s, open(p, 'w'), indent=2)
-print('settings.json updated' + ('; backup saved alongside' if t else ''))
+if s == old:
+    print('settings.json already set')
+else:
+    if os.path.exists(p):
+        stem = p + '.bak-' + time.strftime('%Y%m%d-%H%M%S')
+        backup, n = stem, 2
+        while os.path.exists(backup):
+            backup, n = f'{stem}-{n}', n + 1
+        shutil.copy2(p, backup)
+        print('backup: ' + backup)
+    json.dump(s, open(p, 'w'), indent=2)
+    print('settings.json updated')
 EOF
 ```
 

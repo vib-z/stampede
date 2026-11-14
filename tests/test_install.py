@@ -670,7 +670,8 @@ class Install(unittest.TestCase):
 
 class UnattendedSettings(unittest.TestCase):
     """The one-time settings command in unattended-setup.md, taken from the page and run in a scratch HOME: it makes
-    ~/.claude/settings.json from nothing, keeps every setting already there, and gives the same file when run again."""
+    ~/.claude/settings.json from nothing, adds what is missing, sets auto-mode-setup off, keeps every other setting,
+    backs a changed file up under a name no backup has yet, and writes nothing when nothing would change."""
 
     def run_snippet(self, home):
         page = (ROOT / 'skills/herdr-fleet/references/unattended-setup.md').read_text()
@@ -678,24 +679,55 @@ class UnattendedSettings(unittest.TestCase):
         env = {'HOME': str(home), 'PATH': os.environ['PATH']}
         done = subprocess.run([sys.executable, '-'], input=code, env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
-        return json.loads((home / '.claude/settings.json').read_text())
+        return done.stdout
+
+    def settings(self, home):
+        return home / '.claude/settings.json'
+
+    def backups(self, home):
+        return sorted((home / '.claude').glob('settings.json.bak-*'))
 
     def test_from_nothing_an_empty_file_or_other_settings(self):
-        for start in (None, '', '{"theme": "dark", "permissions": {"allow": ["Bash(ls:*)"]}}'):
+        other = '{"theme": "dark", "skillOverrides": {"auto-mode-setup": "on", "x": "y"}, "permissions": {"allow": ["Bash(ls:*)"]}}'
+        for start in (None, '', other):
             with tempfile.TemporaryDirectory() as folder:
                 home = Path(folder)
                 if start is not None:
                     (home / '.claude').mkdir()
-                    (home / '.claude/settings.json').write_text(start)
-                first = self.run_snippet(home)
-                backups = list((home / '.claude').glob('settings.json.bak-*'))
-                self.assertEqual(len(backups), 0 if start is None else 1, 'only a file that exists is backed up')
+                    self.settings(home).write_text(start)
+                self.run_snippet(home)
+                first = json.loads(self.settings(home).read_text())
+                self.assertEqual(len(self.backups(home)), 0 if start is None else 1, 'only a file that exists is backed up')
                 self.assertEqual(first['skillOverrides']['auto-mode-setup'], 'off', start)
                 self.assertIn('Bash(herdr agent start:*)', first['permissions']['allow'])
-                self.assertEqual(self.run_snippet(home), first, 'a second run changes nothing')
-                if start and start.strip():
-                    self.assertEqual(first['theme'], 'dark')
+                if start:
+                    self.assertEqual((first['theme'], first['skillOverrides']['x']), ('dark', 'y'), 'other keys are kept')
                     self.assertIn('Bash(ls:*)', first['permissions']['allow'])
+
+    def test_three_runs_make_one_backup_of_the_original(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            (home / '.claude').mkdir()
+            original = b'{"theme": "dark"}\n'
+            self.settings(home).write_bytes(original)
+            self.assertIn('settings.json updated', self.run_snippet(home))
+            written = self.settings(home).read_bytes()
+            for _ in range(2):
+                self.assertIn('already set', self.run_snippet(home))
+                self.assertEqual(self.settings(home).read_bytes(), written, 'a run with nothing to change writes nothing')
+            self.assertEqual([b.read_bytes() for b in self.backups(home)], [original])
+
+    def test_a_backup_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            (home / '.claude').mkdir()
+            self.settings(home).write_text('{"theme": "dark"}')
+            self.run_snippet(home)
+            changed = json.loads(self.settings(home).read_text())
+            changed['skillOverrides']['auto-mode-setup'] = 'on'
+            self.settings(home).write_text(json.dumps(changed))
+            self.run_snippet(home)   # most often in the same second as the first: the second backup takes a -2 name
+            self.assertEqual(sorted(b.read_text() for b in self.backups(home)), sorted(['{"theme": "dark"}', json.dumps(changed)]))
 
 
 if __name__ == '__main__':
