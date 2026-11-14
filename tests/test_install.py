@@ -513,6 +513,17 @@ class Install(unittest.TestCase):
         self.assertNotIn('every change', undone.stdout)
         self.assertEqual((units / 'herdr-event-watchdog.service').read_text(), written)   # stays, as the rollback said
 
+    def test_a_unit_whose_write_failed_is_named_neither_by_the_install_nor_by_the_rollback(self):
+        (self.home / '.config').write_text('a file where the config folder goes')
+        result = self.run_install('--replace', '--supervise', env=self.linux())
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('could not make', result.stderr)
+        self.assertNotIn('timer unit files written', result.stdout + result.stderr)
+        undone = self.undo(self.rollback(result, 'stderr'))
+        self.assertNotIn('kept', undone.stdout)
+        self.assertEqual(undone.stdout.splitlines()[-1], 'rolled back: every link and folder that run made is undone')
+        self.assertEqual((self.home / '.config').read_text(), 'a file where the config folder goes')
+
     def test_replace_keeps_a_timer_unit_that_is_already_right_and_a_plain_install_rewrites_as_before(self):
         env = self.linux()
         self.assertEqual(self.run_install('--supervise', env=env).returncode, 0)

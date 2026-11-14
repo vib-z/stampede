@@ -80,7 +80,7 @@ while [ "$i" -gt 0 ]; do
       if [ -L "$p" ]; then left "$p: a folder install.sh made is a link now"
       elif [ -d "$p" ]; then rmdir "$p" 2>/dev/null || left "$p: a folder install.sh made, not empty now"
       elif there "$p"; then left "$p: a folder install.sh made is something else now"; fi;;
-    unit) units="$p${s:+ (its older copy is $s)}${units:+, }$units";;   # newest first here, so in the order written
+    unit) if there "$p"; then units="$p${s:+ (its older copy is $s)}${units:+, }$units"; fi;;   # only one written; newest first, so in order
     *) left "$p: a step this rollback does not know (${K[$i]})";;
   esac
   i=$((i-1))
