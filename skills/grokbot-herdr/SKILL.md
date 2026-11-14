@@ -1,83 +1,66 @@
 ---
 name: grokbot-herdr
-description: "FIRST skill to read whenever a Grok Bot needs Herdr on the owner's Mac: handles the remote entry from the box (SSH over Tailscale, health check, workspace lookup, safe agent start), then hands off to herdr, herdr-fleet and moshi-best-practices for the actual work."
+description: "FIRST skill to read whenever a Grok Bot, or any bot outside Herdr, needs Herdr on the owner's machine: connect over SSH, health check, a tagged workspace, a safe stampede start, then act only on the events that come back. Hands off to herdr and herdr-fleet."
 ---
 
-> **STRICT, every bot:** tag the Herdr workspace with your bot slug before agents start, launch and exit, never poll or wait on a job (no `herdr agent wait` for its result, sleep loops, repeated reads or watcher executors). Act only when the relayed event arrives. Bounded startup checks are fine: `agent start`, `herdr-send` and `agent wait <name> --until idle --timeout 30000` after clearing a startup dialog.
-# grokbot-herdr: remote entry to Herdr on the owner's Mac
+# grokbot-herdr: a bot's way into Herdr
 
-## First look here
-You are a Grok Bot on the box, OUTSIDE Herdr. Before any Herdr work:
-1. Read this skill and do steps 1-4 below (connect, health check, workspace, start agent).
-2. Then hand off: use `herdr` for ground rules and commands, `herdr-fleet` for fleet shape, roles, model routing and failure-modes.md, and `moshi-best-practices` for the phone side, as written.
-3. herdr-fleet's **Where are you?** section covers external callers; keep the **After hand-off** lines at the bottom in force.
+For: a bot on its own computer, OUTSIDE Herdr, that starts and relays a stampede job on the owner's machine over SSH.
+Use before any Herdr work; then herdr-fleet's external-caller rules ([SKILL.md](../herdr-fleet/SKILL.md)), `herdr` and moshi-best-practices.
+Every `stampede` command and its output: [docs/CLI.md](../../docs/CLI.md). An event's line may say `fleet-job`: the same command.
 
-## Running from Grok Bot
+## Steps
 
-- Grok Bot runs on a Linux box. Anything that touches the owner's repos, herdr or the Mac runs on the Mac through `ssh <host>` (the SSH alias of the owner's Mac, over Tailscale). If ssh times out, bring Tailscale back up on the box, then retry.
-- herdr on the Mac is `~/.local/bin/herdr` (0.9.5 when last checked, 2026-11-11). Run `herdr --version` on the Mac first and treat the Mac's binary as the authority. Run herdr ON the Mac over ssh, never `herdr --remote` or `--machine` from the box: the Mac has no saved machine profiles.
-- Never use a work machine. Only the owner's own machines.
-- Questions for the owner go to the owner in chat, never into a herdr pane.
-- Credentials and env files are not part of this skill: never read, copy or print them, on either machine.
-- Approval gate: ask the owner in chat and wait for an explicit yes. The list, what is allowed without asking and the merge rule: [herdr-fleet's gates.md](../herdr-fleet/references/gates.md).
-- Then follow herdr-fleet's "Where are you?" external-caller rules: literal ids, never set `HERDR_ENV`, read the screen after every start, report in chat.
+1. **Connect.** Every call: `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '<command>'`. Not found: prefix `export PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH;`. ssh fails: bring Tailscale up on the box, retry once, then tell the owner (the machine is likely asleep).
+2. **Health check:** `stampede doctor --tui` (a Core job: `--core`), read only.
+   - Exit 0: go on; report each `warn`, fix only your own (a stale tag or worktree).
+   - Exit 1: stop and tell the owner the `PROBLEM` lines. A `PROBLEM herdr`: never start the server.
+   - `event relay not installed`: run `herdr-doctor --relay` with the same `--tui` or `--core`; stop on its `PROBLEM` lines.
+3. **Size the job** by herdr-fleet's sizing rule. Small: no job, one tagged pane of your own, `herdr-send` to a [brief](../herdr-fleet/references/brief.md); never a bare agent CLI over SSH or `nohup`.
+4. **Workspace and tag** (a TUI job):
+   - Make your own: `herdr workspace create --cwd <repo> --label bot-<task> --no-focus`, and keep its literal ids.
+   - Tag it before any agent starts: `herdr-events-owner <workspace id> <bot slug>`. Untagged, your bot hears none of its questions or gates.
+   - Ids, the first tab, a project workspace: [workspace.md](references/workspace.md).
+5. **Start the lead.** Write the owner's words to `ask.md` and copy it over: `ssh -o BatchMode=yes <host> 'cat > /tmp/ask-<task>.md' < ask.md`. Then on the machine:
+
+```bash
+herdr-trust <repo>                                             # a repo under the trust root
+stampede new --file /tmp/ask-<task>.md --pane <root pane id>   # or --workspace <id>
+HERDR_EVENTS_OWNER=<bot slug> stampede new --core --file /tmp/ask-<task>.md --cwd <repo>   # on Herdr Core
+```
+
+   - `--lead codex` when the owner asks for a Codex lead; `--review` when they asked to see the plan first ([share-plan](../share-plan/SKILL.md)). Never `--front-door`: a bot relays its own jobs.
+   - The ask names every parallel step as a pane (`research-web`), or the lead runs it as a hidden subagent.
+   - It prints `<lead> <job dir>`: tell the owner its name. Read the screen once: `herdr agent read <lead> --source visible --lines 30` (Core: `hc read <address>`); a dialog: [workspace.md](references/workspace.md).
+6. **End your turn.** Only an event wakes you; hooks wake the lead.
+7. **On an event,** read once, act, end your turn. A TUI job: first read the new lines of `<job dir>/inbox.log` once.
+
+| event (`source` `state`) | do |
+|---|---|
+| `stampede question` | ask the owner in chat, then run its `answer` with their words |
+| `stampede gate` | ask the owner in chat with its action, PR and commit; on their yes to that gate run its `approve` line over plain ssh (never `hc exec`); else its `deny` with their words |
+| `stampede post` | show the owner the text and send its files; nothing to answer |
+| `stampede done` | report its `summary`, then ask the close question (below) |
+| `herdr`, `claude`, `herdr-watchdog`: blocked, a permission prompt, `StopFailure`, `stale`, `dead` | read that pane once, tell the owner |
+| `hc`: blocked, error, stale, dead | `hc read <address>` once (`stampede tree <job dir>` lists them), never type into it; answer with `stampede tell <job dir> lead "..."` |
+| a turn end, no open job | read the pane once and finish |
 
 ## Hard rules
-- Target ONLY the ssh alias `<host>`: the owner's own Mac with the owner's own Claude, Codex and Cursor subscriptions. Never a machine on work subscriptions unless the owner asks in chat for that job.
-- Run herdr ON the Mac via ssh. Never `herdr --remote`/`--machine` from the box. Never start/stop `herdr server` or the TUI.
-- Never touch workspaces, tabs or panes you didn't create (the owner's own project workspaces above all).
-- Never poll a running job. After the first prompt and one screen check, end your turn and wait. A small job (no job marker) wakes you on its turn end. A stampede job wakes you on blocked, a permission prompt, StopFailure, stale, dead, a question, a gate, a post, or the one done from `fleet-job finish` (source `stampede`). Only then read the pane, once.
-- Always prompt agents with `herdr-send <name-or-pane> "<text>"` (grokbot-herdr/scripts/herdr-send, installed at `~/.local/bin/herdr-send`) or `herdr agent prompt`, never `pane send-text` plus Enter (Codex leaves it unsubmitted). Never send `ctrl+c` to an idle Codex yourself: on an empty prompt it quits Codex (herdr-send clears only typed leftovers). Continue only on `SUBMITTED`; on `FAILED` read the screen before any resend. If Claude kept the text but dropped the Enter (it can while still drawing its screen), herdr-send presses Enter once and says so; it never does that for a slash command.
 
-## Size the job first
-Before creating any workspace, size the job (herdr-fleet, "Size the job first: small or big"). A small job needs no stampede job: do it as one session with built-in subagents in a single Herdr pane of its own, tagged with `herdr-events-owner` and prompted with `herdr-send` pointing at a brief file on herdr-fleet's [hand-off template](../herdr-fleet/references/brief.md), never as a bare agent CLI call over SSH or nohup outside Herdr. Only a big job goes through `fleet-job new`.
+- Target only `<host>`, the owner's own machine; a work machine only when the owner asks in chat for that job.
+- Run herdr on the machine over ssh: never `herdr --remote` or `--machine` from the box, never start or stop `herdr server` or the TUI, never set `HERDR_ENV`.
+- Never poll a job (no `herdr agent wait` for a result, sleep loops, repeated reads or watchers). Fine: `agent start`, `herdr-send`, `herdr agent wait <name> --until idle --timeout 30000` after clearing a dialog.
+- Prompt only with `herdr-send <name or pane> "<text>"` or `herdr agent prompt`, never `pane send-text` and Enter. Go on only on `SUBMITTED`; on `FAILED` read the screen first ([send.md](../../remote/grokbot/send.md)). Never `ctrl+c` an idle Codex: it quits.
+- Touch only the workspaces, tabs and panes you created; never the owner's project workspaces.
+- Questions for the owner go to them in chat, never into a pane.
+- Gates are the owner's yes in chat ([gates.md](../herdr-fleet/references/gates.md)). Never type a yes into a pane, approve a gate they did not answer, or change its commit: a push after the yes withdraws it.
+- Never read, copy or print credentials or env files, on either machine.
+- Login, payment, an account switch, trust for a folder outside the trust root, or anything unfamiliar: stop and ask the owner.
+- Nothing closes when the job ends: refresh the reopen record and end with "Close workspace <label>? Reopen with <job dir>/reopen.sh." No answer is a no.
+- Moshi is read-only for a bot: report a dead pairing, never re-pair. Never delete receipts or invoices.
 
-## Setup note
-Every tagged event goes to the route named after the tag (`~/.config/herdr-events/routes/<bot-slug>`, holding `URL=` and `KEY=`), or to the `default` route when the bot has none (turn events only: a job's questions and gates need the bot's own route file, even when it points at the same webhook); the webhook behind it passes the event to the owning bot as a message. When that message arrives, read the pane once and finish your job.
+## Read when
 
-The relay scripts live in `scripts/` here and are copied to `~/.local/bin` on the Mac (back up the live copy first: `cp -p ~/.local/bin/<s> ~/.local/bin/<s>.bak-<date>`). `herdr-reopen-snapshot` (the reopen record, Step 4 and After hand-off) is copied the same way. Tests: `python3 -m unittest tests.test_herdr_relay tests.test_herdr_send tests.test_herdr_trust tests.test_herdr_reopen_snapshot` from the repo root. What reaches your bot (2026-10-16):
-- While `~/.config/herdr-events/jobs/<workspace>` exists (`fleet-job new` writes it, `fleet-job finish` removes it), plain turn ends in that workspace stay on the machine: Herdr `done`/`idle`, Claude `Stop`, `idle_prompt`, Codex `agent-turn-complete`. Still sent: `blocked` and permission prompts (one per pane per 120 s, whichever source is first), `StopFailure`, `stale`, `dead`, questions, gates, posts, and that one finish. With no marker, Herdr `done`/`idle`, Claude `Stop` and Codex `agent-turn-complete` for one pane within 15 s are one event (the first), and `idle_prompt` 60 s after a turn end is dropped. A Codex turn with no Herdr pane is never sent.
-- Codex sub-agents, the `--approve-for-me` guardian and Codex's chat-title side conversation never report "done"; only the agent's own turn does.
-- After an outage only each pane's newest queued event is delivered; older ones go to `~/.herdr-events/dead/*.superseded`.
-- Owner tags for workspaces gone a day, and malformed tags, are removed by the watchdog.
-- A Herdr Core job (`fleet-job new --core`) has a key `hc-<12 hex>` in place of a workspace id. Its questions, gates, posts and finish come as above (source `stampede`). Only the lead is watched for you: the watchdog's sweep posts `source` `hc` (blocked, error, dead, stale) within about 5 minutes, once per episode, with `pane` `hc:<key>/<address>`. Read that terminal once with `hc read <address>`, a helper too (`fleet-job tree <job dir>` lists them), and never type into one; answer through `fleet-job tell <job dir> lead` ([events.md](../../remote/events.md)). A job on the earlier path (`--core --relay`) has a follower that also posts `done`, `idle` and `relay_down`.
-
-## Step 1. Connect
-Every call: `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '<herdr command>'`. If herdr isn't found, prefix `export PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH;`.
-
-## Step 2. Health check
-`ssh -o BatchMode=yes -o ConnectTimeout=10 <host> '~/.local/bin/herdr-doctor --tui --relay'` (read only; `--tui` keeps a stopped Herdr server a `PROBLEM` on a machine that also runs Herdr Core; checks the herdr server and client, the relay plugin, hooks and launchd jobs, the event queue, owner tags, leftover worktrees and disk; one `ok`, `warn` or `PROBLEM` line each, exit 1 on a PROBLEM).
-- Exit 0: go on. Mention any `warn` line in your report; never fix it yourself unless it is yours (your own stale tag or worktree).
-- Exit 1: stop and tell the owner the PROBLEM lines (a broken relay means your job's events would never reach you).
-- ssh fails -> bring Tailscale back up on the box, then retry once. Still failing -> stop and tell the owner (usually the Mac is asleep/offline).
-- herdr server not running or erroring (a `PROBLEM herdr` line) -> stop and tell the owner; don't start it.
-
-## Step 3. Workspace (by name, never env vars)
-- Existing project workspace id: `ssh -o BatchMode=yes <host> 'herdr workspace list' | jq -r '.result.workspaces[]|select(.label=="<project>").workspace_id'`
-- Bot work: create your own: `herdr workspace create --cwd <repo dir> --label bot-<task> --no-focus`. Record the returned literal ids (`.result.workspace.workspace_id`, `.result.tab.tab_id`, `.result.root_pane.pane_id`, e.g. `wK`, `wK:t1`, `wK:p1`). **First tab rule:** `workspace create` already makes tab 1 with a root pane. Never leave it empty: use it for the first workstream (`herdr tab rename <tab> <label>` on the returned `.result.tab.tab_id`, and put the lead or first agent in `.result.root_pane.pane_id`), and only `tab create` for further workstreams. Before creating tabs in an existing workspace, list its tabs; rename a leftover empty default tab and use it. When the owner says yes to closing (After hand-off) and you created the workspace, close the whole workspace (`herdr workspace close <ws>`), not tab by tab, so no stray tab 1 is left.
-- Tag the owner right away: `~/.local/bin/herdr-events-owner <wK> <your-bot-slug>` (lowercase bot name, e.g. `alpha`). `<wK>` is the literal `.result.workspace.workspace_id` (e.g. `w1K`), never the `.result.workspace` object; the script refuses anything that is not a live workspace id. It also shows your slug as `$owner` in Herdr's sidebar, once the owner's Herdr config lists that token. For one-off commands in a pane, also set `HERDR_EVENTS_OWNER=<your-bot-slug>`. What the relay still sends (the list above) then POSTs to your route (or the default route), which relays it to your bot. Untagged workspaces are only logged, never sent.
-
-## Step 4. Start an agent safely
-Write the owner's words to `ask.md` on the box and copy it to the Mac (`ssh -o BatchMode=yes <host> 'cat > /tmp/ask-<task>.md' < ask.md`), then run `fleet-job new --file /tmp/ask-<task>.md --pane <wK root pane>` there, after the owner tag (Step 3); in an existing project workspace use `--workspace wK` instead. Add `--lead codex` when the owner asks for a Codex (Astra) lead; without it the lead is Claude. It makes the job folder `~/code/herdr-jobs/jobs/<date>-<bot>-<slug>/` (the repo stays the lead's cwd), starts the lead `lead-<slug>` with its hooks in that empty root pane (its tab becomes `lead`, per the first tab rule) or in a new `lead` tab, and prints the lead's name and the job folder; tell the owner the lead's name. When the owner asked to see the plan first, add `--review` and use the share-plan skill.
-- `agent_not_ready` = blocked at a dialog. Some dialogs report `idle` instead, so after every start read the screen once: `herdr agent read <name> --source visible --lines 30`.
-- Codex "Update available" (start returns `agent_not_ready`): the highlighted default is "Update now", which runs npm. Press `herdr agent send-keys <name> esc` to skip it; never Enter.
-- Claude "New MCP server found in this project": `herdr agent send-keys <name> enter` on the default, "Continue without using this MCP server". Prevent it in a folder `herdr-trust` refuses (not a git repo) by writing `{"disabledMcpjsonServers": ["<server>"]}` to `<cwd>/.claude/settings.local.json` before the start (failure-modes.md).
-- Folder trust: before starting agents in a repo under the trust root (`FLEET_TRUST_ROOT`, default `~/code`), run `~/.local/bin/herdr-trust <repo dir>` (owner-approved 2026-10-16). It marks the repo trusted in `~/.claude.json` and `~/.codex/config.toml`, so neither CLI asks. If a trust dialog still shows (a new folder that is not a repo, or the write was refused), Claude: `agent send-keys <name> down`, read to confirm "Yes, I trust this folder" is selected, then `agent send-keys <name> enter` as a separate call; Codex: `agent send-keys <name> enter` on "Trust and continue".
-- After clearing a dialog: `herdr agent wait <name> --until idle --timeout 30000` (a stale `blocked` clears within seconds), then read the screen once more before the first prompt.
-- Login, payment, account switch, trust for a folder outside the trust root, or anything unfamiliar -> stop and ask the owner.
-- Reopen record (17 Oct 2026): `fleet-job new` records the lead's start in `<job dir>/agents.tsv`; once it runs, `herdr-reopen-snapshot wK <job dir>` writes `REOPEN.md` and `reopen.sh` there. Refresh it after every later start and before any close (herdr-fleet, "Reopen record").
-
-Then end your turn. On a stampede job the webhook stays quiet through ordinary turn ends and fires for blocked, a permission prompt, StopFailure, stale, dead, a question, a gate, a post, or the lead's `fleet-job finish`. On an event, read the new lines of `<job dir>/inbox.log` once (a Herdr Core job without `--relay` has none: go by the event). A `QUESTION` line or a `question` event (source `stampede`) for the owner: ask in chat, then `fleet-job tell <job dir> lead "<their words>"`. A gate comes back to you as a `gate` event (source `stampede`: job, gate, exact action, PR, commit): ask the owner in chat with those, and only on their yes to that gate run its `approve` command on the Mac over plain ssh (never `hc exec`: it refuses inside Herdr and Herdr Core), `fleet-job approve-gate <job dir> <gate> --sha <commit> --by "owner in <bot> chat"`; on a no or anything else, `fleet-job tell` the lead their words. A `post` event (source `stampede`: text, outbox number, files on the Mac) is the lead's plan, files, decision or report: show the owner the text and send the files; nothing to answer. Never type a yes into a pane, approve a gate the owner did not answer, or change its commit; a push after the yes withdraws it. Hand off to `herdr` / `herdr-fleet` / `moshi-best-practices` for anything else.
-
-## After hand-off
-herdr-fleet now handles external callers; follow its **Where are you?** section (literal ids, scoped fleet-watch, agent get before prompt, read before resend). Also keep:
-- The ask you write for `fleet-job new` names every parallel step as a pane (`research-web` in tab `research`, `review-claude`), never leaving one unassigned, or the lead runs it as a hidden built-in subagent (herdr-fleet, "Panes, not built-in subagents"). The lead it starts is woken by hooks: it neither polls nor watches, so do not add rules about waiting.
-- Moshi: read-only from bots; if the box's pairing (moshi-hook serve) is dead, report, never re-pair.
-- Done: never close anything, or clear the owner tag, by yourself when the job ends (the owner's rule, 17 Oct 2026). Refresh the reopen record, leave the workspace open, and end your report or done event with the question: "Close workspace <label>? Reopen with <job dir>/reopen.sh." No answer is a no. Only after the owner's explicit yes, as the last step: exit the agents gracefully (`/exit`, `/quit` for Codex), `herdr-reopen-snapshot wK <job dir>`, `~/.local/bin/herdr-events-owner wK --clear`, then `herdr workspace close wK`, only for workspaces you created. Never close project workspaces. Never delete receipts or invoices.
-- Hard rules above stay in force (`<host>` only, herdr on the Mac, never touch what you didn't create).
-
-## Official docs
-- https://herdr.dev/docs/cli-reference/
-- https://herdr.dev/docs/agent-automation/
-
-Re-check both, and `herdr <cmd> --help` on the Mac, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (herdr 0.9.5 on 2026-11-11).
+- The workspace, dialogs, trust, the reopen record, closing, Herdr's docs: [references/workspace.md](references/workspace.md).
+- What reaches your bot and when, installing the relay scripts: [references/relay.md](references/relay.md).
+- Every event field: [remote/events.md](../../remote/events.md). The one-time setup: [remote/grokbot/](../../remote/grokbot/README.md).

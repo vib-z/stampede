@@ -12,9 +12,9 @@ Prove the machine is ready before the first real job, and tell the person in pla
 ## Run
 ```bash
 herdr --version && herdr status
-herdr-doctor --tui --relay                                  # exit 0: go on; exit 1: report the PROBLEM lines
+stampede doctor --tui                               # exit 0: go on; exit 1: report the PROBLEM lines
 claude --version                                    # the lead's CLI
-stampede --help                                     # usage: fleet-job ... {new,start,tell,ask,cancel,approve,hook,_ask}
+stampede --help                                     # usage: stampede <command> [<args>], then every command
 herdr-event-post source=test state=done pane=<pane id>                                    # only when a remote listens
 ```
 
@@ -22,6 +22,6 @@ herdr-event-post source=test state=done pane=<pane id>                          
 This machine is ready for stampede: Herdr <version>, agents <list>, health check clean. Ask me for a job.
 ```
 
-On Herdr Core instead of the Herdr TUI: `herdr-doctor --core` in place of the first two lines ([core.md](../../skills/herdr-fleet/references/core.md)).
+On Herdr Core instead of the Herdr TUI: `stampede doctor --core` in place of the first two lines ([core.md](../../skills/herdr-fleet/references/core.md)).
 
 Anything failed: the fix is in [README, Troubleshoot](../../README.md#troubleshoot) and [docs/SETUP.md](../../docs/SETUP.md#setup-problems). Setup B is done; the job flow is the same as on any machine ([README](../../README.md#how-it-works)).

@@ -1,6 +1,8 @@
 # Any machine: stampede on a remote computer (setup B)
 
-No machine of your own needs to stay on. Everything runs on one remote computer: a Grok Bot or ChatGPT Dots computer, a rented server, or any Mac or Linux machine. Herdr, the agent CLIs and stampede are installed there, and you watch from your phone or laptop. This guide is written for an agent to follow, step by step. Setup A, where a bot drives your own machine, is [grokbot/](../grokbot/README.md).
+No machine of your own needs to stay on. Everything runs on one remote computer: a Grok Bot or ChatGPT Dots computer, a rented server, or any Mac or Linux machine. Herdr, the agent CLIs and stampede are installed there, and you watch from your phone or laptop.
+
+This guide is written for an agent to follow, step by step. Setup A, where a bot drives your own machine, is [grokbot/](../grokbot/README.md).
 
 ## Do
 - Follow the parts in order; finish each one's check before the next.

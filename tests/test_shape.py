@@ -33,10 +33,6 @@ MODEL_OK = ("config.example", "skills/", "tests/")  # the only places a model na
 SKILL_BYTES, PLAYBOOK_BYTES, LINE_CHARS = 6000, 8000, 400  # a playbook is read whole by an agent: short in bytes, not only lines
 # core-relay.md describes the deprecated --core --relay path and is deleted in v0.3.0: no byte or line-length limit until then.
 LONG_OK = {"skills/herdr-fleet/references/core-relay.md"}
-# Over a limit, or holding history, today: build-guides rewrites these and removes them from this set. Never add one.
-PENDING = {"skills/grokbot-herdr/SKILL.md", "skills/stampede/SKILL.md", "remote/events.md", "remote/claude-code.md",
-           "remote/moshi.md", "remote/watchdogs.md", "remote/README.md", "remote/other.md", "remote/any-machine/README.md",
-           "remote/phone-clients.md"}
 MONTHS = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 HISTORY = re.compile(r"\b20[0-9]{2}-[01][0-9]-[0-3][0-9]\b|\b[0-3]?[0-9] (?:" + MONTHS + r")[a-z]* 20[0-9]{2}\b"
                      r"|owner's rule|owner-approved|Seen 20", re.I)
@@ -161,17 +157,8 @@ class Shape(unittest.TestCase):
 
     def test_playbook_bytes_and_line_length(self):
         """SKILL.md at most SKILL_BYTES, every other playbook file at most PLAYBOOK_BYTES, no line over LINE_CHARS (code too)."""
-        bad = [b for p in md_files() if is_playbook(p) and rel(p) not in LONG_OK | PENDING for b in too_long(p, rel(p))]
+        bad = [b for p in md_files() if is_playbook(p) and rel(p) not in LONG_OK for b in too_long(p, rel(p))]
         self.assertEqual(bad, [], "\n".join(bad))
-
-    def test_pending_is_only_the_other_lane(self):
-        """PENDING is exactly the other lane's files that broke a limit when the limits came in, each still there: it only shrinks."""
-        allowed = {"skills/grokbot-herdr/SKILL.md", "skills/stampede/SKILL.md", "remote/events.md", "remote/claude-code.md",
-                   "remote/moshi.md", "remote/watchdogs.md", "remote/README.md", "remote/other.md",
-                   "remote/any-machine/README.md", "remote/phone-clients.md"}
-        self.assertLessEqual(PENDING, allowed, sorted(PENDING - allowed))
-        for r in PENDING:
-            self.assertTrue((ROOT / r).is_file(), r)
 
     def test_playbook_bytes_count_the_disk(self):
         """The byte limit reads the file's bytes, so CRLF line ends count."""
@@ -186,7 +173,7 @@ class Shape(unittest.TestCase):
     def test_no_history_in_playbooks(self):
         """Playbooks hold rules, not their history (AGENTS.md section 2): no dates, no "owner's rule", no "Seen 20..."."""
         bad = [f"{rel(p)}:{i}: history: {HISTORY.search(line).group(0)}" for p in md_files()
-               if is_playbook(p) and rel(p) not in PENDING
+               if is_playbook(p)
                for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if HISTORY.search(line)]
         self.assertEqual(bad, [], "\n".join(bad))
 
