@@ -5,7 +5,7 @@ set -u
 SRC="$(cd "$(dirname "$0")" && pwd)"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 export HOME="$T" PATH="$T/.local/bin:/opt/homebrew/bin:/usr/bin:/bin" CODEX_HOME="$T/.codex"
-unset XDG_STATE_HOME
+unset XDG_STATE_HOME XDG_CONFIG_HOME
 unset HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_EVENTS_OWNER HERDR_EVENTS_HOME HERDR_EVENTS_ROUTES_DIR HERDR_EVENTS_DIR
 B="$T/.local/bin"; F="$T/fake"; mkdir -p "$B" "$F" "$T/.config/herdr-events/owners" "$T/.config/herdr-events/routes"
 for s in herdr-event-post herdr-event-flush herdr-event-watchdog herdr-event-codex-notify herdr-events-owner; do ln -s "$SRC/$s" "$B/$s"; done

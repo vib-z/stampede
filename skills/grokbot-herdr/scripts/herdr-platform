@@ -4,6 +4,87 @@
 # GNU stat -c is tried first: on GNU, stat -f prints a filesystem report and still exits 0.
 # A script sources the copy beside itself, following one symlink (install.sh links the scripts).
 
+# The settings file, ${XDG_CONFIG_HOME:-~/.config}/stampede/config: the user's own shell file, read here as data and
+# never run, so a script a timer or a hook starts with no environment sees its settings too. A line counts only when
+# it is [export ]NAME=value, the value bare, '...' or "...", with $HOME, ${HOME} and a leading ~/ the only expansions,
+# then an optional " # comment"; only a space and a tab separate, and a final CR is dropped. Any other line, or one
+# holding another control byte, is skipped; herdr_settings_skipped lists its number for herdr-doctor. A setting
+# (FLEET_*, HERDR, HERDR_*, HC, HC_*, STAMPEDE_*) is exported unless the environment holds it, even empty; the names
+# Herdr, Herdr Core and stampede set per pane, terminal or job never are. A file that is not regular, over 4 KB or
+# over 100 lines, or holding a NUL byte, is skipped whole, and herdr_settings_unread says why. Nothing here prints.
+herdr_settings_skipped=""; herdr_settings_unread=""
+# never an unset HOME: with neither it nor XDG_CONFIG_HOME there is no file to read
+_hp_f=""; _hp_l=""; _hp_k=""; _hp_out=""; _hp_n=0; _hp_seen=" "   # all set here: nothing inherited steers the reader
+if [ -n "${XDG_CONFIG_HOME:-}" ]; then _hp_f=$XDG_CONFIG_HOME/stampede/config
+elif [ -n "${HOME+x}" ]; then _hp_f=$HOME/.config/stampede/config; fi
+_hp_lc=${LC_ALL-}; _hp_lcset=${LC_ALL+x}; LC_ALL=C   # bytes, and ASCII classes, whatever the user's locale
+# read stops at 4097 bytes or a NUL and then succeeds: such a file is skipped whole; at the end of a smaller one it fails
+if [ ! -f "$_hp_f" ] || [ ! -r "$_hp_f" ]; then [ ! -e "$_hp_f" ] || herdr_settings_unread="not a readable regular file"
+elif IFS= read -r -d '' -n 4097 _hp_l <"$_hp_f"; then
+  herdr_settings_unread="over 4 KB"; [ "${#_hp_l}" -ge 4097 ] || herdr_settings_unread="it holds a NUL byte"
+else
+  _hp_al=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_; _hp_an=${_hp_al}0123456789; _hp_ws=$' \t'
+  # one line: NAME=, then '...', "..." or a bare word, then nothing or a # comment; no control byte but a separating tab
+  _hp_plain="^([$_hp_al][$_hp_an]*)=([$_hp_an./:@%+,=-]*)\$"
+  _hp_re="^[$_hp_ws]*(export[$_hp_ws]+)?([$_hp_al][$_hp_an]*)=('[^'[:cntrl:]]*'|\"[^\"\\\`[:cntrl:]]*\"|[$_hp_an./:@%+,=~\${}-]*)([$_hp_ws]+#[^[:cntrl:]]*)?[$_hp_ws]*\$"
+  _hp_expand() {  # _hp_expand <text> <1 for a bare word>: _hp_out is <text> with $HOME, ${HOME} (and, bare, ~/) expanded; 1 for anything else
+    local s=$1 pre rest
+    _hp_out=""
+    if [ "$2" = 1 ]; then
+      case $s in "~/"*) [ -n "${HOME+x}" ] || return 1; _hp_out=$HOME; s=${s#\~};; esac
+      case $s in *"~"*) return 1;; esac
+    fi
+    while :; do
+      case $s in *'$'*) ;; *) break;; esac
+      pre=${s%%\$*}; rest=${s#*\$}
+      case $rest in
+        '{HOME}'*) s=${rest#'{HOME}'};;
+        HOME|HOME[!_$_hp_an]*) s=${rest#HOME};;
+        *) return 1;;
+      esac
+      [ "$2" = 1 ] && case $pre in *[{}]*) return 1;; esac
+      [ -n "${HOME+x}" ] || return 1
+      _hp_out=$_hp_out$pre$HOME
+    done
+    [ "$2" = 1 ] && case $s in *[{}]*) return 1;; esac
+    _hp_out=$_hp_out$s
+  }
+  _hp_n=0; while IFS= read -r _hp_l || [ -n "$_hp_l" ]; do _hp_n=$((_hp_n + 1)); done <"$_hp_f"
+  [ "$_hp_n" -le 100 ] || { _hp_f=""; herdr_settings_unread="over 100 lines"; }
+  _hp_n=0
+  [ -z "$_hp_f" ] || while IFS= read -r _hp_l || [ -n "$_hp_l" ]; do
+    _hp_n=$((_hp_n + 1)) _hp_l=${_hp_l%$'\r'}
+    if [[ $_hp_l =~ $_hp_plain ]]; then   # the common line, NAME=word with nothing to expand
+      _hp_k=${BASH_REMATCH[1]} _hp_out=${BASH_REMATCH[2]}
+    elif [[ $_hp_l =~ $_hp_re ]]; then
+      _hp_k=${BASH_REMATCH[2]} _hp_out=${BASH_REMATCH[3]}
+      case $_hp_out in
+        \'*) _hp_out=${_hp_out:1:${#_hp_out}-2};;
+        \"*) _hp_out=${_hp_out:1:${#_hp_out}-2}; [[ $_hp_out =~ [$] ]] && ! _hp_expand "$_hp_out" 0 && _hp_k="";;
+        *) [[ $_hp_out =~ [$~{}] ]] && ! _hp_expand "$_hp_out" 1 && _hp_k="";;
+      esac
+    else
+      case ${_hp_l#"${_hp_l%%[!$_hp_ws]*}"} in ''|'#'*) continue;; esac
+      _hp_k=""
+    fi
+    case $_hp_k in
+      '') herdr_settings_skipped="$herdr_settings_skipped $_hp_n";;
+      HERDR_ENV|HERDR_PANE_ID|HERDR_TAB_ID|HERDR_WORKSPACE_ID|HERDR_PLUGIN_EVENT_JSON|HERDR_EVENTS_OWNER) ;;
+      HC_TERMINAL_*|HC_SCOPE|STAMPEDE_JOB_KEY|FLEET_JOB_DIR) ;;
+      FLEET_*|HERDR|HERDR_*|HC|HC_*|STAMPEDE_*)   # never over the environment; a later line for a name wins, as in a shell
+        case $_hp_seen in
+          *" $_hp_k "*) export "$_hp_k=$_hp_out";;
+          *) [ -n "${!_hp_k+x}" ] || { export "$_hp_k=$_hp_out"; _hp_seen="$_hp_seen$_hp_k "; };;
+        esac;;
+    esac
+  done <"$_hp_f"
+  herdr_settings_skipped=${herdr_settings_skipped# }
+  unset -f _hp_expand
+  unset _hp_al _hp_an _hp_ws _hp_plain _hp_re
+fi
+{ if [ -n "$_hp_lcset" ]; then LC_ALL=$_hp_lc; else unset LC_ALL; fi; } 2>/dev/null
+unset _hp_f _hp_l _hp_k _hp_out _hp_n _hp_seen _hp_lc _hp_lcset
+
 if stat -c %s / >/dev/null 2>&1; then
   file_bytes() { stat -c %s "$1"; }
   file_mtime() { stat -c %Y "$1"; }
