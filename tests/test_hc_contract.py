@@ -10,6 +10,7 @@ import hc_contract  # noqa: E402
 
 FAKE_HC = ROOT / 'tests/fake_hc.py'
 PRODUCT = [ROOT / 'skills/herdr-fleet/scripts/fleet_job.py', ROOT / 'skills/grokbot-herdr/scripts/herdr-event-core',
+           ROOT / 'skills/grokbot-herdr/scripts/herdr-event-sweep',
            ROOT / 'skills/grokbot-herdr/scripts/herdr-event-watchdog', ROOT / 'skills/herdr-fleet/scripts/core_native.py']
 
 

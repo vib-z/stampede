@@ -79,7 +79,7 @@ A message from an agent (a terminal that reports a status) arrives in the termin
 | a helper's turn end, block or exit | its parent | Core's note; no stampede code |
 | a question, a gate, a post | the owner (the bot that started the job, else the phone) | `stampede ask`, `ask --gate`, `post`, through `herdr-event-post` |
 | the job is done | the owner | `stampede finish`: one `done` event, `source` `stampede` |
-| the lead is blocked, at an error, dead or stalled | the owner | the machine's watchdog timer runs `herdr-event-core --sweep`: one event per episode, `source` `hc`, `pane` `hc:<key>/<address>`, `workspace` `<key>`, `agent` the lead's name |
+| the lead is blocked, at an error, dead or stalled | the owner | the machine's watchdog timer runs `herdr-event-sweep`: one event per episode, `source` `hc`, `pane` `hc:<key>/<address>`, `workspace` `<key>`, `agent` the lead's name |
 
 A client that wants live changes follows Core: `hc events --label stampede.job=<key>` for the labelled terminals, or `hc events` for all, and applies each fact change to its copy of the tree.
 

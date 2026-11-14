@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The Core-native sweep has a script of its own, `herdr-event-sweep`.** The watchdog and `herdr-doctor` call it for the sweep and for `--alive`, `--core-version` and `--socket`, which answer as before. `herdr-event-core` keeps only the `--relay` job's follower, built on the same code; its `--sweep`, `--alive`, `--core-version` and `--socket` are kept for one release and hand over to the new script. No behaviour change: `<job>/sweep-state.json`, its lock and every event stay as they were.
+
 ## 0.2.0 (13 Nov 2026)
 
 A job on Herdr Core now runs the way Core itself works: the lead is a root terminal, every helper is its real Core child, and every message goes through Core. The shape every client reads is [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). This release also carries the 0.1.10 work, which was never published on its own: a Codex lead on Codex 0.167.1 gets its workers' reports and your messages again, a bot that started a job hears every post from its lead, and the fleet skill's default shape is thinker and doer.

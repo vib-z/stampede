@@ -249,8 +249,8 @@ class FollowerCase(MixedCase):
     def follower(self):
         core = follower_module()
         for patch in (mock.patch.object(core.Follower, 'post', lambda follower, event: self.posts.append(event)),
-                      mock.patch.object(core, 'POLL_EVERY', 0), mock.patch.object(core, 'STALL_EVERY', 0),
-                      mock.patch.object(core, 'wall', lambda: self.now[0])):
+                      mock.patch.object(core, 'POLL_EVERY', 0), mock.patch.object(core.base, 'STALL_EVERY', 0),
+                      mock.patch.object(core.base, 'wall', lambda: self.now[0])):
             patch.start()
             self.addCleanup(patch.stop)
         return core.Follower(self.job_dir)

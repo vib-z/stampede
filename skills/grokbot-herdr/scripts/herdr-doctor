@@ -63,7 +63,7 @@ tui_checks(){   # herdr on PATH, its version, and a running server of the same v
   else ok "herdr client and server $cv"; fi
 }
 core_checks(){   # hc and its version, the selected core, agents that report OSC 7501 status, and what 0.1.18 to 0.1.20 changed
-  local hcv follower cv alive=0
+  local hcv probe cv alive=0
   hcv=$(version_of "${HC:-hc}")
   if ! command -v "${HC:-hc}" >/dev/null; then gap "hc not on PATH: install Herdr Core $HC_MIN or later (curl -fsSL https://releases.herdr.dev/core/install.sh | sh), or set HC"
   elif [ -z "$hcv" ]; then gap "hc --version printed no version: reinstall Herdr Core $HC_MIN or later"
@@ -72,8 +72,8 @@ core_checks(){   # hc and its version, the selected core, agents that report OSC
     ok "hc $hcv"
     newer "$hcv" "$HC_REC" || warn "hc $hcv is older than $HC_REC, which this stampede was checked against: hc update (from $HC_REC Core holds a message while a person is typing in the terminal, which a Codex lead on Core needs, and on macOS quitting an app no longer ends terminals; reopen older job terminals once after it)"
   fi
-  follower=$(python3 -c 'import os,sys; print(os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "herdr-event-core"))' "${BASH_SOURCE[0]}")
-  if "$follower" --alive; then ok "Herdr Core answers (HC_SESSION ${HC_SESSION:-default})"; alive=1
+  probe=$(python3 -c 'import os,sys; print(os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "herdr-event-sweep"))' "${BASH_SOURCE[0]}")
+  if "$probe" --alive; then ok "Herdr Core answers (HC_SESSION ${HC_SESSION:-default})"; alive=1
   else gap "Herdr Core not running for HC_SESSION ${HC_SESSION:-default}: the owner starts it (hc server start); this check never does"; fi
   cv=$(claude --version 2>/dev/null | awk '{print $1}')
   if [ -z "$cv" ] && command -v codex >/dev/null; then warn "claude not on PATH: a Core job here needs stampede new --core --lead codex, and Codex workers"
