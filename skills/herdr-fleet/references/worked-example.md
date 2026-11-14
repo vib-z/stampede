@@ -1,6 +1,6 @@
 # Worked example: a lead, two builders and a reviewer
 
-A feature with a server half and a UI half, on the Herdr TUI. `stampede new --file <ask.md> --name alerts` in the project workspace started the lead and made the job folder `<jobs_root>/jobs/<date>-local-alerts`. `build-api` and `build-ui` take their models from `roles.build` (here `build-ui` is Codex by `--kind codex`), `review-alerts` from `roles.review`.
+A feature with a server half and a UI half, on the Herdr TUI. `stampede new --file <ask.md> --name alerts` in the project workspace started the lead and made the job folder `<jobs_root>/jobs/<date>-local-alerts`. `build-api` takes its model from `roles.build`, `review-alerts` from `roles.review`; `build-ui` runs on Codex and names its own.
 Each builder gets a worktree because both halves touch shared code. Ids come from Herdr's JSON, never from this page; from outside Herdr, see [tui.md](tui.md#from-outside-herdr).
 
 ## 1. Contract, briefs, register
@@ -48,9 +48,11 @@ T=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$WT/alerts-api" --
 TAB=$(echo "$T" | jq -r .result.tab.tab_id); PA=$(echo "$T" | jq -r .result.root_pane.pane_id)
 PU=$(herdr pane split --pane "$PA" --direction right --cwd "$WT/alerts-ui" --no-focus | jq -r .result.pane.pane_id)   # after checking 80 columns each
 stampede start "$B" build-api --pane "$PA" --brief "$B/briefs/build-api.md" --report reports/build-api.md
-stampede start "$B" build-ui --kind codex --pane "$PU" --brief "$B/briefs/build-ui.md" --report reports/build-ui.md
+stampede start "$B" build-ui --kind codex --model gpt-6.1-sol --effort medium --pane "$PU" --brief "$B/briefs/build-ui.md" --report reports/build-ui.md
 herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # again after Codex's first turn, which reports its session id
 ```
+
+- A builder moved to another CLI names its model and effort: a role's model goes only with its own kind, so `--kind codex` alone gets the CLI's default, which can be the reviewer's model.
 
 - Read each screen before anything else (`herdr agent read build-ui --source visible --lines 40`): it shows the model too. A `BLOCKED` start or a dialog shown as `idle`: clear it ([unattended-setup.md](unattended-setup.md#startup-dialogs-the-lead-clears)), then send the printed `stampede tell` line.
 - A start the classifier denies: stop and hand the owner the two `stampede start` lines, with the real pane ids, to run as `!` commands.
@@ -59,7 +61,14 @@ herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # again after Codex's first t
 ## 3. Wait, then integrate
 
 The lead does its own work, then ends its turn. A builder's report, turn end, question or exit adds a line to `$B/inbox.log` (`REPORT reports/build-api.md`, `TURN`, `QUESTION`, `GONE`), which wakes it.
-On each `REPORT`, read the report and the diff, then `git -C "$WT/alerts" merge --no-ff alerts-api -m "alerts: merge build-api"`. With both in, run the full checks once (type check, lint, suite, build).
+On each `REPORT`, read the report and the diff, then merge that lane's branch:
+
+```bash
+git -C "$WT/alerts" merge --no-ff alerts-api -m "alerts: merge build-api"   # on REPORT reports/build-api.md
+git -C "$WT/alerts" merge --no-ff alerts-ui -m "alerts: merge build-ui"     # on REPORT reports/build-ui.md
+```
+
+With both in, run the full checks once (type check, lint, suite, build).
 
 ## 4. Review
 
@@ -88,7 +97,7 @@ When both reports update: merge the fixes, `git -C "$WT/alerts-review" checkout 
 ## 6. Merge and wrap up
 
 ```bash
-git -C "$WT/alerts" push -u origin alerts && gh pr create --draft --fill      # no need to ask
+(cd "$WT/alerts" && git push -u origin alerts && gh pr create --draft --fill)  # in the worktree; no need to ask
 stampede ask "$B" --gate --kind merge --sha <sha> --pr <n> "merge PR <n>"        # GATE <gate>
 stampede gate-ok "$B" <gate> --sha <sha>                                         # once the owner said yes: APPROVED
 stampede merge "$B" <n> --sha <sha> --review "$B/reports/review-alerts.md" --gate <gate>

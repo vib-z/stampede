@@ -5,6 +5,7 @@ Run from the repo root: python3 -m unittest tests.test_shape
 import hashlib
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -137,6 +138,14 @@ def frontmatter(text):
     return fm
 
 
+def too_long(p, name):
+    """A playbook's size over its limit, counted on disk (CRLF counts), and each line over LINE_CHARS characters."""
+    size, limit = p.stat().st_size, SKILL_BYTES if p.name == "SKILL.md" else PLAYBOOK_BYTES
+    bad = [f"{name}: {size} bytes, limit {limit}"] if size > limit else []
+    return bad + [f"{name}:{i}: {len(line)} characters, limit {LINE_CHARS}"
+                  for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if len(line) > LINE_CHARS]
+
+
 class Shape(unittest.TestCase):
     def test_line_limits(self):
         bad = []
@@ -152,24 +161,27 @@ class Shape(unittest.TestCase):
 
     def test_playbook_bytes_and_line_length(self):
         """SKILL.md at most SKILL_BYTES, every other playbook file at most PLAYBOOK_BYTES, no line over LINE_CHARS (code too)."""
-        bad = []
-        for p in md_files():
-            r = rel(p)
-            if not is_playbook(p) or r in LONG_OK or r in PENDING:
-                continue
-            text = p.read_text(encoding="utf-8")
-            limit = SKILL_BYTES if p.name == "SKILL.md" else PLAYBOOK_BYTES
-            if len(text.encode()) > limit:
-                bad.append(f"{r}: {len(text.encode())} bytes, limit {limit}")
-            bad += [f"{r}:{i}: {len(line)} characters, limit {LINE_CHARS}"
-                    for i, line in enumerate(text.splitlines(), 1) if len(line) > LINE_CHARS]
+        bad = [b for p in md_files() if is_playbook(p) and rel(p) not in LONG_OK | PENDING for b in too_long(p, rel(p))]
         self.assertEqual(bad, [], "\n".join(bad))
 
     def test_pending_is_only_the_other_lane(self):
-        """PENDING holds only files build-guides owns, each still there; the lead's playbook (herdr-fleet) is never in it."""
+        """PENDING is exactly the other lane's files that broke a limit when the limits came in, each still there: it only shrinks."""
+        allowed = {"skills/grokbot-herdr/SKILL.md", "skills/stampede/SKILL.md", "remote/events.md", "remote/claude-code.md",
+                   "remote/moshi.md", "remote/watchdogs.md", "remote/README.md", "remote/other.md",
+                   "remote/any-machine/README.md", "remote/phone-clients.md"}
+        self.assertLessEqual(PENDING, allowed, sorted(PENDING - allowed))
         for r in PENDING:
             self.assertTrue((ROOT / r).is_file(), r)
-            self.assertFalse(r.startswith("skills/herdr-fleet/"), r)
+
+    def test_playbook_bytes_count_the_disk(self):
+        """The byte limit reads the file's bytes, so CRLF line ends count."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "SKILL.md"
+            body = ("x" * 99 + "\n") * 60   # 6,000 bytes with LF: at the limit
+            p.write_bytes(body.encode())
+            self.assertEqual(too_long(p, "SKILL.md"), [])
+            p.write_bytes(body.replace("\n", "\r\n").encode())   # 6,060 bytes on disk, 6,000 read as text
+            self.assertEqual(too_long(p, "SKILL.md"), ["SKILL.md: 6060 bytes, limit 6000"])
 
     def test_no_history_in_playbooks(self):
         """Playbooks hold rules, not their history (AGENTS.md section 2): no dates, no "owner's rule", no "Seen 20..."."""

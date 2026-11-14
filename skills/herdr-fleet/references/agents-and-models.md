@@ -44,6 +44,6 @@ The default shape; the owner can change it per job.
 
 - Never substitute a model the owner named: when it is unavailable or at capacity, say so and wait or ask.
 - Any other lane moves to its fallback on a usage limit, or on "at capacity" again after one retry. A Claude usage limit covers every Claude model, so Claude lanes fall back to Codex.
-- To move a lane: exit the agent, start the fallback in the same pane under the same name, and prompt it with its brief plus one line: it takes over from the stopped agent, whose work is on disk (`git status`) and in any partial report.
+- To move a lane: exit the agent, start the fallback in the same pane under the same name (on another CLI, with its `--model` and `--effort`: a role's model goes only with its own kind), and prompt it with its brief plus one line: it takes over from the stopped agent, whose work is on disk (`git status`) and in any partial report.
 - A lead falls back the same way: `stampede start <job> <lead> --kind claude|codex --pane <its pane> --brief <job>/briefs/<lead>.md` (the Herdr TUI only).
 - Note the switch in `register.md` and in the report.
