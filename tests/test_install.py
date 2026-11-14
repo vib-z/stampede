@@ -196,15 +196,34 @@ class Install(unittest.TestCase):
         (self.home / '.claude/skills/herdr-fleet/SKILL.md').write_text('an older skill')
         (bin_dir / 'my-own-tool').write_text('never a target')
 
-    def tree(self, skip='.local/state'):
-        """Every path under HOME but skip with what it is: a link's value, a file's bytes, or a folder."""
+    def tree(self, skip=('.local/state', 'fake-bin')):
+        """Every path under HOME but those under skip, with what it is: a link's value, a file's bytes, or a folder.
+        ~/.local itself is left out: the backups live under it, so a rollback leaves it."""
         return {str(p.relative_to(self.home)): ('-> ' + os.readlink(p)) if p.is_symlink() else p.read_bytes() if p.is_file() else 'dir'
-                for p in self.home.rglob('*') if not str(p.relative_to(self.home)).startswith(skip)}
+                for p in self.home.rglob('*') if not str(p.relative_to(self.home)).startswith(skip)
+                and str(p.relative_to(self.home)) != '.local'}
 
-    def rollback(self, result):
-        last = result.stdout.splitlines()[-1]
-        self.assertRegex(last, rf'^rollback: bash {re.escape(str(self.home))}/\.local/state/stampede/backup-\d{{8}}-\d{{6}}/rollback\.sh$')
+    def rollback(self, result, out='stdout'):
+        last = getattr(result, out).splitlines()[-1]
+        self.assertRegex(last, rf'^rollback: bash {re.escape(str(self.home))}/\.local/state/stampede/backup-\d{{8}}-\d{{6}}(-\d+)?/rollback\.sh$')
         return Path(last.split()[-1])
+
+    def undo(self, script, code=0, env=None):
+        undone = subprocess.run(['bash', str(script)], env=env or self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(undone.returncode, code, undone.stdout + undone.stderr)
+        return undone
+
+    def fake(self, name, body):
+        """A PATH whose first folder holds a fake <name> command."""
+        bin_dir = self.home / 'fake-bin'
+        bin_dir.mkdir(exist_ok=True)
+        (bin_dir / name).write_text('#!/bin/bash\n' + body + '\n')
+        (bin_dir / name).chmod(0o755)
+        return {**self.env, 'PATH': f'{bin_dir}:/usr/bin:/bin'}
+
+    def read_only(self, folder):
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
 
     def test_replace_takes_over_an_older_install_with_a_backup_and_its_rollback_restores_it(self):
         self.older_install()
@@ -231,9 +250,10 @@ class Install(unittest.TestCase):
         self.assertNotIn('rollback:', again.stdout)
         self.assertEqual([p.name for p in backup.parent.iterdir()], [backup.name])
         self.assertEqual(self.tree(), installed)
-        undone = subprocess.run(['bash', str(backup / 'rollback.sh')], env=self.env, capture_output=True, text=True, timeout=30)
-        self.assertEqual((undone.returncode, undone.stderr), (0, ''))
+        undone = self.undo(backup / 'rollback.sh')
+        self.assertEqual(undone.stderr, '')
         self.assertIn(f'restored {bin_dir}/herdr-send', undone.stdout)
+        self.assertEqual(undone.stdout.splitlines()[-1], 'rolled back: every change of that run is undone')
         self.assertEqual(self.tree(), before)                                  # the links it made are gone too
 
     def test_a_rollback_leaves_a_target_someone_changed_since(self):
@@ -242,8 +262,7 @@ class Install(unittest.TestCase):
         mine = self.home / '.local/bin/herdr-send'
         mine.unlink()
         mine.write_text('put here after the install')
-        undone = subprocess.run(['bash', str(backup / 'rollback.sh')], env=self.env, capture_output=True, text=True, timeout=30)
-        self.assertEqual(undone.returncode, 1)
+        undone = self.undo(backup / 'rollback.sh', 1)
         self.assertIn(f'left {mine}: something else is there now; its original is {backup}/.local/bin/herdr-send', undone.stderr)
         self.assertEqual(mine.read_text(), 'put here after the install')
         self.assertEqual((backup / '.local/bin/herdr-send').read_text(), 'an older copy of herdr-send')
@@ -254,21 +273,131 @@ class Install(unittest.TestCase):
         own = self.home / '.claude/skills/stampede'  # the first target, so nothing was linked before it'
         own.mkdir(parents=True)
         (own / 'SKILL.md').write_text('an older skill')
-        own.parent.chmod(0o555)
-        self.addCleanup(own.parent.chmod, 0o755)
+        before = self.tree()
+        self.read_only(own.parent)
         result = self.run_install('--replace')
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(f'install.sh: could not move {own} to ', result.stderr)
-        self.assertRegex(result.stderr, r'rollback: bash \S+/rollback\.sh')
         self.assertFalse(own.is_symlink())
         self.assertEqual((own / 'SKILL.md').read_text(), 'an older skill')
         self.assertFalse((self.home / '.local/bin').exists(), 'it stopped before the commands')
-        journal = next((self.home / '.local/state/stampede').iterdir()) / 'journal'
-        self.assertEqual(journal.read_text(), '')   # a move that failed is not journaled
+        undone = self.undo(self.rollback(result, 'stderr'))                      # journaled, never done: skipped
+        self.assertNotIn('left', undone.stderr)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_journal_that_cannot_be_written_after_a_move_stops_and_the_rollback_still_restores(self):
+        self.older_install()
+        before = self.tree()
+        env = self.fake('mv', '/bin/mv "$@" || exit $?\n/bin/chmod a-w "$HOME"/.local/state/stampede/backup-*/journal')
+        result = self.run_install('--replace', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('could not write', result.stderr)
+        script = self.rollback(result, 'stderr')
+        self.assertIn(f'replaced {self.home}/.claude/skills/herdr-fleet', result.stdout)   # one move, then the write failed
+        self.undo(script)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_backup_folder_already_there_gets_a_new_name_before_anything_changes(self):
+        state = self.home / '.local/state/stampede'
+        stamp = subprocess.run(['date', '+%s'], capture_output=True, text=True).stdout.strip()
+        taken = []
+        for ahead in range(10):                                                # this second and the next nine
+            name = subprocess.run(['date', '-r', str(int(stamp) + ahead), '+backup-%Y%m%d-%H%M%S'] if platform.system() == 'Darwin'
+                                  else ['date', '-d', f'@{int(stamp) + ahead}', '+backup-%Y%m%d-%H%M%S'],
+                                  capture_output=True, text=True).stdout.strip()
+            (state / name).mkdir(parents=True)
+            taken.append(state / name)
+        before = self.tree(skip=('\0',))
+        result = self.run_install('--replace')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        script = self.rollback(result)
+        self.assertRegex(script.parent.name, r'-2$')
+        self.assertTrue(all(list(t.iterdir()) == [] for t in taken), 'a folder already there is never used')
+        self.undo(script)
+        self.assertEqual({k: v for k, v in self.tree(skip=('\0',)).items() if script.parent.name not in k}, before)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can write into a read-only folder')
+    def test_a_rollback_that_cannot_move_an_original_back_says_where_it_is_and_exits_1(self):
+        bin_dir = self.home / '.local/bin'
+        bin_dir.mkdir(parents=True)
+        (bin_dir / 'stampede').write_text('an older stampede')
+        script = self.rollback(self.run_install('--replace'))
+        (bin_dir / 'stampede').unlink()
+        self.read_only(bin_dir)
+        undone = self.undo(script, 1)
+        saved = script.parent / '.local/bin/stampede'
+        self.assertIn(f'left {bin_dir}/stampede: could not move it back; its original is still {saved}', undone.stderr)
+        self.assertEqual(saved.read_text(), 'an older stampede')
+        self.assertIn('rollback incomplete', undone.stderr)
+        self.assertNotIn('rolled back', undone.stdout)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can write into a read-only folder')
+    def test_a_rollback_that_cannot_remove_a_link_says_so_and_exits_1(self):
+        bin_dir = self.home / '.local/bin'
+        bin_dir.mkdir(parents=True)
+        (bin_dir / 'stampede').write_text('an older stampede')
+        script = self.rollback(self.run_install('--replace'))
+        self.read_only(bin_dir)
+        undone = self.undo(script, 1)
+        saved = script.parent / '.local/bin/stampede'
+        self.assertIn(f'left {bin_dir}/stampede: could not remove the link install.sh made', undone.stderr)
+        self.assertIn(f'  its original is {saved}', undone.stderr)
+        self.assertEqual(saved.read_text(), 'an older stampede')
+        self.assertNotIn('rolled back', undone.stdout)
+
+    def test_the_printed_rollback_line_runs_as_pasted_in_an_odd_home(self):
+        for odd in ('a home with spaces', 'home-$(touch marker)'):
+            with self.subTest(home=odd):
+                scratch = Path(tempfile.mkdtemp(dir=self.home))
+                home = scratch / odd
+                (home / '.local/bin').mkdir(parents=True)
+                (home / '.local/bin/stampede').write_text('an older stampede')
+                env = {**self.env, 'HOME': str(home)}
+                result = self.run_install('--replace', env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                line = result.stdout.splitlines()[-1]
+                self.assertTrue(line.startswith('rollback: '), line)
+                undone = subprocess.run(['bash', '-c', line[len('rollback: '):]], cwd=scratch, env=env,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(undone.returncode, 0, undone.stderr)
+                self.assertFalse((scratch / 'marker').exists(), 'the pasted line ran part of the path')
+                self.assertEqual((home / '.local/bin/stampede').read_text(), 'an older stampede')
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can write into a read-only folder')
+    def test_a_new_link_that_fails_after_a_replace_stops_with_exit_1_and_the_rollback_line(self):
+        own = self.home / '.claude/skills/stampede'
+        own.mkdir(parents=True)
+        (own / 'SKILL.md').write_text('an older skill')
+        bin_dir = self.home / '.local/bin'
+        bin_dir.mkdir(parents=True)
+        before = self.tree()
+        self.read_only(bin_dir)
+        result = self.run_install('--replace')
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(f'install.sh: could not link {bin_dir}/stampede; stopped', result.stderr)
+        script = self.rollback(result, 'stderr')
+        self.assertEqual((script.parent / '.claude/skills/stampede/SKILL.md').read_text(), 'an older skill')
+        bin_dir.chmod(0o755)
+        self.undo(script)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_link_journaled_but_never_made_is_skipped_and_ln_exit_codes_become_1(self):
+        self.older_install()
+        before = self.tree()
+        env = self.fake('ln', 'exit 9')
+        result = self.run_install('--replace', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        script = self.rollback(result, 'stderr')
+        self.assertTrue(script.with_name('journal').read_text().startswith('step link '))
+        self.undo(script)
+        self.assertEqual(self.tree(), before)
+        plain = self.run_install(env=env)                                       # without --replace: exit as on main
+        self.assertEqual(plain.returncode, 9)
+        self.assertNotIn('rollback', plain.stdout + plain.stderr)
 
     def test_dry_run_replace_names_each_target_and_changes_nothing(self):
         self.older_install()
-        before = self.tree(skip='\0')
+        before = self.tree(skip=('\0',))
         result = self.run_install('--dry-run', '--replace')
         self.assertEqual(result.returncode, 0, result.stderr)
         replaced = re.findall(r'(?m)^would replace (\S+) \(backup in (\S+)\)$', result.stdout)
@@ -277,7 +406,7 @@ class Install(unittest.TestCase):
         self.assertRegex(replaced[0][1], rf'^{re.escape(str(self.home))}/\.local/state/stampede/backup-\d{{8}}-\d{{6}}$')
         self.assertIn(f'would link {self.home}/.local/bin/herdr-doctor', result.stdout)
         self.assertNotIn('rollback:', result.stdout)
-        self.assertEqual(self.tree(skip='\0'), before)
+        self.assertEqual(self.tree(skip=('\0',)), before)
 
     def test_without_replace_the_skip_names_the_flag_and_no_backup_is_made(self):
         self.older_install()

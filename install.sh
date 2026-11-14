@@ -29,42 +29,68 @@ ours() {  # ours <link value> <target>: the same file in another checkout of thi
   rest=${1#"$INSTALL"/}
   [[ "$rest" =~ ^[0-9]+-[0-9]+/checkout/ ]] && [ "${rest#"${BASH_REMATCH[0]}"}" = "${2#"$ROOT"/}" ]
 }
-BACKUP="${XDG_STATE_HOME:-$HOME/.local/state}/stampede/backup-$(date +%Y%m%d-%H%M%S)"
+BASE="${XDG_STATE_HOME:-$HOME/.local/state}/stampede/backup-$(date +%Y%m%d-%H%M%S)"
+BACKUP=$BASE
 JOURNAL=0   # 1 once this --replace run has made its backup folder, rollback.sh and journal
-open_backup() {  # the backup folder, rollback.sh and an empty journal, on this --replace run's first change
-  if [ "$JOURNAL" = 0 ]; then
-    mkdir -p "$(dirname "$BACKUP")"
-    mkdir "$BACKUP" || { echo "install.sh: $BACKUP is already there; run it again in a second" >&2; exit 1; }
-    JOURNAL=1
-    cat > "$BACKUP/rollback.sh" <<'ROLLBACK'
-#!/bin/bash
-# Undo one install.sh --replace: remove each link it made, and move back what it moved into this folder.
-# A path that changed since is left as it is, and named. Exit 0 all undone, 1 something left.
-B=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-status=0
-back() {  # back <target> <path> <where the old one was moved, or empty>
-  if [ -L "$2" ] && [ "$(readlink "$2")" = "$1" ]; then rm "$2" && echo "unlinked $2"
-  elif [ -z "$3" ]; then echo "left $2: not the link install.sh made" >&2; status=1; return 0; fi
-  [ -n "$3" ] || return 0
-  if [ -e "$2" ] || [ -L "$2" ]; then echo "left $2: something else is there now; its original is $3" >&2; status=1
-  elif [ ! -e "$3" ] && [ ! -L "$3" ]; then echo "left $2: $3 is gone" >&2; status=1
-  else mv "$3" "$2" && echo "restored $2"; fi
+stopped() {  # stopped <what failed>: a --replace run stops here; the journal already names every change it made
+  echo "install.sh: $1; stopped" >&2
+  if [ "$JOURNAL" = 1 ] && [ -s "$BACKUP/journal" ]; then echo "rollback: bash $(printf %q "$BACKUP/rollback.sh")" >&2; fi
+  exit 1
 }
-. "$B/journal"
+open_backup() {  # the backup folder, rollback.sh and an empty journal, before this --replace run's first change
+  [ "$JOURNAL" = 0 ] || return 0
+  local n=1
+  mkdir -p "$(dirname "$BASE")" || stopped "could not make $(dirname "$BASE")"
+  until mkdir "$BACKUP" 2>/dev/null; do   # a name already taken gets a suffix
+    { [ -e "$BACKUP" ] || [ -L "$BACKUP" ]; } && [ "$n" -lt 50 ] || stopped "could not make a backup folder in $(dirname "$BASE")"
+    n=$((n+1)); BACKUP="$BASE-$n"
+  done
+  cat > "$BACKUP/rollback.sh" <<'ROLLBACK' && : > "$BACKUP/journal" || stopped "could not write $BACKUP/rollback.sh"
+#!/bin/bash
+# Undo one install.sh --replace from the journal beside it, newest step first. Each step is checked against what is
+# there now: a link the run made is removed, an original goes back when its path is free, a step that never happened
+# is skipped. What cannot be undone is named, with where its original is. Exit 0 all undone, 1 something left.
+B=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P) || exit 1
+status=0
+n=0
+step() { n=$((n+1)); K[$n]=$1; P[$n]=$2; T[$n]=${3:-}; S[$n]=${4:-}; }   # step <kind> <path> [<target> [<saved>]]
+left() { echo "left $1" >&2; status=1; }
+there() { [ -e "$1" ] || [ -L "$1" ]; }
+unlink_ours() {  # unlink_ours <path> <target>: remove the link the run made there, if it is still there
+  [ -L "$1" ] && [ "$(readlink "$1")" = "$2" ] || return 0
+  if rm "$1"; then echo "unlinked $1"; else left "$1: could not remove the link install.sh made"; return 1; fi
+}
+. "$B/journal" || { echo "could not read $B/journal; nothing undone" >&2; exit 1; }
+i=$n
+while [ "$i" -gt 0 ]; do
+  p=${P[$i]} t=${T[$i]} s=${S[$i]}
+  case ${K[$i]} in
+    link) if unlink_ours "$p" "$t" && there "$p"; then left "$p: something else is there now, not the link install.sh made"; fi;;
+    move)
+      if ! unlink_ours "$p" "$t"; then there "$s" && echo "  its original is $s" >&2
+      elif ! there "$s"; then there "$p" || left "$p: its original is not in $s"   # moved, or never moved: as it was
+      elif there "$p"; then left "$p: something else is there now; its original is $s"
+      elif mv "$s" "$p"; then echo "restored $p"
+      else left "$p: could not move it back; its original is still $s"; fi;;
+    made) if [ -d "$p" ] && [ ! -L "$p" ]; then rmdir "$p" 2>/dev/null || left "$p: a folder install.sh made, not empty now"; fi;;
+  esac
+  i=$((i-1))
+done
+if [ "$status" = 0 ]; then echo "rolled back: every change of that run is undone"; else echo "rollback incomplete: each left line says what is where" >&2; fi
 exit "$status"
 ROLLBACK
-    : > "$BACKUP/journal"
-  fi
+  JOURNAL=1
 }
-journal() {  # journal <target> <path> <where the old one was moved, or empty>: one line rollback.sh reads
-  [ "$REPLACE" = 1 ] || return 0
-  open_backup
-  printf 'back %q %q %q\n' "$1" "$2" "$3" >> "$BACKUP/journal"
+step() {  # step <kind> <path> [<target> [<saved>]]: the intent, journaled before the change; a failed write stops the run
+  local line
+  line=$(printf ' %q' "$@")
+  printf 'step%s\n' "$line" >> "$BACKUP/journal" || stopped "could not write $BACKUP/journal"
 }
-stopped() {  # stopped <what failed>: a --replace that cannot move or link stops here; the journal holds what it did
-  echo "install.sh: $1; stopped" >&2
-  if [ "$JOURNAL" = 1 ]; then echo "rollback: bash $BACKUP/rollback.sh" >&2; fi
-  exit 1
+made() {  # made <folder>: make it and each missing parent, each journaled first, so the rollback removes it again if empty
+  [ -d "$1" ] && return 0
+  made "$(dirname "$1")"
+  step made "$1"
+  mkdir "$1" || stopped "could not make $1"
 }
 link() {  # link <target> <path>
   if [ -L "$2" ] && [ "$(readlink "$2")" = "$1" ]; then echo "ok $2"
@@ -72,15 +98,22 @@ link() {  # link <target> <path>
     if [ "$DRY" = 1 ]; then echo "would relink $2 -> $1"; else ln -sfn "$1" "$2" && echo "relinked $2 -> $1"; fi
   elif { [ -e "$2" ] || [ -L "$2" ]; } && [ "$REPLACE" = 0 ]; then echo "skip $2: something else is there; left as is (--replace backs it up and links)"
   elif [ -e "$2" ] || [ -L "$2" ]; then
-    local saved="$BACKUP/${2#"$HOME"/}"
     if [ "$DRY" = 1 ]; then echo "would replace $2 (backup in $BACKUP)"; return 0; fi
     open_backup
-    mkdir -p "$(dirname "$saved")" && mv "$2" "$saved" || stopped "could not move $2 to $saved"
-    journal "$1" "$2" "$saved"   # before the link: a link that fails still has its move undone
+    local saved="$BACKUP/${2#"$HOME"/}"
+    mkdir -p "$(dirname "$saved")" || stopped "could not make $(dirname "$saved")"
+    step move "$2" "$1" "$saved"
+    mv "$2" "$saved" || stopped "could not move $2 to $saved"
     ln -s "$1" "$2" || stopped "could not link $2"
     echo "replaced $2 -> $1 (the old one is in $saved)"
   elif [ "$DRY" = 1 ]; then echo "would link $2 -> $1"
-  else mkdir -p "$(dirname "$2")" && ln -s "$1" "$2" && journal "$1" "$2" "" && echo "linked $2 -> $1"; fi
+  elif [ "$REPLACE" = 1 ]; then
+    open_backup
+    made "$(dirname "$2")"
+    step link "$2" "$1"
+    ln -s "$1" "$2" || stopped "could not link $2"
+    echo "linked $2 -> $1"
+  else mkdir -p "$(dirname "$2")" && ln -s "$1" "$2" && echo "linked $2 -> $1"; fi
 }
 for app in .claude .codex; do
   [ "$SKILLS" = 1 ] || { echo "skip ~/$app/skills: --no-skills"; continue; }
@@ -179,4 +212,4 @@ WantedBy=timers.target' && n=$((n+1))
 }
 linux_timers
 echo "Next, once per repo: herdr-trust <repo dir>   (pre-trusts it for Claude and Codex, so agents start without a dialog)"
-if [ "$JOURNAL" = 1 ]; then echo "rollback: bash $BACKUP/rollback.sh"; fi
+if [ "$JOURNAL" = 1 ] && [ -s "$BACKUP/journal" ]; then echo "rollback: bash $(printf %q "$BACKUP/rollback.sh")"; fi
