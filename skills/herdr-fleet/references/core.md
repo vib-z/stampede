@@ -17,8 +17,8 @@ The earlier Core path (a follower terminal, inbox files, hooks) is `stampede new
 stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>] [--lead claude|codex] [--max-helpers <n>] [--review] [--fork <session id>]
 ```
 
-- It makes the job folder `<repo>/.herdr-<slug>` (git-excluded), writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, and writes the reopen record.
-- `STARTED <lead> (<address>)`, then `<lead> <job dir>`, exit 0. `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN`, exit 1, as on the relay path. A refusal (bad flags, a used folder, Core silent before anything was made), exit 2.
+- It makes the job folder `<jobs_root>/jobs/<date>-<owner or local>-<slug>`, the repo in its `workdir`, writes the marker and the owner tag, starts the lead as a root terminal labelled with the space's name, and writes the reopen record.
+- `STARTED <lead> (<address>)`, then `<lead> <job dir>`, exit 0. `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN`, exit 1, as on the relay path. A refusal (bad flags, Core silent before anything was made), exit 2; a name used that day gets `-2`.
 - `--cwd` is the repo (default: the git root of the current folder). `--space` names the space (lowercase letters, digits, `-` and `_`); the default is the job's slug, with 4 hex of the key added when another job's live space has that name. `--max-helpers` sets this job's cap. `--review` and `--fork` work as on the TUI; `--front-door` makes the chat that started the job the owner's only contact: post, ask and gate through `<job>/outbox` ([front-door.md](front-door.md#on-herdr-core)).
 
 ## The job folder
@@ -41,12 +41,13 @@ Core's own tree wins while it lives; `tree.json` is a copy for a rebuild.
 ## Start a helper
 
 ```bash
-stampede start <job> <name> --kind claude|codex --brief <file> [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent]
+stampede start <job> <name> --brief <file> [--kind claude|codex] [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent]
 stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--outlive-parent] -- <program> [args]
 ```
 
 - **The parent rule.** A helper is a Core child of the terminal that runs `stampede start`: yours, or a helper's when that helper starts its own. From outside Core its parent is the lead. `--parent <agent>` names another parent in the job.
 - **A branch ends with its parent.** When a parent's program ends, Core ends its children. `--outlive-parent` keeps one running: only for a watcher that must outlive its parent, and only when the brief says so. Core sets a parent once, so after a reopen it still names your old address: `stampede tree` shows it at depth 1 as `outlived <its old parent>`, it counts under the cap, and a whole-job close ends it with the rest.
+- **The role.** A flag not given comes from the role, the name up to its first `-` (`build-api` is a `build`): the setting `roles.<role>`, else `roles.default` (`stampede config show` lists them).
 - A helper gets its brief with its start. Write it on the hand-off template, and tell it to write its result to a file and send you the path.
 - `STARTED <name> (<address>) under <parent>`: it runs. `QUEUED <name> (<n> running, cap <c>)`: it waits under the cap ([below](#the-cap-and-the-queue)). Both exit 0. `FAILED <name> (<why>)`, exit 1: Core refused the run. Exit 2: refused before anything ran (the name `lead`, which names the job's lead, a name a live terminal or a queued start holds, a bad brief or kind, an unknown parent, `--pane`).
 - A helper's report defaults to `<job>/reports/<name>.md`; `--yolo-in <worktree>` runs it in no-checks mode there.

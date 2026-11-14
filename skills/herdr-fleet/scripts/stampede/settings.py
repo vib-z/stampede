@@ -32,6 +32,8 @@ ENV_ONLY = (  # read by other programs too, so they stay environment variables: 
     ('STAMPEDE_NO_UPDATE_CHECK', '0', '1 turns the daily check for a newer release off'),
     ('STAMPEDE_UPDATE_URL', 'https://api.github.com/repos/vib-z/stampede/releases/latest', 'where it reads the latest release'))
 KEY = re.compile(r'[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*')
+ROLE = re.compile(r'roles\.[a-z0-9_]+\.(kind|model|effort)')  # a role of the user's own is a setting too: strings only
+CHOICES = {'backend': ('auto', 'tui', 'core'), 'helpers.layout': ('grid', 'columns', 'rows'), 'review.step': ('end', 'each', 'none')}
 
 
 CONTROL = re.compile(r'[\x00-\x08\x0a-\x1f\x7f]')  # TOML refuses these raw in a string or comment; a tab is fine
@@ -241,11 +243,18 @@ def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
         if source == 'repo' and key.startswith(USER_ONLY):
             problems.append(f'{where}: {key} is taken only from your own {user}, the environment or a flag, '
                             f'never from a repo; skipped')
+        elif ROLE.fullmatch(key) and key not in DEFAULTS:
+            if isinstance(value, str) and value:
+                values[key], sources[key] = value, source
+            else:
+                problems.append(f'{where}: {key} must be a str, not {value!r}; skipped')
         elif key not in DEFAULTS:
             close = difflib.get_close_matches(key, DEFAULTS, n=1)
             problems.append(f'{where}: {key} is not a setting' + (f' (did you mean {close[0]}?)' if close else '') + '; skipped')
         elif not fits(value, DEFAULTS[key]):
             problems.append(f'{where}: {key} must be {kind(DEFAULTS[key])}, not {value!r}; skipped')
+        elif value not in CHOICES.get(key, (value,)):
+            problems.append(f'{where}: {key} must be one of {", ".join(CHOICES[key])}, not {value!r}; skipped')
         else:
             values[key], sources[key] = value, source
 

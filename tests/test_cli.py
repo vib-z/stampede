@@ -239,7 +239,7 @@ class Cli(unittest.TestCase):
         subprocess.run(['git', 'init', '-q', str(repo)], check=True)
         ask = repo.parent / 'ask plan.md'
         ask.write_text('Fix the login bug\n')
-        result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask)], capture_output=True, text=True,
+        result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask), '--set', 'backend=tui'], capture_output=True, text=True,
                                 env=self.env, cwd=repo, timeout=60)
         self.assertEqual(result.returncode, 2, result.stderr)
         command = shlex.split(result.stderr.splitlines()[-1])
@@ -253,7 +253,7 @@ class Cli(unittest.TestCase):
                 subprocess.run(['git', 'init', '-q', str(repo)], check=True)
                 ask = self.home / ('ask ' + name + '.md')
                 ask.write_text('Fix the login bug\n')
-                result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask)], capture_output=True,
+                result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask), '--set', 'backend=tui'], capture_output=True,
                                         text=True, env=self.env, cwd=repo, timeout=60)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertTrue(result.stderr.splitlines()[0].endswith('to run it here on Herdr Core, run the next line'))

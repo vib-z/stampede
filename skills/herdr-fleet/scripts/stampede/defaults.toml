@@ -1,7 +1,8 @@
 # Every stampede setting, with its default. This file is the list of keys: a key not here is not a setting.
 # Set one in ~/.config/stampede/config.toml (you), <repo>/.stampede.toml (a project), the environment or --set key=value.
 
-jobs_root = "~/code/herdr-jobs"  # every TUI job folder goes in <root>/jobs, never in a repo (user only; env FLEET_JOBS_ROOT)
+backend = "auto"                 # where new runs a job given no --core, --pane or --workspace: auto (the Herdr TUI inside a Herdr pane, else Herdr Core), tui or core
+jobs_root = "~/code/herdr-jobs"  # every job folder goes in <root>/jobs/<date>-<owner or local>-<slug>, never in a repo (user only; env FLEET_JOBS_ROOT)
 trust_root = "~/code"            # herdr-trust trusts repos only under this folder; a Core job's repo must be there (user only; env FLEET_TRUST_ROOT)
 
 [lead]
@@ -15,6 +16,51 @@ effort = "xhigh"           # a Claude lead's effort (env FLEET_LEAD_EFFORT, with
 model = "gpt-6-astra"  # a Codex lead's model (env FLEET_LEAD_MODEL, when it is a gpt-... model)
 effort = "ultra"       # a Codex lead's effort (env FLEET_LEAD_EFFORT, with a gpt-... model)
 
+# stampede start <job> <role>-<scope>: the kind, model and effort a helper gets when start names none; add a role of your own as [roles.<name>]
+
+[roles.default]  # any role not listed below
+kind = "claude"
+model = "claude-opus-5-5"
+effort = "medium"
+
+[roles.build]  # implementation against the lead's spec
+kind = "claude"
+model = "claude-opus-5-5"
+effort = "medium"
+
+[roles.research]  # research with the browser
+kind = "claude"
+model = "claude-opus-5-5"
+effort = "xhigh"
+
+[roles.review]  # independent review: another vendor than build
+kind = "codex"
+model = "gpt-6-astra"
+effort = "ultra"
+
+[roles.design]  # design direction and design review
+kind = "codex"
+model = "gpt-6-astra"
+effort = "ultra"
+
+[roles.qa]  # QA: another vendor than build
+kind = "codex"
+model = "gpt-6-astra"
+effort = "ultra"
+
+[roles.copy]  # docs and copy
+kind = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+
+[roles.test]  # tests and quick mechanical edits
+kind = "claude"
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[review]
+step = "end"  # the review the lead's brief asks for: end (one pass at the end, by roles.review), each (one per pull request or step) or none
+
 [ask]
 command = "moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # stampede ask runs this for a question or a gate in a local job; the question and options are appended (user only; env FLEET_ASK_CMD)
 
@@ -23,6 +69,7 @@ sections = ["Goal", "Why", "Inputs", "Constraints", "Done when", "Report back", 
 
 [helpers]
 max = 12       # a Core job: helpers that may work at once in the lead's tree; more starts queue; <job>/max-helpers wins (env STAMPEDE_MAX_HELPERS)
+layout = "grid"  # a Core job: how a tab's terminals split: grid (2 right of 1, 3 below 2, 4 below 1), columns (each right of the one before) or rows (each below)
 tab_panes = 4  # a Core job: live terminals per layout tab label (main, main-2, ...) before the next (env STAMPEDE_TAB_PANES)
 
 [timeouts]

@@ -106,7 +106,7 @@ def lead_folders(job):
     Codex's sandbox keeps read-only unless it is a root of its own."""
     worktrees = job_.jobs_root() / 'worktrees'
     worktrees.mkdir(parents=True, exist_ok=True)
-    repo = (Path(job) / 'workdir').read_text().strip() if (Path(job) / 'workdir').is_file() else str(Path(job).parent)
+    repo = str(job_.workdir(job))
     git = subprocess.run(['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], capture_output=True, text=True)
     return [str(worktrees)] + ([git.stdout.strip()] if git.returncode == 0 and git.stdout.strip() else [])
 
@@ -127,6 +127,17 @@ def claude_session_file(session):
 
 def pointer(agent, brief):
     return f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
+
+
+def review_step(job):
+    """The review step the owner chose for the job (review.step), with its reviewer (roles.review): guidance, one line."""
+    s = settings_.current(job)
+    who = f'review-<scope>, which gets {s.get("roles.review.kind")} {s.get("roles.review.model")} {s.get("roles.review.effort")}'
+    return {'end': f'Review: one review pass at the end of what ships or reaches the owner, by another model than the builder\'s: '
+                   f'start {who}. Loop again only for a real bug.',
+            'each': f'Review: one review pass for each pull request or step, by another model than the builder\'s: start {who}. '
+                    'Loop again only for a real bug.',
+            'none': 'Review: the owner switched the review step off for this job (review.step none): start no reviewer.'}[s.get('review.step')]
 
 
 def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='claude'):
@@ -187,6 +198,6 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
             + reach +
             f'Ask the owner with: fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
             f'Answer a worker with: fleet-job tell {job} <agent> "<text>". {workers}'
-            f'A merge or another gate (the herdr-fleet list): {gate_route} '
+            f'A merge or another gate (the herdr-fleet list): {gate_route} {review_step(job)} '
             f'When idle, end your turn; {wake}.\n'
             f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')

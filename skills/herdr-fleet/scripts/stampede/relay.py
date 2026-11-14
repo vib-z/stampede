@@ -331,7 +331,7 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
         raise ValueError(f'{kind.capitalize()} {why}: hand it to a Herdr TUI pane at its shell prompt with --pane <pane>')
     job, brief = Path(job).absolute(), Path(brief).expanduser().absolute()  # the agent may start in another folder
     hcapi_.target(job)
-    cwd = Path(cwd or job.parent).expanduser().resolve()
+    cwd = Path(cwd or job_.workdir(job)).expanduser().resolve()
     if yolo_in is not None and Path(yolo_in).expanduser().resolve() != cwd:
         raise PermissionError(f'--yolo-in {yolo_in} must be the --cwd the worker starts in ({cwd}): its own worktree')
     with job_.launching(job, agent):
@@ -375,7 +375,7 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
     selected = [lead] + ([] if lead_only else [a for a in people if a != lead])
     folders = {}  # every folder this reopen may start something in, checked before anything starts
     for agent in selected + ([] if finished else ['relay-' + key[3:]]):
-        folders.setdefault(str(job_.core_entries(job).get(agent, {}).get('cwd') or job.parent), []).append(agent)
+        folders.setdefault(str(job_.core_entries(job).get(agent, {}).get('cwd') or job_.workdir(job)), []).append(agent)
     gone = [f'{folder} ({", ".join(agents)})' for folder, agents in folders.items() if not Path(folder).is_dir()]
     if gone:
         raise ValueError('cwd gone: ' + '; '.join(gone) + ': git worktree add each back first; nothing was started')
@@ -386,7 +386,7 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
         relay = 'relay-' + key[3:]
         with job_.launching(job, relay):
             if not handed_.live_terminal(job, relay):
-                outcomes[relay] = reopen_run(job, relay, 'relay', [str(base_.FOLLOWER), str(job)], job.parent, plain=True)
+                outcomes[relay] = reopen_run(job, relay, 'relay', [str(base_.FOLLOWER), str(job)], job_.workdir(job), plain=True)
     pending = job / 'reopen-pending'  # a restarted lead that has not yet acknowledged both inbox files
     for agent in selected:
         with job_.launching(job, agent):  # the lock first, then its entry and row: a start that ran meanwhile is seen
@@ -442,7 +442,7 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
             session = str(uuid.uuid4())
             job_.record(job, agent, kind, row.get('brief') or '-', args, session)
         program = [agents_.cli(kind)] + args + (['--session-id', session] if kind == 'claude' else []) + [pointer]
-        cwd = job_.core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
+        cwd = job_.core_entries(job).get(agent, {}).get('cwd') or job_.workdir(job)
         if pending:
             pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
         return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None,
@@ -464,7 +464,7 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
         program = [agents_.cli(kind), 'resume'] + args + [session] + ([pointer] if prompt else [])
     else:  # a Codex lead that never ended a turn has no session to resume: it starts with its brief, as a fresh one
         program = [agents_.cli(kind)] + args + ([pointer] if prompt or lead else [])
-    cwd = job_.core_entries(job).get(agent, {}).get('cwd') or Path(job).parent
+    cwd = job_.core_entries(job).get(agent, {}).get('cwd') or job_.workdir(job)
     if pending:
         pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
     return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None,
@@ -594,9 +594,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False, settin
     settings = settings or settings_.for_new(repo, {'lead.kind': kind})
     ask = Path(ask_file).expanduser().read_text()
     owner = job_.starter(os.environ.get('HERDR_WORKSPACE_ID'))
-    job = repo / ('.herdr-' + (name or job_.slug(ask)))
-    if job.exists():
-        raise ValueError(f'{job} already exists: a job folder is used once; start another job with --name')
+    job, name = job_.new_folder(name or job_.slug(ask), owner)
     key = job_.job_key(job)  # the path's hash: a folder made again at this path has the same key
     try:
         earlier = hcapi_.hc('ls', '--label', 'stampede.job=' + key, limit=settings.get('timeouts.hc_call')).get('terminals', [])
@@ -605,7 +603,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False, settin
     if earlier:
         raise ValueError('terminals of an earlier job at this path still run: kill them '
                          f'(hc ls --all --label stampede.job={key}) or use another --name')
-    lead = job_.make_job(repo, job, ask, owner, review)
+    lead = job_.make_job(repo, job, ask, owner, review, name)
     settings_.save(job, settings)
     (job / 'backend').write_text('core\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),

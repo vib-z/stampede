@@ -26,6 +26,11 @@ ratio = 0.5
 on = true
 list = [1, -2, 3e2, "a \\"b\\""]
 '''
+# the table in skills/herdr-fleet/SKILL.md, Pick the agent and model: builders at medium, review on the other vendor
+ROLES = {'default': ('claude', 'claude-opus-5-5', 'medium'), 'build': ('claude', 'claude-opus-5-5', 'medium'),
+         'research': ('claude', 'claude-opus-5-5', 'xhigh'), 'review': ('codex', 'gpt-6-astra', 'ultra'),
+         'design': ('codex', 'gpt-6-astra', 'ultra'), 'qa': ('codex', 'gpt-6-astra', 'ultra'),
+         'copy': ('claude', 'claude-opus-5-5', 'high'), 'test': ('claude', 'claude-sonnet-5-5', 'medium')}
 
 
 class Settings(unittest.TestCase):
@@ -48,12 +53,13 @@ class Settings(unittest.TestCase):
     def test_defaults_are_todays_values(self):
         s = self.load()
         self.assertEqual(s.values, {
-            'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude',
+            'backend': 'auto', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude',
             'lead.claude.model': 'claude-opus-5-5', 'lead.claude.effort': 'xhigh',
             'lead.codex.model': 'gpt-6-astra', 'lead.codex.effort': 'ultra',
             'ask.command': 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h',
             'brief.sections': ['Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked'],
-            'helpers.max': 12, 'helpers.tab_panes': 4,
+            **{f'roles.{role}.{field}': value for role, row in ROLES.items() for field, value in zip(('kind', 'model', 'effort'), row)},
+            'review.step': 'end', 'helpers.max': 12, 'helpers.layout': 'grid', 'helpers.tab_panes': 4,
             'timeouts.wait': 3600, 'timeouts.hc_call': 60, 'timeouts.leave': 15, 'timeouts.hold_settle': 5})
         self.assertEqual(set(s.sources.values()), {'default'})
         self.assertEqual(s.problems, [])

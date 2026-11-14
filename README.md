@@ -86,7 +86,7 @@ stampede doctor                        # exit 0, with Herdr running: each check 
 
 **Then from your phone (recommended).** Set up Grok Bot's SSH, Tailscale and webhook once ([remote/grokbot/](remote/grokbot/README.md)), and send the same ask in chat.
 
-**On Herdr Core instead of the Herdr TUI.** With [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) installed and running, run `herdr-doctor` (it checks whichever of the Herdr TUI and Herdr Core is installed), then ask *"With stampede, on Herdr Core: ..."*. The front door runs `stampede new --core`: the lead is a root Core terminal and each helper its Core child ([Herdr Core](#herdr-core)).
+**On Herdr Core instead of the Herdr TUI.** With [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) installed and running, run `herdr-doctor` (it checks whichever of the Herdr TUI and Herdr Core is installed), then ask *"With stampede: ..."* from anywhere outside a Herdr pane. The front door runs `stampede new --file ask.md`, which runs the job on Herdr Core there by itself (the setting `backend`, default `auto`; `--core` forces it): the lead is a root Core terminal and each helper its Core child ([Herdr Core](#herdr-core)).
 
 **Limits.**
 - macOS and Linux. On macOS you load the event relay's two launchd jobs yourself; on Linux `install.sh` starts the same timers (systemd user units, or one flock-guarded loop when `systemctl --user` does not answer). On Linux a whole job ran live on the Herdr TUI and on Herdr Core (Ubuntu 24.04 arm64, stand-in agents; [docs/LINUX.md](docs/LINUX.md) says exactly what was real); a signed-in agent, the systemd timers, Moshi paired and a bot over SSH have not been run there yet.
@@ -209,7 +209,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 <details>
 <summary><b>The job folder</b></summary>
 
-`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (the setting `jobs_root`, or `FLEET_JOBS_ROOT`, moves the root), never inside your repo, so nothing lands in git (a Herdr Core job, on either path, is the one exception: its folder is `<repo>/.herdr-<slug>`, which stampede adds to the repo's git exclude); the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
+`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` (the setting `jobs_root`, or `FLEET_JOBS_ROOT`, moves the root), never inside your repo, so nothing lands in git, on the Herdr TUI and on Herdr Core alike (a job an older stampede made in `<repo>/.herdr-<slug>` keeps working); the repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
 
 ```text
 ask.md        your ask, word for word
@@ -339,7 +339,7 @@ DELIVERED lead-make-hello-txt-with-hi (inbox file)
 lead-make-hello-txt-with-hi ~/code/herdr-jobs/jobs/2026-10-29-local-make-hello-txt-with-hi
 ```
 
-Inside Herdr, `--workspace` defaults to the current workspace and the lead gets a new `lead` tab; `--pane <id>` puts it in an empty pane instead, and `--name <slug>` names the job. A front door outside Herdr (a bot, a desktop app) has no current workspace, so it passes `--workspace` or `--pane`: it creates a workspace for the job (`herdr workspace create`) and passes its root pane, as in [skills/stampede](skills/stampede/SKILL.md). The chat tells you `lead-make-hello-txt-with-hi` and stops.
+Inside Herdr, `--workspace` defaults to the current workspace and the lead gets a new `lead` tab; `--pane <id>` puts it in an empty pane instead, and `--name <slug>` names the job. A front door outside Herdr (a bot, a desktop app) has no current workspace: with no flag the job runs on Herdr Core ([Herdr Core](#herdr-core)), and for the Herdr TUI it passes `--workspace` or `--pane`: it creates a workspace for the job (`herdr workspace create`) and passes its root pane, as in [skills/stampede](skills/stampede/SKILL.md). The chat tells you `lead-make-hello-txt-with-hi` and stops.
 
 **Plan in chat, then fork it into the lead.** A Claude chat where you and Claude already worked out the plan, in Herdr or the Claude desktop app, adds `--fork "$CLAUDE_CODE_SESSION_ID"`: the lead starts as a fork of that chat (`claude --resume <id> --fork-session`), so it keeps the whole conversation and writes the agreed plan into `plan.md` instead of planning again. Your chat stays as it was. Put the agreed plan in the ask file too: it stays the source of truth, since a chat's saved transcript can miss some of its messages. The reopen record leaves the fork out, so `reopen.sh` resumes the lead's own session. Guide: [remote/claude-code.md](remote/claude-code.md#plan-here-then-fork-the-lead).
 
@@ -427,33 +427,34 @@ APPROVED 83307febaa1a at <commit>
 
 The front door shows you the plan file itself, and a yes to its own summary is never an approval. A gate's item carries the exact `approve-gate` line, which the front door runs with your words quoted. If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `BLOCKED_ON_CARD` instead of pretending the message was read. The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead, so the front door is never left waiting on a job that ended. The front door's loop: [skills/stampede](skills/stampede/SKILL.md#relay-a---front-door-job); the lead's side: [front-door.md](skills/herdr-fleet/references/front-door.md).
 
-**On Herdr Core** the same loop runs with `stampede new --core --front-door`, against the test suite's fake `hc` here (the chat's `approve` and `approve-gate` ran from outside Herdr; `<repo>` is the repo's path):
+**On Herdr Core** the same loop runs with `stampede new --front-door` from a chat outside Herdr (`backend` `auto` picks Herdr Core there; `--core` says so outright), against the test suite's fake `hc` here, from the repo (every command ran from outside Herdr):
 
 ```console
-$ stampede new --core --file ask.md --name login --front-door --review
+$ stampede new --file ask.md --name login --front-door --review
+on Herdr Core (backend auto: not inside a Herdr pane)
 STARTED lead-login (t1)
-lead-login <repo>/.herdr-login
-$ J=<repo>/.herdr-login
+lead-login ~/code/herdr-jobs/jobs/2026-11-14-local-login
+$ J=~/code/herdr-jobs/jobs/2026-11-14-local-login
 $ stampede post $J "PLAN READY: two helpers" --file $J/plan.md                     # the lead
-POSTED 001 for the front door to relay (<repo>/.herdr-login/outbox/001.md)
+POSTED 001 for the front door to relay (~/code/herdr-jobs/jobs/2026-11-14-local-login/outbox/001.md)
 $ stampede wait $J                                                                # the chat, in the background
 # 001 post
 ...
 $ stampede approve $J --by "owner in desktop chat: 'go'"
 SUBMITTED lead-login (t1)
 $ stampede ask $J --gate --sha <commit> --pr 12 "merge PR #12"                    # the lead
-GATE 66185eb7d9f5 posted to the front door as outbox 002; act after fleet-job gate-ok <repo>/.herdr-login 66185eb7d9f5 --sha <the commit you act on> prints APPROVED
+GATE deca46984e27 posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login deca46984e27 --sha <the commit you act on> prints APPROVED
 $ stampede wait $J                                                                # the chat
 # 002 gate
 
-Gate 66185eb7d9f5: merge PR #12 (PR #12) at <commit, 12 hex>?
+Gate deca46984e27: merge PR #12 (PR #12) at <commit, 12 hex>?
 One exact action, yes or no. Show the owner this action as written.
 
-Answer with: fleet-job approve-gate <repo>/.herdr-login 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell <repo>/.herdr-login lead 'GATE 66185eb7d9f5 NO: <their words>')
+Answer with: fleet-job approve-gate ~/code/herdr-jobs/jobs/2026-11-14-local-login deca46984e27 --sha <commit> --digest b490e3daedbc6383 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell ~/code/herdr-jobs/jobs/2026-11-14-local-login lead 'GATE deca46984e27 NO: <their words>')
 
-$ stampede approve-gate $J 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
+$ stampede approve-gate $J deca46984e27 --sha <commit> --digest b490e3daedbc6383 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
 SUBMITTED lead-login (t1)
-APPROVED 66185eb7d9f5 at <commit>
+APPROVED deca46984e27 at <commit>
 $ stampede wait $J                                                                # the lead waits at a permission dialog
 BLOCKED lead-login: permission. Core says it waits at a dialog in its terminal t1 (hc read t1). Its screen:
 Allow this command?
@@ -464,14 +465,14 @@ Allow this command?
 
 ## Herdr Core
 
-[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime: programs in persistent terminals that report their own status (OSC 7501), with parent links, labels and an event stream, and no workspaces, tabs or panes. `stampede new --core` runs a job there the way Core itself works: Core holds the tree of terminals, and stampede adds only the space's name, the owner tag, the reopen record, the owner's gates, a cap on helpers and the layout labels. The Herdr TUI stays the default backend, and every TUI command works as before. The shape a client reads (labels, parent links, events): [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The lead's playbook: [references/core.md](skills/herdr-fleet/references/core.md). For Core's own basics read `hc --skill`.
+[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime: programs in persistent terminals that report their own status (OSC 7501), with parent links, labels and an event stream, and no workspaces, tabs or panes. `stampede new` runs a job there the way Core itself works: Core holds the tree of terminals, and stampede adds only the space's name, the owner tag, the reopen record, the owner's gates, a cap on helpers and the layout labels. Which backend a job takes is the setting `backend`: `auto` (the default) runs it on the Herdr TUI inside a Herdr pane, as before, and on Herdr Core everywhere else, saying so on the first line (`on Herdr Core (backend auto: not inside a Herdr pane)`); `tui` and `core` make either the standing choice; `--core` forces Core, and `--pane` or `--workspace` the TUI. Every TUI command works as before. The shape a client reads (labels, parent links, events): [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). The lead's playbook: [references/core.md](skills/herdr-fleet/references/core.md). For Core's own basics read `hc --skill`.
 
 **The tree and the roles.**
 - **The owner** asks, answers questions and gives every gate's yes.
-- **The front door** writes the ask, runs `stampede new --core`, passes the owner's words to the lead with `stampede tell <job> lead "..."` and records a gate's yes with `approve-gate`. It reads the lead or a helper with `hc read <address>` and never types into one. A chat outside Herdr that is your only contact adds `--front-door` and relays the job by `stampede wait`, as on the TUI ([Front door](docs/CORE-NATIVE.md#front-door)): `wait` says `BLOCKED <lead>: <kind>` with the lead's screen where the TUI says `BLOCKED_ON_CARD`.
+- **The front door** writes the ask, runs `stampede new` (outside a Herdr pane, or with `--core`), passes the owner's words to the lead with `stampede tell <job> lead "..."` and records a gate's yes with `approve-gate`. It reads the lead or a helper with `hc read <address>` and never types into one. A chat outside Herdr that is your only contact adds `--front-door` and relays the job by `stampede wait`, as on the TUI ([Front door](docs/CORE-NATIVE.md#front-door)): `wait` says `BLOCKED <lead>: <kind>` with the lead's screen where the TUI says `BLOCKED_ON_CARD`.
 - **The lead** is the root: one Core terminal with no parent, one per job. The space has no terminal of its own: its name is the lead's `stampede.space` label.
 - **Helpers** are the lead's real Core children, started with `stampede start`: Claude, Codex or any program. A helper may start its own helpers, at any depth. Core ends a branch when its parent ends, unless a helper was started with `--outlive-parent`. Core sets a parent once, so such a helper still names its old parent after a lead is reopened: `stampede tree` shows it at depth 1 as `outlived <its old parent>`, the cap counts it, and a whole-job `close` ends it with the rest.
-- **The reviewer** is one helper on another model.
+- **The reviewer** is one helper on another model: a `review-<scope>` helper gets the setting `roles.review` (Codex by default). The lead's brief says when to review, from the setting `review.step`: `end` (one pass at the end, the default), `each` (one per pull request or step) or `none` (the owner switched it off).
 - **Plain children** (a CI wait, a build) are started with a bare `hc run`; they are in the tree by their parent link alone.
 
 **What lives where.** Core holds the tree and each terminal's status; read it with `stampede tree <job>`. The job folder holds the ask, the plan, the briefs, the reports, the owner's gates and `tree.json`, the reopen record. Messages go only through Core: `hc send`, Core's notes to a parent about each child (its turn ended, it is blocked, it exited), `hc wait --children`, and results in files with the path sent. A Core job has no follower terminal, no inbox files and no hooks.
@@ -495,7 +496,7 @@ ok backend core
 
 With both usable the line is `ok backend tui,core`. `herdr-doctor --core` checks Herdr Core only and `--tui` the Herdr TUI only, and there each gap is a `PROBLEM`. On Herdr Core it also warns about three things Herdr Core 0.1.18 to 0.1.20 brought: an `hc` older than 0.1.20; on macOS, terminals opened before the core's current bundle was installed (reopen each once, a job's with its `reopen.sh`); and a core that was started from inside an agent or a pane, so that every new terminal inherits that environment (you run `hc server restart --fresh` from a terminal outside Herdr; programs keep running). It never starts, stops or restarts a core.
 
-On that same machine a job started without `--core` is refused in one line that names it (the Herdr TUI stays the default, so nothing is switched for you; `ask.md` is the one from the walkthrough above):
+On that same machine a job started for the Herdr TUI (`--workspace`) is refused in one line that names Core (`ask.md` is the one from the walkthrough above):
 
 ```console
 $ stampede new --file ask.md --workspace w9
@@ -504,21 +505,22 @@ stampede new: herdr pane list: {'code': 'server_not_running', 'message': 'no her
 
 ### One Core job, start to finish
 
-These commands ran against the test suite's fake `hc` in a scratch home (`<repo>` stands for the repo's path, `J` for the job folder). The front door starts the job from the repo. A Core job's folder is `<repo>/.herdr-<slug>`, which stampede keeps out of git. The lead starts as a root terminal labelled with the space's name (`--space`, by default the job's slug):
+These commands ran against the test suite's fake `hc` in a scratch home (`<repo>` stands for the repo's path, `J` for the job folder). The front door starts the job from the repo, outside any Herdr pane, so `backend` `auto` picks Herdr Core. The job folder is in the jobs root, as on the TUI, with the repo in `<job>/workdir`. The lead starts as a root terminal labelled with the space's name (`--space`, by default the job's slug):
 
 ```console
-$ stampede new --core --file ask.md --cwd ~/code/my-app --name add-health
+$ cd ~/code/my-app && stampede new --file ask.md --name add-health
+on Herdr Core (backend auto: not inside a Herdr pane)
 STARTED lead-add-health (t1)
-lead-add-health <repo>/.herdr-add-health
+lead-add-health ~/code/herdr-jobs/jobs/2026-11-14-local-add-health
 ```
 
-The lead writes `plan.md` and starts its helpers, each as its own Core child. Any CLI runs as a program:
+The lead writes `plan.md` and starts its helpers, each as its own Core child. A helper's role, its name up to the first `-`, gives its kind, model and effort (the settings `roles.<role>`: `build-health` is a Claude builder at medium effort, `review-health` a Codex reviewer); `--kind`, `--model` and `--effort` override them. Any CLI runs as a program:
 
 ```console
-$ J=<repo>/.herdr-add-health
-$ stampede start $J build-health --kind claude --brief $J/briefs/build-health.md --report reports/build-health.md
+$ J=~/code/herdr-jobs/jobs/2026-11-14-local-add-health
+$ stampede start $J build-health --brief $J/briefs/build-health.md --report reports/build-health.md
 STARTED build-health (t2) under lead-add-health
-$ stampede start $J review-health --kind codex --model <another model> --brief $J/briefs/review-health.md
+$ stampede start $J review-health --brief $J/briefs/review-health.md
 STARTED review-health (t3) under lead-add-health
 $ stampede start $J lint -- npm run lint
 STARTED lint (t4) under lead-add-health
@@ -527,7 +529,7 @@ STARTED lint (t4) under lead-add-health
 At most 12 helpers work at once in one lead's tree, at any depth (`--max-helpers <n>` at `new`, `<job>/max-helpers`, or `STAMPEDE_MAX_HELPERS`). With this job's cap set to 3, a fourth start waits in the queue, and the lead runs `stampede next` when a child's note says it is done:
 
 ```console
-$ stampede start $J docs-health --kind claude --brief $J/briefs/docs-health.md
+$ stampede start $J docs-health --brief $J/briefs/docs-health.md
 QUEUED docs-health (3 running, cap 3)
 $ stampede next $J
 STARTED docs-health (t5) under lead-add-health
@@ -542,7 +544,7 @@ space add-health (hc-62876e54e3ce)
     docs-health (t5) helper claude idle tab main-2 pane 1
 ```
 
-The layout is labels only. The lead is pane 1 of tab `main`, top left, and helpers fill `main`, `main-2` and so on, 4 live terminals to a tab (`STAMPEDE_TAB_PANES`), or a workstream tab named with `--tab <label>`, each at the lowest free pane. In each tab, pane 2 splits pane 1 right, pane 3 splits pane 2 down and pane 4 splits pane 1 down: a 2x2 of top left, top right, bottom right, bottom left (the labels `stampede.pane`, `stampede.split` and `stampede.beside`). The lead and every helper also carry `herdr.space` and `herdr.tab`, so the Herdr app can show the job as one space; the app reads only those two and adds each terminal to the tab's row, so a client draws the places from the `stampede.*` labels. The app takes both as ids: it shows the space by its first terminal's folder and a tab by its place until you rename it there (naming it from stampede is planned). `stampede tree --json` gives the same to a client.
+The layout is labels only. The lead is pane 1 of tab `main`, top left, and helpers fill `main`, `main-2` and so on, 4 live terminals to a tab (`STAMPEDE_TAB_PANES`), or a workstream tab named with `--tab <label>`, each at the lowest free pane. In each tab, pane 2 splits pane 1 right, pane 3 splits pane 2 down and pane 4 splits pane 1 down: a 2x2 of top left, top right, bottom right, bottom left (the labels `stampede.pane`, `stampede.split` and `stampede.beside`). The setting `helpers.layout` changes only the split labels: `grid` (this, the default), `columns` (each pane splits the one before it right) or `rows` (down). The lead and every helper also carry `herdr.space` and `herdr.tab`, so the Herdr app can show the job as one space; the app reads only those two and adds each terminal to the tab's row, so a client draws the places from the `stampede.*` labels. The app takes both as ids: it shows the space by its first terminal's folder and a tab by its place until you rename it there (naming it from stampede is planned). `stampede tree --json` gives the same to a client.
 
 The lead waits with Core, never with sleep or a poll. With nothing else to do it ends its turn: Core types each child's news and each message into its terminal, and that wakes it. To block inside a command, `hc wait --children any --timeout <seconds>` returns on the next child's news or a message, and `--children all` once none is working; an answer whose reason is `timeout` (180 s by default) is a check-in, not news. A helper reports with `hc send <parent address> "build-health: done reports/build-health.md"`: one line and the path of its result file, which the lead then reads. Core's own notes tell the lead when a child's turn ends, when it is blocked and when it exits. The owner's words reach the lead through `tell`:
 
@@ -600,7 +602,7 @@ A reopen never hands out work by itself. The lead comes back first (a Claude lea
 
 ```console
 $ stampede finish $J "added /health with a test"
-FINISHED <repo>/.herdr-add-health
+FINISHED ~/code/herdr-jobs/jobs/2026-11-14-local-add-health
 $ stampede reopen $J --fresh
 stampede reopen: the job is finished, so it reopens for reading only: --fresh and --rerun-programs would start its work again
 ```
@@ -652,7 +654,7 @@ Nothing needs setting: every setting has a default. Each one is resolved from la
 2. yours: `~/.config/stampede/config.toml` (`$XDG_CONFIG_HOME/stampede/config.toml` when that is set);
 3. the project's: `.stampede.toml` at the repo root, which a repo can commit;
 4. the environment: the variable names stampede has always read, which keep working;
-5. the command's own flags (`--lead`, `--max-helpers`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, and a bare word is a string).
+5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, and a bare word is a string).
 
 [config.example](config.example) is every key with its default: copy it to `~/.config/stampede/config.toml` and keep only what you change.
 
@@ -668,21 +670,25 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 **User only.** `jobs_root`, `trust_root` and `ask.command` run a command or widen what is trusted, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml`; there each is skipped with a problem line.
 
-**Problems.** A key that is not a setting, a value of the wrong type or a file that does not parse is skipped and named in one line by `stampede config show`. `stampede new` refuses to start a job while there is one (exit 2, each line, then `fix it or remove the key: stampede config show`); no other command fails on them.
+**Problems.** A key that is not a setting, a value of the wrong type or not one of the key's choices or a file that does not parse is skipped and named in one line by `stampede config show`. `stampede new` refuses to start a job while there is one (exit 2, each line, then `fix it or remove the key: stampede config show`); no other command fails on them.
 
 <details>
 <summary><b>Every key, with its default</b></summary>
 
 | key | default | environment | what it does |
 |---|---|---|---|
-| `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | job folders go in `<root>/jobs/`, never in a repo (user only) |
+| `backend` | `auto` | | where `stampede new` runs a job given no `--core`, `--pane` or `--workspace`: `auto` (the Herdr TUI inside a Herdr pane, Herdr Core everywhere else), `tui` or `core` |
+| `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | every job folder, on every backend, is `<root>/jobs/<date>-<owner or local>-<slug>`, never in a repo (user only) |
 | `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | a Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
 | `lead.kind` | `claude` | `FLEET_LEAD_KIND` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
 | `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
-| `lead.codex.model`, `lead.codex.effort` | GPT-6 Astra (its id is in config.example), `ultra` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. Worker models and effort are chosen per start with `--model` and `--effort` |
+| `lead.codex.model`, `lead.codex.effort` | GPT-6 Astra (its id is in config.example), `ultra` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
+| `roles.<role>.kind`, `.model`, `.effort` | `build`, `default`: Claude Opus 5.5 `medium`; `research`: Claude Opus 5.5 `xhigh`; `copy`: Claude Opus 5.5 `high`; `test`: Claude Sonnet 5.5 `medium`; `review`, `qa`, `design`: Codex GPT-6 Astra `ultra` (the ids are in config.example) | | what `stampede start <job> <role>-<scope>` gives a helper when it names no `--kind`, `--model` or `--effort` (the role is the name up to its first `-`; any other role takes `roles.default`). A flag always wins; a role's model and effort go only with its own kind, so `--kind codex` on a Claude role leaves the model to Codex. Add a role of your own as `[roles.<name>]`. Not for a program after `--` |
+| `review.step` | `end` | | the review step the lead's brief asks for, with its reviewer from `roles.review`: `end` (one pass at the end, by another model than the builder's), `each` (one per pull request or step) or `none` (no review step: the brief says the owner switched it off). Guidance only, nothing enforces it |
 | `ask.command` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | `FLEET_ASK_CMD` | what `stampede ask` runs, for a question or a gate, in a job started locally (a bot-started job asks its bot); the options and question are appended (user only) |
 | `brief.sections` | the seven headings of the [hand-off template](skills/herdr-fleet/references/brief.md) | | the sections every worker's brief must fill |
 | `helpers.max` | `12` | `STAMPEDE_MAX_HELPERS` | a Core job: how many helpers may work at once in the lead's tree, at any depth; a start over it is queued (`--max-helpers` or `<job>/max-helpers` per job) |
+| `helpers.layout` | `grid` | | a Core job: the split labels of a tab's terminals: `grid` (2 right of 1, 3 below 2, 4 below 1), `columns` (each right of the one before) or `rows` (each below the one before) |
 | `helpers.tab_panes` | `4` | `STAMPEDE_TAB_PANES` | a Core job: live terminals per layout tab label (`main`, `main-2`, ...) before a helper goes to the next |
 | `timeouts.wait` | `3600` | | seconds `stampede wait` waits before exit 3 (`--timeout` per call) |
 | `timeouts.hc_call` | `60` | | seconds one `hc` call may take on top of what the command itself waits for |
@@ -737,7 +743,7 @@ Other programs read these, so they stay environment variables. Export them in yo
 | `HELD: a send to <lead> got no answer ...` in `<job>/hooks/deliver.log`, or a `blocked` event with `kind` `held` | a line for a Codex lead on a `--relay` job was stopped unanswered, most often because text sits typed in its prompt: send or clear that text in its terminal. Delivery goes on after the lead's next turn; if you cleared the text without sending anything, remove `<job>/hooks/deliver-held.json` once its prompt is empty |
 | `stampede new: ...; Herdr Core answers here, so this job can run on it: new --core ...` | the Herdr TUI could not take the job (no server, no `herdr`, or no workspace outside Herdr) and a Herdr Core is running: start Herdr, or run the job on Core with `--core`; nothing was made |
 | a Codex lead does not react to a worker's report or your `tell` | its lines are typed only while it is idle or done, unfocused, with nothing typed in its prompt: leave its pane, clear a draft, and see `<job>/hooks/deliver.log` (`GAVE UP` after 4 h, `CANNOT REACH HERDR`); `stampede _wake <job>` starts the deliverer again. With Codex 0.167.1 or later, stampede 0.1.9 and older took its empty prompt for a draft and typed nothing: update stampede to 0.2.0 or later |
-| no `.herdr-<slug>` folder in the repo any more | job folders now live in `~/code/herdr-jobs/jobs/` (`jobs_root`, or `FLEET_JOBS_ROOT`); `stampede new` prints the path. An old in-repo `.herdr-*` job still works with every command |
+| no `.herdr-<slug>` folder in the repo any more | job folders now live in `~/code/herdr-jobs/jobs/` (`jobs_root`, or `FLEET_JOBS_ROOT`) on every backend, Herdr Core included; `stampede new` prints the path. An old in-repo `.herdr-*` job still works with every command |
 | `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, then `stampede new: fix it or remove the key: stampede config show` (exit 2) | a config file, the environment or a `--set` holds a key stampede does not have, a value of the wrong type (`helpers.max must be int, not 'six'`), a file that is not TOML, or a user-only key in a repo's `.stampede.toml` (`... is taken only from your own ...`): fix or remove what the line names, check with `stampede config show` (exit 0 when clean), then run `new` again; nothing was made |
 | `stampede start: brief ... is missing: ...` or `brief ... does not exist` | write the brief on the [hand-off template](skills/herdr-fleet/references/brief.md), fill every missing or empty section, then start again |
 | `stampede start: fleet-job starts claude, codex or cursor (and hermes or kimi in a Herdr Core job); ...` | stampede starts only those kinds; start another agent by hand and record it with `herdr-reopen-snapshot` |
@@ -745,8 +751,8 @@ Other programs read these, so they stay environment variables. Export them in yo
 | `BLOCKED <agent>: clear the startup dialog` | read the screen (`herdr agent read <agent> --source visible --lines 30`), clear the dialog, then send the printed `stampede tell` line |
 | `refused: ... is outside ~/code` from `herdr-trust` | the repo is outside `FLEET_TRUST_ROOT`; move it or change the key |
 | `stampede start: pane ...'s shell is in ..., not ...` | `--yolo-in` needs the pane's shell in that worktree; use auto mode or `cd` the pane first |
-| `FileExistsError` from `stampede new` | a job of that name exists; pass `--name <new slug>` |
-| `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core, run the next line` | run outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([skills/stampede](skills/stampede/SKILL.md)), or run the `stampede new --core ...` line printed under it |
+| `stampede new: new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui); to run it here on Herdr Core, run the next line` | your config says `backend = "tui"` and you ran `new` outside Herdr with no target: pass `--workspace <id>` or `--pane <id>` ([skills/stampede](skills/stampede/SKILL.md)), run the printed line, or drop the key (the default `auto` runs the job on Herdr Core there) |
+| `on Herdr Core (backend auto: not inside a Herdr pane)` then `stampede new: Herdr Core did not answer ...` (or `is not installed`, or `needs --cwd`) | `new` ran outside a Herdr pane with no flag, so it chose Herdr Core, which is not running: start it (`hc server start`), pass `--cwd <repo>` outside a git repo, or for the Herdr TUI run `new` inside a Herdr pane or pass `--workspace` or `--pane`; nothing was made |
 | `stampede <command>: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>` | pass the folder `stampede new` printed (`$FLEET_JOBS_ROOT/jobs/<date>-<owner>-<name>`, or `<repo>/.herdr-<name>` for an older Core job) |
 | `stampede tell: agent <name> is not in this job (it has: ...)` | use one of the names it lists, or `lead` |
 | `stampede new: the ask file <path> does not exist` | write what the job is for in that file, then run `new` again |

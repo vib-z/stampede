@@ -15,10 +15,10 @@ A job runs on the Herdr TUI (tabs and panes) or on Herdr Core (a tree of termina
 ## Start a job
 
 ```bash
-stampede new --file ask.md                        # inside a Herdr pane: the lead gets a new tab in this workspace
-stampede new --core --file ask.md --cwd <repo>    # anywhere else, on Herdr Core: the lead is a root Core terminal
+stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr Core
 ```
 
+- On Core it works on the git root here (or `--cwd <repo>`) and says so first. `--core` or `--pane` forces one; the setting `backend` is the standing choice.
 - It prints `<lead> <job dir>` (on Core after a `STARTED <lead> (<address>)` line) and exits 0.
 - A line starting `BLOCKED` or `NOT READY` means the lead is up but waiting: do what that line says, never start a second lead.
 - A refusal exits 2 with the reason, before anything is made.
@@ -34,14 +34,12 @@ stampede new --core --file ask.md --cwd <repo>    # anywhere else, on Herdr Core
 | `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a screenshot, a report; prints `POSTED <n>` and who hears it |
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
-On Herdr Core also: `stampede start <job> <name> --kind claude|codex --brief <file>` (or `-- <program>`) starts a helper, `stampede tree <job>` lists the tree, `stampede close <job> [<agent>]` ends a subtree or the job (owner's yes only), and `stampede reopen <job>` brings back what is not live.
+On Herdr Core also: `stampede start <job> <role>-<scope> --brief <file>` (or `-- <program>`) starts a helper, its model from its role (`roles.build` for `build-api`).
+`stampede tree <job>` lists the tree, `stampede close <job> [<agent>]` ends a subtree or the job (owner's yes only), and `stampede reopen <job>` brings back what is not live.
 
 ## Where the job folder is
 
-The two paths differ today; either way, `new` prints the folder after the lead's name.
-
-- **TUI:** `stampede new` makes `$FLEET_JOBS_ROOT/jobs/<YYYY-MM-DD>-<owner or local>-<name>` (default root `~/code/herdr-jobs`) and records the repo in `<job>/workdir`.
-- **Herdr Core:** `stampede new --core` makes `<repo>/.herdr-<name>` inside the repo, kept out of git by `.git/info/exclude`.
+Always `<jobs_root>/jobs/<YYYY-MM-DD>-<owner or local>-<name>` (default root `~/code/herdr-jobs`), the repo in `<job>/workdir`. An older `<repo>/.herdr-<name>` job still works.
 
 ## What always needs the owner's yes
 

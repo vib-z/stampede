@@ -45,6 +45,7 @@ Labels only. Core stays the source of truth, and the tree above never depends on
 - `stampede start --tab <label>` names a workstream tab instead; it overflows to `<label>-2`, `<label>-3` by the same rule.
 - Pane 2 splits pane 1 right. Pane 3 splits pane 2 down. Pane 4 splits pane 1 down. Each pane from 5 on splits the pane before it right.
 - When the pane a split names is not live, panes 2 and 3 split pane 1 right and pane 4 splits it down; with pane 1 free too, a pane has no split labels.
+- The setting `helpers.layout` changes only the `stampede.split` and `stampede.beside` labels of new terminals: `grid` is the order above (the default), `columns` splits each pane right of the one before it, and `rows` below it; when that pane is not live, it splits pane 1 the same way. Tabs and pane numbers stay as above.
 - A reopen keeps each node's recorded tab and pane; one that goes through the queue keeps its place while that place is free, else takes one by these rules.
 
 | pane | corner | made by |
@@ -86,6 +87,8 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 
 ## The job folder
 
+`<jobs_root>/jobs/<YYYY-MM-DD>-<owner or local>-<slug>` (the setting `jobs_root`, default `~/code/herdr-jobs`), as for every job: never in the repo, which is recorded in `workdir` and is each agent's default `--cwd`. Every agent gets `--add-dir <job>` (for Codex a writable root). The key is the hash of this path. A job an older stampede made in `<repo>/.herdr-<slug>` keeps working: with no `workdir` file, its repo is the folder above it.
+
 | file | holds |
 |---|---|
 | `backend` | `native` |
@@ -105,8 +108,8 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 
 | command | does | prints |
 |---|---|---|
-| `stampede new --core --file <ask.md> [--cwd <repo>] [--name <slug>] [--space <name>] [--lead claude\|codex] [--max-helpers <n>] [--front-door]` | makes the job folder, writes the marker and the owner tag, starts the lead as a root with the space's name, writes the reopen record | `<lead> <job dir>` |
-| `stampede start <job> <name> --kind claude\|codex --brief <file> [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent] [--yolo-in <worktree>]` | starts one helper as a Core child of the caller's terminal (from outside Core, or from a terminal that is not the job's: of the lead); over the cap it queues the start. The name `lead`, a name a live terminal or a queued start of the job holds, and a finished job are refused | `STARTED <name> (<address>) under <parent>` or `QUEUED <name> (<n> running, cap <c>)`; `FAILED <name> (<why>)`, exit 1, when Core refuses the run |
+| `stampede new --core --file <ask.md> [--cwd <repo>] [--name <slug>] [--space <name>] [--lead claude\|codex] [--lead-model <m>] [--lead-effort <e>] [--max-helpers <n>] [--front-door]`; without `--core` outside a Herdr pane too (the setting `backend`, default `auto`, after the line `on Herdr Core (backend auto: not inside a Herdr pane)`) | makes the job folder, writes the marker and the owner tag, starts the lead as a root with the space's name, writes the reopen record | `<lead> <job dir>` |
+| `stampede start <job> <name> --brief <file> [--kind claude\|codex] [--model <m>] [--effort <e>] [--cwd <dir>] [--report <path>] [--tab <label>] [--parent <agent>] [--outlive-parent] [--yolo-in <worktree>]` | starts one helper as a Core child of the caller's terminal, with the kind, model and effort of its role (the name up to its first `-`: the setting `roles.<role>`, else `roles.default`) for each flag not given (from outside Core, or from a terminal that is not the job's: of the lead); over the cap it queues the start. The name `lead`, a name a live terminal or a queued start of the job holds, and a finished job are refused | `STARTED <name> (<address>) under <parent>` or `QUEUED <name> (<n> running, cap <c>)`; `FAILED <name> (<why>)`, exit 1, when Core refuses the run |
 | `stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--outlive-parent] -- <program> [args]` | the same for any program (kind `program`) | the same |
 | `stampede next <job>` | starts queued helpers, oldest first, while fewer than the cap run (a finished job is refused, exit 2); a live terminal of the job that already carries a queued name is adopted, not started again | one `STARTED` line each (`DROPPED <name>: its parent <p> is gone` for one whose parent is neither live nor queued; `UNKNOWN <name>: <why>; run stampede next once Herdr Core answers`, exit 1, when Core stopped answering after a failed run: the request stays and the drain stops), then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED` when nothing started or waits |
 | `stampede tree <job> [--json]` | the tree as Core holds it now, and the queue | `space <name> (<key>)`, then `<name> (<address>) <role> <kind> <status> tab <tab> pane <n>` per terminal, indented by depth (a plain child: role `plain`, kind and tab `-`), then `queued <name> under <parent> (<kind>)`; `--json`: `{space, key, nodes: [{depth, name, address, parent, role, kind, status, state, tab, pane, split, beside, outlived}], queue}` |
