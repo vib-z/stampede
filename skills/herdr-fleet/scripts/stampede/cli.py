@@ -28,7 +28,7 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     if not lead:
         if not Path(brief).is_file():
             raise ValueError(f'brief {brief} does not exist')
-        missing = agents_.missing_sections(Path(brief).read_text())
+        missing = agents_.missing_sections(Path(brief).read_text(), job)
         if missing:
             raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
                              'fill them in on skills/herdr-fleet/references/brief.md and start again')
@@ -98,14 +98,13 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         if core and kind == 'codex' and hcapi_.typing_unsafe():
             raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + hcapi_.typing_unsafe())
         return kind
-    kind = check(kind or settings_.current().get('lead.kind'))
     if core:
+        settings = settings_.for_new(repo_of(cwd), flags)  # every layer first: a repo's .stampede.toml may name the lead
+        kind = check(settings.get('lead.kind'))
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
         if front and relay:
             raise ValueError('--front-door on Herdr Core is for a native job: drop --relay (a --core --relay job has no front door)')
-        settings = settings_.for_new(repo_of(cwd), flags)  # a repo's .stampede.toml may name another lead
-        kind = kind if settings.get('lead.kind') == kind else check(settings.get('lead.kind'))
         if not relay:
             return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front, settings)
         return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings)
@@ -129,7 +128,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     except ValueError as error:  # no herdr on PATH, or one that gave no answer
         raise ValueError(base_.line(error) + relay_.core_hint()) from None
     settings = settings_.for_new(repo, flags)
-    kind = kind if settings.get('lead.kind') == kind else check(settings.get('lead.kind'))
+    kind = check(settings.get('lead.kind'))
     ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
     owner = job_.starter(ws_id)
     if front and owner:

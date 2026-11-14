@@ -21,8 +21,8 @@ ENV_ONLY = (  # read by other programs too, so they stay environment variables: 
     ('FLEET_WATCH_NOTIFY', '1', '0 turns off the phone push for stalls and vanished agents'),
     ('HERDR_EVENTS_MACHINE', socket.gethostname().split('.')[0], 'short hostname sent with every event'),
     ('HERDR_EVENTS_HOME', '~/.herdr-events', 'the event queue and dead letters'),
-    ('HERDR_EVENTS_ROUTES_DIR', '~/.config/herdr-events/routes', 'one file per route, holding URL= and KEY='),
-    ('HERDR_EVENTS_FLUSH_LOG', '~/.herdr-events/flush.log', "the flusher's log"),
+    ('HERDR_EVENTS_ROUTES_DIR', '~/.config/herdr-events/routes', 'one file per route, holding URL= and KEY='),  # $HERDR_EVENTS_DIR/routes
+    ('HERDR_EVENTS_FLUSH_LOG', '~/.herdr-events/flush.log', "the flusher's log"),  # $HERDR_EVENTS_HOME/flush.log
     ('HERDR_EVENTS_DIR', '~/.config/herdr-events', 'owner tags, job markers, handed panes'),
     ('HERDR_EVENTS_STALE_MINUTES', '30', "minutes a working terminal's screen may stay unchanged before stale"),
     ('HC', 'hc', 'the Herdr Core binary'),
@@ -34,11 +34,17 @@ ENV_ONLY = (  # read by other programs too, so they stay environment variables: 
 KEY = re.compile(r'[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*')
 
 
+CONTROL = re.compile(r'[\x00-\x08\x0a-\x1f\x7f]')  # TOML refuses these raw in a string or comment; a tab is fine
+ESCAPES = {'b': '\b', 't': '\t', 'n': '\n', 'f': '\f', 'r': '\r', '"': '"', '\\': '\\'}
+NUMBER = re.compile(r'[+-]?(0|[1-9](?:_?\d)*)(\.\d(?:_?\d)*)?([eE][+-]?\d(?:_?\d)*)?')
+
+
 def loads_subset(text):
     """The TOML these files use, for a Python without tomllib: comments, [table] and [a.b] headers, key = value (dotted keys
-    too) with strings, integers, floats, booleans and arrays of those. Raises ValueError on anything else."""
+    too) with strings, integers, floats, booleans and arrays of those. Raises ValueError on anything else, and on what
+    TOML itself refuses (a table declared twice, a bad number, escape or control character), as tomllib does."""
     out, i, n = {}, 0, len(text)
-    table = out
+    table, declared, dotted = out, set(), set()
 
     def fail(why):
         raise ValueError(f'line {text.count(chr(10), 0, i) + 1}: {why}')
@@ -49,8 +55,11 @@ def loads_subset(text):
             if text[i] in ' \t\r' or (newlines and text[i] == '\n'):
                 i += 1
             elif text[i] == '#':
-                while i < n and text[i] != '\n':
-                    i += 1
+                j = text.find('\n', i)
+                j = n if j < 0 else j
+                if CONTROL.search(text[i:j].rstrip('\r')):
+                    fail('a control character in a comment')
+                i = j
             else:
                 break
 
@@ -66,7 +75,7 @@ def loads_subset(text):
         if not KEY.fullmatch(key):
             fail(f'bad key {key!r}')
         i = j + 1
-        return [part.strip() for part in key.split('.')]
+        return tuple(part.strip() for part in key.split('.'))
 
     def into(node, parts):
         for part in parts:
@@ -75,19 +84,43 @@ def loads_subset(text):
                 fail(f'{part} is already a value')
         return node
 
+    def basic():
+        nonlocal i
+        i, chars = i + 1, []
+        while True:
+            c = text[i] if i < n else '\n'
+            if c == '"':
+                i += 1
+                return ''.join(chars)
+            if c == '\n' or CONTROL.match(c):
+                fail('an unclosed string, or a control character in one')
+            if c != '\\':
+                chars.append(c)
+                i += 1
+                continue
+            code = text[i + 1:i + 2]
+            if code in ESCAPES:
+                chars.append(ESCAPES[code])
+                i += 2
+            elif code in ('u', 'U'):
+                digits = text[i + 2:i + (6 if code == 'u' else 10)]
+                if not re.fullmatch(r'[0-9A-Fa-f]{4}' if code == 'u' else r'[0-9A-Fa-f]{8}', digits) or \
+                        0xD800 <= int(digits, 16) <= 0xDFFF or int(digits, 16) > 0x10FFFF:
+                    fail('an escape that is not a Unicode scalar value')
+                chars.append(chr(int(digits, 16)))
+                i += 2 + len(digits)
+            else:
+                fail(f'an unknown escape \\{code}')
+
     def value():
         nonlocal i
         c = text[i] if i < n else ''
         if c == '"':
-            m = re.compile(r'"(?:[^"\\\n]|\\.)*"').match(text, i)
-            if not m:
-                fail('unclosed string')
-            i = m.end()
-            return json.loads(m.group(0))
+            return basic()
         if c == "'":
             j = text.find("'", i + 1)
-            if j < 0 or '\n' in text[i:j]:
-                fail('unclosed string')
+            if j < 0 or CONTROL.search(text[i + 1:j]):
+                fail('an unclosed string, or a control character in one')
             word, i = text[i + 1:j], j + 1
             return word
         if c == '[':
@@ -103,29 +136,38 @@ def loads_subset(text):
                     i += 1
                 elif not (i < n and text[i] == ']'):
                     fail('expected , or ] in an array')
-        m = re.compile(r'(true|false)\b|[+-]?\d[\d_]*(\.\d[\d_]*)?([eE][+-]?\d+)?\b').match(text, i)
+        for word in ('true', 'false'):
+            if text.startswith(word, i):
+                i += len(word)
+                return word == 'true'
+        m = NUMBER.match(text, i)
         if not m:
             fail('expected a value')
         i = m.end()
         word = m.group(0).replace('_', '')
-        return word == 'true' if m.group(1) else float(word) if m.group(2) or m.group(3) else int(word)
+        return float(word) if m.group(2) or m.group(3) else int(word)
 
+    path = ()
     while True:
         skip(True)
         if i >= n:
             return out
         if text[i] == '[':
             i += 1
-            table = into(out, name(']'))
+            path = name(']')
+            if path in declared or path in dotted:
+                fail(f'[{".".join(path)}] is declared twice')
+            declared.add(path)
+            table = into(out, path)
         else:
             parts = name('=')
             skip(False)
             node = into(table, parts[:-1])
+            dotted.update(path + parts[:k] for k in range(1, len(parts)))
             if parts[-1] in node:
                 fail(f'{parts[-1]} is set twice')
             node[parts[-1]] = value()
         end_of_line()
-
 
 
 def parse(text):
@@ -163,8 +205,9 @@ def lead_env(env):
 
 
 class Settings:
-    def __init__(self, values, sources, problems, files, environment):
+    def __init__(self, values, sources, problems, files, environment, exported=()):
         self.values, self.sources, self.problems, self.files, self.environment = values, sources, problems, files, environment
+        self.exported = set(exported)  # the environment-only names set in the environment (even to their default)
 
     def get(self, key):
         return self.values[key]
@@ -187,7 +230,8 @@ def parse_set(pair):
 
 def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
     """Every setting with the layer it came from. saved: a job's settings.json, whose values beat the files and the
-    environment; a key it holds as a default follows them, as before the job had the file."""
+    environment; a key it holds as a default follows them, as before the job had the file. A user-only key never comes
+    from it: the job's agents can write the job folder, so its source labels grant nothing."""
     env = os.environ if env is None else env
     user = Path(env.get('XDG_CONFIG_HOME') or Path(home or Path.home()) / '.config') / 'stampede' / 'config.toml'
     paths = {'user': user} if repo is None else {'user': user, 'repo': Path(repo) / '.stampede.toml'}
@@ -206,29 +250,34 @@ def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
             values[key], sources[key] = value, source
 
     for source, path in paths.items():
-        if path.is_file():
+        if path.exists():
             try:
-                tree = parse(path.read_text(encoding='utf-8'))
-            except (OSError, UnicodeDecodeError, ValueError) as error:
+                tree = flatten(parse(path.read_text(encoding='utf-8')))
+            except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
                 problems.append(f'{path}: not readable TOML ({error}); the whole file is skipped')
                 continue
-            for key, value in flatten(tree).items():
+            for key, value in tree.items():
                 put(key, value, source, path)
     for key, name in [(key, name) for name, key in ENV.items() if env.get(name)] + lead_env(env):
         text = env[name]
         number = isinstance(DEFAULTS[key], int) and re.fullmatch(r'[+-]?\d+', text)
         put(key, int(text) if number else text, 'env:' + name, 'environment ' + name)
     for key, value in (saved or {}).get('values', {}).items():
-        if saved.get('sources', {}).get(key, 'default') != 'default':
-            put(key, value, saved['sources'][key], 'the job\'s settings.json')
+        source = saved['sources'].get(key, 'default')
+        if isinstance(source, str) and source != 'default' and not key.startswith(USER_ONLY):
+            put(key, value, source, 'the job\'s settings.json')
     for key, value in (flags or {}).items():
         if value is not None:  # a flag the command was not given
             put(key, value, 'flag', 'flag ' + key)
     for pair in sets:
         put(*parse_set(pair), 'set', '--set ' + pair)
-    files = {source: {'path': str(path), 'exists': path.is_file()} for source, path in paths.items()}
+    files = {source: {'path': str(path), 'exists': path.exists()} for source, path in paths.items()}
     environment = {name: env.get(name) or default for name, default, _ in ENV_ONLY}  # an empty one means unset
-    return Settings(values, sources, problems, files, environment)
+    for name, under, leaf in (('HERDR_EVENTS_ROUTES_DIR', 'HERDR_EVENTS_DIR', 'routes'),
+                              ('HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_HOME', 'flush.log')):
+        if not env.get(name):  # as the helper scripts make it
+            environment[name] = environment[under].rstrip('/') + '/' + leaf
+    return Settings(values, sources, problems, files, environment, [name for name, _, _ in ENV_ONLY if env.get(name)])
 
 
 SETS = []  # this command's --set pairs (cli puts them here): every setting it reads applies them
@@ -241,17 +290,23 @@ def current(job=None):
     environment as they are now; then this command's --set pairs. Resolved once until one of its inputs changes."""
     path = Path(job) / 'settings.json' if job else None
     user = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'stampede' / 'config.toml'
-    names = list(ENV) + ['FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT']
-    stamp = tuple(p.stat().st_mtime_ns if p and p.is_file() else None for p in (path, user))
+    names = list(ENV) + ['FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT'] + [name for name, _, _ in ENV_ONLY]
+    stamp = tuple(p.stat().st_mtime_ns if p and p.exists() else None for p in (path, user))
     key = (str(path), str(user), stamp, tuple(os.environ.get(n) for n in names), tuple(SETS))
     if key not in _seen:
+        saved, bad = None, ''
         try:
             saved = json.loads(path.read_text()) if stamp[0] else None
-        except (OSError, ValueError):
-            saved = None  # a damaged file: the live layers, as for a job made before settings.json
+        except (OSError, ValueError, RecursionError) as error:
+            bad = str(error)
+        if saved is not None and not (isinstance(saved, dict) and isinstance(saved.get('values'), dict)
+                                      and isinstance(saved.get('sources'), dict)):
+            saved, bad = None, 'not {"values": {...}, "sources": {...}}'
         settings = load(env=os.environ, sets=SETS, saved=saved)
-        if saved:
+        if saved or bad:
             settings.files['job'] = {'path': str(path), 'exists': True}
+        if bad:  # the live layers, as for a job made before settings.json
+            settings.problems.append(f'{path}: not a stampede settings file ({bad}); the live layers apply')
         _seen[key] = settings
     return _seen[key]
 
@@ -269,7 +324,9 @@ def for_new(repo, flags):
 def save(job, settings):
     """<job>/settings.json: what the job resolved at new, so every later command for it keeps those choices."""
     version = VERSION_FILE.read_text().strip() if VERSION_FILE.is_file() else ''
-    (Path(job) / 'settings.json').write_text(json.dumps({'values': settings.values, 'sources': settings.sources,
+    mine = [key for key in settings.values if not key.startswith(USER_ONLY)]  # user-only keys stay the user's, live
+    (Path(job) / 'settings.json').write_text(json.dumps({'values': {k: settings.values[k] for k in mine},
+                                                         'sources': {k: settings.sources[k] for k in mine},
                                                          'version': version}, indent=2) + '\n')
 
 
@@ -286,8 +343,8 @@ def show(settings, as_json=False):
             lines.append('')
         lines.append(f'{key} = {json.dumps(value)}  ({settings.source(key)})')
     lines += ['', '# environment only: other programs read these too']
-    lines += [f'{name} = {json.dumps(value)}  ({"env" if value != default else "default"})'
-              for (name, default, _), value in zip(ENV_ONLY, settings.environment.values())]
+    lines += [f'{name} = {json.dumps(value)}  ({"env" if name in settings.exported else "default"})'
+              for name, value in settings.environment.items()]
     if settings.problems:
         lines += ['', '# problems'] + settings.problems
     return '\n'.join(lines) + '\n'

@@ -57,10 +57,10 @@ def deliver_core(job, lead):
 HOLD_SETTLE = None  # a test's stand-in for the setting timeouts.hold_settle
 
 
-def settled(terminal):
+def settled(terminal, job=None):
     """The terminal's turn count when it is at rest (idle or done) and has been for timeouts.hold_settle seconds by Core's own
     clock (status_ms): no turn is under way, and none has only just ended whose count might not show yet. Else None."""
-    since, settle = terminal.get('status_ms'), settings_.current().get('timeouts.hold_settle') if HOLD_SETTLE is None else HOLD_SETTLE
+    since, settle = terminal.get('status_ms'), settings_.current(job).get('timeouts.hold_settle') if HOLD_SETTLE is None else HOLD_SETTLE
     if terminal.get('state') == 'live' and hcapi_.core_status(terminal) in ('idle', 'done') and isinstance(since, (int, float)) \
             and not isinstance(since, bool) and time.time() * 1000 - since >= settle * 1000:
         return terminal.get('turn') or 0
@@ -82,8 +82,8 @@ def held(job, terminal):
         path.unlink(missing_ok=True)
         return False
     if not isinstance(record.get('turn'), int):
-        if settled(terminal) is not None:
-            save_hold(job, {**record, 'turn': settled(terminal)})
+        if settled(terminal, job) is not None:
+            save_hold(job, {**record, 'turn': settled(terminal, job)})
         return True
     if (terminal.get('turn') or 0) <= record['turn']:
         return True
@@ -115,7 +115,7 @@ def hold(job, lead, address):
     did. Without one the hold has no count yet, and held takes the first settled look."""
     key, turn = job_.core_key(job), None
     try:
-        turn = settled(hcapi_.hc('get', address))
+        turn = settled(hcapi_.hc('get', address), job)
     except hcapi_.HcError:
         pass
     record = {'address': address, 'turn': turn, 'at': datetime.now().strftime('%Y-%m-%d %H:%M')}

@@ -5,7 +5,7 @@ from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent.parent / 'skills' / 'herdr-fleet' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import settings as st, agents as agents_, job as job_, owner as owner_, hcapi as hcapi_, native as native_, cli as cli_
+from stampede import settings as st, agents as agents_, job as job_, owner as owner_, hcapi as hcapi_, native as native_, cli as cli_, relay as relay_
 
 SAMPLE = '''# a user file
 jobs_root = "~/jobs"   # a comment after a value
@@ -327,6 +327,138 @@ class Wired(unittest.TestCase):
         self.assertIn('helpers.maxx is not a setting', out.stdout.split('# problems')[1])
         out = show('--job', str(self.dir / 'nowhere'))
         self.assertEqual((out.returncode, out.stderr.strip()), (2, f'fleet-job config: {self.dir / "nowhere"} is not a job folder'))
+
+
+class Review(Wired):
+    """The review of PR 45, B1 to B8 and its notes: each finding, then one more case of the builder's own."""
+
+    def snapshot(self, values, sources):
+        (self.job / 'settings.json').write_text(json.dumps({'values': values, 'sources': sources, 'version': 'x'}))
+
+    def test_b1_a_job_snapshot_never_decides_a_user_only_key(self):
+        self.snapshot({'ask.command': '/usr/bin/true', 'jobs_root': '/forged', 'trust_root': '/', 'gates.merge': False},
+                      {'ask.command': 'user', 'jobs_root': 'user', 'trust_root': 'env:FLEET_TRUST_ROOT', 'gates.merge': 'user'})
+        self.assertEqual(owner_.ask_command(self.job), st.DEFAULTS['ask.command'], 'the forged source grants nothing')
+        s = st.current(self.job)
+        self.assertEqual({k: (s.get(k), s.source(k)) for k in ('ask.command', 'jobs_root', 'trust_root')},
+                         {k: (st.DEFAULTS[k], 'default') for k in ('ask.command', 'jobs_root', 'trust_root')})
+        self.config('[ask]\ncommand = "ask-mine"\n')
+        out = subprocess.run([str(SCRIPTS / 'fleet-job'), 'config', 'show', '--job', str(self.job)], capture_output=True,
+                             text=True, env=dict(os.environ))
+        self.assertIn('ask.command = "ask-mine"  (user)', out.stdout, 'show --job: the live source')
+        with self.env(FLEET_ASK_CMD='ask-env', FLEET_JOBS_ROOT='/live'):  # and new never writes them
+            st.save(self.job, st.load(env=os.environ, sets=['trust_root=/set']))
+        saved = json.loads((self.job / 'settings.json').read_text())
+        self.assertFalse([k for k in list(saved['values']) + list(saved['sources']) if k.startswith(st.USER_ONLY)])
+        self.assertEqual(saved['values']['helpers.max'], 12, 'the other keys are kept')
+
+    def test_g19_l09_an_ask_command_set_after_new_is_the_one_asked(self):
+        """CI's evals G19 and L09 set FLEET_ASK_CMD after new; the snapshot new wrote with another value must not win."""
+        with self.env(FLEET_ASK_CMD='ask-at-new'):
+            st.save(self.job, st.load(env=os.environ))
+        with self.env(FLEET_ASK_CMD='ask-later'):
+            self.assertEqual(owner_.ask_command(self.job), 'ask-later')
+        self.assertEqual(owner_.ask_command(self.job), st.DEFAULTS['ask.command'])
+
+    def test_b2_brief_sections_hc_call_and_hold_settle_come_from_the_job(self):
+        self.snapshot({'brief.sections': ['Goal'], 'timeouts.hc_call': 7, 'timeouts.hold_settle': 100},
+                      {'brief.sections': 'repo', 'timeouts.hc_call': 'repo', 'timeouts.hold_settle': 'repo'})
+        self.assertEqual(agents_.missing_sections('## Goal\nShip it.\n', self.job), [])
+        self.assertEqual(agents_.missing_sections('## Goal\nShip it.\n')[:1], ['Why'], 'no job: the live layers')
+        with mock.patch.object(hcapi_, 'TARGET', [self.job]):
+            self.assertEqual(hcapi_.hc_call(), 7)
+        self.assertEqual(hcapi_.hc_call(), 60)
+        import time
+        rest = {'state': 'live', 'status': 'idle', 'status_ms': time.time() * 1000 - 10_000, 'turn': 2}
+        with mock.patch.object(hcapi_, 'core_status', return_value='idle'):
+            self.assertIsNone(relay_.settled(rest, self.job), 'at rest 10 s of the job\'s 100')
+            self.assertEqual(relay_.settled(rest), 2, 'the live 5 s')
+
+    def test_b3_the_fallback_reader_refuses_what_toml_refuses(self):
+        """Expected results written out, so this holds on every Python, for the fallback reader and for parse()."""
+        refused = ['[helpers]\nmax = 3\n[helpers]\ntab_panes = 2', 'helpers.max = 3\n[helpers]\ntab_panes = 2',
+                   'helpers.max = 1__2', 'helpers.max = 012', 'helpers.max = 12_', 'a = "a\\/b"', "a = 'a\x01b'",
+                   'a = "a\x01b"', 'a = "\\uD800"', 'a = 1 # a \x07 bell', 'a = 1e', 'a = trueish',
+                   '[a]\nb.c = 1\n[a.b]']
+        accepted = {'a = "\\U00000041\\u0042"': {'a': 'AB'}, 'a = "x\ty"': {'a': 'x\ty'}, 'a = -0': {'a': 0},
+                    'a = +1.5e3': {'a': 1500.0}, 'a = 1_000': {'a': 1000}, '[a.b]\n[a]': {'a': {'b': {}}},
+                    'a.b = 1\n[a.c]': {'a': {'b': 1, 'c': {}}}, 'a = ["x", # c\n "y",]': {'a': ['x', 'y']}}
+        for reader in (st.loads_subset, st.parse):
+            for text in refused:
+                with self.subTest(reader=reader.__name__, text=text), self.assertRaises(ValueError):
+                    reader(text)
+            for text, want in accepted.items():
+                with self.subTest(reader=reader.__name__, text=text):
+                    self.assertEqual(reader(text), want)
+        self.config('[helpers]\nmax = 012\n')
+        self.assertEqual((len(st.current().problems), st.current().get('helpers.max')), (1, 12), 'the layer is skipped')
+
+    def test_b4_the_cap_file_new_writes_holds_the_resolved_cap(self):
+        settings = st.load(env=os.environ, flags={'helpers.max': 3}, sets=['helpers.max=6'])
+        self.assertEqual((settings.get('helpers.max'), settings.source('helpers.max')), (6, 'set'))
+        # the new itself, against the fake Core: tests/test_native.py, test_b4_set_beats_max_helpers_in_the_cap_file
+
+    def test_b5_new_validates_the_lead_the_layers_resolve(self):
+        repo = self.dir / 'code' / 'repo'
+        repo.mkdir(parents=True)
+        sid = '0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37'
+        self.config('[lead]\nkind = "codex"\n')
+        (repo / '.stampede.toml').write_text('[lead]\nkind = "claude"\n')
+        with self.env(FLEET_TRUST_ROOT=str(self.dir / 'code')), mock.patch.object(native_, 'new', return_value=0) as made:
+            self.assertEqual(cli_.new('ask.md', None, core=True, cwd=str(repo), fork=sid), 0)
+            self.assertEqual(made.call_args.args[5], 'claude', 'the repo\'s Claude lead takes the fork')
+            self.config('')
+            (repo / '.stampede.toml').write_text('[lead]\nkind = "codex"\n')
+            with mock.patch.object(hcapi_, 'typing_unsafe', return_value=''), \
+                    self.assertRaisesRegex(ValueError, '--fork forks a Claude chat'):
+                cli_.new('ask.md', None, core=True, cwd=str(repo), fork=sid)
+        self.assertEqual(made.call_count, 1)
+
+    def test_b6_a_snapshot_of_the_wrong_shape_is_a_problem_not_a_crash(self):
+        for body in ('{"values": []}', '{"values": {}, "sources": null}', '[1, 2]', '"text"', '{"values": {"helpers.max": 4}}'):
+            with self.subTest(body=body):
+                (self.job / 'settings.json').write_text(body)
+                s = st.current(self.job)
+                self.assertEqual(s.get('helpers.max'), 12)
+                self.assertEqual(len(s.problems), 1)
+                self.assertIn('not a stampede settings file', s.problems[0])
+                out = subprocess.run([str(SCRIPTS / 'fleet-job'), 'config', 'show', '--job', str(self.job)],
+                                     capture_output=True, text=True, env=dict(os.environ))
+                self.assertEqual((out.returncode, out.stderr), (1, ''))
+
+    def test_b7_a_very_deep_key_is_one_problem(self):
+        self.config('lead.kind = "codex"\n' + '.'.join(['deep'] * 1200) + ' = 1\n')
+        s = st.current()
+        self.assertEqual((len(s.problems), s.get('lead.kind')), (1, 'claude'), 'one line, the whole layer skipped')
+        repo = self.dir / 'repo'
+        repo.mkdir()
+        (repo / '.stampede.toml').write_text('[' + '.'.join(['deep'] * 1200) + ']\n')
+        self.config('')
+        with mock.patch('sys.stderr'), self.assertRaisesRegex(ValueError, 'fix it or remove the key'):
+            st.for_new(repo, {})
+
+    def test_b8_the_environment_only_section(self):
+        self.assertEqual(st.current().environment['HC_SESSION'], 'default')
+        with self.env(HC_SESSION='other-core'):
+            self.assertEqual(st.current().environment['HC_SESSION'], 'other-core', 'the memo sees it')
+        with self.env(HC_SESSION='default', HERDR_EVENTS_DIR='/scratch/events', HERDR_EVENTS_HOME='/scratch/queue'):
+            text = st.show(st.current())
+        self.assertIn('HC_SESSION = "default"  (env)', text, 'set, even to its default')
+        self.assertIn('HERDR_EVENTS_ROUTES_DIR = "/scratch/events/routes"  (default)', text)
+        self.assertIn('HERDR_EVENTS_FLUSH_LOG = "/scratch/queue/flush.log"  (default)', text)
+        self.assertIn('HC = "hc"  (default)', st.show(st.current()))
+
+    def test_notes_the_wait_timeout_line_and_a_config_that_is_a_folder(self):
+        self.config('[timeouts]\nwait = 0\n')
+        with mock.patch.object(owner_, 'lead_alive', return_value=True), mock.patch('builtins.print') as said:
+            self.assertEqual(owner_.wait(self.job), 3)
+        self.assertIn('after 0s;', said.call_args.args[0])
+        self.user.unlink()
+        self.user.mkdir()
+        s = st.current()
+        self.assertEqual(len(s.problems), 1)
+        self.assertIn('not readable TOML', s.problems[0])
+        self.assertTrue(s.files['user']['exists'])
 
 
 class Example(unittest.TestCase):

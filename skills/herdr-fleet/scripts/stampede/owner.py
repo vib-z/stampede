@@ -205,7 +205,8 @@ def wait(job, timeout=None, every=5):
     job = Path(job).absolute()
     native = job_.backend(job) == 'native'
     seen_path, log = job / 'outbox' / '.seen', job / 'outbox.log'
-    deadline, checks = time.monotonic() + (settings_.current(job).get('timeouts.wait') if timeout is None else timeout), 0
+    timeout = settings_.current(job).get('timeouts.wait') if timeout is None else timeout
+    deadline, checks = time.monotonic() + timeout, 0
     while True:
         seen = int(seen_path.read_text() or 0) if seen_path.is_file() else 0
         rows = [r for r in (log.read_text().splitlines() if log.is_file() else []) if r[:3].isdigit() and int(r[:3]) > seen]

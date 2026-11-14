@@ -93,7 +93,7 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `endpoint` | the core the job was made on (`HC_SESSION`, `HC_SOCKET`) |
 | `lead`, `space`, `workdir` | the lead's name, the space's name, the repo |
 | `max-helpers` | the cap, only when the owner set one |
-| `settings.json` | every setting as `stampede new` resolved it, with the layer that set each and the stampede version; every later command of the job reads it (`stampede config show --job <job>`) |
+| `settings.json` | the settings `stampede new` resolved (not the user-only keys, which always come from your own layers), with the layer that set each and the stampede version; every later command of the job reads it (`stampede config show --job <job>`) |
 | `tree.json` | the reopen record, `{"space", "key", "nodes": {<name>: node}}`: every node with its name, role, parent (by name), kind, model, effort, session, brief, report, cwd, tab, pane, split, beside, `argv` (how to start it again), `outlive`, `address` and its last seen `state` |
 | `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree (`fleet-job reopen <job> "$@"` of this checkout, else `stampede reopen`); both are rendered from `tree.json` alone each time it changes |
 | `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog raises no alarm for a lead closed on purpose |

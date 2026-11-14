@@ -213,7 +213,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 
 ```text
 ask.md        your ask, word for word
-settings.json every setting as stampede new resolved it, and the layer that set each; every later
+settings.json the settings stampede new resolved (not the user-only ones), and the layer that set each; every later
               command of the job reads it (stampede config show --job <job>)
 workdir       the repo the agents work in
 lead          the lead's name
@@ -664,7 +664,7 @@ stampede config show --job <job>         # what that job saved at new
 stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 ```
 
-`stampede new` saves what it resolved in `<job>/settings.json`, with the layer of each value and the stampede version, and every later command of that job reads it there: a job keeps its choices when your environment changes. A key nobody set at `new` keeps following your file and environment, and a later command's own `--set` still wins for that command. A job made before `settings.json` existed reads the live layers. `<job>/max-helpers` still wins for its job.
+`stampede new` saves what it resolved in `<job>/settings.json`, with the layer of each value and the stampede version, and every later command of that job reads it there. A job remembers what was set when it started. Anything that was not set then follows your current config. A later command's own `--set` still wins for that command, a job made before `settings.json` existed reads the live layers, and `<job>/max-helpers` still wins for its job. The user-only keys below are never saved there: the job's agents can write its folder, so a job always reads them from your own file, environment and flags. A `settings.json` that is not a stampede settings file is one problem line, and the live layers apply.
 
 **User only.** `jobs_root`, `trust_root` and `ask.command` run a command or widen what is trusted, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml`; there each is skipped with a problem line.
 
@@ -954,7 +954,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **Unreleased, 14 Nov 2026. A native front door on Herdr Core:** `stampede new --core --front-door` makes a chat outside Herdr and Core the owner's only contact on a Core-native job, as on the TUI: the lead posts, asks and asks gates through `<job>/outbox`, `stampede wait` hands each item on (and says `BLOCKED <lead>: <kind>` with its screen, or `LEAD_GONE`), and answers, `approve` and `approve-gate` reach the lead through `hc send`. Tested with the fake `hc` (the front-door loop for every client outside Herdr on all three backends in the cross-client suite) and on a real scratch core (`tests/core_smoke.py`, hc 0.1.21: `new --core --front-door`, `post`, `wait`, `finish`). No live agent has run it yet.
 
-**Unreleased, 14 Nov 2026. Layered config:** every setting stampede reads comes from one module, resolved from the defaults, your `config.toml`, a repo's `.stampede.toml`, the environment names that always worked, and a command's flags and `--set`; `stampede config show` prints each value with the layer that set it, and `stampede new` saves them in `<job>/settings.json` so a job keeps its choices. That also fixes [F5](docs/CLIENTS.md#found-by-the-live-runs): a TUI lead now asks through the front door's `FLEET_ASK_CMD`. Tested with the unit suite (on Python 3.9 too) and against a scratch HOME. Next for config, planned: a `backend` key, one jobs root for Core, role defaults, the layout and the review step.
+**Unreleased, 14 Nov 2026. Layered config:** every setting stampede reads comes from one module, resolved from the defaults, your `config.toml`, a repo's `.stampede.toml`, the environment names that always worked, and a command's flags and `--set`; `stampede config show` prints each value with the layer that set it, and `stampede new` saves them in `<job>/settings.json` so a job keeps its choices. Tested with the unit suite (on Python 3.9 too) and against a scratch HOME. Next for config, planned: a `backend` key, one jobs root for Core, role defaults, the layout and the review step.
 
 **Next:**
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.

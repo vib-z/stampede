@@ -77,6 +77,30 @@ class New(NativeCase):
         self.assertEqual((job / 'max-helpers').read_text().strip(), '3')
         self.assertEqual(self.labels(self.runs()[0])['herdr.space'], 'login')
 
+    def test_b4_set_beats_max_helpers_in_the_cap_file(self):
+        from stampede import settings as settings_
+        with mock.patch.object(settings_, 'SETS', ['helpers.max=6']):
+            job = self.started(max_helpers=3)
+        self.assertEqual(((job / 'max-helpers').read_text().strip(), native_.cap(job)), ('6', 6))
+        (job / 'max-helpers').write_text('2\n')  # a later edit of the file still wins
+        self.assertEqual(native_.cap(job), 2)
+        self.setUp()
+        with mock.patch.object(settings_, 'SETS', ['helpers.max=5']):
+            job = self.started()
+        self.assertEqual(((job / 'max-helpers').exists(), native_.cap(job)), (False, 5), 'a --set alone: the saved cap')
+
+    def test_b2_a_start_reads_the_brief_sections_the_job_saved(self):
+        from stampede import settings as settings_
+        job = self.started()
+        saved = json.loads((job / 'settings.json').read_text())
+        saved['values']['brief.sections'], saved['sources']['brief.sections'] = ['Goal'], 'repo'
+        (job / 'settings.json').write_text(json.dumps(saved))
+        brief = job / 'briefs' / 'goal-only.md'
+        brief.write_text('## Goal\nShip it.\n')
+        code, out = self.quiet(cli_.start, job, 'goal-only', 'claude', None, str(brief))
+        self.assertIn('STARTED goal-only', out)
+        self.assertEqual(settings_.current().get('brief.sections')[:2], ['Goal', 'Why'], 'the live layers keep seven')
+
     def test_relay_makes_the_earlier_kind_and_space_needs_native(self):
         with mock.patch.object(relay_, 'new_core', return_value=0) as core:
             self.new(relay=True)

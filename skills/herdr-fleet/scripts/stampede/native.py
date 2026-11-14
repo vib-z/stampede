@@ -336,8 +336,8 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
                                               'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')
     (job / 'space').write_text(space + '\n')
-    if max_helpers:
-        (job / 'max-helpers').write_text(f'{max_helpers}\n')
+    if max_helpers:  # the cap file holds the resolved cap: a --set helpers.max comes after the flag
+        (job / 'max-helpers').write_text(f'{settings.get("helpers.max")}\n')
     hcapi_.target(job)
     job_.mark_job(key, job)
     (job_.events_dir() / 'owners' / key).unlink(missing_ok=True)  # a folder used before (same path, same key) had its own
@@ -419,7 +419,7 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
         raise ValueError(f'brief {brief} does not exist' if brief else 'start needs --brief <file>, or a program after --')
     else:
         brief = str(Path(brief).expanduser().absolute())
-        missing = agents_.missing_sections(Path(brief).read_text())
+        missing = agents_.missing_sections(Path(brief).read_text(), job)
         if missing:
             raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
                              'fill them in on skills/herdr-fleet/references/brief.md and start again')

@@ -27,6 +27,7 @@ def target(job):
             os.environ[name] = want
         else:
             os.environ.pop(name, None)
+    TARGET[:] = [job]
 
 
 class HcError(RuntimeError):
@@ -35,9 +36,12 @@ class HcError(RuntimeError):
         self.kind, self.code = kind, code
 
 
+TARGET = []  # the job target() pointed this process at: its saved settings time every hc call
+
+
 def hc_call():
-    """Seconds one hc call may take on top of what the command itself waits for (timeouts.hc_call)."""
-    return settings_.current().get('timeouts.hc_call')
+    """Seconds one hc call may take on top of what the command itself waits for (the job's timeouts.hc_call)."""
+    return settings_.current(TARGET[-1] if TARGET else None).get('timeouts.hc_call')
 
 
 # A send is stopped SEND_MARGIN seconds before Core's draft hold could run out, so it never goes in after a draft someone

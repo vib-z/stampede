@@ -5,11 +5,11 @@ from pathlib import Path
 from . import base as base_, job as job_, settings as settings_
 
 
-def missing_sections(text):
-    """Required brief headings whose section has no non-blank line, or is absent."""
+def missing_sections(text, job=None):
+    """Required brief headings (the job's brief.sections) whose section has no non-blank line, or is absent."""
     parts = re.split(r'(?m)^ {0,3}#{1,6}[ \t]+([^\n]*)\n?', text)
     filled = [parts[i].strip().lower() for i in range(1, len(parts), 2) if parts[i + 1].strip()]
-    return [name for name in settings_.current().get('brief.sections') if not any(heading.startswith(name.lower()) for heading in filled)]
+    return [name for name in settings_.current(job).get('brief.sections') if not any(heading.startswith(name.lower()) for heading in filled)]
 
 
 def hook_command(job, agent, action):
