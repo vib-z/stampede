@@ -266,7 +266,7 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
     if fork:
         gate = ('The conversation before this is the owner\'s planning chat, forked into your terminal: you are no longer that '
                 'chat but the lead, so write what it agreed into plan.md rather than planning again. ' + gate)
-    ask_gate = f'{s} ask {job} --gate --sha <commit> [--pr <n>] "<the exact action>"'
+    ask_gate = f'{s} ask {job} --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>" (--kind merge for a merge, --kind push_default_branch for a push to the default branch; a gate for anything else has no kind)'
     route = (f'it goes to {owner}, which asks the owner in chat' if owner else
              'it is posted to the chat with its approve line, and the chat records the owner\'s yes' if front else
              'it goes to the owner\'s phone')

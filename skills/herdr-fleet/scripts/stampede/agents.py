@@ -152,7 +152,7 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
     if fork:
         gate = ('The conversation before this is the owner\'s planning chat, forked into your pane: you are no longer that chat '
                 'but the lead, so write what it agreed into plan.md rather than planning again. ' + gate)
-    ask_gate_cmd = f'fleet-job ask {job} --gate --sha <commit> [--pr <n>] "<the exact action>"'
+    ask_gate_cmd = f'fleet-job ask {job} --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>" (--kind merge for a merge, --kind push_default_branch for a push to the default branch; a gate for anything else has no kind)'
     gate_ok_cmd = f'fleet-job gate-ok {job} <gate> --sha <the commit you act on>'
     layout, workers = 'the layout (workspace, tabs, panes with app and model)', 'Start a worker with: fleet-job start. '
     if key:

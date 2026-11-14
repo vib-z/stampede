@@ -457,17 +457,17 @@ $ stampede wait $J                                                              
 ...
 $ stampede approve $J --by "owner in desktop chat: 'go'"
 SUBMITTED lead-login (t1)
-$ stampede ask $J --gate --sha <commit> --pr 12 "merge PR #12"                    # the lead
-GATE deca46984e27 posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login deca46984e27 --sha <the commit you act on> prints APPROVED
+$ stampede ask $J --gate --kind merge --sha <commit> --pr 12 "merge PR #12"       # the lead
+GATE d8a231988898 posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login d8a231988898 --sha <the commit you act on> prints APPROVED
 $ stampede wait $J                                                                # the chat
 # 002 gate
 
-Gate deca46984e27: merge PR #12 (PR #12) at <commit, 12 hex>?
+Gate d8a231988898 (merge): merge PR #12 (PR #12) at <commit, 12 hex>?
 One exact action, yes or no. Show the owner this action as written.
 
-Answer with: fleet-job approve-gate ~/code/herdr-jobs/jobs/2026-11-14-local-login deca46984e27 --sha <commit> --digest b490e3daedbc6383 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell ~/code/herdr-jobs/jobs/2026-11-14-local-login lead 'GATE deca46984e27 NO: <their words>')
+Answer with: fleet-job approve-gate ~/code/herdr-jobs/jobs/2026-11-14-local-login d8a231988898 --sha <commit> --digest 2d41deece9d0888b --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell ~/code/herdr-jobs/jobs/2026-11-14-local-login lead 'GATE d8a231988898 NO: <their words>')
 
-$ stampede approve-gate $J deca46984e27 --sha <commit> --digest b490e3daedbc6383 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
+$ stampede approve-gate $J d8a231988898 --sha <commit> --digest 2d41deece9d0888b --by "owner in desktop chat: 'merge it'"   # on the owner's yes
 SUBMITTED lead-login (t1)
 APPROVED deca46984e27 at <commit>
 $ stampede wait $J                                                                # the lead waits at a permission dialog
@@ -573,9 +573,9 @@ A question for the owner, or a gate, goes out with `stampede ask`; on a Core job
 ```console
 $ stampede ask $J "Keep the route at /health?" --option Yes --option No
 ASKED 188e888a8640 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 188e888a8640)
-$ stampede ask $J --gate --sha <commit> --pr 12 "merge PR #12"
-ASKED b821f31f702b (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J b821f31f702b)
-GATE 83db4fd02a26 on the phone; act after fleet-job gate-ok $J 83db4fd02a26 --sha <the commit you act on> prints APPROVED
+$ stampede ask $J --gate --kind merge --sha <commit> --pr 12 "merge PR #12"
+ASKED 92a4f6d0d365 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 92a4f6d0d365)
+GATE 775e5f21eba6 on the phone; act after fleet-job gate-ok $J 775e5f21eba6 --sha <the commit you act on> prints APPROVED
 ```
 
 A message from an agent arrives in a terminal as `<hc from="t7 name">...</hc>`; one from a plain program arrives as bare text. Neither is ever the owner's approval.
@@ -647,7 +647,7 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 ## Safety
 
 - **Your own yes, every time:** a merge to main, a push to main or another shared branch, a deploy, publishing, sending email or messages, resubmitting a sitemap, any spend, and closing panes, tabs, a workspace or a Core job (`stampede close`). Pushing the job's own work branch and opening a draft PR need no ask. The one list, and what never counts as a yes: [gates.md](skills/herdr-fleet/references/gates.md).
-- **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate --kind <gate> --sha <commit> [--pr <n>] "<the exact action>"`:
+- **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>"` (`--kind merge` for a merge, `--kind push_default_branch` for a push to the default branch; a gate for anything else has no kind):
   - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.
   - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
   - **started by a front door** (`--front-door`, on the Herdr TUI or on Herdr Core): a post in `<job>/outbox/`. The front door shows you the exact action and, on your yes in its chat, runs `stampede approve-gate ... --by "owner in <chat>: '<your words>'"`. An explicit order you already gave there for that exact action counts, quoted; anything vaguer goes back to you.
@@ -657,8 +657,8 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
 - **A Codex lead counts only the recorded yes.** stampede types its inbox into its pane, marked as from stampede, so text there proves nothing: it acts only after `gate-ok` prints `APPROVED`.
 - **On Herdr Core only the recorded yes counts.** If someone types yes or a similar gate approval in a job pane or terminal, the lead replies: "A typed yes does not count on Core; answer in the chat or on the phone that started this job." In a job started with `stampede new --core` the lead acts only after `gate-ok` prints `APPROVED`: a yes typed into the lead, an answer to its own question card, and any message never count, because on Core another program can type into any terminal (`hc send`, `hc keys`). Your tap on a phone card (`FLEET_ASK_CMD`) and a bot's `approve-gate` are recorded and count. `approve-gate` also refuses inside a Herdr Core terminal (`HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` set) and under a `herdr-core` or `hc` process, so `hc exec` cannot run it: a bot runs it over plain ssh. Core's own `blocked` state is never a gate.
 - **Three gates are held by code, not only by the lead's brief:**
-  - **merge:** the lead merges only with `stampede merge <job> <pr> --sha <sha> --review <report> --gate <id>`. Whatever the settings, the review report's own header (lines that start with `Status:` and `Reviewed:`, outside code fences and quotes, in its first 10 lines, one value each) must say exactly `Status: PASS` and `Reviewed: <sha>`, and the PR must be open with that sha as its head; with `gates.merge` on, the gate must be one asked with `--kind merge` for that PR and approved at that sha. Every new head, a rebase too, needs a review report that names it. Then it marks a draft ready and runs `gh pr merge <pr> --squash --match-head-commit <sha>` (`merge.method`), so a push after the review or the yes means reviewing and asking again.
-  - **push to the default branch:** `stampede new` installs a `pre-push` hook (marked `# stampede-hook`) in the repo's own hooks folder, only when there is no `pre-push` and `core.hooksPath` is unset; otherwise it prints the one line to add to your hook. Outside a job's environment the hook exits 0 at once, without running stampede, so a push from your own shell is never touched. A job's agent (`STAMPEDE_JOB_KEY` on Core or `HERDR_WORKSPACE_ID` in a Herdr pane names an open job's marker) pushing to the default branch needs a gate asked with `--kind push_default_branch` and approved at the pushed commit. The default branch is the one `stampede new` found for each remote (its HEAD), else `refs/remotes/<remote>/HEAD`, else `main` and `master`. Only `stampede prepush`'s own refusal (exit 9) stops a push: a missing, old or failing stampede lets it through with one warning line saying what to fix.
+  - **merge:** the lead merges only with `stampede merge <job> <pr> --sha <sha> --review <report> --gate <id>`. Whatever the settings, the review report's header (a title line, then lines that start with `Status:` and `Reviewed:`, in its first 10 lines, one line each, before any code block, quote, comment or indented line) must say exactly `Status: PASS` and `Reviewed: <sha>`, and the PR must be open with that sha as its head; with `gates.merge` on, the gate must be one asked with `--kind merge` for that PR and approved at that sha. Every new head, a rebase too, needs a review report that names it. Then it marks a draft ready and runs `gh pr merge <pr> --squash --match-head-commit <sha>` (`merge.method`), so a push after the review or the yes means reviewing and asking again.
+  - **push to the default branch:** `stampede new` installs a `pre-push` hook (marked `# stampede-hook`) in the repo's own hooks folder, only when there is no `pre-push` and `core.hooksPath` is unset. A repo with a hook of its own gets no push gate from a hook (`new` says so); `stampede merge` still holds the merge gate. With neither `STAMPEDE_JOB_KEY` nor `HERDR_WORKSPACE_ID` set, the hook exits 0 without running stampede, so a push from your own shell outside Herdr is never touched; otherwise `stampede prepush` decides. A job's agent (either names an open job's marker) pushing to the default branch needs a gate asked with `--kind push_default_branch` and approved at the pushed commit. The default branch is the one `stampede new` found for each remote (its HEAD), else `refs/remotes/<remote>/HEAD`, else `main` and `master`. Only `stampede prepush`'s own refusal (exit 9) stops a push: a missing, old or failing stampede lets it through with one warning line saying what to fix.
   - **close:** a whole job never closes from one of its own terminals, and `stampede close` never ends a terminal that carries another job's key: it skips that terminal, its branch and the terminals above it (`SKIPPED ...`), and exits 1.
   - These guard against a forgetful agent, not a hostile one: an agent runs as your user and could edit the record or skip a hook with `git push --no-verify`.
 - **Opting out is allowed, and logged.** Every gate is on by default (`[gates]` in [Configure](#configure)). Switch one off for one job with `stampede new --no-gate merge` (repeatable, the same as `--set gates.merge=false`), or for every job in your own `config.toml`; a repo's `.stampede.toml` can never switch a gate off. `stampede new` records the job's gates and each remote's default branch outside the job folder, in `$HERDR_EVENTS_DIR/gates/<job key>.json`, and `stampede merge`, the hook, the lead's brief and `finish` read them there (a job made before has every gate on, and `config show --job` says `no record: all on`). Each gate off is a line `<UTC time> OFF <name> (<layer>)` in `<job>/gates.log`, the lead's brief names it, `stampede config show --job` shows it, and `stampede finish` prints `gates off: <names>` and sends it with the done event. Two rules have no switch: never close what the job did not create, and merge only the reviewed commit.
@@ -764,13 +764,15 @@ Other programs read these, so they stay environment variables. Export them in yo
 | `stampede merge: the merge gate is on: ask the owner with the next line ...` | run the `stampede ask ... --kind merge` line it prints, then merge with `--gate <id>` once the owner said yes |
 | `stampede merge: gate <id> is not a merge gate for PR <n> (it is <kind>, PR <m>)` | the gate was asked for another action or PR, or without `--kind merge`: ask with the line it prints |
 | `stampede merge: gate <id> has no recorded yes`, `... was approved for <a>, not <b>` | wait for the yes, or ask a merge gate for this PR at this commit |
-| `stampede merge: the review report <file> has 2 Status: lines in its first 10 lines (...)` | the report's header must give one value each: the reviewer fixes it |
+| `stampede merge: the review report <file> has 2 Status: lines in its first 10 lines (...)` | the report's header must give one line each: the reviewer fixes it |
+| `stampede merge: line <n> of the review report <file> (...) comes before or inside its header` | the header (a title line, then `Status:` and `Reviewed:`) goes before any code block, quote, comment or indented line: the reviewer moves it up |
+| `stampede merge: the review report <file> says Reviewed: <text>: it takes one full sha and nothing else` | the reviewer writes the full 40-hex sha alone on that line |
 | `stampede merge: <job>/merges.log cannot be written (...): nothing was merged` | make `merges.log` a writable file again, then merge again |
 | `stampede-hook: stampede is not on PATH, so this job's push gate was not checked` (or `stampede prepush failed (exit <n>)`) | the push went through unchecked: put stampede on PATH (`./install.sh`) or run `stampede update` |
 | `SKIPPED <name> (<address>): it carries another job's key ...` from `stampede close` | another job's terminal runs under this job's: close it from its own job; this one stays open around it |
 | `stampede merge: gh pr merge failed: <gh's line>` (exit 1) | gh refused (auth, a protected branch, a head that moved): fix what gh names, then merge again |
 | `stampede prepush: a push of <sha> to main needs the owner's yes. Ask it with the next line ...` | a job's agent pushed to the default branch: run the `stampede ask ... --kind push_default_branch` line it prints, then push again once `gate-ok` prints `APPROVED`; or push the work branch instead |
-| `stampede new: the pre-push hook was not installed (...)` | the repo has its own `pre-push` or `core.hooksPath`: add the line it prints to that hook, or leave the push gate to the lead |
+| `stampede new: the push gate is not enforced by a hook in this repo, because it has its own (...)` | the repo has its own `pre-push` or `core.hooksPath`: a push to the default branch is the lead's to ask; `stampede merge` still holds the merge gate |
 | `stampede new: --no-gate <name> is no gate` | use one of the names it lists: `merge`, `push_default_branch`, `deploy`, `publish`, `send`, `spend`, `close` |
 | `stampede approve-gate: approve-gate needs --digest` | a bot built the command itself: run the gate event's `approve` line as given, which carries the digest |
 | `stampede approve-gate: gate <id> changed while the owner was asked` | the gate was edited after the bot asked you, so your yes was for something else: the lead asks again |

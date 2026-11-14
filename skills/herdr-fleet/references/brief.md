@@ -18,7 +18,7 @@ Write for an agent that has seen nothing else: not the ask, the plan or your lea
 <A checklist you can verify yourself: commands that pass, files that exist and behaviour to show. For a builder, name the cheap tests to run after this step.>
 
 ## Report back
-<Your report's absolute path and shape: Status: DONE (a review: PASS or FINDINGS, and Reviewed: <the full sha it reviewed>) in the first 10 lines; what changed, files touched, not verified and decisions, under 60 lines.>
+<Your report's absolute path and shape: a title line, then Status: DONE (a review: PASS or FINDINGS, then Reviewed: <the full sha it reviewed>), before anything else; what changed, files touched, not verified and decisions, under 60 lines.>
 
 ## If blocked
 <Your lead decides: write the question to `<job>/questions/<agent>.md` (a Claude worker can use its question card, which does that), say so in your last message and end your turn; make the reasonable call where you can and record it.>

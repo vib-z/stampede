@@ -258,7 +258,7 @@ class Hook(Scratch):
         with mock.patch('sys.stderr') as err:
             self.begin()
         self.assertEqual(self.hook.read_text(), '#!/bin/sh\nexit 0\n')
-        self.assertIn('already exists); to hold the push gate, add this line', ''.join(c.args[0] for c in err.write.call_args_list))
+        self.assertIn('already exists); stampede merge still holds the merge gate', ''.join(c.args[0] for c in err.write.call_args_list))
         self.hook.unlink()
         git('config', 'core.hooksPath', '.githooks', cwd=self.repo)
         with mock.patch('sys.stderr') as err:
@@ -321,26 +321,38 @@ class Hook(Scratch):
 class Round1Merge(Merge):
     """The review's findings on merge: R1 (the report's own header only), R4 (the log first), R8, R9, decision 1."""
 
-    def test_r1_only_the_report_s_own_header_counts(self):
-        cases = {
+    def test_r1_the_header_comes_first_with_one_value_each(self):
+        before = 'comes before or inside its header'
+        cases = {  # the round 1 and round 2 reproductions, then cases of my own
             'duplicate status': (f'Status: PASS\nReviewed: {SHA}\nStatus: FINDINGS\n', 'has 2 Status: lines in its first 10 lines (PASS, FINDINGS)'),
             'duplicate reviewed': (f'Status: PASS\nReviewed: {SHA}\nReviewed: {OTHER}\n', 'has 2 Reviewed: lines'),
-            'fenced pass example': (f'```\nStatus: PASS\nReviewed: {SHA}\n```\nStatus: FINDINGS\nReviewed: {SHA}\n',
-                                    'says Status: FINDINGS, not PASS'),
-            'indented pass example': (f'    Status: PASS\n    Reviewed: {SHA}\nStatus: FINDINGS\nReviewed: {SHA}\n',
-                                      'says Status: FINDINGS, not PASS'),
-            'pass only in a fence': (f'~~~\nStatus: PASS\nReviewed: {SHA}\n~~~\n', 'says Status: (none), not PASS'),
+            'the same status twice': (f'Status: PASS\nStatus: PASS\nReviewed: {SHA}\n', 'has 2 Status: lines'),
+            'fenced pass example': (f'```\nStatus: PASS\nReviewed: {SHA}\n```\nStatus: FINDINGS\n', before),
+            'indented pass example': (f'    Status: PASS\n    Reviewed: {SHA}\nStatus: FINDINGS\n', before),
+            'pass only in a fence': (f'~~~\nStatus: PASS\nReviewed: {SHA}\n~~~\n', before),
             'pass only quoted': (f'> Status: PASS\n> Reviewed: {SHA}\n', 'says Status: (none), not PASS'),
+            'a quote before the header': (f'> note\nStatus: PASS\nReviewed: {SHA}\n', 'line 1 of the review report'),
+            'report-html-comment': (f'<!-- template\nStatus: PASS\nReviewed: {SHA}\n-->\n# Findings\n', before),
+            'report-invalid-fence-close': (f'```text\n```not-a-closing-fence\nStatus: PASS\nReviewed: {SHA}\n', before),
+            'report-html-blockquote': (f'<blockquote>\nStatus: PASS\nReviewed: {SHA}\n</blockquote>\n', before),
+            'a tab-indented line before': (f'# r\n\tcode\nStatus: PASS\nReviewed: {SHA}\n', 'line 2 of'),
+            'a fence between the two': (f'Status: PASS\n```\nReviewed: {SHA}\n```\n', 'line 2 of'),
+            'a spaced fence before': (f'   ~~~~\nStatus: PASS\nReviewed: {SHA}\n', before),
             'pass with words after it': (f'Status: PASS with notes\nReviewed: {SHA}\n', 'says Status: PASS with notes, not PASS'),
             'a lowercase status': (f'status: PASS\nReviewed: {SHA}\n', 'says Status: (none)'),
-            'a fence left open hides the rest': (f'```\nStatus: PASS\nReviewed: {SHA}\n', 'says Status: (none)'),
+            'two shas': (f'Status: PASS\nReviewed: {SHA} {OTHER}\n', 'it takes one full sha and nothing else'),
+            'a sha with a tail': (f'Status: PASS\nReviewed: {SHA}, rebased\n', 'it takes one full sha and nothing else'),
+            'reviewed on line eleven': (f'Status: PASS\n' + '\n' * 9 + f'Reviewed: {SHA}\n', 'names no Reviewed:'),
         }
         for name, (text, said) in cases.items():
             with self.subTest(name):
                 self.review(text)
                 self.assertIn(said, self.refused('--gate', self.gate()))
-        self.review(f'# review\n\n```\nStatus: FINDINGS\n```\nStatus: PASS\nReviewed: {SHA}  \n')
-        self.assertEqual(self.merge('--gate', self.gate()).returncode, 0, 'a fenced example does not count against it either')
+        self.review(f'# review-api\nStatus: PASS\nReviewed: {SHA}  \n\n```\nexample\n```\n> quoted\n')
+        self.assertEqual(self.merge('--gate', self.gate()).returncode, 0, 'after the header, anything but another header goes')
+        self.log.unlink()
+        self.review(f'# r\nStatus: PASS\nReviewed: {SHA}\n```\nStatus: FINDINGS\n```\n')
+        self.assertIn('line 4 of the review report', self.refused('--gate', self.gate()), 'no markdown is read: a header line is one')
 
     def test_r4_the_log_is_written_before_anything_merges(self):
         (self.job / 'merges.log').mkdir()
@@ -419,39 +431,57 @@ class Round1Hook(Hook):
         self.assertEqual(self.push('stable').returncode, 0)
         self.assertEqual(self.push('main').returncode, 0)
 
-    def test_r3_outside_a_job_the_hook_never_calls_stampede(self):
+    def test_r3_outside_a_job_s_environment_the_hook_never_calls_stampede(self):
         self.marked()
         self.stand_in('echo called >> "$0.log"; exit 2\n')  # an old stampede without prepush
         for ref in ('feature', 'main'):
             self.assertEqual(self.push(ref, job=False).returncode, 0, ref)
         self.assertFalse((self.bin / 'stampede.log').exists())
-        with mock.patch.dict(os.environ, {'STAMPEDE_JOB_KEY': 'hc-ffffffffffff'}):  # a key with no marker
-            self.assertEqual(self.push('main', job=False).returncode, 0)
+
+    def test_r3c_the_installed_hook_under_sh_e_stops_a_push_only_on_9(self):
+        hook = self.root / 'pre-push'
+        hook.write_text(gates_.HOOK)
+        bodies = {'absent': None, 'old': 'exit 2\n', 'crash': 'exit 1\n', 'killed': 'kill -9 $$\n',
+                  'refusing': f'cat >/dev/null; echo refused >&2; exit {gates_.REFUSED}\n'}
+        bare = {'PATH': self.without_stampede()['PATH'], 'HOME': str(self.home), 'HERDR_EVENTS_DIR': '~/events'}
+        for name, body in bodies.items():
+            if body is None:
+                (self.bin / 'stampede').unlink(missing_ok=True)
+            else:
+                self.stand_in(body)
+            for inside in (False, True):
+                env = {**bare, 'PATH': f'{self.bin}:{bare["PATH"]}', **({'STAMPEDE_JOB_KEY': 'hc-0123456789ab'} if inside else {})}
+                done = subprocess.run(['sh', '-e', str(hook), 'origin', 'url'], input='refs/heads/main a refs/heads/main b\n',
+                                      capture_output=True, text=True, env=env)
+                with self.subTest(name, inside=inside):
+                    self.assertEqual(done.returncode, 1 if inside and name == 'refusing' else 0, done.stderr)
+                    if inside and name != 'refusing':
+                        self.assertIn('so the push gate was not checked', done.stderr)
+                    if not inside:
+                        self.assertEqual(done.stderr, '')
+
+    def test_r3c_a_tilde_events_dir_from_new_still_holds_the_gate(self):
+        with mock.patch.dict(os.environ, {'HERDR_EVENTS_DIR': '~/events'}):  # as written in a profile, unexpanded
+            self.begin()
+            job_.mark_job('hc-0123456789ab', self.job)
+            self.assertTrue((self.home / 'events/jobs/hc-0123456789ab').is_file())
+            refused = self.push('main')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('needs the owner\'s yes', refused.stderr)
 
     def test_r3_inside_a_job_a_missing_old_or_crashing_stampede_warns_and_lets_the_push_through(self):
         self.marked()
         result = self.push_env('main', **self.without_stampede())
         self.assertEqual(result.returncode, 0)
-        self.assertIn('stampede-hook: stampede is not on PATH, so this job\'s push gate was not checked', result.stderr)
+        self.assertIn('stampede-hook: stampede is not on PATH, so the push gate was not checked', result.stderr)
         for body, code in (('exit 2\n', 2), ('echo Traceback >&2; exit 1\n', 1)):
             self.stand_in(body)
             result = self.push('main')
             self.assertEqual(result.returncode, 0, body)
-            self.assertIn(f'stampede prepush failed (exit {code}), so this job\'s push gate was not checked', result.stderr)
+            self.assertIn(f'stampede prepush failed (exit {code}), so the push gate was not checked', result.stderr)
         git('commit', '-q', '--allow-empty', '-m', 'two', cwd=self.repo)
         self.stand_in(f'exit {gates_.REFUSED}\n')
         self.assertNotEqual(self.push('main').returncode, 0, 'only the refusal stops it')
-
-    def test_r3_the_suggested_line_in_an_existing_hook_behaves_the_same(self):
-        self.marked()
-        self.hook.write_text('#!/bin/sh\n' + gates_.HOOK_LINE + '\n')  # the last line: its status is the hook's
-        self.hook.chmod(0o755)
-        self.assertEqual(self.push('feature').returncode, 0)
-        self.assertNotEqual(self.push('main').returncode, 0, 'a job\'s push to main is refused')
-        self.assertEqual(self.push_env('main', **self.without_stampede()).returncode, 0, 'stampede absent')
-        git('commit', '-q', '--allow-empty', '-m', 'two', cwd=self.repo)
-        self.stand_in('exit 2\n')
-        self.assertEqual(self.push('main').returncode, 0, 'an old stampede')
 
     def test_r5_a_symlink_or_an_empty_hooks_path_counts_as_there(self):
         target = self.root / 'nowhere' / 'hook'

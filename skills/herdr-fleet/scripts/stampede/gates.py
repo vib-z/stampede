@@ -11,25 +11,18 @@ from . import base as base_, job as job_, owner as owner_, settings as settings_
 REFUSED = 9  # stampede prepush's refusal: the one exit code that stops a push; anything else lets it through
 HOOK_MARK = '# stampede-hook'
 HOOK = f'''#!/bin/sh
-{HOOK_MARK}: a job's agent may not push to the default branch without the owner's gate (stampede prepush).
-# Outside a job's environment it exits 0 at once; only prepush's own refusal ({REFUSED}) stops a push.
-jobs="${{HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}}/jobs"
-mine=
-for id in "${{STAMPEDE_JOB_KEY:-}}" "${{HERDR_WORKSPACE_ID:-}}"; do
-  case "$id" in hc-*|w*) case "$id" in */*|*..*) ;; *) [ -f "$jobs/$id" ] && mine=1;; esac;; esac
-done
-[ -n "$mine" ] || exit 0
+{HOOK_MARK}: a job's agent may not push to the default branch without the owner's gate. stampede prepush
+# decides whether the push is a job's; only its refusal ({REFUSED}) stops a push. No set -e: every status is tested in an if.
+if [ -z "${{STAMPEDE_JOB_KEY:-}}" ] && [ -z "${{HERDR_WORKSPACE_ID:-}}" ]; then exit 0; fi
 if ! command -v stampede >/dev/null 2>&1; then
-  echo "stampede-hook: stampede is not on PATH, so this job's push gate was not checked: put it on PATH (./install.sh)" >&2
+  echo "stampede-hook: stampede is not on PATH, so the push gate was not checked: put it on PATH (./install.sh)" >&2
   exit 0
 fi
-stampede prepush "$@"
-code=$?
-[ "$code" = {REFUSED} ] && exit 1
-[ "$code" = 0 ] || echo "stampede-hook: stampede prepush failed (exit $code), so this job's push gate was not checked: run stampede update" >&2
+if stampede prepush "$@"; then exit 0; else code=$?; fi
+if [ "$code" = {REFUSED} ]; then exit 1; fi
+echo "stampede-hook: stampede prepush failed (exit $code), so the push gate was not checked: run stampede update" >&2
 exit 0
 '''
-HOOK_LINE = f'if command -v stampede >/dev/null 2>&1; then stampede prepush "$@"; if [ $? = {REFUSED} ]; then exit 1; fi; fi'
 METHODS = ('squash', 'merge', 'rebase')
 
 
@@ -139,8 +132,8 @@ def install_hook(repo):
 
 
 def skipped(why):
-    print(f'stampede new: the pre-push hook was not installed ({why}); to hold the push gate, add this line near the top '
-          f'of that pre-push hook: {HOOK_LINE}', file=sys.stderr)
+    print(f'stampede new: the push gate is not enforced by a hook in this repo, because it has its own ({why}); '
+          'stampede merge still holds the merge gate', file=sys.stderr)
 
 
 def brief_text(job, cmd):
@@ -181,17 +174,19 @@ def review_says(report, sha):
     if not path.is_file():
         raise PermissionError(f'no review report {report}: the reviewer writes one with Status: PASS and Reviewed: <full sha> '
                               'in its first 10 lines')
-    found, fence = {}, None
-    for row in path.read_text(errors='replace').splitlines()[:10]:
-        mark = re.match(r'\s{0,3}(`{3,}|~{3,})', row)
-        if mark and (fence is None or mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence)):
-            fence = mark.group(1) if fence is None else None
-            continue
-        m = None if fence else re.match(r'(Status|Reviewed):[ \t]*(.*?)\s*$', row)  # a header starts the line
+    lines = path.read_text(errors='replace').splitlines()[:10]
+    found = {}
+    for row in lines:
+        m = re.match(r'(Status|Reviewed):[ \t]*(.*?)\s*$', row)  # a header starts the line
         if m:
             found.setdefault(m.group(1), []).append(m.group(2))
+    last = max([n for n, row in enumerate(lines) if re.match(r'(Status|Reviewed):', row)] or [-1])
+    for n, row in enumerate(lines[:last + 1]):  # the header comes before any code block, quote, comment or markup
+        if re.match(r' *(```|~~~|<|>)', row) or row.startswith(('    ', '\t')):
+            raise PermissionError(f'line {n + 1} of the review report {report} ({base_.line(row)[:40]}) comes before or inside '
+                                  'its header: a title line, then Status: and Reviewed:, before any code block, quote or comment')
     for key, values in found.items():
-        if len(set(values)) > 1:
+        if len(values) > 1:
             raise PermissionError(f'the review report {report} has {len(values)} {key}: lines in its first 10 lines '
                                   f'({", ".join(values)}): it must have one; the reviewer fixes the header')
     found = {key: values[0] for key, values in found.items()}
@@ -201,6 +196,9 @@ def review_says(report, sha):
     if 'Reviewed' not in found:
         raise PermissionError(f'the review report {report} names no Reviewed: <full sha> in its first 10 lines: the reviewer '
                               'adds the commit it reviewed')
+    if not base_.SHA.fullmatch(found['Reviewed']):
+        raise PermissionError(f'the review report {report} says Reviewed: {found["Reviewed"]}: it takes one full sha and nothing '
+                              'else')
     if found['Reviewed'] != sha:
         raise PermissionError(f'the review report passes {found["Reviewed"]}, not {sha}: merge the reviewed commit, or review {sha}')
 

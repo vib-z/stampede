@@ -30,7 +30,7 @@ stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr 
 |---|---|---|
 | `stampede tell <job> lead "<the owner's words>"` | the front door | passes words on, verbatim |
 | `stampede ask <job> "<question>" [--option <a>]` | the lead | asks the owner; prints `ASKED <id>` |
-| `stampede ask <job> --gate --kind <gate> --sha <commit> "<action>"` | the lead | asks for a gate; prints `GATE <id>` |
+| `stampede ask <job> --gate [--kind merge] --sha <commit> "<action>"` | the lead | asks for a gate; prints `GATE <id>` |
 | `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a screenshot, a report; prints `POSTED <n>` and who hears it |
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
