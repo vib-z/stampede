@@ -1,5 +1,7 @@
 # Stampede, lean: one plan, one approval, then run
 
+Status today: the original design, kept as history. The current contract is the [README](../../../README.md) and [docs/CORE-NATIVE.md](../../CORE-NATIVE.md).
+
 Date: 21 Oct 2026. Status: approved by the owner as a design; not built.
 
 ## Where it lives

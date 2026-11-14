@@ -225,6 +225,24 @@ class Shape(unittest.TestCase):
             lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
             self.assertTrue(any("outside Herdr" in l and "--workspace" in l and "--pane" in l for l in lines), name)
 
+    def test_using_is_the_front_page(self):
+        """USING.md: one short page an agent reads first, linked from every entry point."""
+        using = ROOT / "USING.md"
+        text = using.read_text(encoding="utf-8")
+        self.assertLess(len(text.encode()), 4000)
+        self.assertEqual([l for l in text.splitlines() if len(l) > 300], [])
+        for name in ("README.md", "AGENTS.md", "CLAUDE.md", "SKILL.md"):
+            self.assertIn("](USING.md)", (ROOT / name).read_text(encoding="utf-8"), name)
+
+    def test_one_gate_list(self):
+        """The gate list lives in gates.md alone; every other playbook links to it ("sitemap" marks a copy of the list)."""
+        gates = ROOT / "skills" / "herdr-fleet" / "references" / "gates.md"
+        self.assertLess(len(gates.read_bytes()), 3000)
+        self.assertIn("sitemap", gates.read_text(encoding="utf-8"))
+        self.assertIn("reviewed commit is the commit the gate names", gates.read_text(encoding="utf-8"))  # merge only what was reviewed
+        copies = [rel(p) for p in md_files() if is_playbook(p) and p != gates and "sitemap" in p.read_text(encoding="utf-8").lower()]
+        self.assertEqual(copies, [])
+
     def test_no_large_files(self):
         bad = [f"{rel(p)}: {p.stat().st_size // 1048576} MB" for p in files() if p.stat().st_size > MAX_BYTES]
         self.assertEqual(bad, [], "\n".join(bad))

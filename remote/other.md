@@ -1,6 +1,6 @@
 # Other front doors: Cursor, ChatGPT Dots, or any bot with a computer of its own
 
-**Cursor** on the machine is a front door like a Herdr chat: ask it to read stampede's `SKILL.md` and start the job; it writes the ask to a file and runs `stampede new --file <ask.md>`. A Cursor chat runs outside Herdr, so it passes `--workspace` or `--pane`: it creates a workspace for the job and passes its root pane ([SKILL.md](../SKILL.md#front-door)). Cursor cannot be woken by another agent, so the lead's questions reach you through Moshi. Cursor works as a worker, not yet as the lead.
+**Cursor** on the machine is a front door like a Herdr chat: ask it to read stampede's `SKILL.md` and start the job; it writes the ask to a file and runs `stampede new --file <ask.md>`. A Cursor chat runs outside Herdr, so it passes `--workspace` or `--pane`: it creates a workspace for the job and passes its root pane ([skills/stampede](../skills/stampede/SKILL.md)). Cursor cannot be woken by another agent, so the lead's questions reach you through Moshi. Cursor works as a worker, not yet as the lead.
 
 Any bot that has a computer of its own can drive stampede the way Grok Bot does: it reaches your machine over SSH on a private network, and a webhook brings events back. Planned, not yet tested.
 

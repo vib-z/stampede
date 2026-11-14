@@ -4,6 +4,15 @@
 
 - **The Core-native sweep has a script of its own, `herdr-event-sweep`.** The watchdog and `herdr-doctor` call it for the sweep and for `--alive`, `--core-version` and `--socket`, which answer as before. `herdr-event-core` keeps only the `--relay` job's follower, built on the same code; its `--sweep`, `--alive`, `--core-version` and `--socket` are kept for one release and hand over to the new script. No behaviour change: `<job>/sweep-state.json`, its lock and every event stay as they were.
 
+Docs only: one page to start from, and one place for each fact.
+
+- **`USING.md`:** the one page an agent reads to run a job: the command that starts it on the TUI and on Herdr Core, the commands that follow, where the job folder is on each path, and the gates. `CLAUDE.md`, `AGENTS.md`, the root `SKILL.md` and the README lead there.
+- **One gate list:** `skills/herdr-fleet/references/gates.md`. The lead's playbook, the front door, the bot front door and the remote guides link to it instead of each keeping a copy.
+- **Helper limits written once,** in herdr-fleet's The shape, for the TUI and for Herdr Core.
+- **A front door on Herdr Core:** what is true today is in docs/CORE-NATIVE.md (`--front-door` is refused); a native one is on the roadmap.
+- **`.ignore`** keeps `film/`, `site/`, `assets/` and `tests/evals/runs/` out of an agent's search.
+- The 21 Oct design spec is marked as history; the README and docs/CORE-NATIVE.md are the current contract.
+
 ## 0.2.0 (13 Nov 2026)
 
 A job on Herdr Core now runs the way Core itself works: the lead is a root terminal, every helper is its real Core child, and every message goes through Core. The shape every client reads is [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md). This release also carries the 0.1.10 work, which was never published on its own: a Codex lead on Codex 0.167.1 gets its workers' reports and your messages again, a bot that started a job hears every post from its lead, and the fleet skill's default shape is thinker and doer.

@@ -7,7 +7,7 @@ You talk to Codex on your own computer from the ChatGPT phone app. The Codex ses
 - On the phone, open Codex and pick the connected machine.
 - Type the ask; Codex reads stampede's entry file and starts the job.
 - Approve Codex's commands from the phone when it asks.
-- Ask for status whenever you like. Codex passes on only your plan approval and your ordinary answers; every gate (merge, push to main, deploy, publish, send, spend, close) is your own tap on the lead's card, which Moshi puts on your phone.
+- Ask for status whenever you like. Codex passes on only your plan approval and your ordinary answers; every gate ([the list](../skills/herdr-fleet/references/gates.md)) is your own tap on the lead's card, which Moshi puts on your phone.
 - For pushes from every pane, pair Moshi too.
 
 ## Run
