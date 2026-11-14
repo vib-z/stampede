@@ -13,7 +13,10 @@
 # Herdr, Herdr Core and stampede set per pane, terminal or job never are. A file that is not regular, over 4 KB or
 # over 100 lines, or holding a NUL byte, is skipped whole, and herdr_settings_unread says why. Nothing here prints.
 herdr_settings_skipped=""; herdr_settings_unread=""
-_hp_f="${XDG_CONFIG_HOME:-$HOME/.config}/stampede/config"
+# never an unset HOME: with neither it nor XDG_CONFIG_HOME there is no file to read
+_hp_f=""; _hp_l=""; _hp_k=""; _hp_out=""; _hp_n=0; _hp_seen=" "   # all set here: nothing inherited steers the reader
+if [ -n "${XDG_CONFIG_HOME:-}" ]; then _hp_f=$XDG_CONFIG_HOME/stampede/config
+elif [ -n "${HOME+x}" ]; then _hp_f=$HOME/.config/stampede/config; fi
 _hp_lc=${LC_ALL-}; _hp_lcset=${LC_ALL+x}; LC_ALL=C   # bytes, and ASCII classes, whatever the user's locale
 # read stops at 4097 bytes or a NUL and then succeeds: such a file is skipped whole; at the end of a smaller one it fails
 if [ ! -f "$_hp_f" ] || [ ! -r "$_hp_f" ]; then [ ! -e "$_hp_f" ] || herdr_settings_unread="not a readable regular file"
@@ -28,7 +31,7 @@ else
     local s=$1 pre rest
     _hp_out=""
     if [ "$2" = 1 ]; then
-      case $s in "~/"*) _hp_out=$HOME; s=${s#\~};; esac
+      case $s in "~/"*) [ -n "${HOME+x}" ] || return 1; _hp_out=$HOME; s=${s#\~};; esac
       case $s in *"~"*) return 1;; esac
     fi
     while :; do
@@ -40,6 +43,7 @@ else
         *) return 1;;
       esac
       [ "$2" = 1 ] && case $pre in *[{}]*) return 1;; esac
+      [ -n "${HOME+x}" ] || return 1
       _hp_out=$_hp_out$pre$HOME
     done
     [ "$2" = 1 ] && case $s in *[{}]*) return 1;; esac
@@ -68,16 +72,18 @@ else
       HERDR_ENV|HERDR_PANE_ID|HERDR_TAB_ID|HERDR_WORKSPACE_ID|HERDR_PLUGIN_EVENT_JSON|HERDR_EVENTS_OWNER) ;;
       HC_TERMINAL_*|HC_SCOPE|STAMPEDE_JOB_KEY|FLEET_JOB_DIR) ;;
       FLEET_*|HERDR|HERDR_*|HC|HC_*|STAMPEDE_*)   # never over the environment; a later line for a name wins, as in a shell
-        _hp_m=_hp_m_$_hp_k
-        if [ -n "${!_hp_m+x}" ] || [ -z "${!_hp_k+x}" ]; then export "$_hp_k=$_hp_out"; printf -v "$_hp_m" 1; fi;;
+        case $_hp_seen in
+          *" $_hp_k "*) export "$_hp_k=$_hp_out";;
+          *) [ -n "${!_hp_k+x}" ] || { export "$_hp_k=$_hp_out"; _hp_seen="$_hp_seen$_hp_k "; };;
+        esac;;
     esac
   done <"$_hp_f"
   herdr_settings_skipped=${herdr_settings_skipped# }
   unset -f _hp_expand
-  unset ${!_hp_m_*} _hp_al _hp_an _hp_ws _hp_plain _hp_re _hp_n _hp_l _hp_k _hp_out _hp_m
+  unset _hp_al _hp_an _hp_ws _hp_plain _hp_re
 fi
 { if [ -n "$_hp_lcset" ]; then LC_ALL=$_hp_lc; else unset LC_ALL; fi; } 2>/dev/null
-unset _hp_f _hp_l _hp_lc _hp_lcset
+unset _hp_f _hp_l _hp_k _hp_out _hp_n _hp_seen _hp_lc _hp_lcset
 
 if stat -c %s / >/dev/null 2>&1; then
   file_bytes() { stat -c %s "$1"; }

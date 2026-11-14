@@ -156,6 +156,33 @@ class Routes(unittest.TestCase):
         self.assertEqual((post.returncode, post.stderr), (0, ''))
         self.assertIn('https://alpha.invalid/hook', self.sent.read_text())
 
+    def test_a_variable_named_like_the_readers_own_state_does_not_let_the_file_win(self):
+        self.route('bot-alpha', 'https://alpha.invalid/hook')
+        (self.home / 'elsewhere').mkdir()
+        self.settings('HERDR_EVENTS_ROUTES_DIR=$HOME/elsewhere\nHC=from-file\n')
+        inherited = {'_hp_m_HERDR_EVENTS_ROUTES_DIR': '1', '_hp_m_HC': '1', '_hp_seen': ' HERDR_EVENTS_ROUTES_DIR HC '}
+        post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}),
+                         HERDR_EVENTS_ROUTES_DIR=str(self.routes), **inherited)
+        self.assertEqual((post.returncode, post.stderr), (0, ''))
+        self.assertIn('https://alpha.invalid/hook', self.sent.read_text())   # the environment's folder: queued and sent
+        for bash in self.bashes():
+            shown = subprocess.run([bash, '-c', f'. {SCRIPTS / "herdr-platform"}; printf "[%s]" "${{HC-unset}}"'],
+                                   env={'HOME': str(self.home), 'HC': '', **inherited}, capture_output=True, text=True, timeout=30)
+            self.assertEqual(shown.stdout, '[]', bash)   # empty in the environment stays empty
+
+    def test_with_home_unset_a_line_that_needs_it_is_skipped_and_nothing_breaks(self):
+        xdg = self.home / 'xdg'
+        (xdg / 'stampede').mkdir(parents=True)
+        (xdg / 'stampede/config').write_text('HC=~/x\nHC_SESSION=$HOME/x\nHC_SOCKET=${HOME}/y\nHERDR_EVENTS_MACHINE=plain\n')
+        show = f'. {SCRIPTS / "herdr-platform"}; printf "%s|%s|%s|%s|%s" "${{HC-unset}}" "${{HC_SESSION-unset}}" "${{HC_SOCKET-unset}}" "${{HERDR_EVENTS_MACHINE-unset}}" "$herdr_settings_skipped"'
+        for bash in self.bashes():
+            for strict in ('', 'set -euo pipefail; '):
+                shown = subprocess.run([bash, '-c', strict + show], env={'XDG_CONFIG_HOME': str(xdg)}, capture_output=True, text=True, timeout=30)
+                self.assertEqual((shown.returncode, shown.stderr, shown.stdout), (0, '', 'unset|unset|unset|plain|1 2 3'), (bash, strict))
+                none = subprocess.run([bash, '-c', strict + f'. {SCRIPTS / "herdr-platform"}; printf "%s" "${{HERDR_EVENTS_MACHINE-unset}}"'],
+                                      env={}, capture_output=True, text=True, timeout=30)
+                self.assertEqual((none.returncode, none.stderr, none.stdout), (0, '', 'unset'), (bash, strict))
+
     def test_every_setting_config_example_lists_is_read_and_no_identity_name_is(self):
         text = (ROOT / 'config.example').read_text().split('\n# Environment only')[1]
         names = sorted(set(re.findall(r'(?m)^# ([A-Z][A-Z0-9_]*)=', text))) + ['HERDR', 'HERDR_BIN_PATH', 'HERDR_PLUGIN_STATE_DIR']
