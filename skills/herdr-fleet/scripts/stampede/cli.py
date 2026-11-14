@@ -90,7 +90,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         raise ValueError('--space and --max-helpers are for a native job: new --core without --relay')
     flags = {'lead.kind': kind, 'helpers.max': max_helpers}
 
-    def check(kind):
+    def check(kind, settings):
         if kind not in agents_.LEAD:
             raise ValueError(f'the lead runs on claude or codex, not {kind!r} (--lead, or the setting lead.kind)')
         if kind != 'claude' and fork:
@@ -102,7 +102,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
 
     def resolve(repo):  # every layer first: a repo's .stampede.toml may name the lead; --lead-model and --lead-effort
         settings = settings_.for_new(repo, flags)  # then set the pair of the lead's own CLI
-        kind = check(settings.get('lead.kind'))
+        kind = check(settings.get('lead.kind'), settings)
         if lead_model or lead_effort:
             settings = settings_.for_new(repo, {**flags, f'lead.{kind}.model': lead_model, f'lead.{kind}.effort': lead_effort})
         return settings, kind
