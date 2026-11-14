@@ -36,7 +36,7 @@ stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr 
 
 On Herdr Core also: `stampede start <job> <role>-<scope> --brief <file>` (or `-- <program>`) starts a helper, its model from its role (`roles.build` for `build-api`).
 `stampede tree <job>` lists the tree. `stampede close <job> [<agent>]` ends a subtree or the job: ask the owner first (code only stops a close from inside the job).
-`stampede reopen <job>` brings back what stopped, and a whole job `close <job>` put away; an agent closed by name stays closed. A finished job reopens read-only.
+`stampede reopen <job>` brings back what stopped, and a whole job `close <job>` put away; a helper closed by name stays closed. A finished job reopens read-only.
 
 ## Where the job folder is
 
