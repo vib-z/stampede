@@ -385,8 +385,8 @@ $ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md
 stampede merge: the merge gate is on: ask the owner with the next line, then run this again with --gate <id>
 stampede ask <job> --gate --kind merge --sha 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766 --pr 12 'merge PR 12 at 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766'
 $ stampede ask $J --gate --kind merge --sha $sha --pr 12 "merge PR 12 at $sha"
-GATE 75143ab0fdaf on the phone; act after fleet-job gate-ok <job> 75143ab0fdaf --sha <the commit you act on> prints APPROVED
-$ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md --gate 75143ab0fdaf     # after your tap
+GATE 3288fa0757e0 on the phone; act after fleet-job gate-ok <job> 3288fa0757e0 --sha <the commit you act on> prints APPROVED
+$ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md --gate 3288fa0757e0     # after your tap
 MERGED 12 9c2d7e1f0a4b6c8d3e5f7a9b1c2d4e6f8a0b1c3d
 ```
 
@@ -458,16 +458,16 @@ $ stampede wait $J                                                              
 $ stampede approve $J --by "owner in desktop chat: 'go'"
 SUBMITTED lead-login (t1)
 $ stampede ask $J --gate --kind merge --sha <commit> --pr 12 "merge PR #12"       # the lead
-GATE d8a231988898 posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login d8a231988898 --sha <the commit you act on> prints APPROVED
+GATE 729a76a001bb posted to the front door as outbox 002; act after fleet-job gate-ok ~/code/herdr-jobs/jobs/2026-11-14-local-login 729a76a001bb --sha <the commit you act on> prints APPROVED
 $ stampede wait $J                                                                # the chat
 # 002 gate
 
-Gate d8a231988898 (merge): merge PR #12 (PR #12) at <commit, 12 hex>?
+Gate 729a76a001bb (merge): merge PR #12 (PR #12) at <commit, 12 hex>?
 One exact action, yes or no. Show the owner this action as written.
 
-Answer with: fleet-job approve-gate ~/code/herdr-jobs/jobs/2026-11-14-local-login d8a231988898 --sha <commit> --digest 2d41deece9d0888b --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell ~/code/herdr-jobs/jobs/2026-11-14-local-login lead 'GATE d8a231988898 NO: <their words>')
+Answer with: fleet-job approve-gate ~/code/herdr-jobs/jobs/2026-11-14-local-login 729a76a001bb --sha <commit> --digest 70efc3bdffe6dabc --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell ~/code/herdr-jobs/jobs/2026-11-14-local-login lead 'GATE 729a76a001bb NO: <their words>')
 
-$ stampede approve-gate $J d8a231988898 --sha <commit> --digest 2d41deece9d0888b --by "owner in desktop chat: 'merge it'"   # on the owner's yes
+$ stampede approve-gate $J 729a76a001bb --sha <commit> --digest 70efc3bdffe6dabc --by "owner in desktop chat: 'merge it'"   # on the owner's yes
 SUBMITTED lead-login (t1)
 APPROVED deca46984e27 at <commit>
 $ stampede wait $J                                                                # the lead waits at a permission dialog
@@ -574,8 +574,8 @@ A question for the owner, or a gate, goes out with `stampede ask`; on a Core job
 $ stampede ask $J "Keep the route at /health?" --option Yes --option No
 ASKED 188e888a8640 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 188e888a8640)
 $ stampede ask $J --gate --kind merge --sha <commit> --pr 12 "merge PR #12"
-ASKED 92a4f6d0d365 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 92a4f6d0d365)
-GATE 775e5f21eba6 on the phone; act after fleet-job gate-ok $J 775e5f21eba6 --sha <the commit you act on> prints APPROVED
+ASKED 439e979b6d65 (Core types the answer into the lead's terminal; cancel with: fleet-job cancel $J 439e979b6d65)
+GATE 8b6cf83c386c on the phone; act after fleet-job gate-ok $J 8b6cf83c386c --sha <the commit you act on> prints APPROVED
 ```
 
 A message from an agent arrives in a terminal as `<hc from="t7 name">...</hc>`; one from a plain program arrives as bare text. Neither is ever the owner's approval.
