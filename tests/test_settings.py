@@ -477,7 +477,7 @@ class Review(Wired):
     def test_b8_the_environment_only_section(self):
         self.assertEqual(st.current().environment['HC_SESSION'], 'default')
         with self.env(HC_SESSION='other-core'):
-            self.assertEqual(st.current().environment['HC_SESSION'], 'other-core', 'the memo sees it')
+            self.assertEqual(st.current().environment['HC_SESSION'], 'other-core', 'a changed variable is seen')
         with self.env(HC_SESSION='default', HERDR_EVENTS_DIR='/scratch/events', HERDR_EVENTS_HOME='/scratch/queue'):
             text = st.show(st.current())
         self.assertIn('HC_SESSION = "default"  (env)', text, 'set, even to its default')
