@@ -48,7 +48,7 @@ class Ev:
     def note(self, argv, result):
         code, out, err = result
         self.cmds.append(shlex.join(str(a) for a in argv) + f'  -> exit {code}')
-        self.log.append(f'$ {shlex.join(str(a) for a in argv)}\n[{code}] {out.strip()[-600:]}\n{err.strip()[-600:]}')
+        self.log.append(f'$ {shlex.join(str(a) for a in argv)}\n[{code}] {record.scrub(out.strip())[-600:]}\n{record.scrub(err.strip())[-600:]}')  # scrub, then cut
         return result
 
     def done(self, ok, actual):
@@ -835,9 +835,10 @@ def d05():
     job, why = local_ask(ev)
     if why:
         return ev.blocked(why)
-    lead(ev, job, 'ask', job.job, 'Keep hello in the root?', '--option', 'yes', '--option', 'no')
-    inbox = inbox_after(job, 'ASK FAILED')
-    return ev.done('ASK FAILED' in inbox, f'lead inbox: {inbox.strip()[-200:]}')
+    code, _, err = lead(ev, job, 'ask', job.job, 'Keep hello in the root?', '--option', 'yes', '--option', 'no')
+    waiting = list((job.job / 'asks').glob('*.pid')) if (job.job / 'asks').is_dir() else []
+    return ev.done(code == 2 and 'the ask command is not installed' in err and 'ask.command' in err and not waiting,
+                   f'ask: exit {code}, {len(waiting)} waiting: {err.strip()[-200:]}')
 
 
 @case('D06')

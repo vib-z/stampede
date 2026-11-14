@@ -184,7 +184,7 @@ class Outcomes(unittest.TestCase):
             out = self.ok(job, 'new')
             self.assertEqual(out.strip().splitlines()[-1], f'{Job.LEAD} {job.job}')
             if job.backend == 'native' and job.row['where'] != 'inside':  # new with no --core, outside a Herdr pane
-                self.assertEqual(out.splitlines()[0], AUTO_CORE, 'backend auto says it chose Herdr Core')
+                self.assertEqual(out.splitlines()[0], f'{AUTO_CORE}, repo {Path(job.repo).resolve()}', 'backend auto says it chose Herdr Core, and the repo')
             self.assertEqual((job.job / 'workdir').read_text().strip(), str(job.repo), 'the job folder is in the jobs root')
             self.assertIn('plan.md', (job.job / 'briefs' / (Job.LEAD + '.md')).read_text())
             self.assertEqual(job.marked, str(job.job), 'the job is marked open until finish')
@@ -351,8 +351,9 @@ class Outcomes(unittest.TestCase):
             for after, (code, recorded) in job.closed.items():  # no yes yet: the gate stays shut
                 self.assertEqual((code, recorded), (2, False), f'the gate opened after {after}')
                 self.refused(job, 'gate-ok after ' + after, 'has no recorded yes')
-            self.refused(job, 'approve inside Herdr', SAY_SO)
-            self.refused(job, 'approve in a Core terminal', SAY_SO)
+            local = 'belongs to a job started locally'  # what is wrong with the gate is said first
+            self.refused(job, 'approve inside Herdr', SAY_SO if job.bot else local)
+            self.refused(job, 'approve in a Core terminal', SAY_SO if job.bot else local)
             self.refused(job, 'approve other commit')
             self.refused(job, 'gate-ok other commit', 'a push after the yes withdraws it')
             if job.bot:
@@ -364,7 +365,7 @@ class Outcomes(unittest.TestCase):
                 self.ok(job, 'gate-ok', f'APPROVED {job.ident} by owner in {job.bot} chat')
             else:
                 self.assertIn(f'Gate {job.ident} (merge): {GATE} (PR #3) at {SHA[:12]}?', job.asked())
-                self.refused(job, 'approve', SAY_SO if job.row['where'] == 'inside' else 'belongs to a job started locally')
+                self.refused(job, 'approve', 'belongs to a job started locally')  # what is wrong with the gate first, then where it runs
                 self.ok(job, 'gate-ok', f'APPROVED {job.ident} by owner, through ask')
                 self.assertEqual(self.events(job, 'gate'), [])
         self.outcome('O5', check)

@@ -26,7 +26,7 @@ def linked_worktree(folder):
 
 
 YOLO = {'claude': ['--dangerously-skip-permissions'], 'codex': ['--yolo'], 'cursor': ['--yolo'], 'hermes': ['--yolo']}
-LEAD = ('claude', 'codex')  # the CLIs a lead runs on; its model and effort are the settings lead.<cli>.model and .effort
+LEAD = settings_.CHOICES['lead.kind']  # the CLIs a lead runs on; its model and effort are the settings lead.<cli>.model and .effort
 AUTO = {'claude': ['--permission-mode', 'auto'], 'codex': ['--approve-for-me'], 'cursor': ['--auto-review'], 'hermes': [],
         'kimi': ['-y']}  # Kimi 2.2's -y asks only for risky actions; its never-ask --auto is not an approved flag
 

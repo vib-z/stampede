@@ -559,8 +559,9 @@ def run(a):
         if a.relay and not core:
             raise ValueError('--relay is for new --core')
         if core:
-            if why:
-                print(f'on Herdr Core ({why})')
+            repo = repo_of(a.cwd)  # every Core start names its repo first; flushed, so a refusal on stderr comes after it
+            out_.fact(repo=str(repo) if repo else None)
+            print(f'on Herdr Core ({why or ("--core --relay" if a.relay else "--core")})' + (f', repo {repo}' if repo else ''), flush=True)
             try:
                 return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,
                            app=a.app_space, relay=a.relay, space=a.space, max_helpers=a.max_helpers, lead_model=a.lead_model,

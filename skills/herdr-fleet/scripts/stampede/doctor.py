@@ -7,12 +7,14 @@ from . import base as base_, settings as settings_
 
 ROOT = base_.SCRIPTS.parents[2]  # the checkout: skills/herdr-fleet/scripts -> the repo
 HELPERS = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts'
+CONTROL = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|[\x00-\x08\x0a-\x1f\x7f]')  # OSC, CSI, then any other
 
 
 def shown(text):
     """Text as doctor prints it: the home folder, by either spelling (HOME, and where it resolves to when it is a link),
-    as ~, wherever it stands, so a pasted report carries no home path. main runs every line and JSON string through it."""
-    text = str(text)
+    as ~, wherever it stands, so a pasted report carries no home path; and no control bytes (another program's escape
+    sequences would garble the terminal). main runs every line and JSON string through it."""
+    text = CONTROL.sub('', str(text))
     homes = {os.path.expanduser('~').rstrip('/'), os.path.realpath(os.path.expanduser('~')).rstrip('/')} - {''}
     for home in sorted(homes, key=len, reverse=True):  # the longer first, so one spelling inside the other still goes
         text = re.sub(re.escape(home) + r'(?![^/\s\'"():;,\]])', '~', text)
@@ -60,8 +62,9 @@ def commands():
 
 
 def config():
-    """The settings files: each problem stampede new would refuse on (a key that is not a setting, a wrong type, a file
-    that is not TOML, a user-only key in a repo file), with the file to fix. The repo file when run inside a repo."""
+    """The settings files: each problem stampede new would refuse on (a key that is not a setting, a wrong type, a value
+    outside the key's choices, a file that is not TOML, a user-only key in a repo file), with the file to fix. The repo
+    file when run inside a repo."""
     top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     loaded = settings_.load(repo=top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else None)
     files = ', '.join(f['path'] for f in loaded.files.values() if f['exists']) or 'none'

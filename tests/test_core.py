@@ -341,7 +341,7 @@ class CoreSafety(CoreCase):
         self.assertIn("or on the owner's yes typed in your pane", out)
         with mock.patch.object(herdrapi_, 'inside_herdr', return_value=True), self.assertRaises(PermissionError) as refused:
             owner_.approve_gate(job, next((job / 'gates').glob('*.json')).stem, SHA, 'x')
-        self.assertIn("types yes in the lead's pane", str(refused.exception))
+        self.assertIn('belongs to a job started locally: the owner answers on the phone or in Herdr', str(refused.exception))  # the route first
         self.assertTrue(herdrapi_.inside_herdr({'HC_SCOPE': 'x'}, 1))  # the Core half, so this class fails as one until it lands
 
 

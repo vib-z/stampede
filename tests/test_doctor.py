@@ -273,6 +273,10 @@ echo disabled; exit 1
         self.assert_problem(self.doctor(TEST_SERVER_VERSION='0.9.4'), 'herdr client 0.9.5, server 0.9.4')
         self.assert_problem(self.doctor(TEST_DISK_KB='1048576'), '1 GB free')
 
+    def test_a_program_found_off_the_caller_s_path_says_where(self):
+        self.assertIn('ok herdr on PATH', self.doctor('--tui').stdout)
+        self.assertIn(f'ok herdr (found in {self.bin})', self.doctor('--tui', PATH='/usr/bin:/bin').stdout)
+
     def test_help_and_usage_do_not_run_health_checks(self):
         for flag in ('--help', '-h'):
             result = self.doctor(flag)

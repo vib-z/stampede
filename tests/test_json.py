@@ -213,7 +213,7 @@ class Json(unittest.TestCase):
         self.assertEqual(new['backend'], 'native')
         auto = json.loads(native.steps['new auto'][1])
         self.assertEqual((auto['status'], auto['backend'], auto['lead']), ('STARTED', 'native', 'lead-xd'))
-        self.assertIn('on Herdr Core (backend auto: not inside a Herdr pane)', auto['notes'])
+        self.assertTrue(any(n.startswith('on Herdr Core (backend auto: not inside a Herdr pane), repo ') for n in auto['notes']), auto['notes'])
         started = json.loads(native.steps['start claude'][1])
         self.assertEqual({k: started[k] for k in ('status', 'agent', 'kind', 'model', 'effort')},
                          {'status': 'STARTED', 'agent': 'build-claude', 'kind': 'claude', 'model': 'claude-opus-5-5', 'effort': 'medium'})  # roles.default

@@ -1495,7 +1495,7 @@ class LeadChoice(unittest.TestCase):
             root = Path(tempfile.mkdtemp())
             with self.subTest(env=env, kw=kw), self.assertRaises(ValueError) as refused:
                 self.new({'FLEET_JOBS_ROOT': str(root), **env}, **kw)
-            self.assertIn('the lead runs on claude or codex, not', str(refused.exception))
+            self.assertIn('fix it or remove the key: stampede config show', str(refused.exception))  # lead.kind's choices
             self.assertFalse((root / 'jobs').exists())
         ask = Path(tempfile.mkdtemp()) / 'ask.md'
         ask.write_text('Fix the login bug\n')

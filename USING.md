@@ -1,17 +1,17 @@
 # Using stampede
 
 stampede turns one ask into a job run by a lead agent in Herdr.
-The lead plans in `plan.md`, starts helper agents only when it pays, and brings the owner only the questions and gates that are theirs.
-A job runs on the Herdr TUI (tabs and panes) or on Herdr Core (a tree of terminals).
+The lead plans in `plan.md`, starts helpers when it pays, and brings the owner only their questions and gates.
+A job runs on the Herdr TUI (tabs and panes) or Herdr Core (a tree of terminals).
 
 ## Before you start
 
-- `stampede doctor` checks the machine and this checkout, one line each with its fix (`stampede doctor --core` for Herdr Core). Its warnings are the owner's to fix.
-- `stampede --help` lists every command; `stampede <command> --help` gives its flags and an example.
-- `--json` on any command: one JSON object ([docs/CLI-JSON.md](docs/CLI-JSON.md)).
-- `herdr-trust <repo>` once per repo, so Claude and Codex skip the trust dialog. The repo must sit under `FLEET_TRUST_ROOT` (default `~/code`).
-- Write the ask (the owner's words, and any agreed plan) to a file outside the repo.
-- See what a job will do: `stampede config show` (every setting, and the layer that set it).
+- Install: clone the repo, run `./install.sh` ([README, Install](README.md#install)).
+- `stampede doctor` checks the machine, each line with its fix (`--core` for Herdr Core); warnings are the owner's.
+- `stampede <command> --help`: flags and an example. `--json` on any: one object ([CLI-JSON](docs/CLI-JSON.md)).
+- `herdr-trust <repo>` once per repo (under `FLEET_TRUST_ROOT`, default `~/code`), so agents skip the trust dialog.
+- `stampede config show`: every setting, the layer that set it, and your config file; settings go there as in [config.example](config.example).
+- Write the ask (the owner's words and plan) to a file outside the repo.
 
 ## Start a job
 
@@ -19,11 +19,10 @@ A job runs on the Herdr TUI (tabs and panes) or on Herdr Core (a tree of termina
 stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr Core
 ```
 
-- On Core it works on the git root here (or `--cwd <repo>`) and says so first. `--core` or `--pane` forces one; the setting `backend` is the standing choice.
-- It prints `<lead> <job dir>` (on Core after a `STARTED <lead> (<address>)` line) and exits 0.
-- A line starting `BLOCKED` or `NOT READY` means the lead is up but waiting: do what that line says, never start a second lead.
-- A refusal exits 2 with the reason, before anything is made.
-- A chat outside Herdr that wants the TUI passes `--pane` or `--workspace`, and usually `--front-door`: see [skills/stampede](skills/stampede/SKILL.md).
+- On Core it works on the git root here (or `--cwd <repo>`) and names it first. `--core` or `--pane` forces one; the setting `backend` is the standing choice.
+- It prints `<lead> <job dir>` (on Core after `STARTED <lead> (<address>)`), exit 0. A refusal exits 2, before anything is made.
+- `BLOCKED` or `NOT READY`: the lead waits. Do what the line says; never start a second lead.
+- An agent chat that relays the owner's answers passes `--front-door`, on Core too. For the TUI it also passes `--pane` or `--workspace`: see [skills/stampede](skills/stampede/SKILL.md).
 
 ## Then
 
@@ -32,30 +31,28 @@ stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr 
 | `stampede tell <job> lead "<the owner's words>"` | the front door | passes words on, verbatim |
 | `stampede ask <job> "<question>" [--option <a>]` | the lead | asks the owner; prints `ASKED <id>` |
 | `stampede ask <job> --gate [--kind merge] --sha <commit> "<action>"` | the lead | asks for a gate; prints `GATE <id>` |
-| `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a screenshot, a report; prints `POSTED <n>` and who hears it |
+| `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a report; prints `POSTED <n>` |
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
 On Herdr Core also: `stampede start <job> <role>-<scope> --brief <file>` (or `-- <program>`) starts a helper, its model from its role (`roles.build` for `build-api`).
-`stampede tree <job>` lists the tree, `stampede close <job> [<agent>]` ends a subtree or the job (owner's yes only), and `stampede reopen <job>` brings back what is not live.
+`stampede tree <job>` lists the tree. `stampede close <job> [<agent>]` ends a subtree or the job: ask the owner first (code only stops a close from inside the job).
+`stampede reopen <job>` brings back what stopped, and a whole job `close <job>` put away; a helper closed by name stays closed. A finished job reopens read-only.
 
 ## Where the job folder is
 
-Always `<jobs_root>/jobs/<YYYY-MM-DD>-<owner or local>-<name>` (default root `~/code/herdr-jobs`), the repo in `<job>/workdir`. An older `<repo>/.herdr-<name>` job still works.
+`<jobs_root>/jobs/<YYYY-MM-DD>-<owner or local>-<name>` (default root `~/code/herdr-jobs`); `<job>/workdir` holds the repo's path.
 
 ## What always needs the owner's yes
 
-Merges, pushes to shared branches, deploys, sends, spends and closes: the list and how a gate is asked and passed are in [gates.md](skills/herdr-fleet/references/gates.md). Merge with `stampede merge`, never `gh pr merge`.
+Merges, pushes to shared branches, deploys, sends, spends and closes ([gates.md](skills/herdr-fleet/references/gates.md) has the list and how a gate is passed). Merge with `stampede merge`, never `gh pr merge`. Who records the yes:
 
-## Searching this repo
-
-`.ignore` keeps `film/`, `site/`, `assets/` and `tests/evals/runs/` out of ripgrep and similar searches, so a search stays in the product.
+- A job a bot started: the bot runs the `approve-gate` line it is handed.
+- A chat outside Herdr: it starts the job with `--front-door` and does the same.
+- A job started locally: the owner answers through `ask.command` (the phone by default), so it must work before the first gate.
 
 ## Go deeper
 
-- Starting a job (the front door): [skills/stampede/SKILL.md](skills/stampede/SKILL.md)
-- Leading one: [skills/herdr-fleet/SKILL.md](skills/herdr-fleet/SKILL.md), and on Herdr Core [core.md](skills/herdr-fleet/references/core.md) and [docs/CORE-NATIVE.md](docs/CORE-NATIVE.md)
-- A bot front door over SSH: [skills/grokbot-herdr/SKILL.md](skills/grokbot-herdr/SKILL.md)
-- Showing the plan first: [skills/share-plan/SKILL.md](skills/share-plan/SKILL.md)
-- Changing this repo: [AGENTS.md](AGENTS.md)
-- Every command, what it prints and its exit codes: [docs/CLI.md](docs/CLI.md)
-- Everything else: [README.md](README.md)
+- Starting a job: [skills/stampede](skills/stampede/SKILL.md). Leading one: [skills/herdr-fleet](skills/herdr-fleet/SKILL.md), on Core [core.md](skills/herdr-fleet/references/core.md)
+- A bot over SSH: [skills/grokbot-herdr](skills/grokbot-herdr/SKILL.md). Showing the plan first: [skills/share-plan](skills/share-plan/SKILL.md)
+- Every command, its output and exit codes: [docs/CLI.md](docs/CLI.md). Changing stampede: [AGENTS.md](AGENTS.md). The rest: [README.md](README.md)
+- `.ignore` keeps `film/`, `site/`, `assets/` and eval runs out of ripgrep.

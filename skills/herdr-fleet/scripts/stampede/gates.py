@@ -23,7 +23,7 @@ if [ "$code" = {REFUSED} ]; then exit 1; fi
 echo "stampede-hook: stampede prepush failed (exit $code), so the push gate was not checked: run stampede update" >&2
 exit 0
 '''
-METHODS = ('squash', 'merge', 'rebase')
+METHODS = settings_.CHOICES['merge.method']
 
 
 class GhError(OSError):
@@ -129,6 +129,7 @@ def install_hook(repo):
     with os.fdopen(fd, 'w') as out:
         out.write(HOOK)
     hook.chmod(0o755)
+    print(f'hook pre-push installed in {hook}: a job\'s agent cannot push to the default branch without the gate', file=sys.stderr)
 
 
 def skipped(why):
@@ -220,13 +221,13 @@ def merge(job, pr, sha, review, gate=None):
     if method not in METHODS:
         raise ValueError(f'the setting merge.method is {method!r}: it takes {", ".join(METHODS)}')
     if on:
-        ask = ask_line(job, 'merge', sha, f'merge PR {pr} at {sha}', pr)
+        ask = ask_line(job, 'merge', sha, f'merge PR {pr}', pr)  # the gate adds the commit itself
         if not gate:
             raise base_.Retry('the merge gate is on: ask the owner with the next line, then run this again with --gate <id>', ask)
         asked = owner_.load_gate(job, gate)
         if asked.get('kind') != 'merge' or asked.get('pr') != pr:
-            raise base_.Retry(f'gate {gate} is not a merge gate for PR {pr} (it is {asked.get("kind") or "of no kind"}, PR '
-                              f'{asked.get("pr")}): ask one with the next line', ask)
+            raise base_.Retry(f'gate {gate} is not a merge gate for PR {pr} (it is {asked.get("kind") or "of no kind"}, '
+                              + (f'PR {asked["pr"]}' if asked.get('pr') else 'no PR') + '): ask one with the next line', ask)
         with contextlib.redirect_stdout(io.StringIO()):
             owner_.gate_ok(job, gate, sha)
     else:

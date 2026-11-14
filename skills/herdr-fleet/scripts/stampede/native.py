@@ -585,8 +585,13 @@ def tree(job, as_json=False):
     hcapi_.target(job)
     key, terminals = job_.core_key(job), listing(job)
     lead = lead_of(key, terminals)
-    rows = []
-    for depth, t, outlived in job_tree(key, terminals):
+    rows, shown = [], job_tree(key, terminals)
+    named = {name_of(t) for _, t, _ in shown}
+    for t in reversed(terminals):  # a helper reopen left ended (a program, a codex): its newest terminal, under no live lead
+        if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'helper' and name_of(t) not in named:
+            shown.append((1, t, None))
+            named.add(name_of(t))
+    for depth, t, outlived in shown:
         tags = labels(t)
         rows.append({'depth': depth, 'name': name_of(t), 'address': t['address'], 'parent': t.get('parent'),
                      'role': tags.get('stampede.role') or 'plain', 'kind': tags.get('stampede.kind') or '-',

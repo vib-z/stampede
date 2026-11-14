@@ -23,7 +23,8 @@ PERSONAL = re.compile(r"/Use" r"rs/(?!you\b|<|\$USER|USER\b)[A-Za-z0-9._-]+|/hom
 PRIVATE = {"05bd4b1a17d3955b", "1afc78a3a8aca49e", "270d76c78b081db7", "34d87f87a274e311", "4e09d4303ab499d0", "5a5a908605d4726a",
            "60019f2d98774f2e", "60c268171f89f3ed", "61ea0803f8853523", "6ea1969caf4636dc", "7221ac81b18aa788", "7277ce043c1567e2",
            "926b5c9ce5f79e20", "a5ccbc8dbcb36c0b", "c8914ee7e7531aaf", "e444bd3bca2736f3", "ef194d30114c4521",
-           "4e09d4303ab499d0", "cafd568139954f07"}  # the last two: forms of the machine's own name, as Herdr Core 0.1.20 names a core
+           "4e09d4303ab499d0", "cafd568139954f07",  # these two: forms of the machine's own name, as Herdr Core 0.1.20 names a core
+           "90c5bc16cb06e34c"}  # a surname, as a log cut inside a home path leaves it
 PRIVATE_PATH = re.compile(r"~/co" r"de/skills\b|skills/pers" r"onal/")  # the private skills checkout and its layout
 MAX_BYTES = 10 * 1024 * 1024  # AGENTS.md: never commit media over 10 MB
 USERS_DIR = "/" + "Users" + "/"  # owner, 19:05: nothing hard-coded; built here so this file does not match itself

@@ -195,11 +195,12 @@ class Merge(Scratch):
     def test_the_merge_gate_needs_an_approved_gate_for_this_pr_at_this_commit(self):
         err = self.refused()
         self.assertEqual(err, 'stampede merge: the merge gate is on: ask the owner with the next line, then run this again with '
-                              f"--gate <id>\nstampede ask {self.job} --gate --kind merge --sha {SHA} --pr 12 'merge PR 12 at {SHA}'\n")
+                              f"--gate <id>\nstampede ask {self.job} --gate --kind merge --sha {SHA} --pr 12 'merge PR 12'\n")
         self.assertIn('has no recorded yes', self.refused('--gate', self.gate(approve=False)))
         self.assertIn('is not a merge gate for PR 12 (it is merge, PR 13)', self.refused('--gate', self.gate('1123456789ab', pr=13)))
         self.assertIn('is not a merge gate for PR 12 (it is of no kind', self.refused('--gate', self.gate('2123456789ab', kind=None)))
         self.assertIn('(it is send, PR 12)', self.refused('--gate', self.gate('3123456789ab', kind='send')))
+        self.assertIn('(it is merge, no PR)', self.refused('--gate', self.gate('4123456789ab', pr=None)))
         self.assertIn('no gate', self.refused('--gate', 'ffffffffffff'))
 
     def test_an_approved_gate_merges_the_reviewed_commit(self):
@@ -248,7 +249,10 @@ class Hook(Scratch):
         self.hook = self.repo / '.git/hooks/pre-push'
 
     def test_new_installs_it_once_and_leaves_an_existing_hook_or_hooks_path_alone(self):
-        self.begin()
+        with mock.patch('sys.stderr') as err:
+            self.begin()
+        self.assertEqual(''.join(c.args[0] for c in err.write.call_args_list).splitlines(),
+                         [f'hook pre-push installed in {self.hook}: a job\'s agent cannot push to the default branch without the gate'])
         self.assertIn(gates_.HOOK_MARK, self.hook.read_text())
         self.assertTrue(os.access(self.hook, os.X_OK))
         with mock.patch('sys.stderr') as err:
@@ -372,11 +376,11 @@ class Round1Merge(Merge):
         self.job, self.report = spaced, spaced / 'reports' / 'review.md'
         line = self.refused().splitlines()[1]
         self.assertEqual(__import__('shlex').split(line), ['stampede', 'ask', str(spaced), '--gate', '--kind', 'merge', '--sha',
-                                                           SHA, '--pr', '12', f'merge PR 12 at {SHA}'])
+                                                           SHA, '--pr', '12', 'merge PR 12'])
 
     def test_d1_a_merge_gate_asked_with_kind_merge_opens_merge(self):
         (self.job / 'ask.md').write_text('x\n')
-        with mock.patch.object(owner_, 'ask_background'), mock.patch('sys.stdout'):
+        with mock.patch.object(owner_, 'ask_background'), mock.patch.object(owner_, 'ASK_CMD', 'true'), mock.patch('sys.stdout'):
             owner_.ask_gate(self.job, f'merge PR 12 at {SHA}', SHA, 12, 'merge')
         (ident,) = [g.stem for g in (self.job / 'gates').glob('*.json')]
         gate = owner_.load_gate(self.job, ident)
@@ -396,6 +400,39 @@ class Round1Merge(Merge):
         self.assertIn("invalid choice: 'mergee'", result.stderr)
         result = subprocess.run([str(FLEET), 'ask', str(self.job), '--kind', 'merge', 'which?'], capture_output=True, text=True)
         self.assertEqual((result.returncode, result.stderr.strip()), (2, 'stampede ask: --kind is for a gate: ask --gate --kind <name>'))
+
+
+class Polish(Scratch):
+    """A local job: a gate no one can answer is never asked; approve-gate names the route first; finish is quiet."""
+
+    def test_an_ask_command_that_is_not_installed_refuses_before_anything_is_asked(self):
+        with mock.patch.object(owner_, 'ASK_CMD', 'stampede-no-such-asker --x'), mock.patch('sys.stdout') as out:
+            for call in (lambda: owner_.ask_gate(self.job, 'deploy', SHA), lambda: owner_.ask(self.job, 'which?', [])):
+                with self.assertRaisesRegex(ValueError, r'^the ask command is not installed \(stampede-no-such-asker is not on '
+                                                        r'PATH\), .* set ask\.command'):
+                    call()
+        self.assertFalse(out.write.called)
+        self.assertEqual(list(self.job.glob('gates/*.json')) + list(self.job.glob('asks/*')), [], 'no gate or question is left waiting')
+        with mock.patch.object(owner_, 'ASK_CMD', 'false'), mock.patch.object(owner_, 'ask_background'), \
+                mock.patch('sys.stdout') as out:  # a command that runs and fails is today's ASK FAILED, later
+            owner_.ask_gate(self.job, 'deploy', SHA)
+        self.assertIn('on the phone; act after stampede gate-ok', ''.join(c.args[0] for c in out.write.call_args_list))
+
+    def test_approve_gate_says_first_that_a_local_gate_is_answered_on_the_phone(self):
+        with mock.patch.object(owner_, 'ASK_CMD', 'true'), mock.patch.object(owner_, 'ask_background'), mock.patch('sys.stdout'):
+            owner_.ask_gate(self.job, 'deploy', SHA)
+        (ident,) = [g.stem for g in (self.job / 'gates').glob('*.json')]
+        with mock.patch.object(owner_.herdrapi_, 'inside_herdr', return_value=True):
+            with self.assertRaisesRegex(PermissionError, 'belongs to a job started locally: the owner answers on the phone'):
+                owner_.approve_gate(self.job, ident, SHA, 'owner', 'x')
+
+    def test_finish_cancels_quietly_a_question_already_answered(self):
+        (self.job / 'asks').mkdir()
+        (self.job / 'asks' / '0123456789ab.pid').write_text('999999\n')  # its waiter is gone
+        with mock.patch('sys.stdout') as out:
+            owner_.cancel(self.job, '0123456789ab', waiting_only=True)
+        self.assertFalse(out.write.called)
+        self.assertFalse((self.job / 'asks' / '0123456789ab.pid').exists())
 
 
 class Round1Keys(Scratch):

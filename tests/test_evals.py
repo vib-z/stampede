@@ -63,6 +63,15 @@ class Recorder(unittest.TestCase):
             self.assertIn('| pass | 1 |', (run.dir / 'summary.md').read_text())
             self.assertEqual([json.loads(r)['id'] for r in (run.dir / 'results.jsonl').read_text().splitlines()], ['G01', 'G02'])
 
+    def test_a_long_log_is_scrubbed_before_it_is_cut(self):
+        with tempfile.TemporaryDirectory() as out:
+            run = record.Run('unit', backend='fixture', cases=['G01'], out_root=out)
+            home = str(Path.home())
+            run.case('G01', 'pass', log=f'{home}/code/job ' + 'x' * (record.LOG_TAIL - 12))  # a cut would fall inside the home
+            log = json.loads((run.dir / 'results.jsonl').read_text())['log']
+            self.assertTrue(log.startswith('~/code/job '), log[:40])
+            self.assertNotIn(Path(home).name, log)
+
     def test_a_host_name_is_scrubbed_in_any_case_and_a_runner_can_add_one(self):
         """Herdr Core 0.1.20 prints a core's name, made from the machine's name in lower case: no run may keep it."""
         host = 'Somebodys-Box'

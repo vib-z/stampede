@@ -6,7 +6,7 @@ Add `--json` to any command an agent runs, before or after the command's name (`
 $ stampede start <job> build-api --kind claude --brief <job>/briefs/build-api.md --json
 {"ok": true, "command": "start", "status": "STARTED", "job": "<job>", "agent": "build-api", "address": "t2", "parent": "lead-demo"}
 $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
-{"ok": false, "command": "merge", "status": null, "job": "<job>", "error": "stampede merge: the merge gate is on: ask the owner with the next line, then run this again with --gate <id>", "retry": "stampede ask <job> --gate --kind merge --sha <sha> --pr 3 'merge PR 3 at <sha>'"}
+{"ok": false, "command": "merge", "status": null, "job": "<job>", "error": "stampede merge: the merge gate is on: ask the owner with the next line, then run this again with --gate <id>", "retry": "stampede ask <job> --gate --kind merge --sha <sha> --pr 3 'merge PR 3'"}
 ```
 
 ## The shape
@@ -35,6 +35,7 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 | `reason` | why: the error, the dialog's kind, or for `SKIPPED` and `DONE` a short code (below) |
 | `retry` | the command to run next, where the line names one |
 | `to` | who hears a post or a question: the bot, `front door`, or null |
+| `repo` | `new` on Herdr Core: the repo the job works on, absolute, or null outside a repo |
 
 ## Per command
 
