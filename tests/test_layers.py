@@ -1,6 +1,7 @@
 """The stampede package's layers, read with ast (nothing is imported or started): who may import whom, no import
-cycle at load, every call through the module (`from . import job as job_`, never `from .job import backend`), every
-module under 1,000 lines and the fleet_job.py entry under 20."""
+cycle at load, every call through the module (`from . import job as job_`, never `from .job import backend` or an
+absolute import of the package), every module under 1,000 lines and the fleet_job.py entry under 20. An import in an
+if, try, with or class body runs at load and counts as one; an import inside a function is lazy and must be in LAZY."""
 import ast, unittest
 from pathlib import Path
 
@@ -26,75 +27,107 @@ LAZY = {
 }
 
 
-def imports(path):
-    """(modules imported at load, {function: modules imported inside it}, every ImportFrom of the package)."""
-    tree = ast.parse(path.read_text())
-    load, inside, froms = set(), {}, []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.level or (node.module or '').startswith('stampede')):
-            froms.append(node)
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.level:
-            load |= {a.name for a in node.names}
-        if isinstance(node, ast.FunctionDef):
-            found = {a.name for x in ast.walk(node) if isinstance(x, ast.ImportFrom) and x.level for a in x.names}
-            if found:
-                inside[node.name] = found
-    return load, inside, froms
+def scan(text):
+    """(modules imported at load, {top-level function: modules imported inside it}, [import lines in another form than
+    `from . import x as x_`]) for one module's source. Every import of the package counts, whatever its form or depth."""
+    load, inside, bad = set(), {}, []
+
+    def record(node, mods, canonical, function):
+        if not canonical:
+            bad.append(f'line {node.lineno}: {ast.unparse(node)}')
+        if function:
+            inside.setdefault(function, set()).update(mods)
+        else:
+            load.update(mods)
+
+    def visit(node, function):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            function = function or getattr(node, 'name', '<lambda>')
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ''
+            if node.level:  # from . import x, from .x import y, from .. import ...
+                mods = {a.name for a in node.names} if not module else {module.split('.')[0]}
+                canonical = node.level == 1 and not module and all(a.asname == a.name + '_' for a in node.names)
+                record(node, mods, canonical, function)
+            elif module == 'stampede':
+                record(node, {a.name for a in node.names}, False, function)
+            elif module.startswith('stampede.'):
+                record(node, {module.split('.')[1]}, False, function)
+        elif isinstance(node, ast.Import):
+            mods = {a.name.split('.')[1] if '.' in a.name else '__init__' for a in node.names
+                    if a.name == 'stampede' or a.name.startswith('stampede.')}
+            if mods:
+                record(node, mods, False, function)
+        for child in ast.iter_child_nodes(node):
+            visit(child, function)
+
+    visit(ast.parse(text), None)
+    return load, inside, bad
+
+
+def read():
+    return {p.stem: p.read_text() for p in sorted(PACKAGE.glob('*.py')) if p.stem != '__init__'}
+
+
+def problems(sources):
+    """Every broken layer rule of a package given as {module: source}, as one line each; [] when it keeps its layers."""
+    mods = {mod: scan(text) for mod, text in sources.items()}
+    out = []
+    for mod, (load, inside, bad) in mods.items():
+        out += [f'{mod}: {b}: call through the module, from . import x as x_' for b in bad]
+        out += [f'{mod}: imports {m}, which is no module of the package'
+                for m in load | set().union(*inside.values()) if m not in mods]
+    for mod, allowed in LOWER.items():
+        load, inside, _ = mods[mod]
+        out += [f'{mod}: imports {m} at load' for m in sorted(load - allowed)]
+        out += [f'{mod}.{f}: imports {sorted(m)} inside' for f, m in inside.items()]
+    for mod, banned in NEVER.items():
+        load, inside, _ = mods[mod]
+        out += [f'{mod}: imports {m}, which it must never reach' for m in sorted(load & banned)]
+        out += [f'{mod}.{f}: imports {m}, which it must never reach' for f, found in inside.items()
+                for m in sorted(found & banned - LAZY.get((mod, f), set()))]
+    for mod, (load, _, _) in mods.items():
+        if mod != 'cli' and 'native' in load:
+            out.append(f'{mod}: imports native at load (only cli does)')
+        if mod not in DELETED:
+            out += [f'{mod}: imports {m} at load (relay and handed only inside a function)' for m in sorted(load & DELETED)]
+    if 'relay' in mods['handed'][0]:
+        out.append('handed: imports relay (relay imports handed, never the other way)')
+    found = {(mod, f): names for mod, (_, inside, _) in mods.items() for f, names in inside.items()}
+    if found != LAZY:
+        out.append(f'imports inside functions differ from LAZY: found {found}')
+    cycle = find_cycle({mod: load & set(mods) for mod, (load, _, _) in mods.items()})
+    if cycle:
+        out.append('cycle at load: ' + ' -> '.join(cycle))
+    return out
+
+
+def find_cycle(graph):
+    done, path = set(), []
+
+    def visit(mod):
+        if mod in path:
+            return path[path.index(mod):] + [mod]
+        if mod in done:
+            return None
+        path.append(mod)
+        for other in sorted(graph[mod]):
+            cycle = visit(other)
+            if cycle:
+                return cycle
+        path.pop()
+        done.add(mod)
+        return None
+    for mod in sorted(graph):
+        cycle = visit(mod)
+        if cycle:
+            return cycle
+    return None
 
 
 class Layers(unittest.TestCase):
-    def setUp(self):
-        self.mods = {p.stem: imports(p) for p in sorted(PACKAGE.glob('*.py')) if p.stem != '__init__'}
-
-    def test_every_import_of_the_package_is_a_module_under_its_alias(self):
-        for mod, (_, _, froms) in self.mods.items():
-            for node in froms:
-                self.assertEqual((node.level, node.module), (1, None), f'{mod}: call through the module, from . import x as x_')
-                for alias in node.names:
-                    self.assertIn(alias.name, self.mods, mod)
-                    self.assertEqual(alias.asname, alias.name + '_', f'{mod}: import {alias.name} as {alias.name}_')
-
-    def test_the_lower_layers_import_only_what_is_below_them(self):
-        for mod, allowed in LOWER.items():
-            load, inside, _ = self.mods[mod]
-            self.assertLessEqual(load, allowed, mod)
-            self.assertEqual(inside, {}, mod)
-
-    def test_native_and_tui_never_import_the_paths_they_must_not_reach(self):
-        for mod, banned in NEVER.items():
-            load, inside, _ = self.mods[mod]
-            self.assertFalse(load & banned, mod)
-            for function, found in inside.items():
-                self.assertFalse(found & banned - LAZY.get((mod, function), set()), f'{mod}.{function}')
-
-    def test_only_cli_imports_native_at_load_and_nothing_imports_relay_or_handed_at_load(self):
-        for mod, (load, _, _) in self.mods.items():
-            if mod != 'cli':
-                self.assertNotIn('native', load, mod)
-            if mod not in DELETED:
-                self.assertFalse(load & DELETED, mod)
-        self.assertNotIn('relay', self.mods['handed'][0], 'relay imports handed, never the other way')
-
-    def test_the_imports_inside_functions_are_exactly_the_listed_ones(self):
-        found = {(mod, function): names for mod, (_, inside, _) in self.mods.items() for function, names in inside.items()}
-        self.assertEqual(found, LAZY)
-
-    def test_no_import_cycle_at_load(self):
-        graph = {mod: load for mod, (load, _, _) in self.mods.items()}
-        done, path = set(), []
-
-        def visit(mod):
-            self.assertNotIn(mod, path, 'cycle: ' + ' -> '.join(path + [mod]))
-            if mod in done:
-                return
-            path.append(mod)
-            for other in sorted(graph[mod]):
-                visit(other)
-            path.pop()
-            done.add(mod)
-        for mod in sorted(graph):
-            visit(mod)
+    def test_the_package_keeps_its_layers(self):
+        self.assertEqual(problems(read()), [])
 
     def test_every_module_is_under_1000_lines_and_the_entry_under_20(self):
         for path in PACKAGE.glob('*.py'):
@@ -102,6 +135,40 @@ class Layers(unittest.TestCase):
         self.assertLess(len((SCRIPTS / 'fleet_job.py').read_text().splitlines()), 20)
         self.assertEqual((PACKAGE / '__init__.py').read_text(),
                          '"""stampede: the job commands behind the stampede and fleet-job CLIs."""\n')
+
+
+class Mutations(unittest.TestCase):
+    """The guard catches each way a later change could break a layer: the package's own sources, one module changed in
+    memory."""
+
+    def caught(self, module, extra, words):
+        sources = read()
+        sources[module] += '\n' + extra
+        found = problems(sources)
+        self.assertTrue(any(words in line for line in found), f'not caught: {extra!r} in {module}: {found}')
+
+    def test_a_forbidden_relative_import(self):
+        self.caught('native', 'from . import tui as tui_\n', 'native: imports tui, which it must never reach')
+
+    def test_a_forbidden_absolute_import(self):
+        self.caught('native', 'import stampede.tui as tui_\n', 'native: imports tui, which it must never reach')
+        self.caught('native', 'from stampede import tui\n', 'call through the module')
+
+    def test_a_cycle_by_an_absolute_import(self):
+        self.caught('base', 'import stampede.hcapi as hcapi_\n', 'cycle at load: ')
+        self.caught('job', 'from . import hcapi as hcapi_\n', 'cycle at load: ')
+
+    def test_an_import_in_an_if_try_with_or_class_body_runs_at_load(self):
+        self.caught('native', 'if True:\n    from . import tui as tui_\n', 'native: imports tui, which it must never reach')
+        self.caught('native', 'try:\n    from . import hooks as hooks_\nexcept ImportError:\n    pass\n', 'native: imports hooks')
+        self.caught('owner', 'class Late:\n    from . import native as native_\n', 'owner: imports native at load')
+
+    def test_a_name_imported_from_a_module_and_not_through_it(self):
+        self.caught('owner', 'from .job import backend\n', 'call through the module')
+        self.caught('owner', 'from stampede.job import backend\n', 'call through the module')
+
+    def test_a_lazy_import_not_in_lazy(self):
+        self.caught('hooks', 'def later():\n    from . import relay as relay_\n', 'differ from LAZY')
 
 
 if __name__ == '__main__':
