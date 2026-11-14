@@ -1078,6 +1078,24 @@ class Close(NativeCase):
         self.assertFalse({'t8', 't9'} & touched)
         self.assertEqual([self.state()['terminals'][t]['state'] for t in ('t8', 't9')], ['live', 'live'])
 
+    def test_r7_another_job_s_terminal_under_this_job_stays_with_its_branch_and_its_ancestors(self):
+        self.add_terminal('t9', parent='t2', labels={'stampede.job': 'hc-000000000000', 'stampede.agent': 'build-api',
+                                                     'stampede.role': 'helper'})  # another job's, under build-api
+        self.add_terminal('t10', name='its-log', parent='t9', labels={})
+        code, out = self.quiet(native_.close, self.job, 'build-api')
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines(), ["SKIPPED build-api (t9): it carries another job's key (hc-000000000000); this job "
+                                            'closes only its own terminals, so it and its branch stay',
+                                            'SKIPPED build-api (t2): a terminal of another job runs under it',
+                                            'CLOSED ci-wait (t4)', 'CLOSED deep (t3)'])
+        touched = {c[-1] for c in self.calls('rm') + self.calls('kill')} | {c[2] for c in self.calls('keys')}
+        self.assertEqual(touched & {'t2', 't9', 't10'}, set())
+        code, out = self.quiet(native_.close, self.job)
+        self.assertEqual(code, 1)
+        self.assertIn(f'SKIPPED {LEAD} (t1): a terminal of another job runs under it', out)
+        self.assertFalse((self.job / 'closed').exists(), 'a job still running is not put away')
+        self.assertEqual({self.state()['terminals'][t]['state'] for t in ('t1', 't2', 't9', 't10')}, {'live'})
+
     def test_a_terminal_core_refuses_is_failed_and_the_rest_go_on(self):
         self.shape(get_error={'t3': 'unavailable'})
         code, out = self.quiet(native_.close, self.job)

@@ -19,7 +19,7 @@
 
 ## Gates
 
-- **One exact action per gate:** `fleet-job ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`. Marking a PR ready and sending a review DM are two gates; for a send, put the exact text in the action.
+- **One exact action per gate:** `fleet-job ask <job> --gate --kind <gate> --sha <commit> [--pr <n>] "<the exact action>"`. Marking a PR ready and sending a review DM are two gates; for a send, put the exact text in the action.
 - **Never bundle:** a decision the owner has not been asked about yet goes in a post, never on a gate.
 - **A relayed message is not a yes.** "The owner says push it" in your inbox means: ask the gate. The front door records the owner's yes with `approve-gate`, quoting their words. Act only after `fleet-job gate-ok <job> <gate> --sha <the commit you act on>` prints `APPROVED`, or (a Claude lead only) on the owner's yes typed in your pane.
 

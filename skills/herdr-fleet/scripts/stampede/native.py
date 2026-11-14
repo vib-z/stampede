@@ -853,8 +853,27 @@ def close(job, name=None):
     under = [(d, t) for d, t, _ in job_tree(key, terminals)][1:] if whole else descendants(terminals, target['address'])
     if os.environ.get('HC_TERMINAL_ID') in [target['address']] + [t['address'] for _, t in under]:
         raise ValueError(f'close {name} from outside its tree: this terminal is {name} or under it')
-    failed, closed = False, []
-    for _, t in sorted(under, key=lambda pair: -pair[0]) + [(0, target)]:
+    failed, closed, foreign = False, [], set()
+    for _, t in under:  # depth first, parents before children: a terminal of another job, and its branch, stay
+        other = labels(t).get('stampede.job')
+        if t.get('parent') in foreign or other not in (None, key):
+            foreign.add(t['address'])
+        if other not in (None, key):
+            failed = True
+            print(f'SKIPPED {name_of(t)} ({t["address"]}): it carries another job\'s key ({other}); this job closes only its '
+                  'own terminals, so it and its branch stay')
+    by, kept = {t['address']: t for t in terminals}, set()
+    for address in [a for a in foreign if by[a].get('parent') not in foreign]:  # its ancestors stay too: ending one could end it
+        parent = by[address].get('parent')
+        while parent in by and parent not in kept:
+            kept.add(parent)
+            if parent == target['address']:
+                break
+            parent = by[parent].get('parent')
+    for address in sorted(kept):
+        print(f'SKIPPED {name_of(by[address])} ({address}): a terminal of another job runs under it')
+    under = [(d, t) for d, t in under if t['address'] not in foreign | kept]
+    for _, t in sorted(under, key=lambda pair: -pair[0]) + ([] if target['address'] in kept else [(0, target)]):
         tags, address = labels(t), t['address']
         shown = (tags.get('stampede.agent') if tags.get('stampede.role') else None) or t.get('name') or address
         try:
@@ -875,7 +894,7 @@ def close(job, name=None):
             continue
         closed.append(shown)
         print(f'CLOSED {shown} ({address})')
-    if whole:  # the job put away: a later reopen brings back what ran, so no node is marked closed
+    if whole and target['address'] not in kept:  # the job put away: a later reopen brings back what ran, so no node is marked closed
         (job / 'closed').write_text(time.strftime('%Y-%m-%d %H:%M') + '\n')
     with contextlib.suppress(hcapi_.HcError):
         refresh(job)

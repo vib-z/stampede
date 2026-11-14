@@ -8,13 +8,28 @@ from pathlib import Path
 
 from . import base as base_, job as job_, owner as owner_, settings as settings_
 
+REFUSED = 9  # stampede prepush's refusal: the one exit code that stops a push; anything else lets it through
 HOOK_MARK = '# stampede-hook'
 HOOK = f'''#!/bin/sh
 {HOOK_MARK}: a job's agent may not push to the default branch without the owner's gate (stampede prepush).
-command -v stampede >/dev/null 2>&1 || exit 0
-exec stampede prepush "$@"
+# Outside a job's environment it exits 0 at once; only prepush's own refusal ({REFUSED}) stops a push.
+jobs="${{HERDR_EVENTS_DIR:-$HOME/.config/herdr-events}}/jobs"
+mine=
+for id in "${{STAMPEDE_JOB_KEY:-}}" "${{HERDR_WORKSPACE_ID:-}}"; do
+  case "$id" in hc-*|w*) case "$id" in */*|*..*) ;; *) [ -f "$jobs/$id" ] && mine=1;; esac;; esac
+done
+[ -n "$mine" ] || exit 0
+if ! command -v stampede >/dev/null 2>&1; then
+  echo "stampede-hook: stampede is not on PATH, so this job's push gate was not checked: put it on PATH (./install.sh)" >&2
+  exit 0
+fi
+stampede prepush "$@"
+code=$?
+[ "$code" = {REFUSED} ] && exit 1
+[ "$code" = 0 ] || echo "stampede-hook: stampede prepush failed (exit $code), so this job's push gate was not checked: run stampede update" >&2
+exit 0
 '''
-HOOK_LINE = 'command -v stampede >/dev/null 2>&1 && { stampede prepush "$@" || exit 1; }'
+HOOK_LINE = f'if command -v stampede >/dev/null 2>&1; then stampede prepush "$@"; if [ $? = {REFUSED} ]; then exit 1; fi; fi'
 METHODS = ('squash', 'merge', 'rebase')
 
 
@@ -35,14 +50,20 @@ def record_path(job):
     return job_.events_dir() / 'gates' / (job_.job_key(job) + '.json')
 
 
-def of(job):
-    """name -> (on, source) for this job, from its record; every gate on for a job without one (made before gates)."""
+def recorded(job):
+    """The job's record as new wrote it, or {} (none, or one naming another folder)."""
     try:
         found = json.loads(record_path(job).read_text())
     except (OSError, ValueError):
-        found = {}
-    if not isinstance(found, dict) or found.get('job') != str(Path(job).absolute()):
-        found = {}
+        return {}
+    return found if isinstance(found, dict) and found.get('job') == str(Path(job).absolute()) else {}
+
+
+def of(job):
+    """name -> (on, source) for this job, from its record; every gate on for a job without one (made before gates)."""
+    found = recorded(job)
+    if not found:
+        return {name: (True, 'no record: all on') for name in names()}
     gates, sources = found.get('gates') or {}, found.get('sources') or {}
     return {name: (gates.get(name) is not False, str(sources.get(name, 'default'))) for name in names()}
 
@@ -58,12 +79,40 @@ def begin(job, settings, repo):
     sources = {name: settings.source('gates.' + name) for name in names()}
     path = record_path(job)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({'job': str(job), 'gates': gates, 'sources': sources}) + '\n')
+    branches = default_branch(repo) if gates['push_default_branch'] else {}
+    path.write_text(json.dumps({'job': str(job), 'gates': gates, 'sources': sources, 'default_branch': branches}) + '\n')
     for name in names():
         if not gates[name]:
             base_.append(job / 'gates.log', f'{stamp()} OFF {name} ({sources[name]})')
     if gates['push_default_branch']:
         install_hook(repo)
+
+
+def default_branch(repo):
+    """At new, once: {remote name and its URL: the default branch}, from the remote's HEAD symref, else git ls-remote
+    --symref (5 s at most); a remote that answers neither is left out."""
+    def git(*args, timeout=None):
+        try:
+            return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True, timeout=timeout,
+                                  env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    found = {}
+    listed = git('remote')
+    for remote in (listed.stdout.split() if listed and listed.returncode == 0 else []):
+        head, prefix = git('symbolic-ref', '--quiet', f'refs/remotes/{remote}/HEAD'), f'refs/remotes/{remote}/'
+        branch = head.stdout.strip()[len(prefix):] if head and head.returncode == 0 and head.stdout.startswith(prefix) else ''
+        if not branch:
+            remote_head = git('ls-remote', '--symref', remote, 'HEAD', timeout=5)
+            line = remote_head.stdout.splitlines()[0] if remote_head and remote_head.returncode == 0 and remote_head.stdout else ''
+            m = re.match(r'ref: refs/heads/(\S+)\s+HEAD$', line)
+            branch = m.group(1) if m else ''
+        if branch:
+            found[remote] = branch
+            url = git('remote', 'get-url', remote)
+            if url and url.returncode == 0 and url.stdout.strip():
+                found[url.stdout.strip()] = branch
+    return found
 
 
 def install_hook(repo):
@@ -74,23 +123,34 @@ def install_hook(repo):
     if found.returncode or not found.stdout.strip():
         return  # not a git repo: nothing to push
     hook = Path(found.stdout.strip()) / 'hooks' / 'pre-push'
-    custom = git('config', '--get', 'core.hooksPath').stdout.strip()
-    if not custom and hook.is_file() and HOOK_MARK in hook.read_text(errors='replace'):
-        return  # an earlier job's
-    if custom or hook.exists():
-        where = f'core.hooksPath is {custom}' if custom else f'{hook} already exists'
-        return print(f'stampede new: the pre-push hook was not installed ({where}); to hold the push gate, add this line '
-                     f'to that pre-push hook: {HOOK_LINE}', file=sys.stderr)
+    custom = git('config', '--get', 'core.hooksPath')
+    if custom.returncode == 0:  # set, even to the empty string
+        return skipped(f'core.hooksPath is set ({custom.stdout.strip() or "empty"})')
     hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text(HOOK)
+    try:
+        fd = os.open(hook, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o755)  # never through a symlink, never over another
+    except FileExistsError:
+        if hook.is_symlink() or not hook.is_file() or HOOK_MARK not in hook.read_text(errors='replace'):
+            skipped(f'{hook} already exists')
+        return  # else an earlier job's
+    with os.fdopen(fd, 'w') as out:
+        out.write(HOOK)
     hook.chmod(0o755)
+
+
+def skipped(why):
+    print(f'stampede new: the pre-push hook was not installed ({why}); to hold the push gate, add this line near the top '
+          f'of that pre-push hook: {HOOK_LINE}', file=sys.stderr)
 
 
 def brief_text(job, cmd):
     """The lead's brief, on every backend: merge only with stampede merge, then which gates the owner switched off."""
     text = (f'Merge only with {cmd} merge {job} <pr> --sha <the reviewed commit> --review <the review report> --gate <gate>, never '
             'with gh pr merge: it checks that the report passes that commit and the PR head is still it. A merge and a push '
-            'to the default branch need the recorded yes (gate-ok), never a typed one. ')
+            'to the default branch open only with a gate asked with --kind merge or --kind push_default_branch and its '
+            'recorded yes, never a typed one or your own card. Every review report, after every new commit (a rebase too), '
+            'must carry Status: PASS or FINDINGS and Reviewed: <the full sha it reviewed> in its first 10 lines: put that in '
+            'each review brief. ')
     gone = off(job)
     if gone:
         text += (f'The owner switched these gates off for this job: {", ".join(gone)}; those need no yes. Every other gate '
@@ -99,12 +159,11 @@ def brief_text(job, cmd):
 
 
 def overlay(settings, job):
-    """config show --job: the gates as the job's record holds them, with the layer that set each at new."""
-    if not record_path(job).is_file():
-        return settings
+    """config show --job: the gates as the job's record holds them (with the layer that set each at new); a job with
+    no record has every gate on, whatever the user's config says now."""
     values, sources = dict(settings.values), dict(settings.sources)
     for name, (on, source) in of(job).items():
-        values['gates.' + name], sources['gates.' + name] = on, source + ', at new'
+        values['gates.' + name], sources['gates.' + name] = on, source if source.startswith('no record') else source + ', at new'
     return settings_.Settings(values, sources, settings.problems, settings.files, settings.environment, settings.exported)
 
 
@@ -122,12 +181,20 @@ def review_says(report, sha):
     if not path.is_file():
         raise PermissionError(f'no review report {report}: the reviewer writes one with Status: PASS and Reviewed: <full sha> '
                               'in its first 10 lines')
-    head = path.read_text(errors='replace').splitlines()[:10]
-    found = {}
-    for row in head:
-        m = re.match(r'\s*(Status|Reviewed):\s*(\S+)', row)
+    found, fence = {}, None
+    for row in path.read_text(errors='replace').splitlines()[:10]:
+        mark = re.match(r'\s{0,3}(`{3,}|~{3,})', row)
+        if mark and (fence is None or mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence)):
+            fence = mark.group(1) if fence is None else None
+            continue
+        m = None if fence else re.match(r'(Status|Reviewed):[ \t]*(.*?)\s*$', row)  # a header starts the line
         if m:
-            found.setdefault(m.group(1), m.group(2))
+            found.setdefault(m.group(1), []).append(m.group(2))
+    for key, values in found.items():
+        if len(set(values)) > 1:
+            raise PermissionError(f'the review report {report} has {len(values)} {key}: lines in its first 10 lines '
+                                  f'({", ".join(values)}): it must have one; the reviewer fixes the header')
+    found = {key: values[0] for key, values in found.items()}
     if found.get('Status') != 'PASS':
         raise PermissionError(f'the review report {report} says Status: {found.get("Status", "(none)")}, not PASS, in its first '
                               '10 lines: fix the findings and review again')
@@ -151,39 +218,69 @@ def merge(job, pr, sha, review, gate=None):
     if pull.get('headRefOid') != sha:
         raise PermissionError(f'the review report passes {sha} but the PR head is {pull.get("headRefOid")}: review the new commit')
     on, source = of(job)['merge']
+    method = settings_.current(job).get('merge.method')
+    if method not in METHODS:
+        raise ValueError(f'the setting merge.method is {method!r}: it takes {", ".join(METHODS)}')
     if on:
-        ask = f'stampede ask {job} --gate --sha {sha} --pr {pr} ' + shlex.quote(f'merge PR {pr} at {sha}')
+        ask = ask_line(job, 'merge', sha, f'merge PR {pr} at {sha}', pr)
         if not gate:
-            raise PermissionError(f'the merge gate is on: ask the owner with {ask}, then run this again with --gate <id>')
-        if owner_.load_gate(job, gate).get('pr') != pr:
-            raise PermissionError(f'gate {gate} is not about PR {pr}: ask with {ask}')
+            raise base_.Retry('the merge gate is on: ask the owner with the next line, then run this again with --gate <id>', ask)
+        asked = owner_.load_gate(job, gate)
+        if asked.get('kind') != 'merge' or asked.get('pr') != pr:
+            raise base_.Retry(f'gate {gate} is not a merge gate for PR {pr} (it is {asked.get("kind") or "of no kind"}, PR '
+                              f'{asked.get("pr")}): ask one with the next line', ask)
         with contextlib.redirect_stdout(io.StringIO()):
             owner_.gate_ok(job, gate, sha)
     else:
         base_.append(job / 'gates.log', f'{stamp()} MERGE {pr} {sha} without the merge gate (off: {source})')
-    method = settings_.current(job).get('merge.method')
-    if method not in METHODS:
-        raise ValueError(f'the setting merge.method is {method!r}: it takes {", ".join(METHODS)}')
-    if pull.get('isDraft'):
-        gh(job, 'pr', 'ready', str(pr))
-    gh(job, 'pr', 'merge', str(pr), '--' + method, '--match-head-commit', sha)
-    commit = gh(job, 'pr', 'view', str(pr), '--json', 'mergeCommit', '-q', '.mergeCommit.oid').strip() or 'unknown'
-    facts = {'pr': pr, 'sha': sha, 'merge_commit': commit, 'method': method, 'review': str(review), 'gate': gate if on else None}
-    base_.append(job / 'merges.log', f'{stamp()} MERGED {pr} {sha} {commit} {method} review {review} gate {gate if on else "off"}')
-    print(f'MERGED {pr} {commit}')
-    return facts
+    how = f'{method} review {review} gate {gate if on else "off"}'
+    try:  # the intent is on record before anything changes on GitHub, or nothing is merged
+        base_.append(job / 'merges.log', f'{stamp()} MERGING {pr} {sha} {how}')
+    except OSError as error:
+        raise PermissionError(f'{job / "merges.log"} cannot be written ({base_.line(error)}): nothing was merged; fix it, '
+                              'then merge again') from None
+    try:
+        if pull.get('isDraft'):
+            gh(job, 'pr', 'ready', str(pr))
+        gh(job, 'pr', 'merge', str(pr), '--' + method, '--match-head-commit', sha)
+    except GhError as error:
+        with contextlib.suppress(OSError):
+            base_.append(job / 'merges.log', f'{stamp()} FAILED {pr} {sha} {how}: {base_.line(error)}')
+        raise
+    try:
+        commit = gh(job, 'pr', 'view', str(pr), '--json', 'mergeCommit', '-q', '.mergeCommit.oid').strip()
+    except GhError:
+        commit = ''
+    with contextlib.suppress(OSError):
+        base_.append(job / 'merges.log', f'{stamp()} MERGED {pr} {sha} {commit or "(merge commit not read)"} {how}')
+    print(f'MERGED {pr} {commit}'.rstrip())
+    return {'pr': pr, 'sha': sha, 'merge_commit': commit or None, 'method': method, 'review': str(review),
+            'gate': gate if on else None}
 
 
-def default_branches(remote):
+def ask_line(job, kind, sha, action, pr=None):
+    """The stampede ask a refusal hands back, as one runnable line."""
+    return shlex.join(['stampede', 'ask', str(job), '--gate', '--kind', kind, '--sha', sha, *(['--pr', str(pr)] if pr else []),
+                       action])
+
+
+def default_branches(job, remote, url=None):
+    """The job's record from new, else refs/remotes/<remote>/HEAD (the whole name after the prefix), else main and master."""
+    saved = recorded(job).get('default_branch') or {}
+    for name in (remote, url):
+        if name and isinstance(saved.get(name), str):
+            return [saved[name]]
     found = subprocess.run(['git', 'symbolic-ref', '--quiet', f'refs/remotes/{remote}/HEAD'], capture_output=True, text=True)
-    head = found.stdout.strip()
-    return [head.rpartition('/')[2]] if found.returncode == 0 and head else ['main', 'master']
+    head, prefix = found.stdout.strip(), f'refs/remotes/{remote}/'
+    return [head[len(prefix):]] if found.returncode == 0 and head.startswith(prefix) and head != prefix else ['main', 'master']
 
 
-def approved(job, sha):
-    """True when the job holds a gate approved at sha."""
+def approved(job, sha, kind):
+    """True when the job holds a gate of this kind approved at sha."""
     for path in sorted((Path(job) / 'gates').glob('*.json')):
         try:
+            if owner_.load_gate(job, path.stem).get('kind') != kind:
+                continue
             with contextlib.redirect_stdout(io.StringIO()):
                 owner_.gate_ok(job, path.stem, sha)
             return True
@@ -192,19 +289,26 @@ def approved(job, sha):
     return False
 
 
-def prepush(remote, lines, env=None):
+def job_of(env):
+    """The open job a push comes from: the first of STAMPEDE_JOB_KEY and HERDR_WORKSPACE_ID naming a valid marker."""
+    for name in ('STAMPEDE_JOB_KEY', 'HERDR_WORKSPACE_ID'):
+        marker = job_.job_marker(env.get(name)) if env.get(name) else None
+        try:
+            job = Path((marker.read_text().splitlines() or [''])[0].strip()) if marker and marker.is_file() else None
+        except OSError:
+            job = None
+        if job and job.is_absolute() and job.is_dir():
+            return job
+    return None
+
+
+def prepush(remote, lines, env=None, url=None):
     """The pre-push hook: 0 unless a job's agent (STAMPEDE_JOB_KEY on Core, HERDR_WORKSPACE_ID in a Herdr pane, naming an
     open job's marker) pushes to the remote's default branch with the gate on and no approved gate for the commit."""
-    env = os.environ if env is None else env
-    marker = None
-    for name in ('STAMPEDE_JOB_KEY', 'HERDR_WORKSPACE_ID'):
-        marker = marker or (job_.job_marker(env.get(name)) if env.get(name) else None)
-    if marker is None or not marker.is_file():
+    job = job_of(os.environ if env is None else env)
+    if job is None:
         return 0
-    job = Path((marker.read_text().splitlines() or [''])[0].strip())
-    if not job.is_absolute() or not job.is_dir():
-        return 0
-    branches = default_branches(remote)
+    branches = default_branches(job, remote, url)
     on, source = of(job)['push_default_branch']
     logged = False
     for row in lines:
@@ -217,10 +321,10 @@ def prepush(remote, lines, env=None):
                 base_.append(job / 'gates.log', f'{stamp()} PUSH {sha} to {branch} without the push gate (off: {source})')
                 logged = True
             continue
-        if approved(job, sha):
+        if approved(job, sha, 'push_default_branch'):
             continue
-        print(f'stampede prepush: a push of {sha} to {branch} needs the owner\'s yes. Ask with: stampede ask {job} --gate --sha '
-              f'{sha} ' + shlex.quote(f'push {sha} to {branch}') + ', then push again once stampede gate-ok prints APPROVED',
+        print(f'stampede prepush: a push of {sha} to {branch} needs the owner\'s yes. Ask it with the next line, then push '
+              'again once stampede gate-ok prints APPROVED:\n' + ask_line(job, 'push_default_branch', sha, f'push {sha} to {branch}'),
               file=sys.stderr)
-        return 1
+        return REFUSED
     return 0

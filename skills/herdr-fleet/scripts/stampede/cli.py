@@ -218,7 +218,7 @@ EXAMPLES = {
     'ask': '''examples:
   stampede ask <job> "Which database?" --option Postgres --option SQLite
   sha=$(gh pr view 12 --json headRefOid -q .headRefOid)     # the PR's head: the commit the owner says yes to
-  stampede ask <job> --gate "merge PR 12" --sha "$sha" --pr 12''',
+  stampede ask <job> --gate --kind merge "merge PR 12" --sha "$sha" --pr 12''',
     'post': '''examples:
   stampede post <job> "PLAN READY" --file <job>/plan.md
   stampede post <job> "the login page, before and after" --file before.png --file after.png''',
@@ -329,6 +329,8 @@ def main(argv):
     p.add_argument('question', nargs='+', help='the question, or with --gate the action')
     p.add_argument('--gate', action='store_true', help='a gate: one exact action at one commit, yes or no')
     p.add_argument('--sha', help='with --gate: the full commit id it is about'); p.add_argument('--pr', type=int, help='with --gate: the PR number')
+    p.add_argument('--kind', choices=gates_.names(), help='with --gate: which gate it is; stampede merge takes only a merge gate, '
+                   'and a job\'s push to the default branch only a push_default_branch gate')
     p = command('post', 'Put an item for the owner in <job>/outbox/<n>.md, with its files copied beside it. A job a bot\n'
                         'started also sends that bot the item; a front door reads it with stampede wait.')
     p.add_argument('job', help=JOB); p.add_argument('text', nargs='+', help='the item\'s text')
@@ -513,7 +515,7 @@ def run(a):
         print(settings_.show(found, a.json).rstrip('\n'))
         return 1 if found.problems else 0
     if a.cmd == 'prepush':
-        return gates_.prepush(a.remote, sys.stdin.read().splitlines())
+        return gates_.prepush(a.remote, sys.stdin.read().splitlines(), url=a.url)
     if a.cmd == 'new':
         unknown = [name for name in a.no_gate if name not in gates_.names()]
         if unknown:
@@ -571,7 +573,9 @@ def run(a):
     if a.cmd == 'ask' and a.gate:
         if a.option or not a.sha:
             raise ValueError('a gate takes --sha and no --option: one exact action, yes or no; ask each choice as its own gate')
-        return owner_.ask_gate(a.job, ' '.join(a.question), a.sha, a.pr)
+        return owner_.ask_gate(a.job, ' '.join(a.question), a.sha, a.pr, a.kind)
+    if a.cmd == 'ask' and a.kind:
+        raise ValueError('--kind is for a gate: ask --gate --kind <name>')
     if a.cmd == 'ask':
         return owner_.ask(a.job, ' '.join(a.question), a.option) and 0
     if a.cmd == 'approve-gate':
