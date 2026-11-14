@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.2.2 (14 Nov 2026)
+
+Three pieces of earlier work that were never merged, rebuilt on 0.2.1: an installer that can take over an older install and undo it, timers and hooks that honour the settings file, and two fixes for jobs on Herdr Core.
+
+Changes in behaviour:
+
+- **A setting kept only in `~/.config/stampede/config` now takes effect in the relay scripts:** the watchdog, the flusher, the sweep and the Claude and Codex hooks read its plain `NAME=value` lines themselves. Until now only a shell that sourced the file, and the Herdr plugin event, saw them. If the file holds a value you had forgotten, it applies now; a value already in the environment still wins.
+- **An answer the lead cannot take is no longer dropped.** In a local Core-native job, when Core cannot type the owner's answer into the lead (it is blocked or gone), the answer is kept in `<job>/asks/<id>.answer`, readable only by you, the question's `FAILED` line names the file, and the lead's brief says to read it after a block. A bot or a front door gets exit 2, as before, and sends the answer again.
+- **`<job>/asks` is private:** the folder is made, and tightened to, mode 0700.
+- **After `stampede reopen`, `stampede wait` reports a blocked or gone lead again.** Every command finds the new lead, not the shell Core left in the old lead's place, and the job's record no longer shows a lost lead as live. `stampede close` ends what it ended before.
+- **`install.sh` no longer links a `__pycache__` folder** into `~/.local/bin` from a checkout where the tests have run.
+
+What is new:
+
+- **`install.sh --replace`** takes over an older install: each copy, link into another checkout or real skill folder in the way is moved into `~/.local/state/stampede/backup-<date>-<time>/`, this checkout is linked in its place, and that folder's `rollback.sh` puts every link and folder back. Nothing is deleted; every step is journaled before it happens, and a rollback that cannot undo something names it and exits 1. On Linux an older stampede timer unit is saved there too; unit files are not rolled back. `--dry-run --replace` names what would move, and `install.sh --no-skills` links the commands only.
+- **`stampede doctor`** names `install.sh --replace` as the fix for a command on PATH from another checkout.
+- **A timer honours the settings file.** A launchd or systemd timer starts with no environment; it now gets the settings from the file, with no values copied into a plist or a unit. The file is read as data and nothing in it runs: only plain `NAME=value` lines (with `$HOME` and a leading `~/`), settings only, at most 4 KB and 100 lines. A value worked out by a command belongs in your shell profile. `herdr-doctor --relay` names the lines the relay skips, or says why the file is not read. The Herdr plugin event still sources the file as shell, as before.
+
+Not in this release: refusing a message when a draft is already typed in an agent's prompt on a Core-native job (Herdr Core waits for a person's unfinished draft itself; a check from the screen could not tell a draft from a suggestion), alerts for a job's helpers (planned), and the removal of `--core --relay` (the next minor release).
+
 ## 0.2.1 (14 Nov 2026)
 
 stampede, rebuilt to be easy for an agent to pick up: one page to start from, one command that starts a job anywhere, a CLI that explains itself, settings you can read and override, gates that code holds, and short playbooks. Jobs that are open keep working.
