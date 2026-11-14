@@ -353,8 +353,9 @@ class Follower(base.Watcher):
         rows = queue.Queue()
 
         def pump():
-            for row in process.stdout:
-                rows.put(row)
+            with process.stdout:  # closed here, at the end of the stream, since this thread is its only reader
+                for row in process.stdout:
+                    rows.put(row)
             rows.put(None)
         threading.Thread(target=pump, daemon=True).start()
         beats, heard = False, clock()  # Core's heartbeat (every 15 s): once one came, a stream that goes silent is hung

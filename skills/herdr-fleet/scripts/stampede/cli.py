@@ -1,9 +1,11 @@
-"""The parser (main), the dispatch (run) and the two commands that start agents on every backend: new and start."""
-import json, os, subprocess, sys
+"""The parser (main) with every command's help, the dispatch (run) and the two commands that start agents on every
+backend: new and start."""
+import json, os, shlex, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_
+from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
+    doctor as doctor_, check as check_
 
 
 def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
@@ -62,7 +64,7 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     snapshot = str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot')
     subprocess.run([snapshot, 'record', str(job), agent, kind, str(brief), '--', *args], check=True)
     if blocked:
-        print(f'BLOCKED {agent}: clear the startup dialog, then fleet-job tell {job} {agent} "Read {brief}"')
+        print(f'BLOCKED {agent}: clear the startup dialog, then stampede tell {job} {agent} "Read {brief}"')
         return
     pointer = f'You are {agent} in a herdr fleet. Read {brief} and do everything it says.'
     if lead and kind == 'codex':
@@ -104,7 +106,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if not (workspace or pane):
-        raise ValueError('new needs --workspace or --pane, or run it inside Herdr' + relay_.core_hint())
+        raise base_.Retry('new needs --workspace or --pane, or run it inside Herdr' + relay_.core_hint()
+                    + '; to run it here on Herdr Core, run the next line',
+                    ' '.join(['stampede', 'new', '--core', '--file', shlex.quote(str(ask_file)), '--cwd', git_root()]))
     if fork is not None and not base_.SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     ask = Path(ask_file).expanduser().read_text()
@@ -147,7 +151,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
                     kind, str(brief), '--', *args], check=True)
     job_.mark_job(ws_id, job)
     if blocked:
-        return print(f'BLOCKED {lead}: clear the startup dialog, then fleet-job tell {job} lead "Read {brief}"')
+        return print(f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"')
     pointer = f'You are {lead}. Read {brief} and do everything it says.'
     if kind == 'codex' and tui_.type_pointer(job, lead, 'lead', brief, pointer):
         return 1
@@ -156,16 +160,96 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     print(lead + ' ' + str(job))
 
 
+GROUPS = (  # the top-level help, in the order an agent meets the commands; hook and the _ commands stay out of it
+    ('start a job', (('new', 'make a job folder and start its lead'),)),
+    ('work in it', (('start', 'start a worker (or a restarted lead) in the job'),
+                    ('tell', 'send a message to an agent of the job'),
+                    ('ask', 'ask the owner a question, or a gate: one exact action, yes or no'),
+                    ('post', "put an item for the owner in the job's outbox"),
+                    ('wait', 'a front door: wait for the next outbox item'),
+                    ('next', 'a native job: start what waits in the queue'),
+                    ('tree', 'a native job: its agents as Herdr Core holds them'))),
+    ('gates', (('approve', "record the owner's yes to the plan"),
+               ('approve-gate', "a bot: record the owner's yes to one gate"),
+               ('gate-ok', 'exit 0 only when a gate has the owner\'s yes at this commit'),
+               ('cancel', 'stop a question still waiting on the phone'))),
+    ('end and return', (('finish', 'tell the owner where the job ended, in one line'),
+                        ('snapshot', 'a native job: save how to reopen it'),
+                        ('reopen', 'a native job: start again what is not live'),
+                        ('close', "a native job: end an agent's subtree, or the whole job"))),
+    ('the machine', (('doctor', 'check this machine and this checkout, with the fix for each problem'),
+                     ('check', "run this checkout's fast tests (--full: all of them)"),
+                     ('update', 'update this checkout to the latest release'))),
+)
+SUMMARY = {name: text for _, commands in GROUPS for name, text in commands}
+TOP = ('Run a team of AI agents on one job: a lead plans, workers build in their own panes or terminals, a reviewer\n'
+       'checks, and the owner answers questions and gates from a chat or a phone.\n\ncommands:\n'
+       + '\n'.join(f'  {group}:\n' + '\n'.join(f'    {name:<13} {text}' for name, text in commands) for group, commands in GROUPS))
+TOP_EPILOG = '''start a job:
+  stampede new --file ask.md                    inside Herdr: the lead gets a tab of this workspace
+  stampede new --core --file ask.md --cwd .     anywhere: the job runs on Herdr Core
+Each command takes the job folder new prints. `stampede <command> --help` has its flags and examples;
+USING.md in the stampede checkout has the whole flow.'''
+EXAMPLES = {
+    'new': '''examples:
+  stampede new --file ask.md
+  stampede new --core --file ask.md --cwd ~/code/app --lead codex''',
+    'start': '''examples:
+  stampede start <job> build-api --kind claude --brief <job>/briefs/build-api.md --pane w1:p3
+  stampede start <job> build-api --kind codex --brief <job>/briefs/build-api.md --model gpt-6-astra
+  stampede start <job> lint-web -- npm run lint     # a native job: any program''',
+    'tell': '''examples:
+  stampede tell <job> lead "the owner says: ship it"
+  stampede tell <job> build-api "Read <job>/briefs/build-api.md again: the Done when changed"''',
+    'ask': '''examples:
+  stampede ask <job> "Which database?" --option Postgres --option SQLite
+  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)     # the PR's head: the commit the owner says yes to
+  stampede ask <job> --gate "merge PR 12" --sha "$sha" --pr 12''',
+    'post': '''examples:
+  stampede post <job> "PLAN READY" --file <job>/plan.md
+  stampede post <job> "the login page, before and after" --file before.png --file after.png''',
+    'wait': '''example:
+  stampede wait <job> --timeout 600     # run it in the background; it returns with each new item''',
+    'next': 'example:\n  stampede next <job>',
+    'tree': 'examples:\n  stampede tree <job>\n  stampede tree <job> --json',
+    'approve': 'example:\n  stampede approve <job> --by owner',
+    'approve-gate': '''example (run the approve line the gate event carries, as given):
+  stampede approve-gate <job> 0123456789ab --sha <40 hex> --by owner --digest <digest>''',
+    'gate-ok': '''example (one commit for the check and the act, so a later push cannot slip in):
+  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
+  stampede gate-ok <job> 0123456789ab --sha "$sha" && gh pr merge 12 --squash --match-head-commit "$sha"''',
+    'cancel': 'example:\n  stampede cancel <job> 0123456789ab',
+    'finish': 'example:\n  stampede finish <job> "PR 12 merged; the report is <job>/reports/lead.md"',
+    'snapshot': 'example:\n  stampede snapshot <job>',
+    'reopen': 'examples:\n  stampede reopen <job>\n  stampede reopen <job> --fresh',
+    'close': 'examples:\n  stampede close <job> build-api\n  stampede close <job>     # the whole job',
+    'doctor': 'examples:\n  stampede doctor\n  stampede doctor --core --json',
+    'check': 'examples:\n  stampede check\n  stampede check --full',
+}
+JOB = 'the job folder (new prints it)'
+
+
 def main(argv):
     import argparse
-    parser = argparse.ArgumentParser(prog='fleet-job')
-    sub = parser.add_subparsers(dest='cmd', required=True)
-    p = sub.add_parser('new'); p.add_argument('--file', required=True)
-    p.add_argument('--workspace', help='default: $HERDR_WORKSPACE_ID (Herdr TUI only)')
-    p.add_argument('--core', action='store_true', help='run the job on Herdr Core (hc), in --cwd; start --pane still hands '
-                   'cursor, hermes or kimi to Herdr TUI panes')
-    p.add_argument('--cwd', help='with --core: the repo (default: the git root of the current folder)')
-    p.add_argument('--name'); p.add_argument('--review', action='store_true')
+    form = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(prog='stampede', usage='stampede <command> [<args>]', description=TOP, epilog=TOP_EPILOG,
+                                     formatter_class=form)
+    sub = parser.add_subparsers(dest='cmd', metavar='<command>', help=argparse.SUPPRESS)
+    sub.required = True
+
+    def command(name, description=None):
+        return sub.add_parser(name, description=description or SUMMARY[name][0].upper() + SUMMARY[name][1:] + '.',
+                              epilog=EXAMPLES.get(name), formatter_class=form)
+
+    p = command('new', 'Make a job folder and start its lead. Inside Herdr the lead gets a tab of this workspace (or --pane);\n'
+                       'anywhere else, --core runs the whole job on Herdr Core. Prints the lead\'s name and the job folder.')
+    p.add_argument('--file', required=True, help='the ask: a file with what the job is for')
+    p.add_argument('--workspace', help='the Herdr workspace for the lead\'s tab (default: $HERDR_WORKSPACE_ID; Herdr TUI only)')
+    p.add_argument('--core', action='store_true', help='run the job on Herdr Core (hc) in --cwd: every agent is a Core terminal and '
+                   'nothing is handed to a Herdr TUI pane (that is --core --relay)')
+    p.add_argument('--cwd', help='with --core: the repo the agents work in (default: the git root of the current folder)')
+    p.add_argument('--name', help='the job\'s short name (default: made from the ask); the lead is lead-<name>')
+    p.add_argument('--review', action='store_true', help='the owner sees the plan first: no worker starts before stampede approve')
     p.add_argument('--pane', help="an existing empty pane for the lead (a fresh workspace's root pane); its tab becomes lead")
     p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
     p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox')
@@ -173,58 +257,116 @@ def main(argv):
                    '$FLEET_LEAD_KIND, else claude. --fork takes claude only')
     p.add_argument('--app-space', action='store_true', help='with --core --relay: label the lead and workers for the Herdr app '
                    '(herdr.space, herdr.tab), so it shows the job in a space; a native job always carries them')
-    p.add_argument('--relay', action='store_true', help='with --core: the earlier Core job (a follower, inbox files, hooks)')
+    p.add_argument('--relay', action='store_true', help='with --core: the earlier Core job (a follower, inbox files, hooks), which hands '
+                   'cursor, hermes or kimi to Herdr TUI panes with start --pane')
     p.add_argument('--space', help='with --core: the space\'s name (default: the job\'s name)')
-    p.add_argument('--max-helpers', type=int, help=f'with --core: helpers running at once (default $STAMPEDE_MAX_HELPERS, else 12)')
-    p = sub.add_parser('post'); p.add_argument('job'); p.add_argument('text', nargs='+'); p.add_argument('--file', action='append', default=[])
-    p = sub.add_parser('wait'); p.add_argument('job'); p.add_argument('--timeout', type=int, default=3600, help='seconds; exit 3 when nothing came')
-    p = start_parser = sub.add_parser('start'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('--kind')
-    p.add_argument('--pane', help='the Herdr TUI pane (required on the TUI; in a Core job, the pane a cursor, hermes or kimi '
-                   'agent is handed to)'); p.add_argument('--brief')
+    p.add_argument('--max-helpers', type=int, help='with --core: helpers running at once (default $STAMPEDE_MAX_HELPERS, else 12)')
+    p = start_parser = command('start', 'Start a worker in the job, or restart its lead: its brief pointer is its first message.\n'
+                                        'Kinds: on a Herdr TUI job claude, codex or cursor; on a --core --relay job claude or codex in a\n'
+                                        'Core terminal, and cursor, hermes or kimi handed to a Herdr TUI --pane; on a native job\n'
+                                        '(new --core) claude or codex, and any other CLI or program after --.')
+    p.add_argument('job', help=JOB)
+    p.add_argument('agent', help='its name, <role>-<scope> in lowercase, such as build-api')
+    p.add_argument('--kind', help='its CLI: claude, codex, cursor, hermes or kimi (see above for where each runs)')
+    p.add_argument('--pane', help='the Herdr TUI pane (required on the TUI; in a --core --relay job, the pane a cursor, hermes or kimi '
+                   'agent is handed to)')
+    p.add_argument('--brief', help='its brief file (a worker\'s needs the sections of skills/herdr-fleet/references/brief.md)')
     p.add_argument('--tab', help='a native job: the workstream tab (default main)')
     p.add_argument('--parent', help='a native job: the agent it runs under (default: the caller, else the lead)')
     p.add_argument('--outlive-parent', action='store_true', help='a native job: keep it running when its parent ends')
-    p.add_argument('--cwd', help='a Herdr Core job: the folder an agent Core runs starts in (default: the repo)')
-    p.add_argument('--model'); p.add_argument('--effort')
-    p.add_argument('--report', action='append', default=[]); p.add_argument('--yolo-in', help='a worker in its own git worktree: no-checks mode')
+    p.add_argument('--cwd', help='a Herdr Core job: the folder the agent starts in (default: the repo)')
+    p.add_argument('--model', help='its model (default: the CLI\'s own; a restarted lead keeps the lead\'s)')
+    p.add_argument('--effort', help='its reasoning effort, where the CLI takes one')
+    p.add_argument('--report', action='append', default=[], help='a report it must write before it may stop, such as reports/build-api.md in the job folder (repeatable: any one will do)')
+    p.add_argument('--yolo-in', metavar='WORKTREE', help='a worker in its own git worktree: no-checks mode, never the lead')
+    p = command('tell', 'Send a message to an agent of the job (lead names the lead). A Claude agent or the lead of a Herdr TUI\n'
+                        'or --relay job reads it from its inbox file; every other agent gets it typed into its pane or terminal.')
+    p.add_argument('job', help=JOB); p.add_argument('agent', help='the agent\'s name, or lead')
+    p.add_argument('text', nargs='+', help='the message')
+    p = command('ask', 'Ask the owner a question and return at once: the answer comes to the lead\'s inbox (a native job:\n'
+                       'its terminal). With --gate, ask for a yes or no to one exact action at one commit.')
+    p.add_argument('job', help=JOB)
+    p.add_argument('--option', action='append', default=[], help='one answer to choose from (repeatable; not with --gate)')
+    p.add_argument('question', nargs='+', help='the question, or with --gate the action')
+    p.add_argument('--gate', action='store_true', help='a gate: one exact action at one commit, yes or no')
+    p.add_argument('--sha', help='with --gate: the full commit id it is about'); p.add_argument('--pr', type=int, help='with --gate: the PR number')
+    p = command('post', 'Put an item for the owner in <job>/outbox/<n>.md, with its files copied beside it. A job a bot\n'
+                        'started also sends that bot the item; a front door reads it with stampede wait.')
+    p.add_argument('job', help=JOB); p.add_argument('text', nargs='+', help='the item\'s text')
+    p.add_argument('--file', action='append', default=[], help='a file to send with it (repeatable)')
+    p = command('wait', 'A front door\'s wait: return with every outbox item not shown yet, or when the lead sits at a\n'
+                        'question card. Exit 0 with output, 3 when nothing came in --timeout seconds.')
+    p.add_argument('job', help=JOB)
+    p.add_argument('--timeout', type=int, default=3600, help='seconds (default 3600); exit 3 when nothing came')
     for verb in ('next', 'snapshot'):
-        sub.add_parser(verb, help='a native job').add_argument('job')
-    p = sub.add_parser('reopen', help='a native job: start what is not live, parents first'); p.add_argument('job')
+        command(verb).add_argument('job', help=JOB)
+    p = command('tree'); p.add_argument('job', help=JOB); p.add_argument('--json', action='store_true', help='one JSON document')
+    p = command('reopen', 'A native job: start what is not live, parents first. A finished job reopens for reading only.')
+    p.add_argument('job', help=JOB)
     p.add_argument('--fresh', action='store_true', help='every Claude agent starts a new session with its brief')
     p.add_argument('--prompt', action='store_true', help='each resumed helper is told its parent\'s new address')
     p.add_argument('--rerun-programs', action='store_true', help='run programs that did not exit 0 again')
-    p = sub.add_parser('close', help='a native job: end an agent\'s subtree, or the whole job'); p.add_argument('job')
-    p.add_argument('agent', nargs='?')
-    p = sub.add_parser('tree', help='a native job: its tree as Core holds it'); p.add_argument('job'); p.add_argument('--json', action='store_true')
-    p = sub.add_parser('tell'); p.add_argument('job'); p.add_argument('agent'); p.add_argument('text', nargs='+')
-    p = sub.add_parser('ask'); p.add_argument('job'); p.add_argument('--option', action='append', default=[]); p.add_argument('question', nargs='+')
-    p.add_argument('--gate', action='store_true', help='a gate: one exact action at one commit, yes or no')
-    p.add_argument('--sha', help='with --gate: the full commit id it is about'); p.add_argument('--pr', type=int, help='with --gate: the PR number')
-    p = sub.add_parser('approve-gate'); p.add_argument('job'); p.add_argument('gate'); p.add_argument('--sha', required=True)
-    p.add_argument('--by', required=True)
+    p = command('close'); p.add_argument('job', help=JOB)
+    p.add_argument('agent', nargs='?', help='the agent whose subtree ends (default: the whole job)')
+    p = command('approve', 'Record the owner\'s yes to the plan as it stands (plan.md), then wake the lead. Run it after the\n'
+                           'owner said yes, and again after any change to the plan.')
+    p.add_argument('job', help=JOB); p.add_argument('--by', required=True, help='who said yes')
+    p = command('approve-gate', 'A bot, outside Herdr: record the owner\'s yes, said in its chat, to one gate at one commit.')
+    p.add_argument('job', help=JOB); p.add_argument('gate', help='the gate\'s id (12 hex)')
+    p.add_argument('--sha', required=True, help='the full commit id the yes is for'); p.add_argument('--by', required=True, help='who said yes')
     p.add_argument('--digest', help='the gate as it was asked, from the approve command the bot was handed')
-    p = sub.add_parser('gate-ok'); p.add_argument('job'); p.add_argument('gate'); p.add_argument('--sha', required=True)
-    p = sub.add_parser('cancel'); p.add_argument('job'); p.add_argument('ident')
-    p = sub.add_parser('approve'); p.add_argument('job'); p.add_argument('--by', required=True)
-    p = sub.add_parser('finish'); p.add_argument('job'); p.add_argument('summary', nargs='+')
+    p = command('gate-ok', 'The lead\'s check before it acts: exit 0 only when the owner\'s yes to this gate is recorded at\n'
+                           'this very commit.')
+    p.add_argument('job', help=JOB); p.add_argument('gate', help='the gate\'s id (12 hex)')
+    p.add_argument('--sha', required=True, help='the full commit id about to be acted on')
+    p = command('cancel'); p.add_argument('job', help=JOB); p.add_argument('ident', help='the question\'s id (ASKED prints it)')
+    p = command('finish', 'Tell the owner where the job ended, in one line: one done event, sent once. Questions still\n'
+                          'waiting on the phone are cancelled.')
+    p.add_argument('job', help=JOB); p.add_argument('summary', nargs='+', help='one line on where the job ended')
+    p = command('doctor', 'Check this machine and this checkout: one line per check, ok, warn or PROBLEM with its fix.\n'
+                          'Exit 1 when any line is a PROBLEM.')
+    p.add_argument('--core', action='store_true', help='check Herdr Core only (passed to herdr-doctor)')
+    p.add_argument('--tui', action='store_true', help='check the Herdr TUI only (passed to herdr-doctor)')
+    p.add_argument('--json', action='store_true', help='{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}')
+    p = command('check', 'Run the fast part of this checkout\'s unit tests (under 15 seconds) in a scratch HOME, with no herdr or hc\n'
+                         'on PATH, so nothing reaches a live job. One line per test module, then the total. Exit 0 or 1.')
+    p.add_argument('--full', action='store_true', help='run the whole suite (minutes)')
+    p.add_argument('--json', action='store_true', help='{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
     p.add_argument('payload', nargs='?', help="Codex's notify JSON, passed as the last argument; other hooks read stdin")
-    p = sub.add_parser('_reopen', help='a Herdr Core job: start what is missing (reopen.sh runs it)'); p.add_argument('job')
+    p = sub.add_parser('_reopen'); p.add_argument('job')
     p.add_argument('--lead', action='store_true', help='only the follower and the lead')
     p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
     p.add_argument('--fresh', action='store_true', help='each agent it starts begins a new session with its brief')
-    p = sub.add_parser('_deliver', help='type a Codex lead\'s unread inbox lines into its pane once it is idle'); p.add_argument('job')
-    p = sub.add_parser('_wake', help='start a _deliver in the background (a Claude lead needs none)'); p.add_argument('job')
+    sub.add_parser('_deliver').add_argument('job')
+    sub.add_parser('_wake').add_argument('job')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
     p.add_argument('--gate')
     p.add_argument('--ident', help='this question\'s id: names its waiter, so cancel signals only that process')
     p.add_argument('question', nargs='+')
+    if not argv:
+        parser.print_help(sys.stderr)
+        return 2
+    if argv[0] == 'update':  # scripts/stampede runs it first; this is the same command under fleet-job's own entry
+        return subprocess.run([sys.executable, '-I', str(base_.SCRIPTS.parents[2] / 'scripts/stampede_update.py'), *argv[1:]]).returncode
+    if not argv[0].startswith('-') and argv[0] not in sub.choices:  # argparse would list hook and the _ commands too
+        parser.error(f'{argv[0]!r} is no stampede command: stampede --help lists them')
     program = []
     if argv[:1] == ['start'] and '--' in argv:  # a native job: a program after --; cut here, since argparse before 3.13
         cut = argv.index('--')                    # loses it when a flag stands between the name and the --
         argv, program = argv[:cut], argv[cut + 1:]
     a = parser.parse_args(argv)
     a.program = program
+    try:
+        if a.cmd == 'new':
+            ask = Path(a.file).expanduser()
+            if not ask.is_file():
+                raise ValueError(f'the ask file {a.file} does not exist: write what the job is for in it, then run new again')
+        elif a.cmd != 'hook' and getattr(a, 'job', None) is not None:
+            require_job(a.job)
+    except ValueError as error:
+        print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        return 2
     if a.cmd == 'new' and a.cwd and not a.core:
         parser.error('--cwd is for new --core')
     if a.cmd == 'start' and job_.backend(a.job) != 'native':
@@ -237,11 +379,28 @@ def main(argv):
     except (ValueError, PermissionError) as error:
         if a.cmd == 'hook':  # a hook's exit 2 blocks or wakes Claude; keep a hook's error a plain failure
             raise
-        print('fleet-job ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        if isinstance(error, base_.Retry):
+            print(error.command, file=sys.stderr)
         return 2
     except (hcapi_.HcError, herdrapi_.HerdrError, OSError) as error:  # Herdr, Herdr Core or a program failed: one line, never a traceback
-        print('fleet-job ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
         return 1
+
+
+def git_root():
+    done = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    return shlex.quote(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else '<repo>'  # printed in a command
+
+
+def require_job(job):
+    """Every command but new and hook: the job folder exists and is one (new writes lead and ask.md; either will do, so a
+    job that lost one can still be finished or reopened), before anything reads its backend."""
+    path = Path(job).expanduser()
+    if not path.is_dir():
+        raise ValueError(f'job folder not found: {job}')
+    if not ((path / 'lead').is_file() or (path / 'ask.md').is_file()):
+        raise ValueError(f'not a job folder, it has no lead or ask.md file: {job}')
 
 
 NATIVE_ONLY = ('next', 'tree', 'snapshot', 'reopen', 'close')
@@ -249,6 +408,10 @@ NATIVE_ONLY = ('next', 'tree', 'snapshot', 'reopen', 'close')
 
 def run(a):
     from . import relay as relay_
+    if a.cmd == 'doctor':
+        return doctor_.main(a.core, a.tui, a.json)
+    if a.cmd == 'check':
+        return check_.main(a.full, a.json)
     if a.cmd == 'new':
         if a.core:
             return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,

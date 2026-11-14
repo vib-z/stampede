@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""herdr-reopen-snapshot: save how to reopen a Herdr job after its workspace is closed (owner's rule, 17 Oct 2026).
+"""herdr-reopen-snapshot: save how to reopen a Herdr job after its workspace is closed.
 
   herdr-reopen-snapshot <ws> <job dir>
       Read the live workspace (read-only herdr calls) and write <job dir>/REOPEN.md and an executable
       <job dir>/reopen.sh that recreates the job's tabs (those holding its agents in agents.tsv): panes, labels, cwds, agents.
   herdr-reopen-snapshot <hc-key> <job dir>
       A Herdr Core job (its key is in <job dir>/workspace): write REOPEN.md and reopen.sh from agents.tsv and core.json,
-      with no hc call. reopen.sh runs `fleet-job _reopen`, which starts only what is not live. stampede writes it at
-      every Core start. A Core-native job (<job dir>/backend native) hands over to `fleet-job snapshot <job dir>`
-      and exits with its code.
+      with no hc call. reopen.sh starts only what is not live. stampede writes it at every Core start.
+      A Core-native job (<job dir>/backend native) hands over to `stampede snapshot <job dir>` and exits with its code.
   herdr-reopen-snapshot record <job dir> <agent> <kind> <brief|-> [--session <id>] -- <agent args...>
       Note how an agent was started (the flags after `herdr agent start ... --`, and its brief) in
       <job dir>/agents.tsv. Herdr knows layout, kinds and session ids, not flags or briefs: record them at every start.
@@ -361,6 +360,8 @@ def native(job):
 
 
 def main(argv):
+    if argv[:1] in (['-h'], ['--help']):
+        return print(__doc__.strip())
     if argv[:1] == ['record']:
         return record(argv[1:])
     if len(argv) != 2 or argv[0].startswith('-'):

@@ -116,14 +116,32 @@ def update():
     return 0
 
 
+HELP = '''usage: stampede update [--check]
+
+Update this checkout to the latest release: fast-forward a clean checkout on main, then run install.sh again. It never
+overwrites a local file; a Herdr plugin install names herdr plugin update instead.
+
+options:
+  -h, --help  show this help message and exit
+  --check     one line: a newer release is out (exit 1), or this is the latest (exit 0); nothing when offline or
+              with STAMPEDE_NO_UPDATE_CHECK=1
+
+examples:
+  stampede update --check
+  stampede update'''
+
+
 def main(argv):
+    if argv in (['-h'], ['--help']):
+        print(HELP)
+        return 0
     if argv == ['--check']:
         code, text = check()
         if text:
             print(text)
         return code
     if argv:
-        print('usage: stampede update [--check]', file=sys.stderr)
+        print('usage: stampede update [--check] (stampede update --help says more)', file=sys.stderr)
         return 2
     return update()
 

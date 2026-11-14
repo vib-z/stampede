@@ -201,6 +201,7 @@ class CoreContract(CoreCase):
         code = ('import sys, time; sys.path.insert(0, sys.argv[1]); from stampede import job as job_\n'
                 'with job_.launching(sys.argv[2], "build-api"):\n    print("held", flush=True); time.sleep(60)')
         holder = subprocess.Popen([sys.executable, '-c', code, str(SCRIPTS), str(job)], stdout=subprocess.PIPE, text=True)
+        self.addCleanup(holder.stdout.close)
         self.addCleanup(holder.kill)
         self.assertEqual(holder.stdout.readline().strip(), 'held')
         with self.assertRaises(ValueError), job_.launching(job, 'build-api'):
@@ -467,7 +468,7 @@ class CoreNew(CoreCase):
         self.assertEqual(code, 1)
         self.assertIn(f'BLOCKED {LEAD}: permission', out)
         self.assertIn('hc read t2', out)
-        self.assertIn(f'fleet-job tell {self.job} lead "Read', out)
+        self.assertIn(f'stampede tell {self.job} lead "Read', out)
         self.assertEqual(self.entries(self.job)[LEAD]['state'], 'live')
         self.assertTrue((self.events / 'jobs' / job_.job_key(self.job)).exists())
         self.assertEqual([t['state'] for t in self.state()['terminals'].values()], ['live', 'live'])
@@ -1137,7 +1138,7 @@ class ReviewOneLine(CoreCase):
         self.assertEqual(result.returncode, 1)
         self.assertNotIn('Traceback', result.stderr)
         self.assertEqual(len(result.stderr.strip().splitlines()), 1)
-        self.assertTrue(result.stderr.startswith('fleet-job _reopen: hc '), result.stderr)
+        self.assertTrue(result.stderr.startswith('stampede _reopen: hc '), result.stderr)
 
 
 

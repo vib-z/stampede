@@ -27,10 +27,16 @@ class Hello(socketserver.StreamRequestHandler):
         self.wfile.write((json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'version': '0.1.13'}}) + '\n').encode())
 
 
+class HelloServer(socketserver.ThreadingUnixStreamServer):
+    def shutdown(self):  # each test's cleanup: stop serving, then close the socket too
+        super().shutdown()
+        self.server_close()
+
+
 def core_socket(folder):
     """A Unix socket that answers hello like a running core; returns its path."""
     path = Path(tempfile.mkdtemp(dir='/tmp')) / 'c.sock'
-    server = socketserver.ThreadingUnixStreamServer(str(path), Hello)
+    server = HelloServer(str(path), Hello)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return path, server
 
@@ -193,6 +199,7 @@ class CoreAlive(Shell):
         fake = self.home / 'herdr-core'
         fake.symlink_to('/bin/sleep')
         unrelated = subprocess.Popen([str(fake), '30'])
+        self.addCleanup(unrelated.wait)
         self.addCleanup(unrelated.kill)
         result = self.run_script('herdr-event-sweep', '--alive', HC_SOCKET=str(self.home / 'none.sock'))
         self.assertEqual(result.returncode, 1)
@@ -976,6 +983,7 @@ class ReviewHookQueue(CoreCase):
     def hook(self):
         event = json.dumps({'hook_event_name': 'Notification', 'notification_type': 'permission_prompt', 'session_id': 's1'})
         subprocess.run([str(RELAY / 'herdr-event-claude-hook')], input=event, text=True, check=True, timeout=30,
+                       stderr=subprocess.DEVNULL,  # a test with a file where the queue goes means its complaint
                        env={**os.environ, 'HC_TERMINAL_ID': 't3', 'STAMPEDE_JOB_KEY': self.key, 'HERDR_EVENTS_OWNER': 'alpha'})
 
     def follow(self, core):

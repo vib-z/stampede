@@ -8,7 +8,10 @@ import signal
 import subprocess
 import tempfile
 import sys
-import tomllib
+try:
+    import tomllib
+except ImportError:  # Python 3.9 and 3.10: the manifest check below skips (stampede itself does without it)
+    tomllib = None
 import unittest
 from pathlib import Path
 
@@ -179,6 +182,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.run_install('--from-plugin').returncode, 0)
         self.assertEqual(self.run_install('--unknown').returncode, 2)
 
+    @unittest.skipIf(tomllib is None, 'tomllib is in Python 3.11 and later')
     def test_manifest_commands_exist(self):
         manifest = tomllib.loads((ROOT / 'herdr-plugin.toml').read_text())
         self.assertEqual(manifest['min_herdr_version'], '0.9.4')

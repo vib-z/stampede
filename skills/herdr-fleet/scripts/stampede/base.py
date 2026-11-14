@@ -28,3 +28,12 @@ FOLLOWER = SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-core'
 
 
 SESSION = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+class Retry(ValueError):
+    """A refusal that carries the command to run instead: cli.main prints it on a line of its own, exactly as built (never
+    through line, which would fold the spaces inside a quoted path)."""
+    def __init__(self, text, command):
+        super().__init__(text)
+        self.command = command
+
+
+MIN_PYTHON = (3, 9)  # the oldest Python the unit suite passes on (CI runs it); fleet_job.py refuses an older one

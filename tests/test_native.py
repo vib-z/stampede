@@ -1,6 +1,6 @@
 """A Core-native job (stampede new --core, docs/CORE-NATIVE.md): the lead as a root, helpers as Core children, the cap
 and its queue, the tabs, the tree, tell, and the shared commands. Every Core call goes to tests/fake_hc.py through HC."""
-import json, os, subprocess, sys, unittest
+import json, os, shlex, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -157,8 +157,9 @@ class Start(NativeCase):
     def test_the_cli_refuses_pane_in_one_line(self):
         result = self.cli('start', self.job, 'x', '--kind', 'cursor', '--pane', 'w1:p1', '--brief', self.brief(self.job, 'x'))
         self.assertEqual(result.returncode, 2)
-        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
-        self.assertIn('run that CLI as a program', result.stderr)
+        refusal, command = result.stderr.strip().splitlines()   # one line, then the command to run, quoted as built
+        self.assertIn('run that CLI as a program', refusal)
+        self.assertEqual(shlex.split(command)[:4], ['stampede', 'start', str(self.job), 'x'])
 
     def test_the_cli_takes_flags_before_the_program(self):
         """argparse before 3.13 loses a program after -- once a flag stands before it: the CLI cuts at -- itself."""
@@ -372,7 +373,8 @@ class TreeTell(NativeCase):
         self.assertEqual(code, 2)
         self.assertTrue(out.startswith('FAILED build-api ('))
         result = self.cli('tell', self.job, 'nobody', 'x')
-        self.assertEqual((result.returncode, result.stdout.strip()), (2, 'FAILED nobody (no live terminal of this job is nobody)'))
+        self.assertEqual(result.returncode, 2)   # the names it has, as tell on the other backends gives them
+        self.assertRegex(result.stdout.strip(), r'^FAILED nobody \(no live terminal of this job is nobody; it has: lead, build-api(, [a-z-]+)*\)$')
 
     def test_notify_lead_types_into_the_lead_and_never_raises(self):
         self.quiet(owner_.notify_lead, self.job, 'TURN build-api')

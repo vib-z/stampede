@@ -7,6 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, LEAD, ROOT, SCRIPTS, SHA, git
+from quiet import setUpModule, tearDownModule  # noqa: E402,F401: commands run in-process print status lines
 from stampede import job as job_, herdrapi as herdrapi_, agents as agents_, owner as owner_, relay as relay_, handed as handed_, cli as cli_
 from events_log import events_log
 from test_core_relay import RELAY, Shell, follower_module, status

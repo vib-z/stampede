@@ -15,7 +15,7 @@ def tell(job, name, text):
     people, lead = job_.roster(job)
     name = lead if name == 'lead' else name
     if not base_.NAME.fullmatch(name or '') or name not in people:
-        raise ValueError('agent is not in this job: ' + str(name))
+        raise ValueError(f'agent {name} is not in this job (it has: {", ".join(["lead"] + sorted(set(people) - {lead}))})')
     if people[name] == 'claude' or name == lead:  # the lead always gets its inbox file, so no answer or yes is ever lost
         base_.append(Path(job) / 'inbox' / (name + '.md'), base_.line(text))
         if people[name] != 'claude':  # a Codex lead has no file hook: the line is typed into its pane once it is idle
@@ -154,8 +154,11 @@ def post(job, text, files=()):
     owner = '' if job_.front_door(job) else job_.job_owner(job)
     n = outbox_post(job, 'post', text, files)
     item = Path(job).absolute() / 'outbox' / (n + '.md')
-    if not owner:
+    if not owner and job_.front_door(job):
         return print(f'POSTED {n} for the front door to relay ({item})')
+    if not owner:  # a local job: the outbox is the only copy, and nothing reads it
+        return print(f'POSTED {n} to the outbox only ({item}): no bot or front door hears it. To have the owner told, a job a '
+                     'bot starts sets HERDR_EVENTS_OWNER=<bot> at new, and a chat outside Herdr starts it with --front-door')
     copies = [str(item.parent / n / Path(f).name) for f in files]
     post_event(job, owner, {'state': 'post', 'text': str(text).strip(), 'outbox': n, 'item': str(item), 'files': copies},
                refused=lambda why: f'outbox {n} is written but {owner} never heard it: the relay refused it ({why}). '

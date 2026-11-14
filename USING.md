@@ -6,7 +6,8 @@ A job runs on the Herdr TUI (tabs and panes) or on Herdr Core (a tree of termina
 
 ## Before you start
 
-- `herdr-doctor` checks the machine (`herdr-doctor --core` for Herdr Core). Its warnings are the owner's to fix.
+- `stampede doctor` checks the machine and this checkout, one line each with its fix (`stampede doctor --core` for Herdr Core). Its warnings are the owner's to fix.
+- `stampede --help` lists every command; `stampede <command> --help` gives its flags and an example.
 - `herdr-trust <repo>` once per repo, so Claude and Codex skip the trust dialog. The repo must sit under `FLEET_TRUST_ROOT` (default `~/code`).
 - Write the ask (the owner's words, and any agreed plan) to a file outside the repo.
 
@@ -29,7 +30,7 @@ stampede new --core --file ask.md --cwd <repo>    # anywhere else, on Herdr Core
 | `stampede tell <job> lead "<the owner's words>"` | the front door | passes words on, verbatim |
 | `stampede ask <job> "<question>" [--option <a>]` | the lead | asks the owner; prints `ASKED <id>` |
 | `stampede ask <job> --gate --sha <commit> [--pr <n>] "<action>"` | the lead | asks for a gate; prints `GATE <id>` |
-| `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a screenshot, a report; prints `POSTED <n>` |
+| `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a screenshot, a report; prints `POSTED <n>` and who hears it |
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
 On Herdr Core also: `stampede start <job> <name> --kind claude|codex --brief <file>` (or `-- <program>`) starts a helper, `stampede tree <job>` lists the tree, `stampede close <job> [<agent>]` ends a subtree or the job (owner's yes only), and `stampede reopen <job>` brings back what is not live.
@@ -56,4 +57,5 @@ Merges, pushes to shared branches, deploys, sends, spends and closes: the list a
 - A bot front door over SSH: [skills/grokbot-herdr/SKILL.md](skills/grokbot-herdr/SKILL.md)
 - Showing the plan first: [skills/share-plan/SKILL.md](skills/share-plan/SKILL.md)
 - Changing this repo: [AGENTS.md](AGENTS.md)
+- Every command, what it prints and its exit codes: [docs/CLI.md](docs/CLI.md)
 - Everything else: [README.md](README.md)
