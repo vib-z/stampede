@@ -660,6 +660,29 @@ class Helpers(NativeCase):
             self.assertFalse([c for c in self.calls('ls') if 'stampede.role=helper' in c], 'no helper listing')
 
 
+class EndToEnd(NativeCase):
+    def test_new_saves_alerts_helpers_and_the_sweep_reports_a_failed_helper(self):
+        fleet = ROOT / 'skills/herdr-fleet/scripts/fleet-job'
+        ask = self.root / 'ask.md'
+        ask.write_text('Fix the login bug\n')
+        made = subprocess.run([str(fleet), 'new', '--core', '--file', str(ask), '--cwd', str(self.repo), '--name', 'login',
+                               '--set', 'alerts.helpers=true'], capture_output=True, text=True, timeout=60,
+                              env={**os.environ, 'HERDR_EVENTS_OWNER': 'alpha'})  # a bot's job: its events are queued for it
+        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        job = Path(made.stdout.split()[-1])
+        self.assertIs(json.loads((job / 'settings.json').read_text())['values']['alerts.helpers'], True)
+        point = json.loads((job / 'endpoint').read_text())
+        (job / 'endpoint').write_text(json.dumps({**point, 'socket': str(self.socket)}))  # the fake core's hello socket
+        started = subprocess.run([str(fleet), 'start', str(job), 'build-api', '--', 'false'], capture_output=True, text=True,
+                                 timeout=60, env={**os.environ, 'HC_TERMINAL_ID': ''})
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        address = next(a for a, t in self.state()['terminals'].items() if t['labels'].get('stampede.agent') == 'build-api')
+        self.sweep()
+        self.terminal(address, state='finished', status=None, exit_code=1, reason='exited', finished_ms=int(time.time() * 1000))
+        self.sweep()
+        self.assertEqual([(e['state'], e['agent'], e['exit_code']) for e in self.queued()], [('dead', 'build-api', 1)])
+
+
 class Watchdog(NativeCase):
     def test_the_watchdog_runs_the_sweep_with_no_herdr_tui(self):
         self.lead(status={'state': 'blocked', 'kind': 'permission'})

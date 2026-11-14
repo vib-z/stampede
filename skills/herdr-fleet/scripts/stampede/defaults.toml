@@ -77,3 +77,6 @@ wait = 3600      # seconds stampede wait runs before it gives up (exit 3); --tim
 hc_call = 60     # seconds one hc call may take on top of what the command itself waits for
 leave = 15       # seconds an idle agent has to leave after /exit or /quit, at stampede close
 hold_settle = 5  # seconds a terminal must have been at rest before its turn count can start a hold
+
+[alerts]
+helpers = false  # a Core-native job: the watchdog also tells the owner a helper is blocked, at an error, stalled or dead, as for the lead

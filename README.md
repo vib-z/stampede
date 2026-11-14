@@ -694,6 +694,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 | `timeouts.hc_call` | `60` | | seconds one `hc` call may take on top of what the command itself waits for |
 | `timeouts.leave` | `15` | | seconds an idle agent has to leave after `/exit` or `/quit` at `stampede close` |
 | `timeouts.hold_settle` | `5` | | seconds a `--relay` terminal must have been at rest before its turn count can start a hold |
+| `alerts.helpers` | `false` | | a Core-native job: the watchdog's sweep also reports each helper's `blocked`, `error`, `stale` and `dead` to the owner, as it does the lead's ([remote/events.md](remote/events.md#a-herdr-core-job)); read from `<job>/settings.json`, so set it at `new` (`--set alerts.helpers=true`) or in a config file |
 </details>
 
 <details>
