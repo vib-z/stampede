@@ -35,12 +35,12 @@ def deliver_core(job, lead):
                               f'{job / "hooks" / "deliver-held.json"} is removed by someone who looked')
                         return 7
                     if terminal and not held(job, terminal):
-                        unsafe, seconds = hcapi_.typing_guard()
+                        unsafe, seconds = hcapi_.typing_guard(timeout=hcapi_.hc_call(job))
                         if unsafe:
                             print(f'{datetime.now():%Y-%m-%d %H:%M} NOT TYPED: {unsafe}; the lines stay in {job / "inbox.log"} and '
                                   f'{job / "inbox" / (lead + ".md")}')
                             return 6
-                        limit = hcapi_.send_limit(seconds)
+                        limit = hcapi_.send_limit(seconds, timeout=hcapi_.hc_call(job))
                         outcome = point_owed(job, lead, limit) if owed(job) else tui_.type_unread(job, lead, limit)
                         if outcome is None:
                             hold(job, lead, terminal['address'])
@@ -560,7 +560,7 @@ def send_core(job, name, text, limit=None):
                 why = (f'text is already typed in its prompt; Core cannot clear it safely: read it with hc read {address}, '
                        f'clear it with hc keys {address} ctrl+c when hc get shows idle, then tell again')
             else:
-                sent = hcapi_.hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text, limit=limit or hcapi_.send_limit(), job=job)
+                sent = hcapi_.hc('send', *(['--if', 'idle'] if word == 'idle' else []), '--', address, text, limit=limit or hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
                 quiet = ('' if sent.get('started') is not False else
                          f'; it has not gone working yet: read it with hc read {address} before any resend')
                 return True, f'SUBMITTED {name} ({address}){quiet}'

@@ -624,22 +624,63 @@ class Timeouts(NativeCase):
         self.assertIn('after 0s;', out)
         self.assertEqual(hcapi_.hc_call(self.job), 4)
 
-    def test_every_hc_call_in_a_function_with_a_job_passes_it(self):
-        """By construction: in the package, a function that has a job passes it to each hc and listing call (or gives
-        the timeout itself, with limit= or seconds), so no call path can read another job's timeout or none."""
+    TIMED = {'hc': {'job', 'limit'}, 'listing': {'job', 'seconds'}, 'hc_call': {'job'}, 'core_env': {'timeout'},
+             'core_hold': {'timeout'}, 'hc_version': {'timeout'}, 'typing_guard': {'timeout'}, 'typing_unsafe': {'timeout'},
+             'send_limit': {'timeout'}}  # each call that reaches Core, and the argument that times it
+    UNTIMED = {  # (module, function, call): a call that truly has neither, each the last resort for a caller outside
+        ('hcapi', 'core_env', 'hc_call'),     # core_env(timeout=None): timeout or hc_call(), for a caller outside the package
+        ('hcapi', 'hc_version', 'hc_call'),   # the same in hc_version
+    }
+
+    def test_every_call_that_reaches_core_is_timed_by_its_job(self):
+        """By construction: every call in the package of hc, listing, hc_call or a helper that runs hc passes its job or
+        an explicit timeout (by keyword, or listing's and hc_call's first argument), so none can read another job's
+        timeout or the default. The fallback to target()'s job is only for callers outside the package (UNTIMED)."""
         import ast
-        bad = []
+        bad, allowed = [], set()
         for path in sorted((SCRIPTS / 'stampede').glob('*.py')):
             for fn in [n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n, ast.FunctionDef)]:
-                if 'job' not in [a.arg for a in fn.args.args + fn.args.kwonlyargs]:
-                    continue
                 for call in [c for c in ast.walk(fn) if isinstance(c, ast.Call)]:
                     name = getattr(call.func, 'attr', getattr(call.func, 'id', ''))
-                    keys = {k.arg for k in call.keywords}
-                    if name == 'hc' and not keys & {'job', 'limit'} or name == 'listing' and not call.args:
-                        bad.append(f'{path.name}:{call.lineno} {fn.name} calls {name} without its job')
+                    if name not in self.TIMED:
+                        continue
+                    given = {k.arg for k in call.keywords} | ({'job'} if name in ('listing', 'hc_call') and call.args else set())
+                    if name == 'send_limit' and len(call.args) > 1 or given & self.TIMED[name]:
+                        continue
+                    if (path.stem, fn.name, name) in self.UNTIMED:
+                        allowed.add((path.stem, fn.name, name))
+                        continue
+                    bad.append(f'{path.name}:{call.lineno} {fn.name} calls {name} with no job or timeout')
         self.assertEqual(bad, [])
+        self.assertEqual(allowed, self.UNTIMED, 'an entry that no longer matches a call goes')
 
+    def test_a_codex_front_door_new_times_its_preflight_with_the_jobs_timeout(self):
+        """Review round 3: new with a Codex lead asks Core for its version and environment before the job folder exists;
+        those calls take the timeouts.hc_call just resolved, whatever this process targeted before."""
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 1\n[lead]\nkind = "codex"\n')
+        real = subprocess.run
+        seen = []
+
+        def run(argv, *args, **kw):
+            seen.append((Path(str(argv[0])).name, argv[1] if len(argv) > 1 else '', kw.get('timeout')))
+            return real(argv, *args, **kw)
+        other = self.root / 'other-job'
+        other.mkdir()
+        (other / 'settings.json').write_text(json.dumps({'values': {'timeouts.hc_call': 7}, 'sources': {'timeouts.hc_call': 'user'}}))
+        for targeted in ([], [other]):
+            with self.subTest(targeted=targeted), mock.patch.object(hcapi_, 'TARGET', list(targeted)), \
+                    mock.patch.object(subprocess, 'run', run):
+                seen.clear()
+                hcapi_.typing_unsafe(timeout=1)
+                self.assertTrue(seen)
+                self.assertEqual({t for _, _, t in seen}, {1}, seen)
+        (self.repo / '.stampede.toml').write_text('timeouts.hc_call = 1\n')  # and the real new, with its preflight
+        with mock.patch.object(hcapi_, 'TARGET', [other]), mock.patch.object(subprocess, 'run', run), \
+                mock.patch.object(hcapi_, 'typing_unsafe', wraps=hcapi_.typing_unsafe) as preflight:
+            seen.clear()
+            self.new(front=True, kind='codex')
+        self.assertEqual(preflight.call_args.kwargs, {'timeout': 1})
+        self.assertEqual({t for _, verb, t in seen if verb in ('exec', '--version', '--core-version')}, {1}, seen)
 
 class Fake(CoreCase):
     def test_a_parent_from_parent_or_the_caller_and_its_end_ends_its_branch(self):

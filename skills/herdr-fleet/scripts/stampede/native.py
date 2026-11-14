@@ -611,7 +611,7 @@ def tell(job, name, text):
             names = {labels(t).get('stampede.agent') for t in live(job_.core_key(job), terminals)} - {lead, None}
             print(f'FAILED {name} (no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))})')
             return 2
-        hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit(), job=job)
+        hcapi_.hc('send', '--', found['address'], text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
     except hcapi_.HcError as error:
         print(f'FAILED {name} ({base_.line(error)})')
         return 2
@@ -825,7 +825,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                     print(f'QUEUED {request["name"]} ({count} running, cap {limit})')
     for name, address, text in told:
         try:
-            hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit(), job=job)
+            hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)
         except hcapi_.HcError as error:
             print(f'NOT TOLD {name} ({base_.line(error)})')
     return 1 if failed else 0

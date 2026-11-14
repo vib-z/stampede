@@ -37,8 +37,9 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
             return handed_.start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, lead)
         if lead and kind == 'codex':
             hcapi_.target(job)
-            if hcapi_.typing_unsafe():
-                raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + hcapi_.typing_unsafe())
+            unsafe = hcapi_.typing_unsafe(timeout=hcapi_.hc_call(job))
+            if unsafe:
+                raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + unsafe)
         previous = agents_.lead_brief_for(job, agent, kind, brief) if lead else None
         try:
             return relay_.start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, lead)
@@ -95,8 +96,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
             raise ValueError(f'the lead runs on claude or codex, not {kind!r} (--lead, or the setting lead.kind)')
         if kind != 'claude' and fork:
             raise ValueError('--fork forks a Claude chat, so it takes a Claude lead: drop --lead codex, or start without --fork')
-        if core and kind == 'codex' and hcapi_.typing_unsafe():
-            raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + hcapi_.typing_unsafe())
+        unsafe = core and kind == 'codex' and hcapi_.typing_unsafe(timeout=settings.get('timeouts.hc_call'))  # no job yet
+        if unsafe:
+            raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + unsafe)
         return kind
     if core:
         settings = settings_.for_new(repo_of(cwd), flags)  # every layer first: a repo's .stampede.toml may name the lead

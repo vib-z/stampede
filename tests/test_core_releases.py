@@ -63,7 +63,7 @@ class DraftHold(Told):
     def test_a_hung_hc_ends_within_the_limit_and_types_nothing(self):
         self.shape(send_slow={'t1': 30})
         started = time.monotonic()
-        with mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 1):
+        with mock.patch.object(hcapi_, 'send_limit', lambda seconds=None, timeout=None: 1):
             out, code, sent = self.told()
         self.assertLess(time.monotonic() - started, 10)
         self.assertEqual((code, sent), (2, []))
@@ -105,7 +105,7 @@ class DraftHold(Told):
         would type the tell after it once its hold ran out; the send is stopped before that, and nothing is typed."""
         self.shape(draft_wait=4)  # the fake holds a draft that stays this long
         self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay'})
-        with mock.patch.object(hcapi_, 'core_hold', lambda: (4.0, 'in a test')), mock.patch.object(hcapi_, 'SEND_MARGIN', 3), mock.patch.object(hcapi_, 'SEND_FLOOR', 0.5):
+        with mock.patch.object(hcapi_, 'core_hold', lambda timeout=None: (4.0, 'in a test')), mock.patch.object(hcapi_, 'SEND_MARGIN', 3), mock.patch.object(hcapi_, 'SEND_FLOOR', 0.5):
             out, code, sent = self.told()
         self.assertEqual((code, sent), (2, []))
         self.assertIn('no answer in 1 s, so it was stopped', out)
@@ -376,7 +376,7 @@ class CodexLeadOnCore(CoreCase):
         base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(draft_wait=30)
         self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay'})
-        with mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 0.5):
+        with mock.patch.object(hcapi_, 'send_limit', lambda seconds=None, timeout=None: 0.5):
             code, out = self.deliver(job, wait=10)   # the deadline is not what is tested: room for a slow machine
         self.assertEqual(code, 7, out)
         terminal = self.state()['terminals']['t1']
@@ -396,7 +396,7 @@ class CodexLeadOnCore(CoreCase):
                 self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay',
                                             'after': max(0, born[0] + 3 - time.monotonic())})
             return real(*args, **kw)
-        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 2):
+        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'send_limit', lambda seconds=None, timeout=None: 2):
             first = self.deliver(job, wait=15)[0]
             time.sleep(max(0, born[0] + 3.2 - time.monotonic()))   # the hold has run out: a send now would go in after the draft
             later = [self.deliver(job, wait=10)[0] for _ in range(2)]
@@ -553,7 +553,7 @@ class CodexLeadOnCore(CoreCase):
                 born.append(time.monotonic())   # the owner starts typing right after the look at the prompt
                 self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay', 'after': 3})
             return answer
-        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'send_limit', lambda seconds=None: 2):
+        with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'send_limit', lambda seconds=None, timeout=None: 2):
             first = self.deliver(job, wait=15)[0]
             time.sleep(max(0, born[0] + 3.2 - time.monotonic()))
             self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay', 'after': 0})   # the hold has run out
