@@ -43,7 +43,7 @@ Always `<jobs_root>/jobs/<YYYY-MM-DD>-<owner or local>-<name>` (default root `~/
 
 ## What always needs the owner's yes
 
-Merges, pushes to shared branches, deploys, sends, spends and closes: the list and how a gate is asked and passed are in [gates.md](skills/herdr-fleet/references/gates.md).
+Merges, pushes to shared branches, deploys, sends, spends and closes: the list and how a gate is asked and passed are in [gates.md](skills/herdr-fleet/references/gates.md). Merge with `stampede merge`, never `gh pr merge`.
 
 ## Searching this repo
 

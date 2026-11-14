@@ -256,14 +256,15 @@ def finish(job, summary):
     A job a bot started uses the strict route; a local job uses the ordinary relay. Every question still waiting on the
     phone is cancelled: its waiter runs in a session of its own, which outlives the lead's pane on the Herdr TUI and,
     since Herdr Core 0.1.19, a Core terminal too, so nothing else ends it."""
-    from . import handed as handed_, native as native_
+    from . import handed as handed_, native as native_, gates as gates_
     job = Path(job).absolute()
     summary = base_.line(summary)
+    gone = gates_.off(job)
     if not summary:
         raise ValueError('finish needs one line on where the job ended')
     stamp = job / 'finished'
     if not stamp.is_file():
-        fields = {'state': 'done', 'summary': summary}
+        fields = {'state': 'done', 'summary': summary, **({'gates_off': gone} if gone else {})}
         workspace = (job / 'workspace').read_text().strip() if (job / 'workspace').is_file() else ''
         if workspace:
             fields['workspace'] = workspace
@@ -271,7 +272,7 @@ def finish(job, summary):
         if owner:
             post_event(job, owner, fields)
         elif job_.front_door(job):  # no bot hears a front-door job's end: the front door's wait does, from the outbox
-            outbox_post(job, 'done', summary)
+            outbox_post(job, 'done', summary + (f'\ngates off: {", ".join(gone)}' if gone else ''))
         else:
             post_local(job, fields)
         stamp.write_text(summary + '\n')
@@ -283,6 +284,8 @@ def finish(job, summary):
     if (job / 'workspace').is_file():
         job_.clear_job_marker((job / 'workspace').read_text().strip(), job)
     handed_.unmark_handed(job)
+    if gone:
+        print('gates off: ' + ', '.join(gone))
     print('FINISHED ' + str(job))
     if job_.backend(job) == 'native':
         with contextlib.suppress(Exception):  # the record is a copy: a refresh that fails never fails finish

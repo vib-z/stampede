@@ -15,7 +15,7 @@ LAZY = {
     ('cli', 'new'): {'relay'},
     ('cli', 'start'): {'relay', 'handed'},
     ('cli', 'run'): {'relay'},
-    ('owner', 'finish'): {'handed', 'native'},
+    ('owner', 'finish'): {'handed', 'native', 'gates'},  # gates imports owner (gate_ok) at load
     # Exceptions, each a function that branches on the backend and is called from a layer below cli, so a load-time
     # import would be a cycle: tell and notify_lead (owner and hooks call them), lead_alive and caller_ids reach native;
     # tell reaches a relay job's Codex and handed agents; the deliverer types into a relay job's Core terminal; the

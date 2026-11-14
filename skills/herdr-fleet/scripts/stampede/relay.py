@@ -3,7 +3,7 @@ import fcntl, json, os, shlex, subprocess, time, uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_, settings as settings_
+from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_, settings as settings_, gates as gates_
 
 
 def deliver_core(job, lead):
@@ -605,6 +605,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False, settin
                          f'(hc ls --all --label stampede.job={key}) or use another --name')
     lead = job_.make_job(repo, job, ask, owner, review, name)
     settings_.save(job, settings)
+    gates_.begin(job, settings, repo)
     (job / 'backend').write_text('core\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
                                               'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')

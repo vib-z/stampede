@@ -65,7 +65,7 @@ Either way:
 - **One ask, one lead.** A Claude Code lead plans the job and does it.
 - **Workers only when it's worth it.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
 - **Hooks, not polling.** Workers report to the lead through hooks, and you can watch every pane in Herdr.
-- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job, and a yes typed in a Claude lead's Herdr pane works too (for a Codex lead and on Herdr Core only the recorded yes counts). The lead keeps working while it waits.
+- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job, and a yes typed in a Claude lead's Herdr pane works too, except for a merge or a push to the default branch (for a Codex lead and on Herdr Core only the recorded yes counts). The lead keeps working while it waits.
 
 ## Quick start
 
@@ -196,7 +196,7 @@ The flow is the [diagram at the top](#how-it-flows), step by step, for any front
 3. **A pane only when it's worth it:** parallel pieces of about 30 minutes or more (at most 4), another model or tool, one reviewer on another model, or the same task many times (6 at once). Each worker gets its own Herdr pane.
 4. **Hooks, not polling.** A worker's report, turn end, question or exit lands as a line in `<job>/inbox.log` (`REPORT`, `TURN`, `QUESTION`, `GONE`, and `UNDELIVERED` for a question, gate or post its bot has not heard), and Claude's file hook wakes the lead. A Codex lead has no file hook: stampede types each new line into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`, once it is idle and unfocused.
 5. **Review only what ships**, on another model, at most two rounds.
-6. **Questions and gates go back to whoever started the job**: a bot gets a `question` or `gate` event, asks you in chat and passes your answer back (a gate's yes recorded with `approve-gate`); a job you started locally asks on your phone through Moshi. On the TUI, a yes typed in a Claude lead's pane works; for a Codex lead, and on Core, only a recorded yes counts. The lead keeps working while it waits, and an agent's own say-so never counts.
+6. **Questions and gates go back to whoever started the job**: a bot gets a `question` or `gate` event, asks you in chat and passes your answer back (a gate's yes recorded with `approve-gate`); a job you started locally asks on your phone through Moshi. On the TUI, a yes typed in a Claude lead's pane works, except for a merge or a push to the default branch, which take the recorded yes; for a Codex lead, and on Core, only a recorded yes counts. The lead keeps working while it waits, and an agent's own say-so never counts.
 7. **The lead reports back once.** When the job is done or stopped for good it runs `stampede finish <job> "<summary>"`. That is the one done event a bot outside Herdr gets for the job. While the job is open, plain turn ends in its workspace stay on the machine. Blocked, permission prompts, StopFailure, a stale or dead pane, questions, gates and the lead's posts still go out: in a job a bot started, each `stampede post` reaches that bot as a `post` event, which it shows you. Then the lead asks whether to close.
 8. **Workers exit when their work is merged** or accepted. Nothing closes without your yes, and `reopen.sh` brings a closed job back.
 
@@ -240,6 +240,8 @@ core.json, locks/, relay-state.json, start-failed, reopen-pending
               the --relay path's record (core-relay.md)
 finished      the one-line summary written by stampede finish
 gates/        each gate asked (action, PR, commit) and your recorded yes
+gates.log     one line per gate switched off for the job, and each merge or push made without one
+merges.log    one line per stampede merge: PR, reviewed commit, merge commit, review report, gate
 agents.tsv    who was started, and how: the reopen record (not on Core)
 approved      the plan's fingerprint, for a --review job
 front-door    present when a chat outside Herdr relays for you (new --front-door)
@@ -375,7 +377,19 @@ $ stampede ask $J "Keep the file in the repo root?" \
 ASKED 1fecfa0be4dc (the answer goes to the lead inbox; cancel with: fleet-job cancel <job> 1fecfa0be4dc)
 ```
 
-Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging the draft PR) goes back to whoever started the job ([Safety](#safety)); you started this one in Herdr, so it is the lead's own question card or `stampede ask --gate`, on your phone. Then the lead writes a short report and asks whether to close the workspace; `<job>/reopen.sh` brings it back later.
+Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging the draft PR) goes back to whoever started the job ([Safety](#safety)); you started this one in Herdr, so it goes to your phone. The lead merges only with `stampede merge`, which checks the review report and the PR head first and names the gate it needs:
+
+```console
+$ sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
+$ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md
+stampede merge: the merge gate is on: ask the owner with stampede ask <job> --gate --sha 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766 --pr 12 'merge PR 12 at 4e1b0c2f9a7d3e5b6c8a0f1e2d3c4b5a69788766', then run this again with --gate <id>
+$ stampede ask $J --gate --sha $sha --pr 12 "merge PR 12 at $sha"
+GATE c055bce746bd on the phone; act after fleet-job gate-ok <job> c055bce746bd --sha <the commit you act on> prints APPROVED, or on the owner's yes typed in your pane
+$ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md --gate c055bce746bd     # after your tap
+MERGED 12 9c2d7e1f0a4b6c8d3e5f7a9b1c2d4e6f8a0b1c3d
+```
+
+It marked the draft ready, merged with `--match-head-commit $sha`, and wrote a line to `<job>/merges.log`. Then the lead writes a short report and asks whether to close the workspace; `<job>/reopen.sh` brings it back later.
 
 ### Share the plan first
 
@@ -637,10 +651,16 @@ Moshi, the phone side of every front door: [remote/moshi.md](remote/moshi.md).
   - **started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
   - **started by a front door** (`--front-door`, on the Herdr TUI or on Herdr Core): a post in `<job>/outbox/`. The front door shows you the exact action and, on your yes in its chat, runs `stampede approve-gate ... --by "owner in <chat>: '<your words>'"`. An explicit order you already gave there for that exact action counts, quoted; anything vaguer goes back to you.
   - **either way, on the Herdr TUI,** a yes typed in a Claude lead's Herdr pane works.
-- **The lead acts on your yes typed in its pane for that exact action (a Claude lead on the Herdr TUI only), or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge also passes `--match-head-commit` on that commit, so a push after your yes means asking again. `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
+- **The lead acts on your yes typed in its pane for that exact action (a Claude lead on the Herdr TUI only), or on a recorded yes for one gate at one commit:** `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED` only when the record names that gate and that commit. A merge and a push to the default branch take only the recorded yes, since the code checks them (below). `approve-gate` refuses inside Herdr, for a job started locally and for another commit: an agent's own say-so never counts, and nor does a plan, a brief or a yes passed on in a message.
 - **A yes covers the gate as you were asked it.** The record holds a digest of the gate's action, PR, commit and route: a gate changed after your yes makes `gate-ok` refuse, and the bot's `approve` command carries the same digest (`--digest`), so a gate changed between the question and your yes takes none. `stampede finish` cancels every question of the job still waiting on your phone.
 - **A Codex lead counts only the recorded yes.** stampede types its inbox into its pane, marked as from stampede, so text there proves nothing: it acts only after `gate-ok` prints `APPROVED`.
 - **On Herdr Core only the recorded yes counts.** If someone types yes or a similar gate approval in a job pane or terminal, the lead replies: "A typed yes does not count on Core; answer in the chat or on the phone that started this job." In a job started with `stampede new --core` the lead acts only after `gate-ok` prints `APPROVED`: a yes typed into the lead, an answer to its own question card, and any message never count, because on Core another program can type into any terminal (`hc send`, `hc keys`). Your tap on a phone card (`FLEET_ASK_CMD`) and a bot's `approve-gate` are recorded and count. `approve-gate` also refuses inside a Herdr Core terminal (`HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET` or `HC_SCOPE` set) and under a `herdr-core` or `hc` process, so `hc exec` cannot run it: a bot runs it over plain ssh. Core's own `blocked` state is never a gate.
+- **Three gates are held by code, not only by the lead's brief:**
+  - **merge:** the lead merges only with `stampede merge <job> <pr> --sha <sha> --review <report> --gate <id>`. Whatever the settings, the review report must say `Status: PASS` and `Reviewed: <sha>` in its first 10 lines, and the PR must be open with that sha as its head; with `gates.merge` on, the gate must be approved at that sha. Then it marks a draft ready and runs `gh pr merge <pr> --squash --match-head-commit <sha>` (`merge.method`), so a push after the review or the yes means reviewing and asking again.
+  - **push to the default branch:** `stampede new` installs a `pre-push` hook (marked `# stampede-hook`) in the repo's own hooks folder, only when there is no `pre-push` and `core.hooksPath` is unset; otherwise it prints the one line to add to your hook. The hook runs `stampede prepush`, which lets every push through unless it comes from a job's agent (`STAMPEDE_JOB_KEY` on Core or `HERDR_WORKSPACE_ID` in a Herdr pane names an open job's marker) and goes to the remote's default branch: that needs a gate approved at the pushed commit. A push from your own shell outside the job is never touched.
+  - **close:** a whole job never closes from one of its own terminals, and `stampede close` ends only the job's own terminals (its key, or under one of them).
+  - These guard against a forgetful agent, not a hostile one: an agent runs as your user and could edit the record or skip a hook with `git push --no-verify`.
+- **Opting out is allowed, and logged.** Every gate is on by default (`[gates]` in [Configure](#configure)). Switch one off for one job with `stampede new --no-gate merge` (repeatable, the same as `--set gates.merge=false`), or for every job in your own `config.toml`; a repo's `.stampede.toml` can never switch a gate off. `stampede new` records the job's gates outside the job folder, in `$HERDR_EVENTS_DIR/gates/<job key>.json`, and `stampede merge`, the hook, the lead's brief and `finish` read them there (a job made before has every gate on). Each gate off is a line `<UTC time> OFF <name> (<layer>)` in `<job>/gates.log`, the lead's brief names it, `stampede config show --job` shows it, and `stampede finish` prints `gates off: <names>` and sends it with the done event. Two rules have no switch: never close what the job did not create, and merge only the reviewed commit.
 - **Auto mode, never no-checks mode, by default:** Claude `--permission-mode auto`, Codex `--approve-for-me`, Cursor `--auto-review`, Hermes its default (a dangerous command asks), Kimi `-y` (a risky action asks). `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode only when its pane's shell sits in its own linked git worktree, and never the lead.
 - **Plan approval** (only when you asked to see the plan) lets the lead work inside the job's own folder and branch; it is not a gate and covers no merge or spend.
 - **Nothing closes by itself.** The last step is always the question whether to close; no answer is a no.
@@ -668,7 +688,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 `stampede new` saves what it resolved in `<job>/settings.json`, with the layer of each value and the stampede version, and every later command of that job reads it there. A job remembers what was set when it started. Anything that was not set then follows your current config. A later command's own `--set` still wins for that command, a job made before `settings.json` existed reads the live layers, and `<job>/max-helpers` still wins for its job. The user-only keys below are never saved there: the job's agents can write its folder, so a job always reads them from your own file, environment and flags. A `settings.json` that is not a stampede settings file is one problem line, and the live layers apply.
 
-**User only.** `jobs_root`, `trust_root` and `ask.command` run a command or widen what is trusted, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml`; there each is skipped with a problem line.
+**User only.** `jobs_root`, `trust_root`, `ask.command` and every `gates.` key run a command, widen what is trusted or lower a gate, so they are read from your file, the environment or a flag, never from a repo's `.stampede.toml`; there each is skipped with a problem line.
 
 **Problems.** A key that is not a setting, a value of the wrong type or not one of the key's choices or a file that does not parse is skipped and named in one line by `stampede config show`. `stampede new` refuses to start a job while there is one (exit 2, each line, then `fix it or remove the key: stampede config show`); no other command fails on them.
 
@@ -694,6 +714,11 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 | `timeouts.hc_call` | `60` | | seconds one `hc` call may take on top of what the command itself waits for |
 | `timeouts.leave` | `15` | | seconds an idle agent has to leave after `/exit` or `/quit` at `stampede close` |
 | `timeouts.hold_settle` | `5` | | seconds a `--relay` terminal must have been at rest before its turn count can start a hold |
+| `gates.merge` | `true` | | `stampede merge` needs a gate approved at the reviewed commit; `false` merges a passing review without one, logged (user only) |
+| `gates.push_default_branch` | `true` | | the `pre-push` hook stops a job's agent pushing to the default branch without a gate; `false` lets it, logged (user only) |
+| `gates.deploy`, `gates.publish`, `gates.send`, `gates.spend` | `true` | | the lead asks before a deploy, publishing, sending or any spend; `false` tells it that one needs no yes (user only) |
+| `gates.close` | `true` | | the lead asks before closing a helper's terminals; a whole job never closes from inside it (user only) |
+| `merge.method` | `squash` | | how `stampede merge` merges: `squash`, `merge` or `rebase` |
 </details>
 
 <details>
@@ -727,6 +752,18 @@ Other programs read these, so they stay environment variables. Export them in yo
 |---|---|
 | `refused: a workspace labelled <label> is already open` from `reopen.sh`, with `none of this job's agents runs there` | after a Herdr server restart, Herdr restores the job's workspace with plain shells: close that workspace (your yes, as for any close), then run `reopen.sh` again |
 | `stampede gate-ok: gate <id> changed after the yes` | the gate's record changed after your yes (its action, PR or route), or the yes was recorded by stampede 0.1.8 or older: the lead asks the gate again |
+| `stampede merge: no review report <file>` | the reviewer writes its report with `Status: PASS` and `Reviewed: <full sha>` in its first 10 lines, then run merge again |
+| `stampede merge: the review report <file> says Status: FINDINGS, not PASS` | fix the findings, review again, then merge |
+| `stampede merge: the review report <file> names no Reviewed: <full sha>` | the reviewer adds the line with the commit it reviewed |
+| `stampede merge: the review report passes <a>, not <b>` | `--sha` must be the reviewed commit: merge that one, or review the new one |
+| `stampede merge: the review report passes <a> but the PR head is <b>: review the new commit` | something was pushed after the review: review the new head, then ask the gate at it |
+| `stampede merge: PR <n> is merged, not open` (or closed) | nothing to merge: check the PR number |
+| `stampede merge: the merge gate is on: ask the owner with stampede ask ...` | run the `stampede ask` line it prints, then merge with `--gate <id>` once the owner said yes |
+| `stampede merge: gate <id> has no recorded yes`, `... is not about PR <n>`, `... was approved for <a>, not <b>` | wait for the yes, or ask a merge gate for this PR at this commit |
+| `stampede merge: gh pr merge failed: <gh's line>` (exit 1) | gh refused (auth, a protected branch, a head that moved): fix what gh names, then merge again |
+| `stampede prepush: a push of <sha> to main needs the owner's yes. Ask with: stampede ask ...` | a job's agent pushed to the default branch: ask that gate, then push again once `gate-ok` prints `APPROVED`; push the work branch instead |
+| `stampede new: the pre-push hook was not installed (...)` | the repo has its own `pre-push` or `core.hooksPath`: add the line it prints to that hook, or leave the push gate to the lead |
+| `stampede new: --no-gate <name> is no gate` | use one of the names it lists: `merge`, `push_default_branch`, `deploy`, `publish`, `send`, `spend`, `close` |
 | `stampede approve-gate: approve-gate needs --digest` | a bot built the command itself: run the gate event's `approve` line as given, which carries the digest |
 | `stampede approve-gate: gate <id> changed while the owner was asked` | the gate was edited after the bot asked you, so your yes was for something else: the lead asks again |
 | `reopen.sh: workspace <id> is open but not tagged for <bot>` (exit 5) | `herdr-events-owner` failed, so the bot would not hear that workspace: run the command it prints, then carry on |
@@ -817,7 +854,7 @@ Every known failure with its fix: [failure-modes.md](skills/herdr-fleet/referenc
 <details>
 <summary><b><code>stampede</code> commands and exit codes</b></summary>
 
-Every command with its flags, the status words it prints (`STARTED`, `QUEUED`, `DELIVERED`, `SUBMITTED`, `BLOCKED`, `APPROVED`, `TIMEOUT`, `LEAD_GONE` and the rest) and one table of exit codes: [docs/CLI.md](docs/CLI.md). The command lists itself too: `stampede --help`, and `stampede <command> --help` for each one's flags and an example. `stampede` and `fleet-job` are the same command ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), the entry; the [stampede package](skills/herdr-fleet/scripts/stampede/) holds the commands). In short: 0 done, 1 Herdr, Herdr Core or a program failed (or `doctor` found a `PROBLEM`), 2 a usage error or a refusal with its reason on one line, 3 `tell` queued behind a question card or `wait` timed out.
+Every command with its flags, the status words it prints (`STARTED`, `QUEUED`, `DELIVERED`, `SUBMITTED`, `BLOCKED`, `APPROVED`, `TIMEOUT`, `LEAD_GONE` and the rest) and one table of exit codes: [docs/CLI.md](docs/CLI.md). The command lists itself too: `stampede --help`, and `stampede <command> --help` for each one's flags and an example. `stampede` and `fleet-job` are the same command ([fleet_job.py](skills/herdr-fleet/scripts/fleet_job.py), the entry; the [stampede package](skills/herdr-fleet/scripts/stampede/) holds the commands). `stampede merge` and the hidden `stampede prepush` (the pre-push hook's) are there too. In short: 0 done, 1 Herdr, Herdr Core or a program failed (or `doctor` found a `PROBLEM`), 2 a usage error or a refusal with its reason on one line, 3 `tell` queued behind a question card or `wait` timed out.
 </details>
 
 <details>
@@ -853,7 +890,8 @@ skills/herdr-fleet/     the job: SKILL.md, references/ (core.md: a Core job; cor
                         the commands, one module per concern: base, job (the job folder), hcapi (Herdr Core),
                         herdrapi (Herdr), agents (per CLI), owner (questions, gates, tell, finish), hooks, tui,
                         native (a Core job), relay and handed (the --relay path), cli (the parser and help),
-                        doctor and check (stampede doctor and stampede check),
+                        doctor and check (stampede doctor and stampede check), gates (stampede merge, the
+                        pre-push hook and each job's gate record),
                         settings (the layered config) with defaults.toml (every key and its default);
                         core_native.py re-exports native for one release
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor,

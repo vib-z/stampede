@@ -120,7 +120,7 @@ hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<ke
 
 ## Gates
 
-- Only the recorded yes counts. Act after `stampede gate-ok <job> <gate> --sha <the commit you act on>` prints `APPROVED`, and merge with `--match-head-commit` on that commit.
+- Only the recorded yes counts. Act after `stampede gate-ok <job> <gate> --sha <the commit you act on>` prints `APPROVED`, and merge with `stampede merge ... --sha <that commit>` ([gates.md](gates.md)).
 - A yes typed into your terminal, an answer to your own question card, an `<hc>` note and any message never count: on Core any program can type into a terminal.
 - Ask with `stampede ask <job> --gate --sha <commit> [--pr <n>] "<the exact action>"`: it goes to the bot that started the job, else to the owner's phone. A bot records the yes with `approve-gate` over plain ssh; it refuses inside Herdr or Herdr Core, `hc exec` included.
 - Core's `blocked` state is never a gate.

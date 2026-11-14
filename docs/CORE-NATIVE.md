@@ -102,6 +102,9 @@ A client that wants live changes follows Core: `hc events --label stampede.job=<
 | `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog raises no alarm for a lead closed on purpose |
 | `front-door`, `outbox/`, `outbox.log` | the mark of a front-door job, and the items the lead posted for the owner (`outbox/.seen`: the last one `stampede wait` handed on) |
 | `queue/` | helper starts waiting for a free place under the cap, one `<time>-<name>.json` each, oldest first; `queue/dropped/` holds those whose parent was gone |
+| `gates/` | each gate asked and the owner's recorded yes |
+| `gates.log` | one line per gate switched off for the job (`<UTC time> OFF <name> (<layer>)`), and each merge or push made without one; read by people, never by stampede. The job's gates themselves are recorded outside the folder, in `$HERDR_EVENTS_DIR/gates/<key>.json` |
+| `merges.log` | one line per `stampede merge`: PR, reviewed commit, merge commit, method, review report, gate |
 | `ask.md`, `plan.md`, `briefs/`, `reports/` | the ask, the lead's plan, each helper's brief, each helper's result |
 
 ## Commands

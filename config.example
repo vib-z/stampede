@@ -1,8 +1,8 @@
 # stampede's settings, as TOML. Every key is optional: the value shown is its default, so keep only what you change.
 # Yours: copy this file to ~/.config/stampede/config.toml ($XDG_CONFIG_HOME/stampede/config.toml when that is set).
 # A project: commit a .stampede.toml at the repo root with the keys every job there should use.
-# User only: jobs_root, trust_root and ask.command run a command or widen what is trusted, so they are read from your
-# file, the environment or a flag, never from a repo's .stampede.toml.
+# User only: jobs_root, trust_root, ask.command and every gates key run a command, widen what is trusted or lower a
+# gate, so they are read from your file, the environment or a flag, never from a repo's .stampede.toml.
 # Last one wins: these defaults, your file, the repo's file, the environment (the names below), then a command's flags
 # and --set key=value. stampede new saves the result in <job>/settings.json. See it all: stampede config show
 
@@ -82,6 +82,18 @@ wait = 3600      # seconds stampede wait runs before it gives up (exit 3); --tim
 hc_call = 60     # seconds one hc call may take on top of what the command itself waits for
 leave = 15       # seconds an idle agent has to leave after /exit or /quit, at stampede close
 hold_settle = 5  # seconds a terminal must have been at rest before its turn count can start a hold
+
+[gates]  # true: the owner's recorded yes is needed (skills/herdr-fleet/references/gates.md); false opts out, and is logged (user only)
+merge = true                # stampede merge needs an approved gate at the reviewed commit
+push_default_branch = true  # the pre-push hook stops a job's agent pushing to the default branch without a gate
+deploy = true               # a deploy: the lead asks
+publish = true              # publishing anything: the lead asks
+send = true                 # sending email or messages: the lead asks
+spend = true                # any spend: the lead asks
+close = true                # closing a helper's terminals: the lead asks (a whole job never closes from inside it)
+
+[merge]
+method = "squash"  # how stampede merge merges: squash, merge or rebase
 
 # Environment only. Other programs read these, so they stay environment variables: export them in your shell
 # profile, or in the shell file ~/.config/stampede/config, which the Herdr plugin event also sources.

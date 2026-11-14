@@ -55,7 +55,7 @@ When a passed review stands (no second review run, the gates still run):
 - A follow-up message to the builder changed no files (`git diff <reviewed-sha>` is empty): nothing to rerun.
 - Anything else reopens the review, for the changed files only.
 
-The lead writes the reviewed commit into `register.md` (`Reviewed: <lane> <sha>`) and moves it to the new head when the review stands as above. The merge pins it (`gh pr merge <n> --squash --match-head-commit <sha>`, see Wrap up in SKILL.md), so a commit nobody reviewed cannot slip into the merge.
+The lead writes the reviewed commit into `register.md` (`Reviewed: <lane> <sha>`) and moves it to the new head when the review stands as above. The reviewer's report carries `Status: PASS` (or `FINDINGS`) and `Reviewed: <the full sha it reviewed>` in its first 10 lines; `stampede merge` refuses any other commit ([gates.md](gates.md)), so a commit nobody reviewed cannot slip into the merge.
 
 Variations that have worked:
 - **Cross-vendor pair.** Claude builds and Codex reviews (the default), or Claude reviews a Codex build.

@@ -17,6 +17,8 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 | `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--lead-model`, `--lead-effort`, `--fork`, `--space <name>`, `--max-helpers <n>` (default: the setting `helpers.max`, 12), `--front-door` (refused with `--relay` and in a bot's job) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
 | `new --core --relay --file <ask.md>` | `--cwd`, `--name`, `--review`, `--lead`, `--fork`, `--app-space` | as `new --core`, for the earlier path |
 
+Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=false`): that gate is off for this job only, recorded outside the job folder and logged in `<job>/gates.log`; an unknown name exits 2 with the list. With `gates.push_default_branch` on, `new` installs the `pre-push` hook in the repo's own hooks folder when there is no `pre-push` and `core.hooksPath` is unset; otherwise it prints `stampede new: the pre-push hook was not installed (...)` and the line to add. [README, Safety](../README.md#safety).
+
 ## Work in it
 
 | command | flags | prints |
@@ -39,12 +41,14 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 | `approve-gate <job> <gate> --sha <commit> --by <who> --digest <d>` | run the `approve` line a gate event carries, as given | `APPROVED <gate> at <sha>`; refused inside Herdr or Herdr Core |
 | `gate-ok <job> <gate> --sha <commit>` | | `APPROVED <gate> by <who> at <time>: <action> at <sha>`, only for the owner's recorded yes at that commit |
 | `cancel <job> <id>` | | `CANCELLED <id>` |
+| `merge <job> <pr> --sha <sha> --review <report>` | `--gate <id>` (required while `gates.merge` is on) | `MERGED <pr> <merge commit>`, after the checks: the report's first 10 lines say `Status: PASS` and `Reviewed: <sha>`, the PR is open with `<sha>` as its head, and the gate is approved at `<sha>` for this PR. It marks a draft ready, runs `gh pr merge <pr> --<merge.method> --match-head-commit <sha>` and appends to `<job>/merges.log`; with the gate off it logs the merge in `<job>/gates.log`. Exit 0 merged, 2 refused (the line names what is missing and what to do), 1 when `gh` failed (its one line) |
+| `prepush <remote> [<url>]` (hidden) | git's lines on stdin | run by the `pre-push` hook `new` installs: exit 0 for every push but a job's agent's (`STAMPEDE_JOB_KEY` or `HERDR_WORKSPACE_ID` naming an open job's marker) to the remote's default branch (`refs/remotes/<remote>/HEAD`, else `main` or `master`), which needs a gate approved at the pushed commit or `gates.push_default_branch` off (logged); else exit 1 and `stampede prepush: a push of <sha> to <branch> needs the owner's yes. Ask with: stampede ask ...` |
 
 ## End and return
 
 | command | flags | prints |
 |---|---|---|
-| `finish <job> <summary>` | | `FINISHED <job>`, after one `done` event (sent once); `NOT CANCELLED <id>: ...` for a question it could not stop |
+| `finish <job> <summary>` | | `FINISHED <job>`, after one `done` event (sent once); `NOT CANCELLED <id>: ...` for a question it could not stop; first `gates off: <names>` when the job had gates off, which the done event carries as `gates_off` |
 | `snapshot <job>` (a Core job) | | the record's path, or `FAILED snapshot (<why>)` |
 | `reopen <job>` (a Core job) | `--fresh`, `--prompt`, `--rerun-programs` | per agent: `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` or `FAILED` |
 | `close <job> [<agent>]` (a Core job) | | `CLOSED <agent> (<address>)` per agent, deepest first; no agent closes the whole job |
@@ -89,8 +93,8 @@ The full list, each with its fix, is the README's [Troubleshoot](../README.md#tr
 | code | means | from |
 |---|---|---|
 | 0 | done; also `new` and `start` on the Herdr TUI that print `BLOCKED <agent>: clear the startup dialog ...`: the agent runs, held at a dialog; clear it, then send the printed `tell` line | every command |
-| 1 | Herdr, Herdr Core or a program failed (one `stampede <command>: ...` line); on Herdr Core (a Core job, a `--relay` job, or an agent handed to a TUI pane) a `new` or `start` that did not end with a ready agent (`BLOCKED`, `NOT READY`, `NOT BRIEFED`, `UNKNOWN`, `FAILED`); on the Herdr TUI a Codex lead whose brief pointer did not go in (`BLOCKED <lead>: its brief pointer did not go in`); a failed `next`, `snapshot`, `reopen` or `close`; `doctor` found a `PROBLEM`; `check` had a failure; `update` refused or failed; `update --check` saw a newer release | any command for a failure; the rest as named |
-| 2 | a usage error or a refusal, with the reason: no such job folder, an agent not in the job, a kind it does not run there, a start before approval, yolo outside a worktree, a gate with no yes at that commit, no route for the bot, `approve-gate` inside Herdr, a Python older than 3.9; also `tell` when nothing was typed (`FAILED`, every backend), `start` of a non-Claude worker on the Herdr TUI whose brief pointer was not sent (the same `FAILED`), and `check` with no `tests/` | every command |
+| 1 | Herdr, Herdr Core or a program failed (one `stampede <command>: ...` line); on Herdr Core (a Core job, a `--relay` job, or an agent handed to a TUI pane) a `new` or `start` that did not end with a ready agent (`BLOCKED`, `NOT READY`, `NOT BRIEFED`, `UNKNOWN`, `FAILED`); on the Herdr TUI a Codex lead whose brief pointer did not go in (`BLOCKED <lead>: its brief pointer did not go in`); a failed `next`, `snapshot`, `reopen` or `close`; `doctor` found a `PROBLEM`; `check` had a failure; `update` refused or failed; `update --check` saw a newer release; `merge` when `gh` failed; `prepush` refusing a job's push to the default branch | any command for a failure; the rest as named |
+| 2 | a usage error or a refusal, with the reason: no such job folder, an agent not in the job, a kind it does not run there, a start before approval, yolo outside a worktree, a gate with no yes at that commit, a `merge` whose review report, PR head or gate does not hold, an unknown `--no-gate` name, no route for the bot, `approve-gate` inside Herdr, a Python older than 3.9; also `tell` when nothing was typed (`FAILED`, every backend), `start` of a non-Claude worker on the Herdr TUI whose brief pointer was not sent (the same `FAILED`), and `check` with no `tests/` | every command |
 | 3 | `tell`: `BLOCKED_ON_CARD`, the message is queued; `wait`: nothing came before `--timeout`; a `--relay` job's `reopen.sh` (`_reopen`): `NOT ACKNOWLEDGED` | `tell`, `wait`, `_reopen` |
 
 The `wake` hook exits 2 on purpose: that wakes Claude.

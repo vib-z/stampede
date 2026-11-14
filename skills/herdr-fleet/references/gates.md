@@ -20,8 +20,14 @@ Pushing the job's own work branches and opening DRAFT PRs from them.
 
 1. The lead asks one exact action at one commit: `stampede ask <job> --gate --sha <commit> [--pr <n>] "<exact action>"`. It prints `GATE <id>` and where the question went: to the bot that started the job, to the front door's outbox, or to the owner's phone.
 2. The bot or front door shows the owner the action as written (for a send, the text). On their yes it runs the `approve-gate` line it was handed, `--by` quoting their words. On the phone, the owner's tap records it the same way.
-3. The lead acts only after `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED`. A Claude lead on the Herdr TUI may also act on the owner's yes typed in its own pane or card.
-4. A merge uses one commit throughout: the reviewed commit is the commit the gate names and the commit merged, `gh pr merge <n> --squash --match-head-commit <that sha>`. A push after the review or after the yes withdraws both: review again and ask again (when a passed review still stands: [collaboration.md, Review](collaboration.md#review)).
+3. The lead acts only after `stampede gate-ok <job> <gate> --sha <the commit it acts on>` prints `APPROVED`. A Claude lead on the Herdr TUI may also act on the owner's yes typed in its own pane or card, except for a merge or a push to the default branch.
+4. A merge uses one commit throughout (the reviewed commit is the commit the gate names and the commit merged), and only `stampede merge <job> <pr> --sha <sha> --review <report> --gate <gate>`, never `gh pr merge`: it checks the report passes that sha, the PR head is it and the gate is approved at it. A push after the review or the yes withdraws both: review again and ask again ([collaboration.md, Review](collaboration.md#review)).
+
+## Held by code, and opting out
+
+- Code holds the merge (`stampede merge`), a job's push to the default branch (a `pre-push` hook) and close (never from inside the job, never what it did not start). The lead asks the rest.
+- Each is a `gates.<name>` setting, on by default: `merge`, `push_default_branch`, `deploy`, `publish`, `send`, `spend`, `close`. The owner opts out per job (`stampede new --no-gate <name>`) or in their own config, never a repo's. Each opt-out is logged in `<job>/gates.log` and named in the lead's brief.
+- Never switched off: merge only the reviewed commit; close only what the job made.
 
 ## What never counts as a yes
 

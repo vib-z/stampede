@@ -125,7 +125,7 @@ Stop at pass. There is no second loop for style. If the recheck still finds a re
 
 ## 8. Wrap up
 
-- Push `claude/alerts` and open a draft PR (no need to ask). Write `Reviewed: alerts <sha>` in the register. Ask the owner before the merge, and on a yes run `gh pr merge <n> --squash --match-head-commit <sha>`.
+- Push `claude/alerts` and open a draft PR (no need to ask). Write `Reviewed: alerts <sha>` in the register. Ask the owner before the merge, and once `gate-ok` prints `APPROVED` run `stampede merge <job> <n> --sha <sha> --review reports/review-alerts.md --gate <gate>`.
 - Keep the builder worktrees and branches until the PR merges.
 - Write the register's final state (commits, what was verified, what is left for the owner) and refresh the reopen record: `herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"`.
 - Leave every pane and tab open. End with a short summary and one question to the owner in the lead pane (AskUserQuestion; external callers: in their own chat): "Close the alerts tab? Reopen with $B/reopen.sh."
