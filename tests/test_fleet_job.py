@@ -760,6 +760,16 @@ class Gates(unittest.TestCase):
             self.assertIn('goes back to alpha' if owner else 'your own question card', brief)
             self.assertEqual('fleet-job post ' + str(job) in brief and 'it goes to alpha' in brief, bool(owner))
 
+    def test_a_tui_lead_brief_names_the_gates_off_and_the_merge_command(self):
+        home = Path(tempfile.mkdtemp())
+        _, job, _ = Fixes.run_new(self, 'idle', {'HOME': str(home)}, no_gate=['send'])
+        brief = (job / 'briefs/lead-fix-login-bug.md').read_text()
+        self.assertIn('The owner switched these gates off for this job: send; those need no yes.', brief)
+        self.assertIn(f'Merge only with fleet-job merge {job} <pr> --sha <the reviewed commit>', brief)
+        self.assertEqual((job / 'gates.log').read_text().split(' ', 1)[1], 'OFF send (flag)\n')
+        _, job, _ = Fixes.run_new(self, 'idle', {'HOME': str(home)})
+        self.assertNotIn('switched these gates off', (job / 'briefs/lead-fix-login-bug.md').read_text())
+
     def test_new_marks_the_workspace_and_tells_the_lead_to_finish(self):
         home = Path(tempfile.mkdtemp())
         _, job, _ = Fixes.run_new(self, 'idle', {'HOME': str(home)})

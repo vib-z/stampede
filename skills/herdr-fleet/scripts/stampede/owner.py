@@ -256,14 +256,15 @@ def finish(job, summary):
     A job a bot started uses the strict route; a local job uses the ordinary relay. Every question still waiting on the
     phone is cancelled: its waiter runs in a session of its own, which outlives the lead's pane on the Herdr TUI and,
     since Herdr Core 0.1.19, a Core terminal too, so nothing else ends it."""
-    from . import handed as handed_, native as native_
+    from . import handed as handed_, native as native_, gates as gates_
     job = Path(job).absolute()
     summary = base_.line(summary)
+    gone = gates_.off(job)
     if not summary:
         raise ValueError('finish needs one line on where the job ended')
     stamp = job / 'finished'
     if not stamp.is_file():
-        fields = {'state': 'done', 'summary': summary}
+        fields = {'state': 'done', 'summary': summary, **({'gates_off': gone} if gone else {})}
         workspace = (job / 'workspace').read_text().strip() if (job / 'workspace').is_file() else ''
         if workspace:
             fields['workspace'] = workspace
@@ -271,7 +272,7 @@ def finish(job, summary):
         if owner:
             post_event(job, owner, fields)
         elif job_.front_door(job):  # no bot hears a front-door job's end: the front door's wait does, from the outbox
-            outbox_post(job, 'done', summary)
+            outbox_post(job, 'done', summary + (f'\ngates off: {", ".join(gone)}' if gone else ''))
         else:
             post_local(job, fields)
         stamp.write_text(summary + '\n')
@@ -283,6 +284,8 @@ def finish(job, summary):
     if (job / 'workspace').is_file():
         job_.clear_job_marker((job / 'workspace').read_text().strip(), job)
     handed_.unmark_handed(job)
+    if gone:
+        print('gates off: ' + ', '.join(gone))
     print('FINISHED ' + str(job))
     if job_.backend(job) == 'native':
         with contextlib.suppress(Exception):  # the record is a copy: a refresh that fails never fails finish
@@ -329,9 +332,13 @@ def ask(job, question, options):
     return ident
 
 
-def ask_gate(job, action, sha, pr=None):
+HELD = ('merge', 'push_default_branch')  # gates the code checks itself: only their recorded yes opens them (gates.py)
+
+
+def ask_gate(job, action, sha, pr=None, kind=None):
     """A gate is one exact action at one commit, answered yes or no. A bot-started job sends it to that bot as a gate
-    event, and the bot records the owner's yes with approve-gate; a local job asks FLEET_ASK_CMD in the background."""
+    event, and the bot records the owner's yes with approve-gate; a local job asks FLEET_ASK_CMD in the background.
+    kind: one of the [gates] names, covered by the digest; stampede merge and the pre-push hook take only their own kind."""
     job = Path(job).absolute()
     if not base_.SHA.fullmatch(sha):
         raise ValueError('--sha takes the full commit id the gate is about (git rev-parse HEAD)')
@@ -339,11 +346,11 @@ def ask_gate(job, action, sha, pr=None):
     ident = uuid.uuid4().hex[:12]
     route = owner or ('front-door' if job_.front_door(job) else 'local')
     gate = {'gate': ident, 'action': base_.line(action), 'pr': pr, 'sha': sha, 'route': route,
-            'asked': datetime.now().strftime('%Y-%m-%d %H:%M')}
+            'asked': datetime.now().strftime('%Y-%m-%d %H:%M'), **({'kind': kind} if kind else {})}
     (job / 'gates').mkdir(exist_ok=True)
     (job / 'gates' / (ident + '.json')).write_text(json.dumps(gate) + '\n')
     check = f'fleet-job gate-ok {job} {ident} --sha <the commit you act on>'
-    typed = ', or on the owner\'s yes typed in your pane' if pane_yes(job) else ''
+    typed = ', or on the owner\'s yes typed in your pane' if pane_yes(job) and kind not in HELD else ''
     if route == 'front-door':
         n = outbox_post(job, 'gate', gate_question(gate) + '\nOne exact action, yes or no. Show the owner this action as written.',
                         answer=shlex.join(['fleet-job', 'approve-gate', str(job), ident, '--sha', sha, '--digest', gate_digest(gate)])
@@ -370,7 +377,7 @@ def gate_digest(gate):
 
 
 def gate_question(gate):
-    return f'Gate {gate["gate"]}: {gate["action"]}' + (f' (PR #{gate["pr"]})' if gate['pr'] else '') + f' at {gate["sha"][:12]}?'
+    return f'Gate {gate["gate"]}' + (f' ({gate["kind"]})' if gate.get('kind') else '') + f': {gate["action"]}' + (f' (PR #{gate["pr"]})' if gate['pr'] else '') + f' at {gate["sha"][:12]}?'
 
 
 def load_gate(job, ident):
@@ -433,7 +440,7 @@ def gate_ok(job, ident, sha):
     path = Path(job) / 'gates' / (ident + '.approved')
     if not path.is_file():
         raise PermissionError(f'gate {ident} has no recorded yes: wait for it'
-                              + (', or the owner\'s yes typed in your pane' if pane_yes(job) else ''))
+                              + (', or the owner\'s yes typed in your pane' if pane_yes(job) and gate.get('kind') not in HELD else ''))
     record = json.loads(path.read_text())
     if not isinstance(record, dict) or not all(base_.line(record.get(k, '')) for k in ('gate', 'sha', 'by', 'at')):
         raise PermissionError(f'the yes recorded for gate {ident} is malformed: ask again')

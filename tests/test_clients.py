@@ -6,7 +6,7 @@ one job per client and backend against the repo's fakes (tests/clients_run.py) a
 contract, O1 to O9, as subtests named "<client>/<backend> <outcome>". A gap between clients is a finding: a test
 marked as an expected failure, named after it. Stdlib only; nothing leaves the machine.
 """
-import re, shutil, sys, tempfile, unittest
+import json, re, shutil, sys, tempfile, unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -333,9 +333,12 @@ class Outcomes(unittest.TestCase):
 
     def test_o5_gate(self):
         def check(job):
-            self.ok(job, 'gate', 'GATE ' + job.ident)
+            said = self.ok(job, 'gate', 'GATE ' + job.ident)
+            self.assertNotIn('typed in your pane', said, 'a merge gate opens only on the recorded yes, for every client')
+            self.assertEqual(json.loads((job.job / 'gates' / (job.ident + '.json')).read_text())['kind'], 'merge')
             notice = 'A typed yes does not count on Core; answer in the chat or on the phone that started this job.'
             brief = (job.job / 'briefs' / (Job.LEAD + '.md')).read_text()
+            self.assertIn('A merge and a push to the default branch open only with a gate asked with --kind merge', brief)
             typed = ['typed ' + text for text in ('yes', 'approve', 'go ahead')] if job.on_core else []
             if job.on_core:
                 self.assertIn(f'reply with one short line: "{notice}"', brief)
@@ -360,7 +363,7 @@ class Outcomes(unittest.TestCase):
                 self.ok(job, 'approve', f'APPROVED {job.ident} at {SHA}')
                 self.ok(job, 'gate-ok', f'APPROVED {job.ident} by owner in {job.bot} chat')
             else:
-                self.assertIn(f'Gate {job.ident}: {GATE} (PR #3) at {SHA[:12]}?', job.asked())
+                self.assertIn(f'Gate {job.ident} (merge): {GATE} (PR #3) at {SHA[:12]}?', job.asked())
                 self.refused(job, 'approve', SAY_SO if job.row['where'] == 'inside' else 'belongs to a job started locally')
                 self.ok(job, 'gate-ok', f'APPROVED {job.ident} by owner, through ask')
                 self.assertEqual(self.events(job, 'gate'), [])

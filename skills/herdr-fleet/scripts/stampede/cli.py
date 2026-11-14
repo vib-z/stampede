@@ -4,7 +4,7 @@ import json, os, shlex, subprocess, sys
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
-    doctor as doctor_, check as check_, settings as settings_
+    doctor as doctor_, check as check_, settings as settings_, gates as gates_
 
 
 def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
@@ -73,7 +73,7 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
 
 
 def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False, kind=None, app=False,
-        relay=False, space=None, max_helpers=None, lead_model=None, lead_effort=None):
+        relay=False, space=None, max_helpers=None, lead_model=None, lead_effort=None, no_gate=()):
     """Front door: make the job, start its lead with its hooks, print the lead's name.
     kind: the lead's CLI, claude (on claude-opus-5-5) or codex (on gpt-6-astra); with none, FLEET_LEAD_KIND, else claude.
     A fork of a Claude chat takes a Claude lead only.
@@ -84,11 +84,11 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     the Herdr app's space and tab labels, so the app shows them (STAMPEDE_APP_SPACE=1 is the standing choice).
     front: the chat that runs this, outside Herdr, stays the owner's only contact; the lead posts to <job>/outbox for it.
     relay: a core job of the earlier kind (follower, inbox, hooks); else a core job is native (core_native.new), where
-    space and max_helpers apply."""
+    space and max_helpers apply. no_gate: the gates switched off for this job (as --set gates.<name>=false)."""
     from . import relay as relay_
     if (space or max_helpers) and (relay or not core):
         raise ValueError('--space and --max-helpers are for a native job: new --core without --relay')
-    flags = {'lead.kind': kind, 'helpers.max': max_helpers}
+    flags = {'lead.kind': kind, 'helpers.max': max_helpers, **{'gates.' + name: False for name in no_gate}}
 
     def check(kind, settings):
         if kind not in agents_.LEAD:
@@ -143,6 +143,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     job, name = job_.new_folder(name or job_.slug(ask), owner)
     lead = job_.make_job(repo, job, ask, owner, review, name, front)
     settings_.save(job, settings)
+    gates_.begin(job, settings, repo)
     if info:
         herdrapi_.herdr('tab', 'rename', info['tab_id'], 'lead')
     else:
@@ -179,7 +180,8 @@ GROUPS = (  # the top-level help, in the order an agent meets the commands; hook
     ('gates', (('approve', "record the owner's yes to the plan"),
                ('approve-gate', "a bot: record the owner's yes to one gate"),
                ('gate-ok', 'exit 0 only when a gate has the owner\'s yes at this commit'),
-               ('cancel', 'stop a question still waiting on the phone'))),
+               ('cancel', 'stop a question still waiting on the phone'),
+               ('merge', 'merge a PR at its reviewed commit, past the merge gate'))),
     ('end and return', (('finish', 'tell the owner where the job ended, in one line'),
                         ('snapshot', 'a native job: save how to reopen it'),
                         ('reopen', 'a native job: start again what is not live'),
@@ -216,7 +218,7 @@ EXAMPLES = {
     'ask': '''examples:
   stampede ask <job> "Which database?" --option Postgres --option SQLite
   sha=$(gh pr view 12 --json headRefOid -q .headRefOid)     # the PR's head: the commit the owner says yes to
-  stampede ask <job> --gate "merge PR 12" --sha "$sha" --pr 12''',
+  stampede ask <job> --gate --kind merge "merge PR 12" --sha "$sha" --pr 12''',
     'post': '''examples:
   stampede post <job> "PLAN READY" --file <job>/plan.md
   stampede post <job> "the login page, before and after" --file before.png --file after.png''',
@@ -229,8 +231,11 @@ EXAMPLES = {
   stampede approve-gate <job> 0123456789ab --sha <40 hex> --by owner --digest <digest>''',
     'gate-ok': '''example (one commit for the check and the act, so a later push cannot slip in):
   sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
-  stampede gate-ok <job> 0123456789ab --sha "$sha" && gh pr merge 12 --squash --match-head-commit "$sha"''',
+  stampede gate-ok <job> 0123456789ab --sha "$sha"     # a merge: stampede merge checks it itself''',
     'cancel': 'example:\n  stampede cancel <job> 0123456789ab',
+    'merge': '''example (the review report carries Status: PASS and Reviewed: <that sha> in its first 10 lines):
+  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
+  stampede merge <job> 12 --sha "$sha" --review <job>/reports/review-api.md --gate 0123456789ab''',
     'finish': 'example:\n  stampede finish <job> "PR 12 merged; the report is <job>/reports/lead.md"',
     'snapshot': 'example:\n  stampede snapshot <job>',
     'reopen': 'examples:\n  stampede reopen <job>\n  stampede reopen <job> --fresh',
@@ -289,6 +294,8 @@ def main(argv):
     p.add_argument('--max-helpers', type=int, help='with --core: helpers running at once (default: the setting helpers.max, 12)')
     p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE', help='a setting for this job, above every '
                    'other layer, such as helpers.max=6 (repeatable; saved in <job>/settings.json; stampede config show lists them)')
+    p.add_argument('--no-gate', action='append', default=[], metavar='NAME', help='switch this gate off for this job only, as '
+                   '--set gates.<name>=false (repeatable; logged in <job>/gates.log): ' + ', '.join(gates_.names()))
     p = start_parser = command('start', 'Start a worker in the job, or restart its lead: its brief pointer is its first message.\n'
                                         'Kinds: on a Herdr TUI job claude, codex or cursor; on a --core --relay job claude or codex in a\n'
                                         'Core terminal, and cursor, hermes or kimi handed to a Herdr TUI --pane; on a native job\n'
@@ -322,6 +329,8 @@ def main(argv):
     p.add_argument('question', nargs='+', help='the question, or with --gate the action')
     p.add_argument('--gate', action='store_true', help='a gate: one exact action at one commit, yes or no')
     p.add_argument('--sha', help='with --gate: the full commit id it is about'); p.add_argument('--pr', type=int, help='with --gate: the PR number')
+    p.add_argument('--kind', choices=gates_.names(), help='with --gate: which gate it is; stampede merge takes only a merge gate, '
+                   'and a job\'s push to the default branch only a push_default_branch gate')
     p = command('post', 'Put an item for the owner in <job>/outbox/<n>.md, with its files copied beside it. A job a bot\n'
                         'started also sends that bot the item; a front door reads it with stampede wait.')
     p.add_argument('job', help=JOB); p.add_argument('text', nargs='+', help='the item\'s text')
@@ -353,6 +362,13 @@ def main(argv):
     p.add_argument('job', help=JOB); p.add_argument('gate', help='the gate\'s id (12 hex)')
     p.add_argument('--sha', required=True, help='the full commit id about to be acted on')
     p = command('cancel'); p.add_argument('job', help=JOB); p.add_argument('ident', help='the question\'s id (ASKED prints it)')
+    p = command('merge', 'Merge a PR at the commit its review passed: the report must say Status: PASS and Reviewed: <sha> in its\n'
+                         'first 10 lines and the PR\'s head must be that sha; with the merge gate on (gates.merge), --gate must\n'
+                         'hold the owner\'s yes at it. Exit 0 merged, 2 refused (the line says what to do), 1 when gh failed.')
+    p.add_argument('job', help=JOB); p.add_argument('pr', type=int, help='the PR number')
+    p.add_argument('--sha', required=True, help='the full commit id the review passed')
+    p.add_argument('--review', required=True, help='the reviewer\'s report file')
+    p.add_argument('--gate', help='the merge gate\'s id (12 hex), approved at --sha')
     p = command('finish', 'Tell the owner where the job ended, in one line: one done event, sent once. Questions still\n'
                           'waiting on the phone are cancelled.')
     p.add_argument('job', help=JOB); p.add_argument('summary', nargs='+', help='one line on where the job ended')
@@ -374,6 +390,7 @@ def main(argv):
                      epilog=EXAMPLES['config'], formatter_class=form)
     p.add_argument('--json', action='store_true', help='{"values", "sources", "files", "environment", "problems"}')
     p.add_argument('--job', help='a job folder: the settings it saved at new (else the repo is the git root here)')
+    p = sub.add_parser('prepush'); p.add_argument('remote'); p.add_argument('url', nargs='?')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
     p.add_argument('payload', nargs='?', help="Codex's notify JSON, passed as the last argument; other hooks read stdin")
     p = sub.add_parser('_reopen'); p.add_argument('job')
@@ -494,10 +511,15 @@ def run(a):
         settings_.parse_set(pair)  # a bad pair is refused before anything runs
     settings_.SETS[:] = getattr(a, 'set', None) or []
     if a.cmd == 'config':
-        found = settings_.current(a.job) if a.job else settings_.load(repo=repo_of())
+        found = gates_.overlay(settings_.current(a.job), a.job) if a.job else settings_.load(repo=repo_of())
         print(settings_.show(found, a.json).rstrip('\n'))
         return 1 if found.problems else 0
+    if a.cmd == 'prepush':
+        return gates_.prepush(a.remote, sys.stdin.read().splitlines(), url=a.url)
     if a.cmd == 'new':
+        unknown = [name for name in a.no_gate if name not in gates_.names()]
+        if unknown:
+            raise ValueError(f'--no-gate {unknown[0]} is no gate: it takes ' + ', '.join(gates_.names()))
         core, why = backend_for(a)
         if a.cwd and not core:
             raise ValueError('--cwd is for a job on Herdr Core (new --core)')
@@ -509,7 +531,7 @@ def run(a):
             try:
                 return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,
                            app=a.app_space, relay=a.relay, space=a.space, max_helpers=a.max_helpers, lead_model=a.lead_model,
-                           lead_effort=a.lead_effort)
+                           lead_effort=a.lead_effort, no_gate=a.no_gate)
             except ValueError as error:
                 if why and any(text in str(error) for text in ('did not answer', 'not installed', 'needs --cwd')):
                     raise base_.Retry(f'{base_.line(error)}; {why}, so start Herdr Core (hc server start) or pass --cwd <repo>, '
@@ -519,7 +541,7 @@ def run(a):
                 raise
         return new(a.file, a.workspace or os.environ.get('HERDR_WORKSPACE_ID'), a.name, a.review, a.pane, a.fork, front=a.front_door,
                    kind=a.lead, app=a.app_space, space=a.space, max_helpers=a.max_helpers, lead_model=a.lead_model,
-                   lead_effort=a.lead_effort)
+                   lead_effort=a.lead_effort, no_gate=a.no_gate)
     if a.cmd == 'start' and not a.program:
         a.kind, a.model, a.effort = role_defaults(a.job, a.agent, a.kind, a.model, a.effort)
     job = getattr(a, 'job', None)
@@ -551,7 +573,9 @@ def run(a):
     if a.cmd == 'ask' and a.gate:
         if a.option or not a.sha:
             raise ValueError('a gate takes --sha and no --option: one exact action, yes or no; ask each choice as its own gate')
-        return owner_.ask_gate(a.job, ' '.join(a.question), a.sha, a.pr)
+        return owner_.ask_gate(a.job, ' '.join(a.question), a.sha, a.pr, a.kind)
+    if a.cmd == 'ask' and a.kind:
+        raise ValueError('--kind is for a gate: ask --gate --kind <name>')
     if a.cmd == 'ask':
         return owner_.ask(a.job, ' '.join(a.question), a.option) and 0
     if a.cmd == 'approve-gate':
@@ -562,6 +586,8 @@ def run(a):
         return owner_.cancel(a.job, a.ident)
     if a.cmd == 'approve':
         return owner_.approve(a.job, a.by)
+    if a.cmd == 'merge':
+        return gates_.merge(a.job, a.pr, a.sha, a.review, a.gate) and 0
     if a.cmd == 'finish':
         return owner_.finish(a.job, ' '.join(a.summary))
     if a.cmd == '_reopen':

@@ -373,7 +373,7 @@ class Job:
         """O5: the lead asks a gate. Before the owner's yes, and after each approve-gate that must be refused, gate-ok
         refuses and no yes is recorded (`closed`); then the real yes, the bot's approve-gate over ssh or the tap on the
         phone card, opens it for that commit only."""
-        out = self.lead('gate', 'ask', self.job, '--gate', '--sha', SHA, '--pr', '3', GATE)[1]
+        out = self.lead('gate', 'ask', self.job, '--gate', '--kind', 'merge', '--sha', SHA, '--pr', '3', GATE)[1]
         self.ident = ident = (re.findall(r'^GATE ([0-9a-f]{12}) ', out, re.M) or ['000000000000'])[0]
         event = next((q['payload'] for q in self.queued() if q['payload'].get('gate') == ident), None)
         digest = ('--digest', shlex.split(event['approve'])[shlex.split(event['approve']).index('--digest') + 1]) \

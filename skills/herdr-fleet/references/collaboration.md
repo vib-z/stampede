@@ -50,12 +50,12 @@ Default: one Codex review pass at the end (see Thinker and doer in SKILL.md). Th
 6. If there are real bugs, the builder fixes them, one commit per finding, and appends "Review fixes" to its report.
 7. The reviewer rechecks only those IDs, once. Stop at pass. There is no second loop for style. If a recheck still finds a real bug, the lead decides.
 
-When a passed review stands (no second review run, the gates still run):
-- The only change since the reviewed commit is a clean merge of main, or a conflict fix that touches only the conflicted files: rerun the gates, not the reviewer.
-- A follow-up message to the builder changed no files (`git diff <reviewed-sha>` is empty): nothing to rerun.
+Every review report starts with its header: a title line, then `Status: PASS` (or `FINDINGS`) and `Reviewed: <the full sha it reviewed>`, each once at the start of a line, before anything else. `stampede merge` merges only the sha a passing report names ([gates.md](gates.md)), so every new head needs a report that names it:
+- A clean merge of main or a clean rebase, or a conflict fix that touches only the conflicted files: the reviewer confirms it from the range-diff (`git range-diff <old base>..<reviewed sha> <new base>..<new head>`) and writes a short report with the new sha; the gates run again.
+- A follow-up message to the builder changed no files (`git diff <reviewed-sha>` is empty): the head did not move, nothing to rerun.
 - Anything else reopens the review, for the changed files only.
 
-The lead writes the reviewed commit into `register.md` (`Reviewed: <lane> <sha>`) and moves it to the new head when the review stands as above. The merge pins it (`gh pr merge <n> --squash --match-head-commit <sha>`, see Wrap up in SKILL.md), so a commit nobody reviewed cannot slip into the merge.
+The lead writes the reviewed commit into `register.md` (`Reviewed: <lane> <sha>`), and moves it only when a new report names the new head.
 
 Variations that have worked:
 - **Cross-vendor pair.** Claude builds and Codex reviews (the default), or Claude reviews a Codex build.

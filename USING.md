@@ -30,7 +30,7 @@ stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr 
 |---|---|---|
 | `stampede tell <job> lead "<the owner's words>"` | the front door | passes words on, verbatim |
 | `stampede ask <job> "<question>" [--option <a>]` | the lead | asks the owner; prints `ASKED <id>` |
-| `stampede ask <job> --gate --sha <commit> [--pr <n>] "<action>"` | the lead | asks for a gate; prints `GATE <id>` |
+| `stampede ask <job> --gate [--kind merge] --sha <commit> "<action>"` | the lead | asks for a gate; prints `GATE <id>` |
 | `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a screenshot, a report; prints `POSTED <n>` and who hears it |
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
@@ -43,7 +43,7 @@ Always `<jobs_root>/jobs/<YYYY-MM-DD>-<owner or local>-<name>` (default root `~/
 
 ## What always needs the owner's yes
 
-Merges, pushes to shared branches, deploys, sends, spends and closes: the list and how a gate is asked and passed are in [gates.md](skills/herdr-fleet/references/gates.md).
+Merges, pushes to shared branches, deploys, sends, spends and closes: the list and how a gate is asked and passed are in [gates.md](skills/herdr-fleet/references/gates.md). Merge with `stampede merge`, never `gh pr merge`.
 
 ## Searching this repo
 

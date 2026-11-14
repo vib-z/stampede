@@ -13,9 +13,9 @@ from stampede import base as base_, check as check_, doctor as doctor_  # noqa: 
 from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 from quiet import quiet  # noqa: E402
 
-ORDER = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'next', 'tree', 'approve', 'approve-gate', 'gate-ok', 'cancel',
+ORDER = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'next', 'tree', 'approve', 'approve-gate', 'gate-ok', 'cancel', 'merge',
          'finish', 'snapshot', 'reopen', 'close', 'config', 'doctor', 'check', 'update')
-HIDDEN = ('hook', '_reopen', '_deliver', '_wake', '_ask')
+HIDDEN = ('hook', 'prepush', '_reopen', '_deliver', '_wake', '_ask')
 
 
 class Cli(unittest.TestCase):
@@ -226,12 +226,13 @@ class Cli(unittest.TestCase):
         self.assertIn('git -C ~ status', said)
 
     def test_the_gate_examples_bind_one_commit_for_the_check_and_the_act(self):
-        texts = [self.stampede(name, '--help').stdout for name in ('ask', 'gate-ok')] + [(ROOT / 'docs/CLI.md').read_text()]
+        texts = [self.stampede(name, '--help').stdout for name in ('ask', 'gate-ok', 'merge')] + [(ROOT / 'docs/CLI.md').read_text()]
         for text in texts:
             for merge in re.findall(r'gh pr merge[^\n]*', text):
-                self.assertIn('--match-head-commit "$sha"', merge)
+                self.assertIn('--match-head-commit', merge)
             self.assertNotIn('rev-parse HEAD', text)
-        self.assertIn('stampede gate-ok <job> 0123456789ab --sha "$sha" && gh pr merge 12 --squash --match-head-commit "$sha"', texts[1])
+        self.assertIn('stampede gate-ok <job> 0123456789ab --sha "$sha"', texts[1])
+        self.assertIn('stampede merge <job> 12 --sha "$sha" --review', texts[2])
 
     def test_the_hint_outside_herdr_runs_as_printed_with_spaces_in_its_paths(self):
         repo = self.home / 'repo with spaces'

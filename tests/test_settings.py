@@ -60,7 +60,9 @@ class Settings(unittest.TestCase):
             'brief.sections': ['Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked'],
             **{f'roles.{role}.{field}': value for role, row in ROLES.items() for field, value in zip(('kind', 'model', 'effort'), row)},
             'review.step': 'end', 'helpers.max': 12, 'helpers.layout': 'grid', 'helpers.tab_panes': 4,
-            'timeouts.wait': 3600, 'timeouts.hc_call': 60, 'timeouts.leave': 15, 'timeouts.hold_settle': 5})
+            'timeouts.wait': 3600, 'timeouts.hc_call': 60, 'timeouts.leave': 15, 'timeouts.hold_settle': 5,
+            **{'gates.' + g: True for g in ('merge', 'push_default_branch', 'deploy', 'publish', 'send', 'spend', 'close')},
+            'merge.method': 'squash'})
         self.assertEqual(set(s.sources.values()), {'default'})
         self.assertEqual(s.problems, [])
         self.assertEqual(s.files, {'user': {'path': str(self.home / '.config/stampede/config.toml'), 'exists': False},
