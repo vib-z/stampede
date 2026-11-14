@@ -126,7 +126,7 @@ Flags: `--relay` forces relay checks; `--core` checks Herdr Core in place of the
 
 Agents start and run without a visit to their pane only after two one-time steps, which you run yourself (an agent cannot change its own permissions):
 - `herdr-trust <repo dir>` for each repo, before agents start there. It marks the repo's main checkout trusted for Claude (`~/.claude.json`) and, when `~/.codex` exists, for Codex (`~/.codex/config.toml`); worktrees are covered. It refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`).
-- The Claude settings for auto mode and the lead's Herdr commands: [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md).
+- The Claude settings for auto mode and the lead's Herdr commands: run the one command in [unattended-setup.md, The settings](../skills/herdr-fleet/references/unattended-setup.md#the-settings-claudesettingsjson-user-scope) yourself, in a terminal. It backs up `~/.claude/settings.json`, then adds the rules, and is safe to run again; `claude auto-mode config` shows the result. Without it, Claude's auto mode refuses the lead's `herdr agent start`, so the lead cannot start other agents, and Claude stops at the end of a turn to offer its own auto-mode setup.
 
 ## Configure
 

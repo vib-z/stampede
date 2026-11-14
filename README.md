@@ -32,7 +32,7 @@ Optional: a [bot on your phone](docs/GUIDE.md#front-doors) that starts jobs and 
 
 ## Install
 
-Open a terminal and run these lines one at a time:
+Open a terminal (the app where you type commands) and run these lines one at a time:
 
 ```bash
 git clone https://github.com/vib-z/stampede.git ~/stampede
@@ -49,16 +49,14 @@ The full install, installing it as a Herdr plugin, and updating: [docs/SETUP.md]
 
 ## Your first job
 
-1. Once per computer, follow the [unattended setup](skills/herdr-fleet/references/unattended-setup.md). It lets agents start without stopping to ask you for permission.
-2. Your project must be a git folder inside `~/code`. Once per project, run `herdr-trust ~/code/my-app` (use your project's folder).
+1. Once per computer, do the [one-time settings](docs/SETUP.md#unattended-agents). They let the lead start more agents in Herdr without stopping to ask you at each step.
+2. Your project must be a folder inside `~/code` that uses git (a tool that keeps the history of your files). Once per project, run `herdr-trust ~/code/my-app` (use your project's folder).
 3. Write what you want in a file outside the project, such as `~/ask.md`:
 
    ```text
    Add a page that says hello, with a test.
-   Have a second agent check it, then open a draft pull request.
+   Have a second agent check the work.
    ```
-
-   A pull request is a proposed change to the code. A draft one is not ready to merge yet.
 4. Open Herdr: type `herdr` in a terminal. In its pane, go to your project with `cd ~/code/my-app`.
 5. Start the job:
 
@@ -75,11 +73,12 @@ The same job, command by command: [the guide](docs/GUIDE.md#use-one-job-start-to
 
 ## How it keeps you safe
 
-- You give your yes before each of these: a merge, a push to the main branch, a deploy, publishing, sending messages, spending money, and closing tabs or panes.
+- You give your yes before each of these: a merge (adding the work to your project's main code), a push to the main branch,
+  a deploy (putting it live), publishing, sending messages, spending money, and closing tabs or panes.
 - A merge takes only the exact version of the code that a reviewer passed.
 - Agents never close anything the job did not start.
-- Agents run in auto mode, so their program still checks each risky command.
-- Pushing the job's own branch and opening a draft pull request need no yes.
+- Agents do small steps without asking you each time, with their agent program's own checks still on.
+- Agents may save their work on a side branch (a separate copy of your code) and open a draft pull request (a proposed change, not yet accepted) without asking.
 
 Every rule, and who records your yes: [docs/SAFETY.md](docs/SAFETY.md).
 
