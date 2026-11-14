@@ -668,5 +668,35 @@ class Install(unittest.TestCase):
         self.assertEqual(int((state / 'supervise.pid').read_text()), pid)
 
 
+class UnattendedSettings(unittest.TestCase):
+    """The one-time settings command in unattended-setup.md, taken from the page and run in a scratch HOME: it makes
+    ~/.claude/settings.json from nothing, keeps every setting already there, and gives the same file when run again."""
+
+    def run_snippet(self, home):
+        page = (ROOT / 'skills/herdr-fleet/references/unattended-setup.md').read_text()
+        code = page.split("python3 - <<'EOF'\n", 1)[1].split('\nEOF\n', 1)[0]
+        env = {'HOME': str(home), 'PATH': os.environ['PATH']}
+        done = subprocess.run([sys.executable, '-'], input=code, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads((home / '.claude/settings.json').read_text())
+
+    def test_from_nothing_an_empty_file_or_other_settings(self):
+        for start in (None, '', '{"theme": "dark", "permissions": {"allow": ["Bash(ls:*)"]}}'):
+            with tempfile.TemporaryDirectory() as folder:
+                home = Path(folder)
+                if start is not None:
+                    (home / '.claude').mkdir()
+                    (home / '.claude/settings.json').write_text(start)
+                first = self.run_snippet(home)
+                backups = list((home / '.claude').glob('settings.json.bak-*'))
+                self.assertEqual(len(backups), 0 if start is None else 1, 'only a file that exists is backed up')
+                self.assertEqual(first['skillOverrides']['auto-mode-setup'], 'off', start)
+                self.assertIn('Bash(herdr agent start:*)', first['permissions']['allow'])
+                self.assertEqual(self.run_snippet(home), first, 'a second run changes nothing')
+                if start and start.strip():
+                    self.assertEqual(first['theme'], 'dark')
+                    self.assertIn('Bash(ls:*)', first['permissions']['allow'])
+
+
 if __name__ == '__main__':
     unittest.main()

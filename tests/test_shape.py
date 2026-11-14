@@ -34,8 +34,6 @@ MODEL_OK = ("config.example", "skills/", "tests/")  # the only places a model na
 SKILL_BYTES, PLAYBOOK_BYTES, LINE_CHARS = 6000, 8000, 400  # a playbook is read whole by an agent: short in bytes, not only lines
 # core-relay.md describes the deprecated --core --relay path and is deleted in v0.3.0: no byte or line-length limit until then.
 LONG_OK = {"skills/herdr-fleet/references/core-relay.md"}
-# History is left as written: its links into README sections that moved to docs/ keep their old anchors.
-HISTORY_FILES = {"CHANGELOG.md", "docs/RUNS.md"}
 README_LINES, README_CHARS = 100, 200  # AGENTS.md section 1: the README is a short front page
 PAGES = ("docs/GUIDE.md", "docs/SETUP.md", "docs/CORE.md", "docs/SAFETY.md", "docs/CONFIGURE.md", "docs/TROUBLESHOOT.md",
          "docs/REFERENCE.md", "docs/STATUS.md", "USING.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE")
@@ -204,8 +202,6 @@ class Shape(unittest.TestCase):
                 dest = (p.parent / path).resolve() if path else p
                 if not dest.exists():
                     bad.append(f"{rel(p)}: broken link {target}")
-                elif rel(p) in HISTORY_FILES and dest == ROOT / "README.md":
-                    continue
                 elif anchor and dest.suffix == ".md" and anchor not in anchors(dest):
                     bad.append(f"{rel(p)}: missing anchor {target}")
         self.assertEqual(bad, [], "\n".join(bad))

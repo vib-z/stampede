@@ -1,5 +1,7 @@
 # Reference
 
+Every command and helper script with its exit codes, how the code is laid out, every doc, and the credits.
+
 ## `stampede` commands and exit codes
 
 Every command with its flags, the status words it prints (`STARTED`, `QUEUED`, `DELIVERED`, `SUBMITTED`, `BLOCKED`, `APPROVED`, `TIMEOUT`, `LEAD_GONE` and the rest) and one table of exit codes: [docs/CLI.md](CLI.md).

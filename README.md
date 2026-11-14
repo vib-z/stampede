@@ -16,7 +16,7 @@
 
 You give stampede one big task, written in your own words.
 One AI agent (a program that writes and runs code for you), called the lead, plans the work and does it.
-It works on your computer inside [Herdr](https://herdr.dev), an app that shows each agent in its own pane, so you can watch.
+It works on your computer inside [Herdr](https://herdr.dev), an app that shows each agent in its own pane (a part of the Herdr window), so you can watch.
 The lead brings in more agents only when that helps.
 It comes back to you only with real questions, and to ask before anything risky.
 
@@ -24,11 +24,13 @@ It comes back to you only with real questions, and to ask before anything risky.
 
 - A Mac or a Linux computer.
 - [Herdr](https://herdr.dev/docs/install/) 0.9.4 or later.
-- At least one agent program, signed in: [Claude Code](https://code.claude.com/docs/en/setup) leads by default, and [Codex](https://developers.openai.com/codex/cli) can lead too.
+- [Claude Code](https://code.claude.com/docs/en/setup), signed in: it leads the job by default.
 - Python 3.9 or later.
 - git, jq and curl, three small tools for the terminal.
+- Optional: [Codex](https://developers.openai.com/codex/cli), to work beside the lead or to [lead a job](docs/GUIDE.md#use-one-job-start-to-finish) with `--lead codex`.
 
-Optional: a [bot on your phone](docs/GUIDE.md#front-doors) that starts jobs and asks you questions, and [Herdr Core](docs/CORE.md). The tested versions: [docs/SETUP.md](docs/SETUP.md#what-you-need).
+Also optional: a [bot on your phone](docs/GUIDE.md#front-doors) that starts jobs and asks you questions, and [Herdr Core](docs/CORE.md).
+The tested versions: [docs/SETUP.md](docs/SETUP.md#what-you-need).
 
 ## Install
 
@@ -43,9 +45,9 @@ stampede doctor
 ```
 
 The first line copies stampede to your computer, and `install.sh` sets up its commands.
-The `export` line lets your terminal find them. Add it to your shell profile (`~/.zshrc` on a Mac, `~/.bashrc` on Linux) so it stays.
+The `export` line lets your terminal find them. Add it to your shell profile (a settings file your terminal reads when it opens: `~/.zshrc` on a Mac, `~/.bashrc` on Linux) so it stays.
 Run `stampede doctor` while Herdr is open. Each line says `ok`, or names a problem and how to fix it.
-The full install, installing it as a Herdr plugin, and updating: [docs/SETUP.md](docs/SETUP.md).
+The full install, other ways to install, and updating: [docs/SETUP.md](docs/SETUP.md).
 
 ## Your first job
 
@@ -66,7 +68,7 @@ The full install, installing it as a Herdr plugin, and updating: [docs/SETUP.md]
 
    The last line it prints names the lead and the job's folder.
 6. A new tab named `lead` appears in Herdr, with the lead agent in it. Click it to watch. The lead writes a plan, then starts work. Each extra agent it brings in gets a pane of its own.
-7. If the lead needs you, it asks in its tab. Type your answer there. With [Moshi](remote/moshi.md), its questions reach your phone too.
+7. If the lead needs you, it asks in its tab: a question appears there, and you pick or type your answer. With [Moshi](remote/moshi.md) set up, its questions reach your phone too.
 8. At the end, the lead writes a short report in its tab. Then it asks whether to close the job, and nothing closes until you say yes.
 
 The same job, command by command: [the guide](docs/GUIDE.md#use-one-job-start-to-finish). If something goes wrong: [docs/TROUBLESHOOT.md](docs/TROUBLESHOOT.md).
@@ -77,7 +79,7 @@ The same job, command by command: [the guide](docs/GUIDE.md#use-one-job-start-to
   a deploy (putting it live), publishing, sending messages, spending money, and closing tabs or panes.
 - A merge takes only the exact version of the code that a reviewer passed.
 - Agents never close anything the job did not start.
-- Agents do small steps without asking you each time, with their agent program's own checks still on.
+- By default, agents do small steps without asking you each time, with their agent program's own checks still on.
 - Agents may save their work on a side branch (a separate copy of your code) and open a draft pull request (a proposed change, not yet accepted) without asking.
 
 Every rule, and who records your yes: [docs/SAFETY.md](docs/SAFETY.md).
@@ -86,11 +88,11 @@ Every rule, and who records your yes: [docs/SAFETY.md](docs/SAFETY.md).
 
 - [The guide](docs/GUIDE.md): how a job flows, what stampede works with, one job command by command, and every way to start one.
 - [Setup](docs/SETUP.md): the full install, updating, the one-time settings and uninstalling.
-- [Herdr Core](docs/CORE.md): running a job on Herdr Core, Herdr's terminal runtime, instead of in Herdr's tabs.
+- [Herdr Core](docs/CORE.md): how to run a job on Herdr Core, a second way to run jobs without Herdr's tabs and panes.
 - [Safety](docs/SAFETY.md): every step that needs your yes, and what the code holds.
 - [Configure](docs/CONFIGURE.md): every setting and its default.
 - [Troubleshoot](docs/TROUBLESHOOT.md): each message you may see, its fix, and the FAQ.
-- [Reference](docs/REFERENCE.md): every command and script with its exit codes, the repo layout, every doc, and the credits.
+- [Reference](docs/REFERENCE.md): every command and script with its exit codes, how the code is laid out, every doc, and the credits.
 - [Status and roadmap](docs/STATUS.md): what works, how it was tested, and what comes next.
 - [For an agent](USING.md): the one page an agent reads before it runs a job.
 - [Changelog](CHANGELOG.md): what each version shipped.

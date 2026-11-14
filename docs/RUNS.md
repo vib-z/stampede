@@ -146,7 +146,7 @@ The tester logged 22 places where it got stuck, guessed or needed help. Each is 
 - **`stampede` was not on PATH from a checkout.** Briefs now name the checkout's `scripts/stampede` by absolute path, and the README says how to run without an install.
 - **A report counted as done whatever it said.** Two designers wrote "not ready" notes at their report paths. A report now counts only with `Status: DONE` (or `PASS` for a review) in its first lines; progress goes to `work/progress/`.
 - **Launch skipped the plan's worktree.** Launch now reads the `Worktrees:` line and makes the worktree before any agent starts.
-- **Gates ran on two channels and raced.** The tester asked the owner a gate question the step pane was already asking. `SKILL.md` and the [Safety](../README.md#safety) section now say where each gate is answered.
+- **Gates ran on two channels and raced.** The tester asked the owner a gate question the step pane was already asking. `SKILL.md` and the [Safety](SAFETY.md) section now say where each gate is answered.
 - **The phone approval link died** when its server stopped. Serving on a Tailscale address is now documented, the server keeps serving until approve or a confirmed Cancel, and Cancel needs a second tap.
 - **The lead's pane was too narrow for its question cards**, sharing a tab with researchers. The lead now gets a tab of its own, and the fleet a new workspace by default.
 - **Four of five watch alarms were false**, for finished step agents and finished lanes. The watch now follows only lane agents with a lane still open, and the reopen record leaves out the entry pane.
@@ -276,7 +276,7 @@ Fixed after the run, on branch `fixes-run2`:
 - **`stampede tell <job> lead` bounced**, since no brief named the lead. `lead` now names the job's lead.
 - **"Added rather than reinvented", and "took very long".** For product or UI work the plan now carries a design direction (start from the user's job, cut before adding, fewer and stronger sections) and a design reviewer judges hierarchy and restraint; every plan is lean by default: the smallest team, one checker per round on another model (two, code and design, when builders make screens), and stops only for the gates and the picks the ask names.
 - **Not every stall was a lost wake.** At 09:46 a builder got the owner's decision through its inbox, and its own safety check refused the command that read a key file; the lead misread its question, and nothing moved for 25 minutes. The refusal stays: a relayed approval to read a secrets file is the check doing its job.
-- **Would `/goal` keep each agent to its job?** The owner asked. A worker's own `Stop` hook now sends it back once when it stops without its report, reading the real file; `/goal` and forks of the lead were tried and not adopted ([why](../README.md#troubleshoot)).
+- **Would `/goal` keep each agent to its job?** The owner asked. A worker's own `Stop` hook now sends it back once when it stops without its report, reading the real file; `/goal` and forks of the lead were tried and not adopted ([why](TROUBLESHOOT.md)).
 
 ## Run 5: a property-data research and build job, by a fresh tester
 

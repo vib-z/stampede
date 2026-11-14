@@ -16,21 +16,19 @@ The short version is in the [README](../README.md#install). This page has the wh
 
 ## What you need
 
-macOS or Linux, Herdr 0.9.4 or later, Claude Code (the lead by default), optionally Codex (workers, or the lead with `stampede new --lead codex`) and Cursor for workers, Python 3.9 or later, git, jq and curl (on Linux also `flock` from util-linux and `ps` from procps). Tested versions: the table below; Linux in detail: [LINUX.md](LINUX.md). Moshi's `moshi-hook` puts the lead's questions on your phone; without it, `stampede ask` reports `ASK FAILED ... exit 127` to the lead's inbox.
-
-**Prerequisites** (tested on macOS 27.2 and Ubuntu 24.04 arm64, 8 to 13 Nov 2026; Linux in detail: [docs/LINUX.md](LINUX.md)):
+macOS or Linux, with these tools (tested on macOS 27.2 and Ubuntu 24.04 arm64, 8 to 13 Nov 2026; Linux in detail: [LINUX.md](LINUX.md)):
 
 | tool | version tested | needed for |
 |---|---|---|
 | [Herdr](https://herdr.dev/docs/install/) | 0.9.5 (0.9.4 or later: the plugin and `herdr-doctor` check it) | the panes |
 | [Herdr Core](https://herdr.dev/core/) `hc` | 0.1.20 (0.1.13 or later; below 0.1.20 `herdr-doctor` warns); the Core-native path ran on 0.1.21 | a job on Herdr Core, optional |
 | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.306 (2.1.295 or later on Herdr Core, for its status) | the lead, and workers |
-| [Codex CLI](https://developers.openai.com/codex/cli) | 0.163.0 (0.165.0 checked for `--no-daemon` on Herdr Core, 0.167.1 for a Codex lead's empty prompt) | workers, optional |
+| [Codex CLI](https://developers.openai.com/codex/cli) | 0.163.0 (0.165.0 checked for `--no-daemon` on Herdr Core, 0.167.1 for a Codex lead's empty prompt) | workers, or the lead with `stampede new --lead codex`; optional |
 | [Cursor Agent](https://cursor.com/docs/cli/installation) | 2026.10.19 | workers, optional |
 | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.22.5 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
 | [Kimi Code](https://moonshotai.github.io/kimi-code/) | 2.2.0 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
-| Python 3, git, jq, curl; on Linux also `flock` (util-linux) and `ps` (procps) | Python 3.9 (the tests need 3.11), git 2.56, jq 1.7 | the scripts |
-| [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.50 (`ask`, `notify` and `job` flags checked with `--help`; on Linux, unpaired) | questions on your phone, optional |
+| Python 3, git, jq, curl; on Linux also `flock` (util-linux) and `ps` (procps) | Python 3.9 (3.9 or later; the tests need 3.11), git 2.56, jq 1.7 | the scripts |
+| [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.50 (`ask`, `notify` and `job` flags checked with `--help`; on Linux, unpaired) | questions on your phone, optional (without it, see [Setup problems](#setup-problems)) |
 | [Tailscale](https://tailscale.com/kb/1017/install) | 1.104.1 | a bot on another computer, optional |
 
 ## Install
@@ -126,7 +124,7 @@ Flags: `--relay` forces relay checks; `--core` checks Herdr Core in place of the
 
 Agents start and run without a visit to their pane only after two one-time steps, which you run yourself (an agent cannot change its own permissions):
 - `herdr-trust <repo dir>` for each repo, before agents start there. It marks the repo's main checkout trusted for Claude (`~/.claude.json`) and, when `~/.codex` exists, for Codex (`~/.codex/config.toml`); worktrees are covered. It refuses a repo outside `FLEET_TRUST_ROOT` (default `~/code`).
-- The Claude settings for auto mode and the lead's Herdr commands: run the one command in [unattended-setup.md, The settings](../skills/herdr-fleet/references/unattended-setup.md#the-settings-claudesettingsjson-user-scope) yourself, in a terminal. It backs up `~/.claude/settings.json`, then adds the rules, and is safe to run again; `claude auto-mode config` shows the result. Without it, Claude's auto mode refuses the lead's `herdr agent start`, so the lead cannot start other agents, and Claude stops at the end of a turn to offer its own auto-mode setup.
+- The Claude settings for auto mode and the lead's Herdr commands: run the one command in [unattended-setup.md, The settings](../skills/herdr-fleet/references/unattended-setup.md#the-settings-claudesettingsjson-user-scope) yourself, in a terminal. It makes `~/.claude/settings.json` when it is missing, backs up one that exists, then adds the rules and keeps every setting already there; it is safe to run again; `claude auto-mode config` shows the result. Without it, Claude's auto mode refuses the lead's `herdr agent start`, so the lead cannot start other agents, and Claude stops at the end of a turn to offer its own auto-mode setup.
 
 ## Configure
 
@@ -189,5 +187,5 @@ Job folders (`~/code/herdr-jobs/`, or `FLEET_JOBS_ROOT`; older Core jobs in `<re
 | `skip ... left as is` | something of yours is at that path; remove it if you want stampede's link there, then re-run |
 | `refused: there is no ~/code folder to trust repos under`, or `warn no ~/code (FLEET_TRUST_ROOT)` from `herdr-doctor` | the trust root (`FLEET_TRUST_ROOT`, default `~/code`) does not exist; create it or change the key |
 | `... not in the plugin checkout ...` from `herdr-doctor` | the links point at an old plugin checkout, which Herdr deletes at its next start: rerun the current one's installer ([Update](#update)) |
-| `ASK FAILED ... exit 127` in the lead's inbox | `moshi-hook` is not installed, so no question or gate left the Mac, though `stampede ask` printed `ASKED` or `GATE ... on the phone`: type your answer in the lead's pane, or install Moshi or set `FLEET_ASK_CMD` |
+| `stampede ask: the ask command is not installed (moshi-hook is not on PATH), so the owner could never answer: ...` (exit 2) | `moshi-hook` is not installed, so stampede asks nothing: a Claude lead on the Herdr TUI asks on its own question card in its pane instead, and you answer there; install Moshi, or set `ask.command` (`FLEET_ASK_CMD`), to get questions on your phone |
 | a dialog at an agent's start | [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md) and [failure-modes.md](../skills/herdr-fleet/references/failure-modes.md) |

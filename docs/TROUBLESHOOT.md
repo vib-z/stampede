@@ -1,5 +1,7 @@
 # Troubleshoot
 
+Each message you may see, with its fix, then the FAQ.
+
 | what you see | fix |
 |---|---|
 | `refused: a workspace labelled <label> is already open` from `reopen.sh`, with `none of this job's agents runs there` | after a Herdr server restart, Herdr restores the job's workspace with plain shells: close that workspace (your yes, as for any close), then run `reopen.sh` again |

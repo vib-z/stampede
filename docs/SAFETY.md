@@ -1,5 +1,7 @@
 # Safety
 
+What never happens without your yes, who records that yes, and what the code holds.
+
 - **Your own yes, every time:** a merge to main, a push to main or another shared branch, a deploy, publishing, sending email or messages, resubmitting a sitemap, any spend, and closing panes, tabs, a workspace or a Core job (`stampede close`). Pushing the job's own work branch and opening a draft PR need no ask. The one list, and what never counts as a yes: [gates.md](../skills/herdr-fleet/references/gates.md).
 - **Gates go back to whoever started the job.** `stampede new` records the bot that started it (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`. The lead asks each gate with `stampede ask <job> --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>"` (`--kind merge` for a merge, `--kind push_default_branch` for a push to the default branch; a gate for anything else has no kind):
   - **started by a bot:** a `gate` event goes to that bot ([remote/events.md](../remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, which records it in `<job>/gates/`.

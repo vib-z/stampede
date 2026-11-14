@@ -20,14 +20,16 @@ An agent cannot apply these: writing its own permission settings is refused as S
 - Extend `autoMode.allow` to "Claude, Codex, Hermes (`--yolo`), Kimi (`-y`) or Cursor agents" when those run. The classifier reads `autoMode` from user settings or `--settings` only, never from a project's settings.
 - **Never allowed:** `herdr pane run` and `herdr pane send-keys` (either types any command into any shell, a path around the classifier), the closing commands and `server stop`.
 
-It backs up the file, then merges; safe to run again:
+It makes the file when it is missing, backs up one that exists, then merges and keeps every setting already there; safe to run again:
 
 ```bash
 python3 - <<'EOF'
 import json, os, shutil, time
 p = os.path.expanduser('~/.claude/settings.json')
-shutil.copy2(p, p + '.bak-' + time.strftime('%Y%m%d-%H%M%S'))
-s = json.load(open(p))
+os.makedirs(os.path.dirname(p), exist_ok=True)
+t = open(p).read() if os.path.exists(p) else ''
+if os.path.exists(p): shutil.copy2(p, p + '.bak-' + time.strftime('%Y%m%d-%H%M%S'))
+s = json.loads(t) if t.strip() else {}
 def add(l, xs): l.extend(x for x in xs if x not in l)
 R = os.environ.get('FLEET_TRUST_ROOT', '~/code')
 s.setdefault('skillOverrides', {})['auto-mode-setup'] = 'off'
@@ -45,7 +47,7 @@ add(M.setdefault('allow', []), ['$defaults',
     'On this machine, starting Claude or Codex agents in herdr panes, prompting them, and answering their startup dialogs (folder trust '
     'for repos under ' + R + ', the Codex continue-without-trusting-hooks choice) is allowed.'])
 json.dump(s, open(p, 'w'), indent=2)
-print('settings.json updated; backup saved alongside')
+print('settings.json updated' + ('; backup saved alongside' if t else ''))
 EOF
 ```
 
