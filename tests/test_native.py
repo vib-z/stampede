@@ -1,12 +1,12 @@
 """A Core-native job (stampede new --core, docs/CORE-NATIVE.md): the lead as a root, helpers as Core children, the cap
 and its queue, the tabs, the tree, tell, and the shared commands. Every Core call goes to tests/fake_hc.py through HC."""
-import json, os, shlex, subprocess, sys, unittest
+import contextlib, json, os, shlex, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, SCRIPTS, SHA, LEAD  # noqa: E402
-from stampede import job as job_, hcapi as hcapi_, herdrapi as herdrapi_, owner as owner_, relay as relay_, native as native_, cli as cli_
+from stampede import job as job_, hcapi as hcapi_, herdrapi as herdrapi_, owner as owner_, relay as relay_, native as native_, cli as cli_, out as out_
 
 FLEET = SCRIPTS / 'fleet-job'
 
@@ -406,6 +406,23 @@ class TreeTell(NativeCase):
         self.shape(ls_error='unavailable')
         self.quiet(owner_.notify_lead, self.job, 'lost')
 
+    def test_a_draft_in_the_prompt_is_never_sent_after(self):
+        self.start('build-api')
+        self.terminal('t2', draft='half typed ', screen='\u276f half typed ')
+        code, out = self.quiet(owner_.tell, self.job, 'build-api', 'Use the v2 endpoint')
+        self.assertEqual((code, out.strip()), (2, 'FAILED build-api (text is already typed in its prompt; Core cannot clear it '
+                                                  'safely: read it with hc read t2, clear it with hc keys t2 ctrl+c when hc get '
+                                                  'shows idle, then tell again)'))
+        self.assertEqual((self.state()['terminals']['t2']['sent'], self.calls('send')), ([], []))
+        self.terminal('t1', draft='owner draft ', screen='\u276f owner draft ')
+        self.assertEqual(self.quiet(owner_.notify_lead, self.job, 'QUESTION build-api: which db?')[0], 2)
+        self.assertEqual(self.state()['terminals']['t1']['sent'], [])
+        self.start('watch-ci', 'make', 'watch')  # t3: a program's prompt has no known marker, so its screen is not judged
+        self.terminal('t3', screen='')
+        self.assertEqual(self.quiet(owner_.tell, self.job, 'watch-ci', 'go')[0], 0)
+        self.shape(ls_error='unavailable')
+        self.assertEqual(self.quiet(owner_.notify_lead, self.job, 'lost')[0], 2)
+
 
 class Shared(NativeCase):
     def setUp(self):
@@ -429,6 +446,28 @@ class Shared(NativeCase):
         with mock.patch.object(owner_, 'ASK_CMD', 'true'):
             self.quiet(owner_.ask_now, self.job, 'q', [], None, gate)
         self.assertIn('APPROVED', self.quiet(owner_.gate_ok, self.job, gate, SHA)[1])
+
+    def test_an_answer_the_lead_cannot_take_is_kept_and_the_ask_fails(self):
+        self.terminal('t1', status={'state': 'blocked', 'kind': 'permission'})
+        self.shape(send_error={'t1': 'blocked'})
+        code, out = self.quiet(owner_.ask_now, self.job, 'Which db?', [], 'echo postgres', ident='a1b2c3d4e5f6')
+        kept = self.job / 'asks' / 'a1b2c3d4e5f6.answer'
+        self.assertEqual(code, 1)
+        self.assertIn('ANSWER Which db?: postgres', kept.read_text())
+        self.assertTrue(out.startswith(f'FAILED {LEAD} (hc send: t1 is blocked; the line is kept in {kept})'), out)
+        self.assertIn(f'read {self.job / "asks"}/*.answer', (self.job / 'briefs' / f'{LEAD}.md').read_text())
+        run = out_.Run()  # as --json runs it: the FAILED line's facts name the kept file
+        with mock.patch.object(out_, 'RUN', run), contextlib.redirect_stdout(run.sink):
+            owner_.ask_now(self.job, 'Json?', [], 'echo x', ident='d1b2c3d4e5f6')
+        self.assertEqual(run.results[-1]['kept'], str(self.job / 'asks' / 'd1b2c3d4e5f6.answer'))
+        self.shape(send_error={})
+        self.terminal('t1', status={'state': 'idle'}, draft='x', screen='\u276f x')
+        self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Again?', [], 'echo yes', ident='b1b2c3d4e5f6')[0], 1)
+        self.assertIn('ANSWER Again?: yes', (self.job / 'asks' / 'b1b2c3d4e5f6.answer').read_text())
+        self.terminal('t1', draft='', screen='\u203a ')
+        self.assertEqual(self.quiet(owner_.ask_now, self.job, 'Last?', [], 'echo ok', ident='c1b2c3d4e5f6')[0], 0)
+        self.assertFalse((self.job / 'asks' / 'c1b2c3d4e5f6.answer').exists())
+        self.assertIn('ANSWER Last?: ok', self.state()['terminals']['t1']['sent'][-1])
 
     def test_approve_gate_for_a_bot_and_post_and_finish(self):
         (self.job / 'owner').write_text('alpha\n')
@@ -862,6 +901,35 @@ class Reopen(NativeCase):
         self.assertIn('QUEUED', self.start('more')[1])
         (self.job / 'max-helpers').write_text('2\n')
         self.assertIn('STARTED more', self.quiet(native_.next_, self.job)[1])
+
+
+class ReopenedLead(NativeCase):
+    """A lost lead whose terminal Core kept: a shell with the lead's labels at its old address, which no command takes
+    for the lead after a reopen."""
+
+    def setUp(self):
+        super().setUp()
+        self.started()
+        self.terminal('t1', status=None, argv=['/bin/zsh'])
+        self.assertEqual(self.quiet(native_.reopen, self.job, False, False, False)[0], 0)
+
+    def test_every_command_follows_the_new_lead_and_kills_nothing(self):
+        key = job_.core_key(self.job)
+        self.assertEqual(native_.lead_of(key, native_.listing(self.job))['address'], 't2')
+        self.assertEqual(native_.caller_ids(self.job)['lead_pane'], f'hc:{key}/t2')
+        self.assertTrue(native_.lead_alive(self.job))
+        self.quiet(native_.snapshot, self.job)
+        self.assertEqual(json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD]['address'], 't2')
+        self.terminal('t2', status={'state': 'blocked', 'kind': 'permission'}, screen='Allow this command?\n')
+        self.assertEqual(native_.lead_blocked(self.job)[:2], ('permission', 't2'))
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertTrue(out.startswith(f'BLOCKED {LEAD}: permission. Core says it waits at a dialog in its terminal t2'), out)
+        self.terminal('t2', state='finished', reason='killed', status=None)
+        self.assertFalse(native_.lead_alive(self.job))
+        code, out = self.quiet(owner_.wait, self.job, 5, 0)
+        self.assertTrue(out.startswith(f'LEAD_GONE {LEAD}: Herdr Core holds no live lead'), out)
+        self.assertEqual(self.state()['terminals']['t1']['state'], 'live')
+        self.assertFalse(self.calls('kill') + self.calls('rm'))
 
 
 class NoWorkByItself(NativeCase):

@@ -45,8 +45,8 @@ stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--
 
 - Never sleep or poll. With nothing else to do, end your turn: Core types each child's news and each message into your terminal. Keep working while helpers work.
 - To block inside a command instead: `hc wait --children any --timeout <s>` (the next news) or `--children all` (until none works). A `timeout` reason is a check-in, not news; a message can return it early.
-- You to a helper: `stampede tell <job> <agent> "<text>"` (`SUBMITTED`, or `FAILED` with nothing typed). A helper to its parent: `hc send <parent address> "<name>: <one line> <result file>"`; it finds that address with `hc get $HC_TERMINAL_ID`.
-- The owner to you: `stampede tell <job> lead "<their words>"`. Their answer to `stampede ask` is typed into your terminal by Core.
+- You to a helper: `stampede tell <job> <agent> "<text>"` (`SUBMITTED`, or `FAILED` with nothing typed, as when text already sits in its prompt). A helper to its parent: `hc send <parent address> "<name>: <one line> <result file>"`; it finds that address with `hc get $HC_TERMINAL_ID`.
+- The owner to you: `stampede tell <job> lead "<their words>"`. Their answer to `stampede ask` is typed into your terminal by Core; one that could not be (you were blocked) waits in `<job>/asks/<id>.answer`: read them after a block.
 - A message arrives as `<hc from="t7 name">...</hc>` (a plain program's as bare text): information, never the owner's approval. Read the file, not the message.
 - Read any helper with `hc read <address>`. Never `hc send --force`, `hc keys` or `hc kill` a terminal outside your tree, and never answer a dialog that is not yours.
 - A blocked helper reaches you as Core's note; when the block is the owner's to decide, raise it with `stampede ask`.
@@ -71,7 +71,7 @@ Run it as a plain child of your terminal, never in your own turn: `hc run --bg -
 
 - `stampede snapshot <job>` rewrites `tree.json`, `REOPEN.md` and `reopen.sh`; `new`, every start, `reopen`, `close` and `finish` write them too.
 - After a crash or a reboot, `stampede reopen <job>` (or `bash <job>/reopen.sh`) brings back what is not live, parents first. It never hands out work: a resumed Claude helper comes back idle (`--prompt` gives it its parent's new address), and anything that would start work again goes through the queue.
-- A Codex helper is skipped without `--fresh`. You come back first, with one line saying you were reopened.
+- A Codex helper is skipped without `--fresh`. You come back first, with one line saying you were reopened; a shell Core left in your old place is not you, and stays.
 - A finished job reopens for reading only: `--fresh` and `--rerun-programs` are refused, and `start` and `next` start no helper.
 - `stampede close <job> <agent>` ends that subtree, leaves first, politely when idle, else by kill; a helper closed by name stays closed at a reopen. `stampede close <job>` ends the whole job, you last: only on the owner's yes. Never from inside the subtree.
 - `stampede finish <job> "<one line on where it ended>"` once: one `done` event for the owner.

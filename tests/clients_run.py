@@ -405,7 +405,8 @@ class Job:
 
     def tell(self):
         """O6: the client tells the lead (a Claude agent: its inbox) and an idle worker that is not Claude; on Core that
-        worker again while it is working (refused) and once its turn is done (sent at once)."""
+        worker again while it is working (refused) and once its turn is done (sent at once); on a native job also while
+        text sits in its prompt (refused)."""
         self.front('tell lead', 'tell', self.job, 'lead', 'Use the repo root')
         self.front('tell worker', 'tell', self.job, self.worker, 'Check the path')
         if self.on_core:
@@ -414,6 +415,10 @@ class Job:
                 self.terminal(self.address(self.worker), status={'state': state})
                 self.front(step, 'tell', self.job, self.worker, text)
             self.terminal(self.address(self.worker), status={'state': 'idle'})
+        if self.backend == 'native':
+            self.terminal(self.address(self.worker), screen='\u276f half typed ')
+            self.front('tell drafted worker', 'tell', self.job, self.worker, 'And after a draft')
+            self.terminal(self.address(self.worker), screen='\u203a ')
 
     def reopen(self):
         """O8: reopen.sh on the live job; on the TUI the lead first writes the reopen record."""

@@ -501,18 +501,6 @@ def acknowledged(job, lead):
     return 3
 
 
-def drafted(address, job=None):
-    """True when the last 8 non-empty screen lines show no empty-prompt marker: text already typed, which Core would
-    paste after. Core 0.1.20 holds a send only while a person is typing; a draft left alone past draft_wait, and text
-    typed with hc keys, still gets the message pasted after it. Cut here, since hc read may give the whole screen, whose
-    scrollback can hold a marker. A screen Core cannot read counts as empty."""
-    try:
-        screen = hcapi_.hc('read', address, '--lines', '8', job=job).get('text', '')
-    except hcapi_.HcError:
-        return False
-    return handed_.typed(screen)
-
-
 def tell_core(job, name, text):
     """Prompt a Codex agent in its Core terminal: send_core's one SUBMITTED or FAILED line, and exit 2 on FAILED."""
     submitted, said = send_core(job, name, text)
@@ -559,7 +547,7 @@ def send_core(job, name, text, limit=None):
                 keys = ' '.join(['space' if c == ' ' else c for c in text] + ['enter'])
                 why = (f'a slash command needs typed keys, which Core cannot guard: when hc get {address} shows idle, '
                        f'run hc keys {address} {keys}')
-            elif drafted(address, job):  # Core pastes after it; clearing it could erase someone's own typing
+            elif hcapi_.drafted(address, job):  # Core pastes after it; clearing it could erase someone's own typing
                 why = (f'text is already typed in its prompt; Core cannot clear it safely: read it with hc read {address}, '
                        f'clear it with hc keys {address} ctrl+c when hc get shows idle, then tell again')
             else:

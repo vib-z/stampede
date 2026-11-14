@@ -51,18 +51,20 @@ def tell(job, name, text):
         raise SystemExit(2)  # herdr-send printed its one FAILED line (focused, blocked or gone); never a traceback
 
 
-def notify_lead(job, text):
-    """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed."""
+def notify_lead(job, text, kept=None):
+    """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed. On a native
+    job Core types it: 0, or 2 when it was not typed (kept names the file that holds it, in the FAILED line)."""
     from . import native as native_
     if job_.backend(job) == 'native':
-        return native_.notify_lead(job, text)
+        return native_.notify_lead(job, text, kept)
     base_.append(Path(job) / 'inbox.log', text)
     if job_.lead_kind(job) == 'codex':
         tui_.deliver_soon(job)
 
 
-def ask_now(job, question, options, command=None, gate=None):
-    """Ask the owner and wait; the answer, or why it failed, goes to the lead's inbox.
+def ask_now(job, question, options, command=None, gate=None, ident=None):
+    """Ask the owner and wait; the answer, or why it failed, goes to the lead's inbox. On a native job Core types it in,
+    and a line the lead cannot take (blocked, text in its prompt, gone) stays in asks/<ident>.answer and the ask fails.
     A gate always asks FLEET_ASK_CMD itself, with the question made from its own record, and its yes (exit 0, a yes or
     nothing on stdout) is recorded for gate-ok, only while the record is still the one asked about."""
     asked = load_gate(job, gate) if gate else None
@@ -91,7 +93,16 @@ def ask_now(job, question, options, command=None, gate=None):
             return 0
         except PermissionError as error:
             status, answer = 'GATE NOT RECORDED', base_.line(error)
-    tell(job, 'lead', status + ' ' + base_.line(question) + ': ' + answer)
+    line = status + ' ' + base_.line(question) + ': ' + answer
+    if job_.backend(job) == 'native':
+        kept = Path(job).absolute() / 'asks' / ((ident or uuid.uuid4().hex[:12]) + '.answer')
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        kept.write_text(line + '\n')  # first, so the answer outlives a send that fails or never returns
+        if notify_lead(job, line, kept):
+            return 1
+        kept.unlink()
+    else:
+        tell(job, 'lead', line)
     return 0 if status == 'ANSWER' else 1
 
 
