@@ -1,6 +1,6 @@
 """The stampede command teaches itself: grouped help with examples, errors that name the next step, stampede doctor and
 stampede check. Everything runs in a scratch HOME with fakes; nothing reaches a live Herdr or Herdr Core."""
-import json, os, re, shlex, subprocess, sys, tempfile, unittest
+import contextlib, io, json, os, re, shlex, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -167,6 +167,20 @@ class Cli(unittest.TestCase):
         with mock.patch.object(check_, 'ROOT', self.home), quiet():
             self.assertEqual(check_.main(full=True), 1, 'a full run of no tests is no pass')
 
+    def test_check_fails_a_run_that_ran_no_tests(self):
+        """Python 3.9's unittest exits 0 for a module of no tests, so check counts them itself, fast and full."""
+        (self.home / 'tests').mkdir()
+        (self.home / 'tests/test_empty.py').write_text('# no tests here\n')
+        (self.home / 'tests/test_nothing.py').write_text('import unittest\nclass Nothing(unittest.TestCase):\n    pass\n')
+        out = io.StringIO()
+        with mock.patch.object(check_, 'ROOT', self.home), mock.patch.object(check_, 'FAST', ('test_empty',)), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(check_.main(full=True), 1)
+            self.assertEqual(check_.main(), 1)
+            self.assertEqual(check_.main(as_json=True), 1)
+        self.assertIn('ran no tests', out.getvalue())
+        self.assertIn('"ok": false', out.getvalue())
+
     def fake_herdr_doctor(self, body):
         helpers = self.home / 'helpers'
         helpers.mkdir()
@@ -183,13 +197,34 @@ class Cli(unittest.TestCase):
         self.assertEqual(checks[-1]['text'], 'herdr-doctor exited 7 (BACKEND_CRASH)')
         self.assertEqual(code, 1)
 
+    def doctor_output(self, home, **patches):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {'HOME': str(home)}), contextlib.redirect_stdout(out), contextlib.ExitStack() as stack:
+            for name, value in patches.items():
+                stack.enter_context(mock.patch.object(doctor_, name, value))
+            doctor_.main()
+            doctor_.main(as_json=True)
+        return out.getvalue()
+
     def test_doctor_shows_home_paths_with_a_tilde(self):
-        with mock.patch.dict(os.environ, {'HOME': str(ROOT.parent)}):
-            text = doctor_.checkout()[0]['text']
-            self.assertEqual(doctor_.shown(ROOT.parent / 'x' / 'y'), '~/x/y')
-            self.assertEqual(doctor_.shown('/elsewhere/x'), '/elsewhere/x')
-        self.assertIn(' in ~/' + ROOT.name + ', ', text)
-        self.assertNotIn(str(ROOT), text)
+        said = self.doctor_output(ROOT.parent, CHECKS=(doctor_.checkout,), herdr_doctor=lambda core, tui: [])
+        self.assertIn(' in ~/' + ROOT.name + ', ', said)
+        self.assertNotIn(str(ROOT.parent), said)
+        self.assertEqual(doctor_.shown('/elsewhere/x'), '/elsewhere/x')
+
+    def test_doctor_redacts_an_errors_own_text_by_both_spellings_of_home(self):
+        physical = self.home / 'physical home'
+        physical.mkdir()
+        physical = physical.resolve()   # where the link lands, as the error names it (on macOS /tmp is /private/tmp)
+        (self.home / 'link').symlink_to(physical)
+        failing = doctor_.check('checkout', 'PROBLEM', f"stampede.x does not import (No such file: '{physical}/a.py')",
+                                f'git -C {self.home / "link"} status')
+        said = self.doctor_output(self.home / 'link', CHECKS=(lambda: [failing],), HELPERS=physical / 'no-helpers')
+        self.assertIn('herdr-doctor did not run', said)   # a missing herdr-doctor: its own error names the folder
+        for home in (str(physical), str(self.home / 'link')):
+            self.assertNotIn(home, said)
+        self.assertIn("(No such file: '~/a.py')", said)
+        self.assertIn('git -C ~ status', said)
 
     def test_the_gate_examples_bind_one_commit_for_the_check_and_the_act(self):
         texts = [self.stampede(name, '--help').stdout for name in ('ask', 'gate-ok')] + [(ROOT / 'docs/CLI.md').read_text()]
@@ -208,8 +243,31 @@ class Cli(unittest.TestCase):
         result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask)], capture_output=True, text=True,
                                 env=self.env, cwd=repo, timeout=60)
         self.assertEqual(result.returncode, 2, result.stderr)
-        command = shlex.split(result.stderr.split('to run it here on Herdr Core: ')[1])
+        command = shlex.split(result.stderr.splitlines()[-1])
         self.assertEqual(command, ['stampede', 'new', '--core', '--file', str(ask), '--cwd', str(repo.resolve())])
+
+    def test_the_hint_keeps_every_character_of_its_paths(self):
+        for name in ('two  spaces', 'a\ttab', "a 'quote'", 'a $dollar', 'all  \t\'"$ of it'):
+            with self.subTest(name=name):
+                repo = self.home / ('repo ' + name)
+                repo.mkdir()
+                subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+                ask = self.home / ('ask ' + name + '.md')
+                ask.write_text('Fix the login bug\n')
+                result = subprocess.run([str(ROOT / 'scripts/stampede'), 'new', '--file', str(ask)], capture_output=True,
+                                        text=True, env=self.env, cwd=repo, timeout=60)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertTrue(result.stderr.splitlines()[0].endswith('to run it here on Herdr Core, run the next line'))
+                self.assertEqual(shlex.split(result.stderr.split('run the next line\n', 1)[1]),
+                                 ['stampede', 'new', '--core', '--file', str(ask), '--cwd', str(repo.resolve())])
+
+    def test_every_help_example_is_valid_shell(self):
+        for name in ORDER[:-1]:
+            with self.subTest(name):
+                epilog = self.stampede(name, '--help').stdout.split('\n\nexample')[1].split('\n', 1)[1]
+                script = re.sub(r'<[^>]+>', 'X', '\n'.join(line.strip() for line in epilog.splitlines()))
+                checked = subprocess.run(['sh', '-n'], input=script, capture_output=True, text=True)
+                self.assertEqual(checked.returncode, 0, script + checked.stderr)
 
     def test_a_blocked_tui_start_exits_0_as_the_exit_table_says(self):
         repo = self.home / 'repo'

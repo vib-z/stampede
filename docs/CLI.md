@@ -63,11 +63,11 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 
 ## Errors
 
-Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what to do>`, never a traceback. Among them:
+Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what to do>`, never a traceback; one that carries a command to run prints it on the next line, exactly as you would type it. Among them:
 - `stampede tell: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>`, for every command given a job folder, before anything else.
 - `stampede tell: agent <name> is not in this job (it has: lead, <names>)`.
 - `stampede new: the ask file <path> does not exist: ...`, before any other check.
-- `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core: stampede new --core --file <ask> --cwd <git root>`.
+- `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core, run the next line`, then on a line of its own `stampede new --core --file <ask> --cwd <git root>`, quoted to run as shown.
 - `stampede: error: ...` with the usage line, for a flag or command it does not know; bare `stampede` prints the help.
 
 The full list, each with its fix, is the README's [Troubleshoot](../README.md#troubleshoot).

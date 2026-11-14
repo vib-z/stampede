@@ -647,8 +647,8 @@ class StampedeReview1(unittest.TestCase):
         no_core = str(ask.parent / 'no-core.sock')   # this machine's own Herdr Core is not asked
         result = self.cli('new', '--file', str(ask), drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr, HC_SOCKET=no_core)
         self.assertEqual((result.returncode, result.stderr.strip()),
-                         (2, 'stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core: '
-                             f'stampede new --core --file {ask} --cwd {ROOT}'))
+                         (2, 'stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core, '
+                             f'run the next line\nstampede new --core --file {ask} --cwd {ROOT}'))
         self.assertFalse(log.exists())
 
     def test_new_names_core_when_herdr_cannot_take_the_job_and_a_core_answers(self):
@@ -688,7 +688,8 @@ class StampedeReview1(unittest.TestCase):
                 self.assertEqual(result.returncode, code, result.stderr)
                 self.assertIn(said, result.stderr)
                 self.assertIn(hint, result.stderr)
-                self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+                lines = result.stderr.strip().splitlines()   # one line, and a refusal's own command to run on the next
+                self.assertEqual(len(lines), 2 if lines[-1].startswith('stampede new --core ') else 1, lines)
                 quiet = self.cli(*argv, **kw, **{**env, 'HC_SOCKET': str(folder / 'none.sock')})
                 self.assertEqual(quiet.returncode, code)
                 self.assertNotIn('Herdr Core answers', quiet.stderr)

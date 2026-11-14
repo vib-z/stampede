@@ -106,8 +106,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if not (workspace or pane):
-        raise ValueError('new needs --workspace or --pane, or run it inside Herdr' + relay_.core_hint()
-                         + f'; to run it here on Herdr Core: stampede new --core --file {shlex.quote(str(ask_file))} --cwd {git_root()}')
+        raise base_.Retry('new needs --workspace or --pane, or run it inside Herdr' + relay_.core_hint()
+                    + '; to run it here on Herdr Core, run the next line',
+                    ' '.join(['stampede', 'new', '--core', '--file', shlex.quote(str(ask_file)), '--cwd', git_root()]))
     if fork is not None and not base_.SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     ask = Path(ask_file).expanduser().read_text()
@@ -196,19 +197,19 @@ EXAMPLES = {
     'start': '''examples:
   stampede start <job> build-api --kind claude --brief <job>/briefs/build-api.md --pane w1:p3
   stampede start <job> build-api --kind codex --brief <job>/briefs/build-api.md --model gpt-6-astra
-  stampede start <job> lint-web -- npm run lint     (a native job: any program)''',
+  stampede start <job> lint-web -- npm run lint     # a native job: any program''',
     'tell': '''examples:
   stampede tell <job> lead "the owner says: ship it"
   stampede tell <job> build-api "Read <job>/briefs/build-api.md again: the Done when changed"''',
     'ask': '''examples:
   stampede ask <job> "Which database?" --option Postgres --option SQLite
-  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)     (the PR's head: the commit the owner says yes to)
+  sha=$(gh pr view 12 --json headRefOid -q .headRefOid)     # the PR's head: the commit the owner says yes to
   stampede ask <job> --gate "merge PR 12" --sha "$sha" --pr 12''',
     'post': '''examples:
   stampede post <job> "PLAN READY" --file <job>/plan.md
   stampede post <job> "the login page, before and after" --file before.png --file after.png''',
     'wait': '''example:
-  stampede wait <job> --timeout 600     (run it in the background; it returns with each new item)''',
+  stampede wait <job> --timeout 600     # run it in the background; it returns with each new item''',
     'next': 'example:\n  stampede next <job>',
     'tree': 'examples:\n  stampede tree <job>\n  stampede tree <job> --json',
     'approve': 'example:\n  stampede approve <job> --by owner',
@@ -221,7 +222,7 @@ EXAMPLES = {
     'finish': 'example:\n  stampede finish <job> "PR 12 merged; the report is <job>/reports/lead.md"',
     'snapshot': 'example:\n  stampede snapshot <job>',
     'reopen': 'examples:\n  stampede reopen <job>\n  stampede reopen <job> --fresh',
-    'close': 'examples:\n  stampede close <job> build-api\n  stampede close <job>     (the whole job)',
+    'close': 'examples:\n  stampede close <job> build-api\n  stampede close <job>     # the whole job',
     'doctor': 'examples:\n  stampede doctor\n  stampede doctor --core --json',
     'check': 'examples:\n  stampede check\n  stampede check --full',
 }
@@ -379,6 +380,8 @@ def main(argv):
         if a.cmd == 'hook':  # a hook's exit 2 blocks or wakes Claude; keep a hook's error a plain failure
             raise
         print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)
+        if isinstance(error, base_.Retry):
+            print(error.command, file=sys.stderr)
         return 2
     except (hcapi_.HcError, herdrapi_.HerdrError, OSError) as error:  # Herdr, Herdr Core or a program failed: one line, never a traceback
         print('stampede ' + a.cmd + ': ' + base_.line(error), file=sys.stderr)

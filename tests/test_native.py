@@ -1,6 +1,6 @@
 """A Core-native job (stampede new --core, docs/CORE-NATIVE.md): the lead as a root, helpers as Core children, the cap
 and its queue, the tabs, the tree, tell, and the shared commands. Every Core call goes to tests/fake_hc.py through HC."""
-import json, os, subprocess, sys, unittest
+import json, os, shlex, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -157,8 +157,9 @@ class Start(NativeCase):
     def test_the_cli_refuses_pane_in_one_line(self):
         result = self.cli('start', self.job, 'x', '--kind', 'cursor', '--pane', 'w1:p1', '--brief', self.brief(self.job, 'x'))
         self.assertEqual(result.returncode, 2)
-        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
-        self.assertIn('run that CLI as a program', result.stderr)
+        refusal, command = result.stderr.strip().splitlines()   # one line, then the command to run, quoted as built
+        self.assertIn('run that CLI as a program', refusal)
+        self.assertEqual(shlex.split(command)[:4], ['stampede', 'start', str(self.job), 'x'])
 
     def test_the_cli_takes_flags_before_the_program(self):
         """argparse before 3.13 loses a program after -- once a flag stands before it: the CLI cuts at -- itself."""

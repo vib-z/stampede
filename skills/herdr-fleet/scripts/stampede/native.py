@@ -377,8 +377,8 @@ def outcome(job, key, lead, address, brief):
 def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, tab_base=None, parent=None, outlive=False, program=()):
     """Queue one helper start, then drain the queue: it starts now when the cap allows, else waits for next."""
     if pane:
-        raise ValueError('a native job hands nothing to a Herdr TUI pane: run that CLI as a program, '
-                         f'stampede start {job} {name} -- <cli> [args]')
+        raise base_.Retry('a native job hands nothing to a Herdr TUI pane: run that CLI as a program, as on the next line',
+                          f'stampede start {shlex.quote(str(job))} {name} -- <cli> [args]')
     owner_.require_approval(job)
     job = Path(job).absolute()
     hcapi_.target(job)
@@ -394,8 +394,8 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
             raise ValueError('a program after -- takes no --kind or --brief')
         kind = 'program'
     elif kind not in KINDS:
-        raise ValueError(f'a native job starts claude or codex helpers; run {kind or "another CLI"} as a program: '
-                         f'stampede start {job} {name} -- <cli> [args]')
+        raise base_.Retry(f'a native job starts claude or codex helpers; run {kind or "another CLI"} as a program, as on the next line',
+                          f'stampede start {shlex.quote(str(job))} {name} -- <cli> [args]')
     elif not brief or not Path(brief).expanduser().is_file():
         raise ValueError(f'brief {brief} does not exist' if brief else 'start needs --brief <file>, or a program after --')
     else:

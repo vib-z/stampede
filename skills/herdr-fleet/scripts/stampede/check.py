@@ -15,11 +15,15 @@ RAN = re.compile(r'^Ran (\d+) tests? in', re.M)
 
 
 def run(name, env):
-    """(name, ok, tests, seconds, output) for one module or class."""
+    """(name, ok, tests, seconds, output) for one module or class. A run of no tests is no pass: Python 3.9's unittest
+    exits 0 for one, so the count decides, not the exit code alone."""
     began = time.monotonic()
     done = subprocess.run([sys.executable, '-m', 'unittest', 'tests.' + name], cwd=ROOT, env=env, capture_output=True, text=True)
     found = RAN.search(done.stderr)
-    return name, done.returncode == 0, int(found.group(1)) if found else 0, time.monotonic() - began, done.stdout + done.stderr
+    count, output = int(found.group(1)) if found else 0, done.stdout + done.stderr
+    if not count:
+        output += f'\nstampede check: tests.{name} ran no tests\n'
+    return name, done.returncode == 0 and count > 0, count, time.monotonic() - began, output
 
 
 def main(full=False, as_json=False):
@@ -53,7 +57,7 @@ def main(full=False, as_json=False):
         seconds, count = time.monotonic() - began, sum(r['tests'] for r in results)
     finally:
         shutil.rmtree(home, ignore_errors=True)
-    failed = [r['name'] for r in results if not r['ok']]
+    failed = [r['name'] for r in results if not r['ok']] or ([] if count else ['(no tests ran)'])
     if as_json:
         print(json.dumps({'ok': not failed, 'tests': count, 'seconds': round(seconds, 1),
                           'modules': sorted(results, key=lambda r: r['name'])}, indent=1))
