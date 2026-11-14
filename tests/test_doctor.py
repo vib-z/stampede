@@ -305,6 +305,26 @@ echo disabled; exit 1
         self.assertEqual(result.stdout.splitlines()[-2:], ['PROBLEM my disk is full: clear it',
                          'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
 
+    def test_a_flood_from_a_hanging_extra_check_is_cut_and_still_counted(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text('#!/usr/bin/env python3\nimport sys, time\nprint("PROBLEM first: fix it")\n'
+                         'sys.stdout.write(("x" * 99 + "\\n") * 52429)\n'   # 5 MiB
+                         'print("PROBLEM last: fix it")\nsys.stdout.flush()\ntime.sleep(60)\n')
+        extra.chmod(0o755)
+        result, took = self.short_doctor(extra)
+        self.assertLess(took, 8)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[-2:], ['HERDR_DOCTOR_EXTRA output cut at 64 KB: run it by hand to see the rest',
+                                      'warn HERDR_DOCTOR_EXTRA did not finish in 2 s, so it and its process group were ended: run it by hand to see why'])
+        self.assertLess(len(result.stdout.encode()), 70000)
+        self.assertIn('PROBLEM first: fix it', lines)
+        self.assertNotIn('PROBLEM last: fix it', lines)      # past the cut, yet counted: exit 1 without the first one
+        extra.write_text(extra.read_text().replace('print("PROBLEM first: fix it")\n', ''))
+        self.assertEqual(self.short_doctor(extra)[0].returncode, 1)
+        extra.write_text(extra.read_text().replace('print("PROBLEM last: fix it")\n', ''))
+        self.assertEqual(self.short_doctor(extra)[0].returncode, 0)
+
     def test_an_extra_check_whose_escaped_child_holds_the_pipe_cannot_hold_the_doctor(self):
         pid = self.home / 'escaped'
         extra = self.home / 'doctor-extra'

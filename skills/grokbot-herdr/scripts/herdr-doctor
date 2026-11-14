@@ -9,9 +9,9 @@
 # core started from inside an agent). One line per check:
 #   ok <what>  |  warn <what>: <fix>  |  PROBLEM <what>: <fix>
 # HERDR_EVENTS_LAUNCHD (default local) is the label prefix of the two macOS launchd jobs. HERDR_DOCTOR_EXTRA (default
-# unset) is an absolute path to an executable of your own that runs last, with empty stdin: its lines print with no
-# control bytes, and each line that starts PROBLEM counts; a missing or failing one, or one not done in 30 s (it and the
-# process group it runs in are ended), is one warn.
+# unset) is an absolute path to an executable of your own that runs last, with empty stdin: its first 64 KB print with
+# no control bytes, and each line that starts PROBLEM counts, all of them; a missing or failing one, or one not done in
+# 30 s (it and the process group it runs in are ended), is one warn.
 # Exit 0 ok, 1 any PROBLEM, 2 usage. Fixes nothing, never starts a core; never prints route files or settings values.
 usage(){ echo 'usage: herdr-doctor [--relay] [--tui|--core] [-h|--help]'; }
 relay=0; only=""
@@ -313,13 +313,14 @@ else ok "${free} GB free"; fi
 
 # your own checks, last: never through a shell string; each line that starts PROBLEM counts
 # run_extra <program> <seconds>: the program in its own session, it and that process group ended after <seconds>; the
-# first line out is its exit status (or timeout), then what it wrote, with no control bytes but newline and tab.
+# first line out is its exit status (or timeout) and how many of its lines start PROBLEM, then the first 64 KB of what it
+# wrote (cut at a line end, then a line that says so), with no control bytes but newline and tab.
 run_extra(){ python3 - "$@" <<'PY'
 import os, re, signal, subprocess, sys
 try:
     p = subprocess.Popen([sys.argv[1]], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
 except OSError:
-    print(126)
+    print(126, 0)
     sys.exit()
 try:
     out, status = p.communicate(timeout=int(sys.argv[2]))[0], p.returncode
@@ -338,7 +339,11 @@ if isinstance(status, int) and status < 0:
     status = 128 - status
 text = out.decode('utf-8', 'replace')
 text = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|[\x00-\x08\x0b-\x1f\x7f]', '', text)  # OSC, CSI, then any other
-print(status); print(text, end='')
+problems = len(re.findall(r'^PROBLEM', text, re.M))
+shown = text.encode()
+if len(shown) > 65536:
+    shown = shown[:shown.rfind(b'\n', 0, 65536) + 1] + b'HERDR_DOCTOR_EXTRA output cut at 64 KB: run it by hand to see the rest\n'
+print(status, problems); sys.stdout.flush(); sys.stdout.buffer.write(shown)
 PY
 }
 extra=${HERDR_DOCTOR_EXTRA:-}; EXTRA_SECS=30
@@ -347,9 +352,9 @@ if [ -n "$extra" ]; then
     warn "HERDR_DOCTOR_EXTRA is not an absolute path to an executable file: fix it or unset it"
   else
     res=$(run_extra "$extra" "$EXTRA_SECS")
-    status=${res%%$'\n'*}; out=""; [ "$res" = "$status" ] || out=${res#*$'\n'}
+    head=${res%%$'\n'*}; out=""; [ "$res" = "$head" ] || out=${res#*$'\n'}
+    status=${head% *}; [ "${head##* }" = 0 ] || bad=1
     [ -n "$out" ] && printf '%s\n' "$out"
-    grep -q '^PROBLEM' <<<"$out" && bad=1
     if [ "$status" = timeout ]; then warn "HERDR_DOCTOR_EXTRA did not finish in $EXTRA_SECS s, so it and its process group were ended: run it by hand to see why"
     elif [ "$status" != 0 ]; then warn "HERDR_DOCTOR_EXTRA exited $status: run it by hand to see why"; fi
   fi
