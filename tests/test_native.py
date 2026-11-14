@@ -388,6 +388,22 @@ class TreeTell(NativeCase):
                           ('ci-wait', 2, 't2', 'plain', '-', None), ('compiler watch', 3, 't3', 'plain', '-', None)])
         self.assertEqual(shown['queue'][0]['name'], 'later')
 
+    def test_a_wait_or_relay_terminal_with_an_ordinary_argv_is_shown_as_it_is(self):
+        key = job_.core_key(self.job)
+        for address, role, parent in (('t2', 'wait', None), ('t3', 'relay', None), ('t4', 'wait', 't1'), ('t5', 'relay', 't1')):
+            self.add_terminal(address, name=f'{role}-{address}', parent=parent, status=None, argv=['sleep', '300'],
+                              labels={'stampede.job': key, 'stampede.role': role})
+        code, out = self.quiet(native_.tree, self.job)
+        lines = [line.strip() for line in out.splitlines()]
+        for address, role in (('t2', 'wait'), ('t3', 'relay'), ('t4', 'wait'), ('t5', 'relay')):
+            self.assertIn(f'{role}-{address} ({address}) {role} - live tab -', lines)
+        self.assertNotIn('shell', out)
+        nodes = {n['address']: n for n in json.loads(self.quiet(native_.tree, self.job, True)[1])['nodes']}
+        self.assertEqual([(nodes[a]['name'], nodes[a]['role'], nodes[a]['kind'], nodes[a]['status'], nodes[a]['shell_of'], nodes[a]['depth'])
+                          for a in ('t2', 't3', 't4', 't5')],
+                         [('wait-t2', 'wait', '-', 'live', None, 1), ('relay-t3', 'relay', '-', 'live', None, 1),
+                          ('wait-t4', 'wait', '-', 'live', None, 1), ('relay-t5', 'relay', '-', 'live', None, 1)])
+
     def test_tell_sends_and_a_refusal_is_failed_exit_2(self):
         self.start('build-api')
         code, out = self.quiet(owner_.tell, self.job, 'build-api', 'Use the v2 endpoint')

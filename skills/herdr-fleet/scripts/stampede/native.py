@@ -37,6 +37,9 @@ def labels(terminal):
     return terminal.get('labels') or {}
 
 
+AGENT_ROLES = ('lead', 'helper')  # the stampede.role values new, start and reopen give the agents they launch
+
+
 def live(key, terminals):
     """The job's live terminals, a shell Core put in a lost program's place left out."""
     return [t for t in terminals if t.get('state') == 'live' and labels(t).get('stampede.job') == key and not hcapi_.shelled(t)]
@@ -595,8 +598,8 @@ def tree(job, as_json=False):
     lead = lead_of(key, terminals)
     rows, shown = [], job_tree(key, terminals)
 
-    def shell(t):  # a shell Core left in a lost agent's place: it carries the agent's labels; a plain child is never judged
-        return bool(labels(t).get('stampede.role')) and hcapi_.shelled(t)
+    def shell(t):  # a shell Core left in a lost agent's place: only an agent native launched is judged, any other role never
+        return labels(t).get('stampede.role') in AGENT_ROLES and hcapi_.shelled(t)
     named = {name_of(t) for _, t, _ in shown if not shell(t)}
     for t in reversed(terminals):  # a helper reopen left ended (a program, a codex): its newest terminal, under no live lead
         if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'helper' and name_of(t) not in named \
