@@ -652,13 +652,13 @@ def lead_blocked(job):
     not answer is None, and a screen it does not give is ''."""
     try:
         hcapi_.target(job)
-        lead = lead_of(job_.core_key(job), listing())
+        lead = lead_of(job_.core_key(job), listing(job))
     except (hcapi_.HcError, ValueError):
         return None
     if not lead or lead.get('state') != 'live' or hcapi_.core_status(lead) != 'blocked':
         return None
     try:
-        screen = hcapi_.hc('read', lead['address'], '--lines', '40').get('text', '')
+        screen = hcapi_.hc('read', lead['address'], '--lines', '40', job=job).get('text', '')
     except (hcapi_.HcError, ValueError):
         screen = ''
     return (lead.get('status') or {}).get('kind') or 'blocked', lead['address'], screen

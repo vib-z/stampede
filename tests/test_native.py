@@ -612,6 +612,18 @@ class Timeouts(NativeCase):
             self.assertEqual(set(self.connect_timeouts(native_.lead_alive, second)), {9})
             self.assertEqual(set(self.connect_timeouts(native_.tree, first)), {2})
 
+    def test_a_front_door_job_saves_its_settings_and_wait_reads_them(self):
+        (self.repo / '.stampede.toml').write_text('[timeouts]\nwait = 0\nhc_call = 4\n')
+        self.started(front=True)
+        saved = json.loads((self.job / 'settings.json').read_text())
+        self.assertEqual((saved['values']['timeouts.wait'], saved['sources']['timeouts.wait']), (0, 'repo'))
+        (self.repo / '.stampede.toml').unlink()  # the job keeps what it saved
+        with mock.patch.object(hcapi_, 'TARGET', []):
+            code, out = self.quiet(owner_.wait, self.job)
+        self.assertEqual(code, 3)
+        self.assertIn('after 0s;', out)
+        self.assertEqual(hcapi_.hc_call(self.job), 4)
+
     def test_every_hc_call_in_a_function_with_a_job_passes_it(self):
         """By construction: in the package, a function that has a job passes it to each hc and listing call (or gives
         the timeout itself, with limit= or seconds), so no call path can read another job's timeout or none."""
