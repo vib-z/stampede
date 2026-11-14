@@ -316,13 +316,13 @@ Once a day stampede tells you when a newer release is out; it never updates anyt
 
 ```text
 $ stampede --version
-0.1.0
+0.2.0
 stampede 0.2.1 is out, this is 0.2.0: run stampede update
 ```
 
 In a plugin install the line ends `run herdr plugin update stampede --yes`. `stampede --version` puts that line on stderr and still exits 0; `herdr-doctor` prints it as a `warn`. Any failure (offline, rate-limited, a malformed reply) prints nothing and is cached too. Turn the check off with `export STAMPEDE_NO_UPDATE_CHECK=1` ([Configure](#configure)). How a release is cut: [RELEASING.md](RELEASING.md).
 
-**`stampede update`** is the guided updater: it updates only a clean checkout on `main`, and never overwrites a file of yours. It runs `git fetch`, fast-forwards with `git merge --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.1.0 -> 0.2.0`. It refuses with the reason, and changes no file, when the checkout has local changes or untracked files, is on another branch, or holds an ignored file at a path the update adds. In a Herdr plugin install it changes nothing and prints `herdr plugin update stampede --yes` to run instead.
+**`stampede update`** is the guided updater: it updates only a clean checkout on `main`, and never overwrites a file of yours. It runs `git fetch`, fast-forwards with `git merge --ff-only`, reruns `./install.sh` (which links any new skill or command), and ends with `stampede 0.2.0 -> 0.2.1`. It refuses with the reason, and changes no file, when the checkout has local changes or untracked files, is on another branch, or holds an ignored file at a path the update adds. In a Herdr plugin install it changes nothing and prints `herdr plugin update stampede --yes` to run instead.
 
 **A plugin update moves the links.** Herdr gives each plugin install or update a new checkout folder and deletes the old one the next time its server starts. The installer moves each stampede link from the older checkout of that same install to the new one, and leaves any other link alone; `herdr-doctor` reports a `PROBLEM` if `stampede` or a skill still resolves outside the checkout Herdr reports.
 
@@ -977,7 +977,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.
 - On Linux: the systemd user timers on a real user manager, x86_64 live (CI covers it with fakes and a Core smoke run), a signed-in Claude and Codex, Moshi paired, and a bot over SSH.
 - A Herdr server restart: `reopen.sh` into the workspace Herdr restores, starting the agents in its plain shells, instead of asking to close it first.
-- The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
+- The open cross-client finding in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
 - On Herdr Core, planned:
   - opt-in alerts to the owner for helpers (blocked, error, stale, dead), as the watchdog sends for the lead today;
   - workers on a second machine (`hc run --on`; a job is local to one machine today);

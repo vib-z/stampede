@@ -368,4 +368,6 @@ What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folder
 
 **A cold walk, earlier the same day.** Before the last pull requests of this release, a fresh agent was given only [USING.md](../USING.md) and told to use stampede: it installed it in a scratch home and ran a whole job on a scratch core. It got the job done and listed 21 places where it had to guess or a line was unclear; this release fixes them.
 
+**Two notes from the run.** The install in check 3 made 17 links, one more than a clean checkout gives: `install.sh` links every entry of the bot scripts folder, and the unit suite had left a `__pycache__` folder there. The link is harmless and the glob is the same as in 0.2.0. The first run of check 10 had three failures that were the check script's own: it put `--json` after the `--` that starts a program (where the flag belongs to the program), expected only `DELIVERED` from `tell`, and expected `tree` to exit 0 after a whole close. With those expectations corrected the whole job ran again from scratch, all steps passing.
+
 **Not run here:** a real signed-in agent, the Herdr TUI path live, a relay job's `reopen.sh` (it names the machine's default core), a real `stampede update` against the published release, `herdr plugin update`, and Linux beyond CI.
