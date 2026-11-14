@@ -87,7 +87,7 @@ def check_process_tree(under):
 
 class Job:
     """One client driving one job on one backend. CoreCase's fake-core helpers read self.core, so they work here too."""
-    WS, NAME, LEAD = 'w9', 'xc', 'lead-xc'  # the fake Herdr's workspace; new --name xc makes the job xc and its lead (Core: <repo>/.herdr-xc; TUI: <jobs root>/jobs/<date>-<bot or local>-xc)
+    WS, NAME, LEAD = 'w9', 'xc', 'lead-xc'  # the fake Herdr's workspace; new --name xc makes the job xc and its lead (on every backend: <jobs root>/jobs/<date>-<bot or local>-xc)
 
     state, terminal, calls, labels, program, option = (CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels,
                                                        CoreCase.program, CoreCase.option)
@@ -108,8 +108,7 @@ class Job:
         self.home, self.events, self.queue = self.root / 'home', self.root / 'events', self.root / 'queue'
         self.bin = self.home / '.local/bin'
         self.jobs_root = self.root / 'herdr-jobs'
-        self.job = (self.repo / ('.herdr-' + self.NAME) if self.on_core else
-                    self.jobs_root / 'jobs' / f'{datetime.now():%Y-%m-%d}-{self.bot or "local"}-{self.NAME}')
+        self.job = self.jobs_root / 'jobs' / f'{datetime.now():%Y-%m-%d}-{self.bot or "local"}-{self.NAME}'
         self.steps, self.error = {}, ''
         for folder in (self.repo, self.core, self.herdr, self.bin, self.events, self.root / 'routes'):
             folder.mkdir(parents=True)
@@ -258,6 +257,9 @@ class Job:
         ask.write_text(f'Write hello-{self.client}-{self.backend}.txt with one worker.\n')
         lead = ('--lead', self.lead_kind) if self.lead_kind else ()
         lead += ('--front-door',) if self.door else ()
+        if self.backend == 'native' and self.row['where'] != 'inside':  # backend auto: no --core outside a Herdr pane is Core
+            self.front('new', 'new', '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
+            return
         if self.on_core:
             relay = ('--relay',) if self.backend == 'core' else ()
             self.front('new', 'new', '--core', *relay, '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)

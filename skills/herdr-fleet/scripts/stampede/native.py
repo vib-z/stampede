@@ -119,13 +119,15 @@ def cap(job):
 
 
 SPLITS = {2: (1, 'right'), 3: (2, 'down'), 4: (1, 'down')}  # the owner's 2x2: 1 top left, 2 top right, 3 bottom right, 4 bottom left
+LAYOUTS = {'columns': 'right', 'rows': 'down'}  # helpers.layout other than grid: each pane splits the one before it this way
 
 
 def place(key, terminals, base, want=None, job=None):
     """A terminal's place: (tab, pane, labels). The tab is the first of base, base-2, ... that holds fewer than
     helpers.tab_panes live terminals of the job; the pane is the lowest number none of them holds (want, a recorded
-    (tab, pane), when that place is still free). Pane 2 splits pane 1 right, 3 splits 2 down, 4 splits 1 down, and each
-    from 5 the one before it right; when that pane is free, panes 2 and 3 split pane 1 right and 4 splits it down."""
+    (tab, pane), when that place is still free). helpers.layout grid: pane 2 splits pane 1 right, 3 splits 2 down, 4 splits
+    1 down, and each from 5 the one before it right; when that pane is free, panes 2 and 3 split pane 1 right and 4 splits
+    it down. columns (rows): each pane splits the one before it right (down), else pane 1."""
     panes, mine = setting(job, None, 'helpers.tab_panes'), live(key, terminals)
 
     def held(name):
@@ -142,9 +144,10 @@ def place(key, terminals, base, want=None, job=None):
         name = base if n == 1 else f'{base}-{n}'
         numbered = held(name)[1]
         pane = min(set(range(1, panes + 1)) - set(numbered))
-    target, how = SPLITS.get(pane, (pane - 1, 'right'))
+    line = LAYOUTS.get(settings_.current(job).get('helpers.layout'))
+    target, how = (pane - 1, line) if line else SPLITS.get(pane, (pane - 1, 'right'))
     if target not in numbered:
-        target, how = 1, 'down' if pane == 4 else 'right'
+        target, how = 1, line or ('down' if pane == 4 else 'right')
     tags = {'herdr.tab': name, 'stampede.pane': str(pane)}
     if pane > 1 and target in numbered:
         tags.update({'stampede.split': how, 'stampede.beside': numbered[target]})
@@ -277,8 +280,9 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
             f'You are {lead}, the lead of the job in {job}, on Herdr Core. The space {space} is your name label. Read {job / "ask.md"} '
             f'and run it. Write the plan in {job / "plan.md"}: the helpers (name, CLI, model, tab), the task of each, and any '
             f'questions with a default. {gate}\n{reach}'
-            f'Start a helper as your own Core child: {s} start {job} <name> --kind claude|codex --brief <file> [--model <m>] '
-            '[--effort <e>] [--cwd <dir>] [--tab <label>]. A brief has the sections Goal, Why, Inputs, Constraints, Done when, '
+            f'Start a helper as your own Core child: {s} start {job} <role>-<scope> --brief <file> [--kind claude|codex] '
+            '[--model <m>] [--effort <e>] [--cwd <dir>] [--tab <label>]; the role (build, research, review, design, qa, copy, '
+            'test) gives the kind, model and effort a flag does not. A brief has the sections Goal, Why, Inputs, Constraints, Done when, '
             f'Report back and If blocked. Run any other CLI as a program: {s} start {job} <name> -- <program> [args].\n'
             f'At most {limit} helpers run at once in your whole tree; a start over that waits in the queue. Only the owner '
             'changes that number.\n'
@@ -286,6 +290,7 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
             'child\'s news and each message), and that wakes you. hc wait --children any --timeout <seconds> is only for blocking inside a command; '
             f'an answer whose reason is timeout is a check-in, not news. On each child\'s note, run {s} next {job} to start what '
             'waits.\n'
+            f'{agents_.review_step(job)}\n'
             f'Each helper writes its result in a file under {job / "reports"} and sends you one line with the path: read the file.\n'
             f'Talk to a child with hc send <address> "<text>" or {s} tell {job} <name> "<text>". See the tree with {s} tree {job}.\n'
             'Run a CI wait or a build as a plain child: hc run --bg -- <command>. Its end comes to you as a note.\n'
@@ -317,10 +322,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     if front and owner:
         raise ValueError(f'--front-door is for a chat outside Herdr, but this job would be owned by the bot {owner}: a bot '
                          'relays its own jobs (drop --front-door, or unset HERDR_EVENTS_OWNER)')
-    slug = name or job_.slug(ask)
-    job = repo / ('.herdr-' + slug)
-    if job.exists():
-        raise ValueError(f'{job} already exists: a job folder is used once; start another job with --name')
+    job, slug = job_.new_folder(name or job_.slug(ask), owner)
     key = job_.job_key(job)
     try:
         terminals = listing(None, settings.get('timeouts.hc_call'))
@@ -332,7 +334,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     if any(t.get('state') == 'live' and labels(t).get('stampede.space') == space and labels(t).get('stampede.job') != key
            for t in terminals):
         space += '-' + key[3:7]
-    lead = job_.make_job(repo, job, ask, owner, review, front=front)
+    lead = job_.make_job(repo, job, ask, owner, review, slug, front)
     settings_.save(job, settings)
     (job / 'backend').write_text('native\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
@@ -425,7 +427,7 @@ def start(job, name, kind, pane, brief, model, effort, reports, yolo_in, cwd, ta
         if missing:
             raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
                              'fill them in on skills/herdr-fleet/references/brief.md and start again')
-    folder = Path(cwd or job.parent).expanduser().resolve()
+    folder = Path(cwd or job_.workdir(job)).expanduser().resolve()
     if yolo_in is not None and (kind == 'program' or Path(yolo_in).expanduser().resolve() != folder or not agents_.linked_worktree(folder)):
         raise PermissionError('yolo is only for a Claude or Codex helper whose --cwd is its own git worktree')
     key, lead = job_.core_key(job), read(job, 'lead')
@@ -782,7 +784,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
             if node['role'] == 'helper' and not resume:  # a brief starts again: through the queue and the cap
                 yolo = kind != 'program' and agents_.YOLO[kind][0] in (node.get('argv') or [])
                 enqueue(queue, dict(name=name, kind=kind, brief=node.get('brief'), model=node.get('model'), effort=node.get('effort'),
-                                    cwd=node.get('cwd') or str(job.parent), tab=node.get('base') or node.get('tab'), parent=parent,
+                                    cwd=node.get('cwd') or str(job_.workdir(job)), tab=node.get('base') or node.get('tab'), parent=parent,
                                     place=[node['tab'], node['pane']] if node.get('tab') and node.get('pane') else None,
                                     outlive=bool(node.get('outlive')), program=list(node.get('argv') or []) if kind == 'program' else [],
                                     yolo=yolo, report=node.get('report') or str(job / 'reports' / (name + '.md'))))
@@ -800,7 +802,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                     **({'stampede.resumed': '1'} if resume else {}), 'herdr.space': space, **place_tags(node)}
             under = now[parent]['address'] if parent else None
             try:
-                shown = run(job, name, tags, node.get('cwd') or job.parent, argv, under, node.get('outlive'))
+                shown = run(job, name, tags, node.get('cwd') or job_.workdir(job), argv, under, node.get('outlive'))
             except (hcapi_.HcError, ValueError) as error:
                 failed = True
                 print(f'FAILED {name} ({base_.line(error)})')

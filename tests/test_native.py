@@ -344,7 +344,7 @@ class Layout(NativeCase):
         ask.write_text('Another job\n')
         code, out = self.quiet(cli_.new, str(ask), None, name='other', core=True, cwd=str(self.repo))
         self.assertEqual(code, 0, out)
-        other = job_.job_key(self.repo / '.herdr-other')
+        other = job_.job_key(next((job_.jobs_root() / 'jobs').glob('*-other')))
         lead = next(t for t in self.state()['terminals'].values() if t['labels'].get('stampede.job') == other)
         self.assertEqual((lead['labels']['herdr.tab'], lead['labels']['stampede.pane']), ('main', '1'))
 

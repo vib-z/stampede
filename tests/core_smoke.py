@@ -72,7 +72,7 @@ def scratch_env(name):
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
     (fake / 'claude').write_text(f'#!/bin/sh\nexec {sys.executable} -I {AGENT}\n')
     (fake / 'claude').chmod(0o755)
-    env = {**ENV, 'PATH': f'{fake}:{ENV["PATH"]}', 'FLEET_TRUST_ROOT': str(T / 'code'), 'HERDR_EVENTS_DIR': str(T / 'events'),
+    env = {**ENV, 'PATH': f'{fake}:{ENV["PATH"]}', 'FLEET_TRUST_ROOT': str(T / 'code'), 'FLEET_JOBS_ROOT': str(T / 'jobs'), 'HERDR_EVENTS_DIR': str(T / 'events'),
            'HERDR_EVENTS_HOME': str(T / 'queue'), 'HERDR_EVENTS_ROUTES_DIR': str(T / 'routes'), 'FLEET_ASK_CMD': 'false'}
     return repo, env
 

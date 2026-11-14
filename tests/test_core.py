@@ -1,6 +1,7 @@
 """Herdr Core support in fleet-job: the job key, the launch environment, new, start and tell on Core, gates, reopen.
 Every Core call goes to tests/fake_hc.py through HC; nothing here starts a program or touches a real core."""
 import contextlib, hashlib, io, json, os, re, shutil, signal, subprocess, sys, tempfile, threading, time, unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -103,7 +104,9 @@ class CoreCase(unittest.TestCase):
 
     @property
     def job(self):
-        return self.repo / ('.herdr-fix-login-bug')
+        """The job new made: <jobs root>/jobs/<date>-<owner or local>-fix-login-bug, the repo in its workdir."""
+        found = sorted((job_.jobs_root() / 'jobs').glob('*-fix-login-bug'))
+        return found[0] if found else job_.jobs_root() / 'jobs' / f'{datetime.now():%Y-%m-%d}-local-fix-login-bug'
 
     def core_job(self, workers=(), owner=''):
         """A Core job folder as new --core leaves it, without running new."""
@@ -443,8 +446,8 @@ class CoreNew(CoreCase):
         self.assertFalse((self.events / 'jobs' / key).exists())
         self.assertFalse((self.events / 'owners' / key).exists())
         self.assertTrue((self.job / 'start-failed').read_text().strip())
-        with self.assertRaises(ValueError):
-            self.new_core()  # the folder stays; a retry is a new job
+        self.new_core()  # the folder stays; a retry is a new job, in a folder of its own
+        self.assertEqual(len(list((job_.jobs_root() / 'jobs').glob('*-fix-login-bug'))), 2)
 
     def test_a_relay_that_never_ran_stops_before_the_lead(self):
         key = job_.job_key(self.job)
@@ -476,8 +479,9 @@ class CoreNew(CoreCase):
         self.terminal('t2', status={'state': 'idle'})
         self.quiet(owner_.tell, self.job, 'lead', 'Read the brief')
         self.assertIn('Read the brief', (self.job / 'inbox' / (LEAD + '.md')).read_text())
-        with self.assertRaises(ValueError):
-            self.new_core()  # never a second lead for this folder
+        self.new_core()  # never a second lead for this folder: the same ask again is a new job in a folder of its own
+        self.assertEqual((self.job / 'lead').read_text().strip(), LEAD)
+        self.assertTrue(list((job_.jobs_root() / 'jobs').glob('*-fix-login-bug-2')))
 
     def test_a_lead_with_an_error_or_no_status_is_not_ready_but_live(self):
         for status, word in (({'state': 'error', 'msg': 'rate limited'}, 'error'), (None, 'no status')):
@@ -1164,6 +1168,7 @@ class ReviewSmallOnes(CoreCase):
         shutil.rmtree(self.job)
         for address in ('t1', 't2'):
             self.terminal(address, state='finished')  # the earlier job's terminals are gone (else new refuses the path)
+        key = job_.job_key(Path(str(self.job).replace('-local-', '-alpha-')))  # a bot's job folder names the bot
         (self.events / 'owners' / key).write_text('owner=beta\n')
         with mock.patch.dict(os.environ, {'HERDR_EVENTS_OWNER': 'alpha'}):
             self.assertEqual(self.new_core()[0], 0)

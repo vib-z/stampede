@@ -645,9 +645,9 @@ class StampedeReview1(unittest.TestCase):
         ask.write_text('Fix the login bug\n')
         herdr, log = fake_herdr(ask.parent)
         no_core = str(ask.parent / 'no-core.sock')   # this machine's own Herdr Core is not asked
-        result = self.cli('new', '--file', str(ask), drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr, HC_SOCKET=no_core)
+        result = self.cli('new', '--file', str(ask), '--set', 'backend=tui', drop=('HERDR_WORKSPACE_ID',), path_herdr=herdr, HC_SOCKET=no_core)
         self.assertEqual((result.returncode, result.stderr.strip()),
-                         (2, 'stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core, '
+                         (2, 'stampede new: new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui); to run it here on Herdr Core, '
                              f'run the next line\nstampede new --core --file {ask} --cwd {ROOT}'))
         self.assertFalse(log.exists())
 
@@ -679,7 +679,8 @@ class StampedeReview1(unittest.TestCase):
         down.chmod(0o755)
         hint = 'Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
         env = {'FLEET_JOBS_ROOT': str(folder / 'jobs-root'), 'HC_SOCKET': str(folder / 'core.sock')}
-        cases = ((('new', '--file', str(ask)), {'drop': ('HERDR_WORKSPACE_ID',)}, 2, 'new needs --workspace or --pane, or run it inside Herdr; '),
+        cases = ((('new', '--file', str(ask), '--set', 'backend=tui'), {'drop': ('HERDR_WORKSPACE_ID',)}, 2,
+                  'new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui); '),
                  (('new', '--file', str(ask), '--workspace', 'w9'), {'path_herdr': down}, 1, 'no herdr server is running'),
                  (('new', '--file', str(ask), '--workspace', 'w9'), {'HERDR': str(folder / 'no-herdr')}, 2, 'did not answer'))
         for argv, kw, code, said in cases:

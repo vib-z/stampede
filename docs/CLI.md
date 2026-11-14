@@ -13,15 +13,15 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 
 | command | flags | prints |
 |---|---|---|
-| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--lead claude\|codex` (default: the setting `lead.kind`, else claude), `--fork <session id>` (Claude only), `--front-door` | `<lead> <job folder>` once its brief pointer went in; `BLOCKED <lead>: clear the startup dialog, then stampede tell ...` |
-| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--fork`, `--space <name>`, `--max-helpers <n>` (default: the setting `helpers.max`, 12), `--front-door` (refused with `--relay` and in a bot's job) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
+| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--lead claude\|codex` (default: the setting `lead.kind`, else claude), `--lead-model <m>` and `--lead-effort <e>` (the settings `lead.<its CLI>.model` and `.effort`; every backend), `--fork <session id>` (Claude only), `--front-door`. With none of `--core`, `--pane` and `--workspace`, the setting `backend` chooses: `auto` (default) is the Herdr TUI inside a Herdr pane (`$HERDR_WORKSPACE_ID` set) and a Core job anywhere else, as `new --core` with `--cwd`; `tui`; `core` | on the TUI `<lead> <job folder>` once its brief pointer went in; a Core job chosen by `backend` first prints `on Herdr Core (backend auto: not inside a Herdr pane)` (or `(backend core)`), then as `new --core`; `BLOCKED <lead>: clear the startup dialog, then stampede tell ...` |
+| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--lead-model`, `--lead-effort`, `--fork`, `--space <name>`, `--max-helpers <n>` (default: the setting `helpers.max`, 12), `--front-door` (refused with `--relay` and in a bot's job) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
 | `new --core --relay --file <ask.md>` | `--cwd`, `--name`, `--review`, `--lead`, `--fork`, `--app-space` | as `new --core`, for the earlier path |
 
 ## Work in it
 
 | command | flags | prints |
 |---|---|---|
-| `start <job> <agent> --kind <cli> --brief <file>` | Herdr TUI: `--pane <id>` (required); every job: `--model`, `--effort`, `--report <path>` (repeatable), `--yolo-in <worktree>`; a Core job: `--cwd`, `--tab`, `--parent`, `--outlive-parent`; a `--relay` job: `--cwd`, and `--pane` for cursor, hermes or kimi | `STARTED <agent> (<pane or address>)`, `QUEUED <agent> (<n> running, cap <c>)` (a Core job at its cap), `DELIVERED <agent>` (a TUI worker's brief pointer), `BLOCKED`, `NOT BRIEFED`, `NOT READY`, `UNKNOWN` |
+| `start <job> <agent> --brief <file>` | every job: `--kind <cli>`, `--model`, `--effort`, each one not given from the setting `roles.<role>` (the role is the name up to its first `-`), else `roles.default`, a role's model and effort only with its own kind (a restarted lead keeps its CLI and lead model); Herdr TUI: `--pane <id>` (required); every job: `--report <path>` (repeatable), `--yolo-in <worktree>`; a Core job: `--cwd`, `--tab`, `--parent`, `--outlive-parent`; a `--relay` job: `--cwd`, and `--pane` for cursor, hermes or kimi | `STARTED <agent> (<pane or address>)`, `QUEUED <agent> (<n> running, cap <c>)` (a Core job at its cap), `DELIVERED <agent>` (a TUI worker's brief pointer), `BLOCKED`, `NOT BRIEFED`, `NOT READY`, `UNKNOWN` |
 | `start <job> <agent> -- <program> [args]` | a Core job: `--cwd`, `--tab`, `--parent`, `--outlive-parent` | as above; any CLI or program runs this way |
 | `tell <job> <agent> <text>` | `lead` names the lead | `DELIVERED <agent> (inbox file)`, `BLOCKED_ON_CARD <agent>: ...` (queued; it waits at a question card), `SUBMITTED <agent> (<address>)`, `FAILED <agent> (<why>)` |
 | `ask <job> <question>` | `--option <a>` (repeatable) | `ASKED <id> ...`, saying where the answer comes back |
@@ -57,7 +57,7 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 
 `new` and `start` take `--set key=value` (repeatable): a setting for that command, above every other layer; the value is read as TOML, a bare word is a string. A pair without `=` or a value exits 2. At `new` it is saved with the rest.
 
-`new` writes `<job>/settings.json`: `{"values", "sources", "version"}`, every setting it resolved except the user-only keys (`ask.command`, `jobs_root`, `trust_root`, `gates.*`), which every command reads from your own file, environment and flags. Every later command of the job starts from it. `new` refuses, exit 2, while the config has a problem: each problem line, then `stampede new: fix it or remove the key: stampede config show`. The layers and every key: [README, Configure](../README.md#configure).
+`new` writes `<job>/settings.json`: `{"values", "sources", "version"}`, every setting it resolved except the user-only keys (`ask.command`, `jobs_root`, `trust_root`, `gates.*`), which every command reads from your own file, environment and flags. Every later command of the job starts from it. `new` refuses, exit 2, while the config has a problem: each problem line, then `stampede new: fix it or remove the key: stampede config show`. The new keys of this kind are `backend`, `roles.<role>.kind|model|effort` (any role name), `helpers.layout` and `review.step`; a value outside a key's choices is a problem too. The layers and every key: [README, Configure](../README.md#configure).
 
 ## The machine
 
@@ -77,7 +77,8 @@ Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what
 - `stampede tell: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>`, for every command given a job folder, before anything else.
 - `stampede tell: agent <name> is not in this job (it has: lead, <names>)`.
 - `stampede new: the ask file <path> does not exist: ...`, before any other check.
-- `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core, run the next line`, then on a line of its own `stampede new --core --file <ask> --cwd <git root>`, quoted to run as shown.
+- `stampede new: new needs --workspace or --pane, or run it inside Herdr (the setting backend is tui); to run it here on Herdr Core, run the next line`, then on a line of its own `stampede new --core --file <ask> --cwd <git root>`, quoted to run as shown.
+- After `on Herdr Core (backend auto: not inside a Herdr pane)`: `stampede new: Herdr Core did not answer ...` (or `is not installed`, or `needs --cwd`) `...; backend auto: not inside a Herdr pane, so start Herdr Core (hc server start) or pass --cwd <repo>, ...`, then `stampede new --file <ask> --workspace <id>` for the Herdr TUI.
 - `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, then `stampede new: fix it or remove the key: stampede config show`.
 - `stampede: error: ...` with the usage line, for a flag or command it does not know; bare `stampede` prints the help.
 

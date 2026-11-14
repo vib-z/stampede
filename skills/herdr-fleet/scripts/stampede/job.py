@@ -1,5 +1,6 @@
 """The job folder and its record: roster, backend, keys, markers, owner and core.json."""
 import contextlib, fcntl, hashlib, json, os, re, subprocess
+from datetime import datetime
 from pathlib import Path
 
 from . import base as base_, settings as settings_
@@ -188,18 +189,27 @@ def jobs_root():
     return Path(settings_.current().get('jobs_root')).expanduser().absolute()
 
 
-def make_job(repo, job, ask, owner, review, name=None, front=False):
-    """The job folder, its ask, owner, review and front-door files, and the lead's name. A folder inside the repo (a Herdr
-    Core job's .herdr-<name>) is git-excluded; one under the jobs root records the repo it works on in `workdir`."""
+def new_folder(base, owner):
+    """A new job's folder, on every backend: <jobs root>/jobs/<date>-<owner or local>-<name>, and its name. The same name
+    again that day, from another repo or ask, takes -2, -3, ..., and lead-<name> stays a valid 32-character NAME."""
+    for n in range(1, 100):
+        name = base if n == 1 else f'{base[:26 - len(str(n))].rstrip("-")}-{n}'
+        job = jobs_root() / 'jobs' / f'{datetime.now():%Y-%m-%d}-{owner or "local"}-{name}'
+        if not job.exists():
+            return job, name
+    raise ValueError(f'99 jobs named {base} today: pass --name')
+
+
+def workdir(job):
+    """The repo a job works on: its workdir file; a Core job made before the one folder rule sits in the repo itself."""
+    path = Path(job) / 'workdir'
+    return Path(path.read_text().strip()) if path.is_file() else Path(job).absolute().parent
+
+
+def make_job(repo, job, ask, owner, review, name, front=False):
+    """The job folder, its ask, workdir (the repo), owner, review and front-door files, and the lead's name."""
     job.mkdir(parents=True, exist_ok=False)
-    if repo in job.parents:
-        probe = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True)
-        if probe.returncode == 0:
-            exclude = repo / probe.stdout.strip()  # an absolute path stays absolute
-            if not exclude.exists() or '/.herdr-*/' not in exclude.read_text().splitlines():
-                base_.append(exclude, '/.herdr-*/')
-    else:
-        (job / 'workdir').write_text(str(repo) + '\n')
+    (job / 'workdir').write_text(str(repo) + '\n')
     (job / 'ask.md').write_text(ask)
     if owner:
         (job / 'owner').write_text(owner + '\n')
@@ -207,7 +217,7 @@ def make_job(repo, job, ask, owner, review, name=None, front=False):
         (job / 'review').write_text('The owner asked to see the plan before any pane opens.\n')
     if front:
         (job / 'front-door').write_text('The chat that started this job is the owner\'s only contact: it relays <job>/outbox.\n')
-    lead = 'lead-' + (name or job.name[len('.herdr-'):])
+    lead = 'lead-' + name
     (job / 'lead').write_text(lead + '\n')
     return lead
 
