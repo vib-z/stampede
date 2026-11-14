@@ -13,8 +13,8 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 
 | command | flags | prints |
 |---|---|---|
-| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--lead claude\|codex` (default `$FLEET_LEAD_KIND`, else claude), `--fork <session id>` (Claude only), `--front-door` | `<lead> <job folder>` once its brief pointer went in; `BLOCKED <lead>: clear the startup dialog, then stampede tell ...` |
-| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--fork`, `--space <name>`, `--max-helpers <n>` (default `$STAMPEDE_MAX_HELPERS`, else 12), `--front-door` (refused with `--relay` and in a bot's job) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
+| `new --file <ask.md>` | `--workspace <id>` (default `$HERDR_WORKSPACE_ID`), `--pane <id>`, `--name <slug>`, `--review`, `--lead claude\|codex` (default: the setting `lead.kind`, else claude), `--fork <session id>` (Claude only), `--front-door` | `<lead> <job folder>` once its brief pointer went in; `BLOCKED <lead>: clear the startup dialog, then stampede tell ...` |
+| `new --core --file <ask.md>` | `--cwd <repo>` (default: the git root here), `--name`, `--review`, `--lead`, `--fork`, `--space <name>`, `--max-helpers <n>` (default: the setting `helpers.max`, 12), `--front-door` (refused with `--relay` and in a bot's job) | `STARTED <lead> (<address>)`, then `<lead> <job folder>`; `BLOCKED`, `NOT READY`, `FAILED` or `UNKNOWN <lead>: ...` with the next step |
 | `new --core --relay --file <ask.md>` | `--cwd`, `--name`, `--review`, `--lead`, `--fork`, `--app-space` | as `new --core`, for the earlier path |
 
 ## Work in it
@@ -27,7 +27,7 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 | `ask <job> <question>` | `--option <a>` (repeatable) | `ASKED <id> ...`, saying where the answer comes back |
 | `ask <job> --gate --sha <commit> <action>` | `--pr <n>`; no `--option` | `GATE <id> ...; act after stampede gate-ok ... prints APPROVED` |
 | `post <job> <text>` | `--file <path>` (repeatable) | `POSTED <n> to <bot> (and <item>)` in a job a bot started; `POSTED <n> for the front door to relay (<item>)` in a `--front-door` job; otherwise `POSTED <n> to the outbox only (<item>): no bot or front door hears it`, with how the owner would be told |
-| `wait <job>` | `--timeout <s>` (default 3600) | every outbox item not shown yet, `BLOCKED_ON_CARD` with the lead's screen, or `LEAD_GONE <lead>: ...`; on a Core job `BLOCKED <lead>: <kind>. Core says it waits at a dialog in its terminal <address> (hc read <address>)` and its screen, or `LEAD_GONE <lead>: Herdr Core holds no live lead of this job ...`; `TIMEOUT nothing new ...` |
+| `wait <job>` | `--timeout <s>` (default: the setting `timeouts.wait`, 3600) | every outbox item not shown yet, `BLOCKED_ON_CARD` with the lead's screen, or `LEAD_GONE <lead>: ...`; on a Core job `BLOCKED <lead>: <kind>. Core says it waits at a dialog in its terminal <address> (hc read <address>)` and its screen, or `LEAD_GONE <lead>: Herdr Core holds no live lead of this job ...`; `TIMEOUT nothing new ...` |
 | `next <job>` (a Core job) | | `STARTED` per queued helper, `DROPPED <name>: its parent ... is gone`, then `WAITING <k> queued (...)` or `NOTHING QUEUED` |
 | `tree <job>` (a Core job) | `--json` | `space <name> (<key>)`, then one line per terminal, indented by depth, then the queue; `NO LEAD` |
 
@@ -49,11 +49,21 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 | `reopen <job>` (a Core job) | `--fresh`, `--prompt`, `--rerun-programs` | per agent: `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` or `FAILED` |
 | `close <job> [<agent>]` (a Core job) | | `CLOSED <agent> (<address>)` per agent, deepest first; no agent closes the whole job |
 
+## Settings
+
+| command | flags | prints |
+|---|---|---|
+| `config show` | `--json`, `--job <job>` (the settings that job saved at `new`; else the repo is the git root of the current folder) | the config files it read (`# user config: <path> (found\|none)`, the repo's, a job's), then one line per setting, `key = value  (source)`, grouped by table, the source being `default`, `user`, `repo`, `env:<NAME>`, `flag` or `set`; then the environment-only variables, `NAME = "value"  (env\|default)`; then `# problems` and one line each. `--json`: `{"values", "sources", "files", "environment", "problems"}`. Exit 0, or 1 when there are problems |
+
+`new` and `start` take `--set key=value` (repeatable): a setting for that command, above every other layer; the value is read as TOML, a bare word is a string. A pair without `=` or a value exits 2. At `new` it is saved with the rest.
+
+`new` writes `<job>/settings.json`: `{"values", "sources", "version"}`, every setting it resolved except the user-only keys (`ask.command`, `jobs_root`, `trust_root`, `gates.*`), which every command reads from your own file, environment and flags. Every later command of the job starts from it. `new` refuses, exit 2, while the config has a problem: each problem line, then `stampede new: fix it or remove the key: stampede config show`. The layers and every key: [README, Configure](../README.md#configure).
+
 ## The machine
 
 | command | flags | prints |
 |---|---|---|
-| `doctor` | `--core` or `--tui` (passed to `herdr-doctor`), `--json` | one line per check, `ok ...`, `warn ...: <fix>` or `PROBLEM ...: <fix>`: Python, the checkout (VERSION and every module imports), the commands on PATH, then `herdr-doctor`'s own lines. `--json`: `{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}` |
+| `doctor` | `--core` or `--tui` (passed to `herdr-doctor`), `--json` | one line per check, `ok ...`, `warn ...: <fix>` or `PROBLEM ...: <fix>`: Python, the checkout (VERSION and every module imports), the commands on PATH, the config files (each problem `stampede new` would refuse on, as a `PROBLEM` with its fix), then `herdr-doctor`'s own lines. `--json`: `{"ok": bool, "checks": [{"name", "level", "text", "fix"}]}` |
 | `check` | `--full`, `--json` | one line per test module (`ok` or `FAIL`, its tests and seconds, a failure's output), then `ok <n> tests in <s> s` or `FAILED <k> of <m>: ...`. The fast part takes a few seconds; `--full` runs the whole suite |
 | `update` | `--check` | `stampede <old> -> <new>` after a fast-forward of a clean `main` and `install.sh`; `refused: ...` with what to move; a Herdr plugin install names `herdr plugin update stampede --yes`. `--check`: one line on whether a newer release is out |
 
@@ -68,6 +78,7 @@ Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what
 - `stampede tell: agent <name> is not in this job (it has: lead, <names>)`.
 - `stampede new: the ask file <path> does not exist: ...`, before any other check.
 - `stampede new: new needs --workspace or --pane, or run it inside Herdr; to run it here on Herdr Core, run the next line`, then on a line of its own `stampede new --core --file <ask> --cwd <git root>`, quoted to run as shown.
+- `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, then `stampede new: fix it or remove the key: stampede config show`.
 - `stampede: error: ...` with the usage line, for a flag or command it does not know; bare `stampede` prints the help.
 
 The full list, each with its fix, is the README's [Troubleshoot](../README.md#troubleshoot).

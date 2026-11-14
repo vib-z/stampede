@@ -3,7 +3,7 @@ herdr-doctor's lines passed through. Each check is {name, level, text, fix}; lev
 import importlib, json, os, re, shutil, subprocess, sys
 from pathlib import Path
 
-from . import base as base_
+from . import base as base_, settings as settings_
 
 ROOT = base_.SCRIPTS.parents[2]  # the checkout: skills/herdr-fleet/scripts -> the repo
 HELPERS = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts'
@@ -59,7 +59,17 @@ def commands():
     return out or [check('commands', 'ok', f'stampede, fleet-job and {len(wanted) - 2} herdr helpers on PATH point into this checkout')]
 
 
-CHECKS = (python, checkout, commands)  # each returns its lines; a new check is one more function here
+def config():
+    """The settings files: each problem stampede new would refuse on (a key that is not a setting, a wrong type, a file
+    that is not TOML, a user-only key in a repo file), with the file to fix. The repo file when run inside a repo."""
+    top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    loaded = settings_.load(repo=top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else None)
+    files = ', '.join(f['path'] for f in loaded.files.values() if f['exists']) or 'none'
+    return [check('config', 'PROBLEM', problem, 'fix or remove what it names, then stampede config show')
+            for problem in loaded.problems] or [check('config', 'ok', f'settings files without problems: {files}')]
+
+
+CHECKS = (python, checkout, commands, config)  # each returns its lines; a new check is one more function here
 
 
 def herdr_doctor(core, tui):

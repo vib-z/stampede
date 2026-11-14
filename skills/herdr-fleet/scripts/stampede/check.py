@@ -10,7 +10,6 @@ ROOT = base_.SCRIPTS.parents[2]
 FAST = ('test_shape', 'test_version', 'test_hc_contract', 'test_layers', 'test_settings', 'test_routes', 'test_herdr_trust',
         'test_herdr_send', 'test_platform', 'test_install',
         'test_fleet_job.Messages', 'test_fleet_job.Briefs', 'test_fleet_job.Command')
-OPTIONAL = {'test_settings'}  # it comes with the layered config; until then a checkout has none
 RAN = re.compile(r'^Ran (\d+) tests? in', re.M)
 
 
@@ -35,7 +34,7 @@ def main(full=False, as_json=False):
         missing = [] if names else [('tests', 'no test_*.py in this checkout\'s tests folder: run git status there')]
     else:
         names = [n for n in FAST if (tests / (n.split('.')[0] + '.py')).is_file()]
-        missing = [(n, f'tests/{n.split(".")[0]}.py is missing from this checkout') for n in FAST if n not in names and n not in OPTIONAL]
+        missing = [(n, f'tests/{n.split(".")[0]}.py is missing from this checkout') for n in FAST if n not in names]
     home = tempfile.mkdtemp(prefix='stampede-check-')
     try:
         os.mkdir(os.path.join(home, 'bin'))

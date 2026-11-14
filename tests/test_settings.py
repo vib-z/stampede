@@ -5,7 +5,7 @@ from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent.parent / 'skills' / 'herdr-fleet' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import settings as st, agents as agents_, job as job_, owner as owner_, hcapi as hcapi_, native as native_, cli as cli_, relay as relay_
+from stampede import settings as st, agents as agents_, job as job_, owner as owner_, hcapi as hcapi_, native as native_, cli as cli_, relay as relay_, doctor as doctor_
 
 SAMPLE = '''# a user file
 jobs_root = "~/jobs"   # a comment after a value
@@ -207,6 +207,7 @@ class Wired(unittest.TestCase):
         self.user.parent.mkdir(parents=True)
         self.job = self.dir / 'job'
         self.job.mkdir()
+        (self.job / 'ask.md').write_text('Fix the login bug\n')  # a job folder, as stampede's commands check
 
     def config(self, text):
         self.user.write_text(text)
@@ -326,7 +327,7 @@ class Wired(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn('helpers.maxx is not a setting', out.stdout.split('# problems')[1])
         out = show('--job', str(self.dir / 'nowhere'))
-        self.assertEqual((out.returncode, out.stderr.strip()), (2, f'fleet-job config: {self.dir / "nowhere"} is not a job folder'))
+        self.assertEqual((out.returncode, out.stderr.strip()), (2, f'stampede config: job folder not found: {self.dir / "nowhere"}'))
 
 
 class Review(Wired):
@@ -460,6 +461,23 @@ class Review(Wired):
         self.assertIn('not readable TOML', s.problems[0])
         self.assertTrue(s.files['user']['exists'])
 
+
+    def test_doctor_reports_each_config_problem_with_its_fix(self):
+        repo = self.dir / 'repo'
+        repo.mkdir()
+        subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+        (repo / '.stampede.toml').write_text('trust_root = "/"\n')
+        self.config('[helpers]\nmaxx = 2\n')
+        with mock.patch.object(doctor_.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, str(repo) + '\n', '')):
+            found = doctor_.config()
+        self.assertEqual([(c['level'], c['fix']) for c in found], [('PROBLEM', 'fix or remove what it names, then stampede config show')] * 2)
+        self.assertIn('helpers.maxx is not a setting', found[0]['text'])
+        self.assertIn('trust_root is taken only from your own', found[1]['text'])
+        self.config('')
+        (repo / '.stampede.toml').unlink()
+        with mock.patch.object(doctor_.subprocess, 'run', return_value=subprocess.CompletedProcess([], 128, '', 'not a repo')):
+            self.assertEqual([c['level'] for c in doctor_.config()], ['ok'])
+        self.assertIn(doctor_.config, doctor_.CHECKS)
 
 class Example(unittest.TestCase):
     def test_config_example_is_the_defaults(self):
