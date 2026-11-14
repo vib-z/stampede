@@ -440,10 +440,18 @@ $ stampede wait $J                                                              
 $ stampede approve $J --by "owner in desktop chat: 'go'"
 SUBMITTED lead-login (t1)
 $ stampede ask $J --gate --sha <commit> --pr 12 "merge PR #12"                    # the lead
-GATE 4eae4f2d1336 posted to the front door as outbox 002; act after fleet-job gate-ok <repo>/.herdr-login 4eae4f2d1336 --sha <the commit you act on> prints APPROVED
-$ stampede approve-gate $J 4eae4f2d1336 --sha <commit> --digest aad7f16507bf9115 --by "owner in desktop chat: 'merge it'"
+GATE 66185eb7d9f5 posted to the front door as outbox 002; act after fleet-job gate-ok <repo>/.herdr-login 66185eb7d9f5 --sha <the commit you act on> prints APPROVED
+$ stampede wait $J                                                                # the chat
+# 002 gate
+
+Gate 66185eb7d9f5: merge PR #12 (PR #12) at <commit, 12 hex>?
+One exact action, yes or no. Show the owner this action as written.
+
+Answer with: fleet-job approve-gate <repo>/.herdr-login 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in <chat>: <their exact words>"   (a no: fleet-job tell <repo>/.herdr-login lead 'GATE 66185eb7d9f5 NO: <their words>')
+
+$ stampede approve-gate $J 66185eb7d9f5 --sha <commit> --digest 44070052fe3b6057 --by "owner in desktop chat: 'merge it'"   # on the owner's yes
 SUBMITTED lead-login (t1)
-APPROVED 4eae4f2d1336 at <commit>
+APPROVED 66185eb7d9f5 at <commit>
 $ stampede wait $J                                                                # the lead waits at a permission dialog
 BLOCKED lead-login: permission. Core says it waits at a dialog in its terminal t1 (hc read t1). Its screen:
 Allow this command?
@@ -904,12 +912,14 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 **Unreleased, 14 Nov 2026. A command that teaches itself:** bare `stampede` and `stampede --help` list the commands grouped in the order an agent meets them, each `--help` has its flags and an example, and a refusal names the next step (a job folder that is not there, an agent not in the job, a missing ask file, a post nobody hears). `stampede doctor` checks Python, the checkout and the commands on PATH before `herdr-doctor`'s own lines, `stampede check` runs the fast tests in seconds, and the suite runs quietly on Python 3.9 in CI. Every command and its exit codes: [docs/CLI.md](docs/CLI.md).
 
+**Unreleased, 14 Nov 2026. A native front door on Herdr Core:** `stampede new --core --front-door` makes a chat outside Herdr and Core the owner's only contact on a Core-native job, as on the TUI: the lead posts, asks and asks gates through `<job>/outbox`, `stampede wait` hands each item on (and says `BLOCKED <lead>: <kind>` with its screen, or `LEAD_GONE`), and answers, `approve` and `approve-gate` reach the lead through `hc send`. Tested with the fake `hc` (the front-door loop for every client outside Herdr on all three backends in the cross-client suite) and on a real scratch core (`tests/core_smoke.py`, hc 0.1.21: `new --core --front-door`, `post`, `wait`, `finish`). No live agent has run it yet.
+
 **Next:**
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.
 - On Linux: the systemd user timers on a real user manager, x86_64 live (CI covers it with fakes and a Core smoke run), a signed-in Claude and Codex, Moshi paired, and a bot over SSH.
 - A Herdr server restart: `reopen.sh` into the workspace Herdr restores, starting the agents in its plain shells, instead of asking to close it first.
 - The cross-client findings in [docs/CLIENTS.md](docs/CLIENTS.md#doing-worse): a bot's Core start that names its owner, and a TUI job whose bot is named by `HERDR_EVENTS_OWNER` tagging its workspace.
-- On Herdr Core, planned: workers on a second machine (`hc run --on`; a job is local to one machine today), a look at an `--app-space` job in the Herdr app and a name for its space set through the app, Kimi as a Core agent (Kimi 2.5.3 reports its status on Herdr Core 0.1.20) once a signed-in run shows its turns and its empty prompt, Hermes and Kimi workers on a TUI-only job, and Hermes's empty prompt, so a handed one is briefed and told without a hand.
+- On Herdr Core, planned: opt-in alerts to the owner for helpers (blocked, error, stale, dead), as the watchdog sends for the lead today, workers on a second machine (`hc run --on`; a job is local to one machine today), a look at an `--app-space` job in the Herdr app and a name for its space set through the app, Kimi as a Core agent (Kimi 2.5.3 reports its status on Herdr Core 0.1.20) once a signed-in run shows its turns and its empty prompt, Hermes and Kimi workers on a TUI-only job, and Hermes's empty prompt, so a handed one is briefed and told without a hand.
 - Starting workers on the other agents Herdr detects, beyond Claude, Codex, Cursor, Hermes and Kimi.
 - Workers on a second machine over Tailscale.
 - Cursor as the lead, and a signed-in Codex leading a live Herdr Core job.
