@@ -78,6 +78,15 @@ class Backend(Choices):
         self.assertEqual(code, 2)
         self.assertIn('backend must be one of auto, tui, core, not \'cloud\'', err)
 
+    def test_an_explicit_core_start_names_its_repo_first_and_as_a_fact(self):
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[0], f'on Herdr Core (--core), repo {self.repo.resolve()}')
+        self.assertEqual(out.splitlines()[-1].split()[0], LEAD, 'the last line stays <lead> <job dir>')
+        code, out, err = self.main('new', '--file', self.ask, '--cwd', self.repo, '--core', '--name', 'second', '--json')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)['repo'], str(self.repo.resolve()))
+
     def test_config_show_and_doctor_catch_a_bad_value_as_new_does(self):
         self.config('[lead]\nkind = "claud"\n[merge]\nmethod = "fast"\n[roles.review]\nkind = "gemini"\n[roles.mine]\nkind = "x"\n')
         code, out, _ = self.main('config', 'show')

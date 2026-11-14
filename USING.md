@@ -11,7 +11,7 @@ A job runs on the Herdr TUI (tabs and panes) or Herdr Core (a tree of terminals)
 - `stampede <command> --help`: flags and an example. `--json` on any: one object ([CLI-JSON](docs/CLI-JSON.md)).
 - `herdr-trust <repo>` once per repo (under `FLEET_TRUST_ROOT`, default `~/code`), so agents skip the trust dialog.
 - `stampede config show`: every setting, the layer that set it, and your config file; settings go there as in [config.example](config.example).
-- Write the ask (the owner's words, any agreed plan) to a file outside the repo.
+- Write the ask (the owner's words and plan) to a file outside the repo.
 
 ## Start a job
 
@@ -19,9 +19,9 @@ A job runs on the Herdr TUI (tabs and panes) or Herdr Core (a tree of terminals)
 stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr Core
 ```
 
-- On Core it works on the git root here (or `--cwd <repo>`) and says so first. `--core` or `--pane` forces one; the setting `backend` is the standing choice.
+- On Core it works on the git root here (or `--cwd <repo>`) and names it first. `--core` or `--pane` forces one; the setting `backend` is the standing choice.
 - It prints `<lead> <job dir>` (on Core after `STARTED <lead> (<address>)`), exit 0. A refusal exits 2, before anything is made.
-- `BLOCKED` or `NOT READY`: the lead is up but waiting. Do what the line says; never start a second lead.
+- `BLOCKED` or `NOT READY`: the lead waits. Do what the line says; never start a second lead.
 - An agent chat that relays the owner's answers passes `--front-door`, on Core too. For the TUI it also passes `--pane` or `--workspace`: see [skills/stampede](skills/stampede/SKILL.md).
 
 ## Then
@@ -35,8 +35,8 @@ stampede new --file ask.md     # in a Herdr pane: the TUI; anywhere else: Herdr 
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
 On Herdr Core also: `stampede start <job> <role>-<scope> --brief <file>` (or `-- <program>`) starts a helper, its model from its role (`roles.build` for `build-api`).
-`stampede tree <job>` lists the tree. `stampede close <job> [<agent>]` ends a subtree or the job: ask the owner first (the code only refuses a close from inside the job).
-`stampede reopen <job>` brings back what stopped, not what `close` ended; a finished job reopens for reading only.
+`stampede tree <job>` lists the tree. `stampede close <job> [<agent>]` ends a subtree or the job: ask the owner first (code only stops a close from inside the job).
+`stampede reopen <job>` brings back what stopped, and a whole job `close <job>` put away; an agent closed by name stays closed. A finished job reopens read-only.
 
 ## Where the job folder is
 
@@ -55,4 +55,4 @@ Merges, pushes to shared branches, deploys, sends, spends and closes ([gates.md]
 - Starting a job: [skills/stampede](skills/stampede/SKILL.md). Leading one: [skills/herdr-fleet](skills/herdr-fleet/SKILL.md), on Core [core.md](skills/herdr-fleet/references/core.md)
 - A bot over SSH: [skills/grokbot-herdr](skills/grokbot-herdr/SKILL.md). Showing the plan first: [skills/share-plan](skills/share-plan/SKILL.md)
 - Every command, its output and exit codes: [docs/CLI.md](docs/CLI.md). Changing stampede: [AGENTS.md](AGENTS.md). The rest: [README.md](README.md)
-- `.ignore` keeps `film/`, `site/`, `assets/` and `tests/evals/runs/` out of ripgrep.
+- `.ignore` keeps `film/`, `site/`, `assets/` and eval runs out of ripgrep.
