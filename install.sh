@@ -32,8 +32,10 @@ ours() {  # ours <link value> <target>: the same file in another checkout of thi
 BASE="${XDG_STATE_HOME:-$HOME/.local/state}/stampede/backup-$(date +%Y%m%d-%H%M%S)"
 BACKUP=$BASE
 JOURNAL=0   # 1 once this --replace run has made its backup folder, rollback.sh and journal
+UNITS=""    # the Linux timer unit files this --replace run wrote, which a rollback leaves
 stopped() {  # stopped <what failed>: a --replace run stops here; the journal already names every change it made
   echo "install.sh: $1; stopped" >&2
+  [ -z "$UNITS" ] || echo "timer unit files written: $UNITS. They are stampede's own and a rollback leaves them" >&2
   if [ "$JOURNAL" = 1 ] && [ -s "$BACKUP/journal" ]; then echo "rollback: bash $(printf %q "$BACKUP/rollback.sh")" >&2; fi
   exit 1
 }
@@ -48,11 +50,13 @@ open_backup() {  # the backup folder, rollback.sh and an empty journal, before t
   cat > "$BACKUP/rollback.sh" <<'ROLLBACK' && : > "$BACKUP/journal" || stopped "could not write $BACKUP/rollback.sh"
 #!/bin/bash
 # Undo one install.sh --replace from the journal beside it, newest step first. Each step is checked against what is
-# there now: a link the run made is removed, an original goes back when its path is free, a step that never happened
-# is skipped. What cannot be undone is named, with where its original is. Exit 0 all undone, 1 something left.
+# there now: a link the run made is removed, an original goes back when its path is free, a folder it made is removed
+# when empty, a step that never happened is skipped. What cannot be undone is named, with where its original is.
+# Linux timer unit files are stampede's own and stay; it names them. Exit 0 all undone, 1 something left.
 B=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P) || exit 1
 status=0
 n=0
+units=""
 step() { n=$((n+1)); K[$n]=$1; P[$n]=$2; T[$n]=${3:-}; S[$n]=${4:-}; }   # step <kind> <path> [<target> [<saved>]]
 left() { echo "left $1" >&2; status=1; }
 there() { [ -e "$1" ] || [ -L "$1" ]; }
@@ -72,11 +76,17 @@ while [ "$i" -gt 0 ]; do
       elif there "$p"; then left "$p: something else is there now; its original is $s"
       elif mv "$s" "$p"; then echo "restored $p"
       else left "$p: could not move it back; its original is still $s"; fi;;
-    made) if [ -d "$p" ] && [ ! -L "$p" ]; then rmdir "$p" 2>/dev/null || left "$p: a folder install.sh made, not empty now"; fi;;
+    made)
+      if [ -L "$p" ]; then left "$p: a folder install.sh made is a link now"
+      elif [ -d "$p" ]; then rmdir "$p" 2>/dev/null || left "$p: a folder install.sh made, not empty now"
+      elif there "$p"; then left "$p: a folder install.sh made is something else now"; fi;;
+    unit) units="$p${s:+ (its older copy is $s)}${units:+, }$units";;   # newest first here, so in the order written
+    *) left "$p: a step this rollback does not know (${K[$i]})";;
   esac
   i=$((i-1))
 done
-if [ "$status" = 0 ]; then echo "rolled back: every change of that run is undone"; else echo "rollback incomplete: each left line says what is where" >&2; fi
+[ -z "$units" ] || echo "kept stampede's own timer unit files, which a rollback leaves: $units"
+if [ "$status" = 0 ]; then echo "rolled back: every link and folder that run made is undone"; else echo "rollback incomplete: each left line says what is where" >&2; fi
 exit "$status"
 ROLLBACK
   JOURNAL=1
@@ -88,6 +98,7 @@ step() {  # step <kind> <path> [<target> [<saved>]]: the intent, journaled befor
 }
 made() {  # made <folder>: make it and each missing parent, each journaled first, so the rollback removes it again if empty
   [ -d "$1" ] && return 0
+  if [ -e "$1" ] || [ -L "$1" ]; then stopped "could not make the folder $1: something else is there"; fi
   made "$(dirname "$1")"
   step made "$1"
   mkdir "$1" || stopped "could not make $1"
@@ -133,11 +144,30 @@ link "$ROOT/scripts/stampede" "$HOME/.local/bin/fleet-job"  # the same command u
 # otherwise one flock-guarded loop.
 write_unit() {  # write_unit <path> <text>. A file without the stampede marker is left alone.
   if [ -e "$1" ] && ! grep -q 'stampede-unit' "$1" 2>/dev/null; then echo "skip $1: something else is there; left as is"; return 1; fi
+  if [ "$REPLACE" = 1 ]; then replace_unit "$@"; return; fi
   if [ "$DRY" = 1 ]; then echo "would write $1"; return 0; fi
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "$2" > "$1"
 }
 . "$ROOT/skills/grokbot-herdr/scripts/herdr-platform"   # event_loop_running
+replace_unit() {  # write_unit under --replace: an older marked unit is saved to the backup first; the same one is kept
+  local saved=""
+  if [ -e "$1" ] && printf '%s\n' "$2" | cmp -s - "$1"; then echo "ok $1"; return 0; fi
+  if [ "$DRY" = 1 ]; then
+    if [ -e "$1" ]; then echo "would replace $1 (backup in $BACKUP)"; else echo "would write $1"; fi
+    return 0
+  fi
+  open_backup
+  if [ -e "$1" ]; then
+    saved="$BACKUP/${1#"$HOME"/}"
+    mkdir -p "$(dirname "$saved")" && cp -p "$1" "$saved" || stopped "could not save $1 to $saved"
+  fi
+  step unit "$1" "" "$saved"
+  mkdir -p "$(dirname "$1")" || stopped "could not make $(dirname "$1")"
+  printf '%s\n' "$2" > "$1" || stopped "could not write $1"
+  UNITS="$UNITS${UNITS:+, }$1${saved:+ (its older copy is $saved)}"
+  if [ -n "$saved" ]; then echo "replaced $1 (stampede's own unit; the old one is in $saved)"; fi
+}
 linux_timers() {
   [ "$(uname -s)" = Linux ] || return 0
   [ "$NO_SUPERVISE" = 1 ] && return 0
@@ -212,4 +242,5 @@ WantedBy=timers.target' && n=$((n+1))
 }
 linux_timers
 echo "Next, once per repo: herdr-trust <repo dir>   (pre-trusts it for Claude and Codex, so agents start without a dialog)"
+[ -z "$UNITS" ] || echo "timer unit files written: $UNITS. They are stampede's own and a rollback leaves them"
 if [ "$JOURNAL" = 1 ] && [ -s "$BACKUP/journal" ]; then echo "rollback: bash $(printf %q "$BACKUP/rollback.sh")"; fi

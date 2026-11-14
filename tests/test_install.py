@@ -253,7 +253,7 @@ class Install(unittest.TestCase):
         undone = self.undo(backup / 'rollback.sh')
         self.assertEqual(undone.stderr, '')
         self.assertIn(f'restored {bin_dir}/herdr-send', undone.stdout)
-        self.assertEqual(undone.stdout.splitlines()[-1], 'rolled back: every change of that run is undone')
+        self.assertEqual(undone.stdout.splitlines()[-1], 'rolled back: every link and folder that run made is undone')
         self.assertEqual(self.tree(), before)                                  # the links it made are gone too
 
     def test_a_rollback_leaves_a_target_someone_changed_since(self):
@@ -444,6 +444,92 @@ class Install(unittest.TestCase):
         plain = self.run_install('--no-skills', '--no-supervise', root=second)                 # without --replace: a relink, as before
         self.assertIn(f'relinked {self.home}/.local/bin/stampede', plain.stdout)
         self.assertNotIn('rollback:', plain.stdout)
+
+    def made_then_changed(self, change):
+        """A --replace in a fresh home (it makes ~/.local/bin), then ~/.local/bin swapped by change; the rollback's result."""
+        script = self.rollback(self.run_install('--replace'))
+        bin_dir = self.home / '.local/bin'
+        bin_dir.rename(self.home / 'moved-bin')
+        change(bin_dir)
+        return bin_dir, self.undo(script, 1)
+
+    def test_a_folder_the_run_made_that_is_a_file_now_is_left_and_named(self):
+        bin_dir, undone = self.made_then_changed(lambda path: path.write_text('a file of the owner'))
+        self.assertIn(f'left {bin_dir}: a folder install.sh made is something else now', undone.stderr)
+        self.assertEqual(bin_dir.read_text(), 'a file of the owner')
+        self.assertNotIn('rolled back', undone.stdout)
+
+    def test_a_folder_the_run_made_that_is_a_link_now_is_left_and_named(self):
+        empty = self.home / 'empty'
+        empty.mkdir()
+        bin_dir, undone = self.made_then_changed(lambda path: path.symlink_to(empty))
+        self.assertIn(f'left {bin_dir}: a folder install.sh made is a link now', undone.stderr)
+        self.assertEqual(os.readlink(bin_dir), str(empty))
+        self.assertTrue(empty.is_dir())
+        self.assertNotIn('rolled back', undone.stdout)
+
+    def test_a_folder_that_cannot_be_made_stops_before_its_step_is_journaled(self):
+        (self.home / '.claude/skills').write_text('a file where the skills folder goes')
+        result = self.run_install('--replace')
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(f'install.sh: could not make the folder {self.home}/.claude/skills: something else is there; stopped', result.stderr)
+        self.assertNotIn('rollback:', result.stderr)                          # nothing changed, nothing to roll back
+        journal = next((self.home / '.local/state/stampede').iterdir()) / 'journal'
+        self.assertEqual(journal.read_text(), '')
+        self.assertEqual((self.home / '.claude/skills').read_text(), 'a file where the skills folder goes')
+
+    def linux(self):
+        """A Linux-looking PATH: uname says Linux, systemctl --user answers and records each call."""
+        env = self.fake('uname', 'echo Linux')
+        self.fake('systemctl', 'echo "$*" >> "$HOME/systemctl-calls"; exit 0')
+        return env
+
+    def test_replace_saves_an_older_marked_timer_unit_and_the_rollback_says_it_stays(self):
+        units = self.home / '.config/systemd/user'
+        units.mkdir(parents=True)
+        custom = '# stampede-unit\n[Service]\nEnvironment=USER_CUSTOM_VALUE=keep-me\n'
+        (units / 'herdr-event-watchdog.service').write_text(custom)
+        (units / 'herdr-events-flush.timer').write_text('[Timer]\nOnUnitActiveSec=1h\n')   # unmarked: the owner's own
+        env = self.linux()
+        dry = self.run_install('--dry-run', '--replace', '--supervise', env=env)
+        self.assertIn(f'would replace {units}/herdr-event-watchdog.service (backup in ', dry.stdout)
+        self.assertFalse((self.home / '.local/state').exists())
+        result = self.run_install('--replace', '--supervise', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        script = self.rollback(result)
+        saved = script.parent / '.config/systemd/user/herdr-event-watchdog.service'
+        self.assertEqual(saved.read_text(), custom)
+        self.assertIn(f'replaced {units}/herdr-event-watchdog.service (stampede\'s own unit; the old one is in {saved})', result.stdout)
+        self.assertIn(f'skip {units}/herdr-events-flush.timer: something else is there; left as is', result.stdout)
+        self.assertEqual((units / 'herdr-events-flush.timer').read_text(), '[Timer]\nOnUnitActiveSec=1h\n')
+        self.assertIn(f'timer unit files written: {units}/herdr-event-watchdog.service (its older copy is {saved}), '
+                      f'{units}/herdr-event-watchdog.timer, {units}/herdr-events-flush.service. They are stampede\'s own', result.stdout)
+        written = (units / 'herdr-event-watchdog.service').read_text()
+        self.assertNotIn('keep-me', written)
+        undone = self.undo(script)
+        self.assertIn(f'kept stampede\'s own timer unit files, which a rollback leaves: {units}/herdr-event-watchdog.service '
+                      f'(its older copy is {saved})', undone.stdout)
+        self.assertEqual(undone.stdout.splitlines()[-1], 'rolled back: every link and folder that run made is undone')
+        self.assertNotIn('every change', undone.stdout)
+        self.assertEqual((units / 'herdr-event-watchdog.service').read_text(), written)   # stays, as the rollback said
+
+    def test_replace_keeps_a_timer_unit_that_is_already_right_and_a_plain_install_rewrites_as_before(self):
+        env = self.linux()
+        self.assertEqual(self.run_install('--supervise', env=env).returncode, 0)
+        unit = self.home / '.config/systemd/user/herdr-event-watchdog.service'
+        os.utime(unit, (1, 1))
+        again = self.run_install('--replace', '--supervise', env=env)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn(f'ok {unit}', again.stdout)
+        self.assertNotIn('rollback:', again.stdout)
+        self.assertFalse((self.home / '.local/state/stampede').exists(), 'nothing changed, so no backup')
+        self.assertEqual(unit.stat().st_mtime, 1)
+        unit.write_text('# stampede-unit\nan older one\n')
+        plain = self.run_install('--supervise', env=env)                        # without --replace: rewritten, no backup
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertNotIn('an older one', unit.read_text())
+        self.assertNotIn(str(unit), plain.stdout)
+        self.assertFalse((self.home / '.local/state/stampede').exists())
 
     def test_a_folder_among_the_helpers_is_not_linked(self):
         root = self.managed_checkout(1)

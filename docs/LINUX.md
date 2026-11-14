@@ -35,6 +35,7 @@ Herdr and Herdr Core publish Linux builds for x86_64 and arm64: [Herdr](https://
 - systemd runs user timers only while your user manager runs: on a machine nobody logs in to, run `loginctl enable-linger $USER` once.
 - The flock loop does not survive a reboot: run `install.sh` again after one.
 - `--no-supervise` skips both; a `HOME` that is not the login home is skipped, so a throwaway home never touches a real user manager.
+- The four unit files in `~/.config/systemd/user/` carry a `# stampede-unit` line, and every install rewrites a unit that has it. To keep your own version of one, remove that line: the installer then leaves the file alone (`skip ... left as is`) and does not enable the timers. Under `install.sh --replace` an older marked unit that differs is first saved in that run's backup folder (`replaced ...`); a rollback leaves the unit files, and says so ([SETUP, Install](SETUP.md#install)).
 
 ## What differs from macOS
 
