@@ -45,8 +45,9 @@ UNHANDED = 'hand it to a Herdr TUI pane at its shell prompt with --pane'
 NATIVE_PANE = 'a native job hands nothing to a Herdr TUI pane: run that CLI as a program'
 OUTCOMES = {
     'O1': 'health', 'O2': 'start', 'O3': 'workers', 'O4': 'question and post', 'O5': 'gate',
-    'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll',
+    'O6': 'tell', 'O7': 'finish', 'O8': 'reopen-safe', 'O9': 'no-poll', 'O10': 'front door',
 }
+FRONT_DOOR_REFUSED = 'a --core --relay job has no front door'  # the relay path, frozen until v0.3.0 deletes it
 
 from clients_run import ANSWER, BOT_SCRIPTS, GATE, LEAD_MODEL, OTHER_SHA, POST, QUESTION, SHA, STAMPEDE, SUMMARY, Job, check_process_tree  # noqa: E402  (after CLIENTS: it imports fleet_job)
 from test_core import FAKE_HC  # noqa: E402
@@ -111,11 +112,14 @@ class Outcomes(unittest.TestCase):
         cls.jobs = [Job(name, row, backend, cls.root, WORKERS, HANDED) for name, row in CLIENTS.items() for backend in row['backends']]
         cls.leads = [Job(name, row, backend, cls.root, WORKERS, HANDED, lead=kind) for name, row in CLIENTS.items()
                      for backend in row['backends'] for kind in ('claude', 'codex')]  # a refused kind must be refused
+        cls.doors = [Job(name, row, backend, cls.root, WORKERS, HANDED, door=True) for name, row in CLIENTS.items()
+                     if row['where'] == 'outside' for backend in row['backends']]  # a chat outside Herdr: --front-door
         with ThreadPoolExecutor(8) as pool:  # each job has its own folders, fakes and environment
             cls.health = dict(zip([(j.client, j.backend) for j in cls.jobs], pool.map(cls.health_check, cls.jobs)))
             cls.reference = dict(zip(('tui', 'tui-bot', 'core'), pool.map(lambda f: cls.run_doctor(f, {}), ('tui', 'tui-bot', 'core'))))
             list(pool.map(Job.play, cls.jobs))
             list(pool.map(Job.opening, cls.leads))
+            list(pool.map(Job.play_door, cls.doors))
 
     @classmethod
     def doctor_flags(cls, job):
@@ -445,6 +449,43 @@ class Outcomes(unittest.TestCase):
             self.assertEqual([(q['route'], q['payload']['state']) for q in job.queued() if q['payload'].get('source') != 'stampede'],
                              [(job.bot, 'blocked')], 'the lead\'s block wakes the bot')
         self.outcome('O9', check)
+
+    def test_o10_front_door(self):
+        """O10: every client outside Herdr runs a --front-door job by its outbox alone, the same loop on the TUI and on a
+        native job: wait hands it each item, the item's own lines answer a question and record a gate's yes, approve takes
+        only the plan it was handed, and wait names a blocked lead, the done item and a lead that is gone."""
+        for job in self.doors:
+            with self.subTest(f'{job.client}/{job.backend} O10'):
+                self.assertEqual(job.error, '')
+                if job.backend == 'core':
+                    self.refused(job, 'new', FRONT_DOOR_REFUSED)
+                    self.assertFalse(job.job.exists(), 'nothing is made')
+                    continue
+                self.ok(job, 'new')
+                self.assertTrue((job.job / 'front-door').is_file())
+                native = job.backend == 'native'
+                self.assertIn('Core types the answer into your terminal' if native else 'it comes to your inbox', self.ok(job, 'ask'))
+                self.ok(job, 'wait question', '# 001 question', QUESTION, 'Answer with: fleet-job tell')
+                self.ok(job, 'answer', 'SUBMITTED' if native else 'DELIVERED')
+                self.assertRegex(job.heard(), rf'ANSWER [0-9a-f]{{12}} {re.escape(QUESTION)}: {re.escape(ANSWER)}')
+                self.ok(job, 'post', 'POSTED 002 for the front door to relay')
+                self.ok(job, 'wait plan', '# 002 post', 'plan.md')
+                self.refused(job, 'approve inside', SAY_SO)
+                self.ok(job, 'approve')
+                self.assertIn('Start the helpers the plan names' if native else 'Start the panes the plan names', job.heard())
+                self.ok(job, 'gate', f'GATE {job.ident} posted to the front door as outbox 003')
+                self.ok(job, 'wait gate', '# 003 gate', f'approve-gate {job.job} {job.ident} --sha {SHA}')
+                self.refused(job, 'gate-ok before', 'has no recorded yes')
+                self.refused(job, 'approve-gate inside', SAY_SO)
+                self.ok(job, 'approve-gate', f'APPROVED {job.ident} at {SHA}')
+                self.assertIn(f'GATE {job.ident} APPROVED by owner in {job.client} chat', job.heard())
+                self.ok(job, 'gate-ok', f'APPROVED {job.ident} by owner in {job.client} chat')
+                self.ok(job, 'wait blocked', f'BLOCKED {Job.LEAD}: permission' if native else f'BLOCKED_ON_CARD {Job.LEAD}')
+                self.ok(job, 'finish', f'FINISHED {job.job}')
+                self.ok(job, 'wait done', '# 004 done', SUMMARY)
+                self.ok(job, 'wait gone', f'LEAD_GONE {Job.LEAD}')
+                self.assertEqual(job.queued(), [], 'no bot hears a front-door job')
+                self.assertEqual((job.asked(), job.moshi()), ('', ''), 'no phone card')
 
     # findings: where a client does worse than another, each with its proof; a fix makes its test an unexpected success
 

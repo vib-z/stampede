@@ -98,10 +98,10 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     if core:
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
-        if front:
-            raise ValueError('--front-door is for a Herdr TUI job: the front door reads the lead\'s pane, and a Herdr Core job has none')
+        if front and relay:
+            raise ValueError('--front-door on Herdr Core is for a native job: drop --relay (a --core --relay job has no front door)')
         if not relay:
-            return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers)
+            return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front)
         return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1')
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
@@ -193,7 +193,8 @@ USING.md in the stampede checkout has the whole flow.'''
 EXAMPLES = {
     'new': '''examples:
   stampede new --file ask.md
-  stampede new --core --file ask.md --cwd ~/code/app --lead codex''',
+  stampede new --core --file ask.md --cwd ~/code/app --lead codex
+  stampede new --core --file ask.md --cwd ~/code/app --front-door     # a chat outside Herdr runs it''',
     'start': '''examples:
   stampede start <job> build-api --kind claude --brief <job>/briefs/build-api.md --pane w1:p3
   stampede start <job> build-api --kind codex --brief <job>/briefs/build-api.md --model gpt-6-astra
@@ -252,7 +253,8 @@ def main(argv):
     p.add_argument('--review', action='store_true', help='the owner sees the plan first: no worker starts before stampede approve')
     p.add_argument('--pane', help="an existing empty pane for the lead (a fresh workspace's root pane); its tab becomes lead")
     p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
-    p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox')
+    p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox '
+                   'and the chat reads it with stampede wait (with --core: a native job only, not --relay)')
     p.add_argument('--lead', choices=sorted(agents_.LEAD), help='the lead\'s CLI: claude (claude-opus-5-5) or codex (gpt-6-astra); default '
                    '$FLEET_LEAD_KIND, else claude. --fork takes claude only')
     p.add_argument('--app-space', action='store_true', help='with --core --relay: label the lead and workers for the Herdr app '
@@ -295,7 +297,8 @@ def main(argv):
     p.add_argument('job', help=JOB); p.add_argument('text', nargs='+', help='the item\'s text')
     p.add_argument('--file', action='append', default=[], help='a file to send with it (repeatable)')
     p = command('wait', 'A front door\'s wait: return with every outbox item not shown yet, or when the lead sits at a\n'
-                        'question card. Exit 0 with output, 3 when nothing came in --timeout seconds.')
+                        'question card (a native job: BLOCKED when Core says it waits at a dialog), or LEAD_GONE.\n'
+                        'Exit 0 with output, 3 when nothing came in --timeout seconds.')
     p.add_argument('job', help=JOB)
     p.add_argument('--timeout', type=int, default=3600, help='seconds (default 3600); exit 3 when nothing came')
     for verb in ('next', 'snapshot'):

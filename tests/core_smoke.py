@@ -2,7 +2,7 @@
 """A smoke run on a real Herdr Core (hc 0.1.13 or later; CI pins 0.1.20 on macOS and Linux) in a scratch session of its own (HC_SESSION and XDG folders under a
 temporary folder), never the machine's own core. CI runs it after installing hc; it prints PASS or the first FAIL.
 The stampede parts run once herdr-event-core is in the checkout: the relay path (new --core --relay, tell, finish, the
-follower's exit) and the Core-native path (new --core, a program helper, tree, close, finish)."""
+follower's exit) and the Core-native path (new --core --front-door, a program helper, tree, post and wait, close, finish)."""
 import json, os, queue, re, shutil, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
@@ -107,12 +107,13 @@ def stampede_core():
 
 
 def stampede_native():
-    """A Core-native job: new --core, one program helper, tree, close (leaves first, the lead last), finish."""
+    """A Core-native front-door job: new --core --front-door, one program helper, tree, a post that wait hands on, close
+    (leaves first, the lead last), finish."""
     repo, env = scratch_env('native')
     ask = T / 'ask-native.md'
     ask.write_text('Smoke test the Core-native path\n')
     run = lambda *args: subprocess.run([str(SRC / 'scripts/stampede'), *args], capture_output=True, text=True, env=env, timeout=120)
-    made = run('new', '--core', '--file', str(ask), '--cwd', str(repo))
+    made = run('new', '--core', '--front-door', '--file', str(ask), '--cwd', str(repo))
     if made.returncode:
         fail(f'stampede new --core: exit {made.returncode}: {made.stdout} {made.stderr}')
     lead, job = made.stdout.strip().splitlines()[-1].split(' ', 1)
@@ -123,6 +124,9 @@ def stampede_native():
     shown = run('tree', job).stdout
     if not re.search(rf'^  {lead} \(t\d+\) lead claude', shown, re.M) or not re.search(r'^    watch-ci \(t\d+\) helper program', shown, re.M):
         fail(f'stampede tree shows {shown}')
+    posted, waited = run('post', job, 'PLAN READY: smoke'), run('wait', job, '--timeout', '20')
+    if posted.returncode or waited.returncode or '# 001 post' not in waited.stdout:
+        fail(f'stampede post and wait: {posted.stdout} {posted.stderr} {waited.stdout} {waited.stderr}')
     closed = run('close', job)
     if closed.returncode or re.findall(r'^CLOSED (\S+)', closed.stdout, re.M) != ['watch-ci', lead]:
         fail(f'stampede close: exit {closed.returncode}: {closed.stdout} {closed.stderr}')
@@ -131,7 +135,9 @@ def stampede_native():
         fail(f'stampede finish: exit {finished.returncode}: {finished.stdout} {finished.stderr}')
     if [t for t in hc('ls', '--all', '--json', '--label', 'stampede.job=' + key, env=env)['terminals'] if t['state'] == 'live']:
         fail('terminals of the native job still run')
-    print('ok stampede new --core (native), start a program, tree, close, finish')
+    if '# 002 done' not in (Path(job) / 'outbox/002.md').read_text():
+        fail('finish posted no done item for the front door')
+    print('ok stampede new --core --front-door (native), start a program, tree, post, wait, close, finish')
 
 
 def main():

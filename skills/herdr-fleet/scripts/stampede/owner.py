@@ -195,8 +195,11 @@ def lead_alive(job):
 
 def wait(job, timeout=3600, every=5):
     """The front door's wait, run in the background: returns with every outbox item it has not shown yet, or when the
-    lead sits at a question card. Exit 0 with output, 3 on timeout. Marks what it printed as seen."""
+    lead sits at a question card (on a native job: when Core says the lead is blocked). Exit 0 with output, 3 on timeout.
+    Marks what it printed as seen."""
+    from . import native as native_
     job = Path(job).absolute()
+    native = job_.backend(job) == 'native'
     seen_path, log = job / 'outbox' / '.seen', job / 'outbox.log'
     deadline, checks = time.monotonic() + timeout, 0
     while True:
@@ -209,10 +212,19 @@ def wait(job, timeout=3600, every=5):
             return 0
         if checks % 6 == 0:
             if not lead_alive(job):
-                print(f'LEAD_GONE {job_.roster(job)[1]}: its agent no longer exists in Herdr (crash, closed pane or restart). '
-                      f'Look at the workspace, then restart it or tell the owner.')
+                print(f'LEAD_GONE {job_.roster(job)[1]}: ' + (
+                    f'Herdr Core holds no live lead of this job (crash, close or restart). Look with stampede tree {job}, '
+                    f'then reopen it (stampede reopen {job}) or tell the owner.' if native else
+                    'its agent no longer exists in Herdr (crash, closed pane or restart). Look at the workspace, then restart '
+                    'it or tell the owner.'))
                 return 0
-            card = lead_card(job)
+            blocked = native_.lead_blocked(job) if native else None
+            if blocked:
+                kind, address, screen = blocked
+                print(f'BLOCKED {job_.roster(job)[1]}: {kind}. Core says it waits at a dialog in its terminal {address} '
+                      f'(hc read {address}). Its screen:\n' + '\n'.join(r for r in screen.splitlines() if r.strip())[-1500:])
+                return 0
+            card = '' if native else lead_card(job)
             if card:
                 print(f'BLOCKED_ON_CARD {job_.roster(job)[1]}: it is waiting at a question card in its pane. Its screen:\n'
                       + '\n'.join(r for r in card.splitlines() if r.strip())[-1500:])
@@ -298,7 +310,8 @@ def ask(job, question, options):
         n = outbox_post(job, 'question', base_.line(question) + ''.join('\n- ' + o for o in options),
                         answer=shlex.join(['fleet-job', 'tell', str(Path(job).absolute()), 'lead',
                                            f'ANSWER {ident} {base_.line(question)}: <their words>']))
-        print(f'ASKED {ident} posted to the front door as outbox {n}; the owner answers there and it comes to your inbox')
+        where = 'Core types the answer into your terminal' if job_.backend(job) == 'native' else 'it comes to your inbox'
+        print(f'ASKED {ident} posted to the front door as outbox {n}; the owner answers there and {where}')
         return ident
     if not owner:
         return ask_background(job, question, options)
@@ -466,7 +479,8 @@ def approve(job, by):
                                       'the file it names, and approve only their yes to that file')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     (Path(job) / 'approved').write_text(f'Approved: {when} by {base_.line(by)}, plan {digest}\n')
-    tell(job, 'lead', f'Approved by {base_.line(by)} at {when}. Start the panes the plan names.')
+    started = 'helpers' if job_.backend(job) == 'native' else 'panes'
+    tell(job, 'lead', f'Approved by {base_.line(by)} at {when}. Start the {started} the plan names.')
 
 
 def require_approval(job):

@@ -92,17 +92,18 @@ class Job:
     state, terminal, calls, labels, program, option = (CoreCase.state, CoreCase.terminal, CoreCase.calls, CoreCase.labels,
                                                        CoreCase.program, CoreCase.option)
 
-    def __init__(self, client, row, backend, root, workers, handed=(), lead=None):
+    def __init__(self, client, row, backend, root, workers, handed=(), lead=None, door=False):
         """row: the client's CLIENTS row; workers: WORKERS, the kinds each backend takes; handed: HANDED, the kinds a Core
         job hands to a Herdr TUI pane (--pane) rather than run in a Core terminal. The lead starts every kind of every
         backend, so a kind this backend does not take is refused; it tells the first kind here that is not Claude.
-        lead: the --lead new passes (None: no flag, so the default Claude lead); a job with one plays only its start."""
-        self.client, self.row, self.backend, self.bot, self.lead_kind = client, row, backend, row.get('bot'), lead
+        lead: the --lead new passes (None: no flag, so the default Claude lead); a job with one plays only its start.
+        door: a --front-door job, which plays only its outbox loop (play_door)."""
+        self.client, self.row, self.backend, self.bot, self.lead_kind, self.door = client, row, backend, row.get('bot'), lead, door
         self.handed = handed if backend == 'core' else ()
         self.on_core = backend in ('core', 'native')
         self.kinds, self.takes = tuple(dict.fromkeys(k for kinds in workers.values() for k in kinds)), workers[backend]
         self.worker = 'build-' + next(k for k in self.takes if k != 'claude')  # prompted, where a Claude agent reads its inbox
-        self.root = root / (f'{client}-{backend}' + (f'-{lead}-lead' if lead else ''))
+        self.root = root / (f'{client}-{backend}' + (f'-{lead}-lead' if lead else '') + ('-door' if door else ''))
         self.repo, self.core, self.herdr = self.root / 'code/repo', self.root / 'core', self.root / 'herdr'
         self.home, self.events, self.queue = self.root / 'home', self.root / 'events', self.root / 'queue'
         self.bin = self.home / '.local/bin'
@@ -256,6 +257,7 @@ class Job:
         ask = self.root / 'ask.md'
         ask.write_text(f'Write hello-{self.client}-{self.backend}.txt with one worker.\n')
         lead = ('--lead', self.lead_kind) if self.lead_kind else ()
+        lead += ('--front-door',) if self.door else ()
         if self.on_core:
             relay = ('--relay',) if self.backend == 'core' else ()
             self.front('new', 'new', '--core', *relay, '--file', ask, '--cwd', self.repo, '--name', self.NAME, *lead)
@@ -268,6 +270,71 @@ class Job:
         if self.bot and self.row['owner_from'] == 'tag':  # grokbot-herdr Step 3: tag the workspace before agents start
             self.front('tag', BOT_SCRIPTS / 'herdr-events-owner', self.WS, self.bot)
         self.front('new', 'new', '--file', ask, '--pane', root_pane, '--name', self.NAME, *lead)
+
+    def heard(self):
+        """What reached the lead: its inbox file, or on a native job what Core typed into its terminal."""
+        return '\n'.join(self.sent(self.LEAD)) if self.backend == 'native' else self.inbox()
+
+    def answer_line(self, n):
+        """The command outbox item n says to run, as the front door runs it, without its no line."""
+        item = (self.job / 'outbox' / f'{n:03d}.md').read_text()
+        return shlex.split(item.split('Answer with: ', 1)[1].split('   (a no:', 1)[0])
+
+    def play_door(self):
+        """O10: a front door outside Herdr runs the job by its outbox, as skills/stampede's Relay says: stampede wait hands
+        it each item, it runs each item's own answer and approve-gate line, and it approves the plan it was handed. Then
+        wait sees the lead blocked, the done item and the lead gone. A --core --relay job refuses --front-door."""
+        try:
+            self.start()
+            if self.backend == 'core':
+                return self
+            wait = lambda step: self.front(step, 'wait', self.job, '--timeout', '5')
+            self.lead('ask', 'ask', self.job, QUESTION, '--option', ANSWER, '--option', 'no')
+            wait('wait question')
+            argv = self.answer_line(1)
+            self.front('answer', *argv[1:-1], argv[-1].replace('<their words>', ANSWER))
+            (self.job / 'plan.md').write_text('One worker writes hello.\n')
+            self.lead('post', 'post', self.job, POST, '--file', self.job / 'plan.md')
+            wait('wait plan')
+            self.front('approve inside', 'approve', self.job, '--by', 'owner', where='core' if self.on_core else 'inside')
+            self.front('approve', 'approve', self.job, '--by', f"owner in {self.client} chat: 'yes'")
+            out = self.lead('gate', 'ask', self.job, '--gate', '--sha', SHA, '--pr', '3', GATE)[1]
+            self.ident = (re.findall(r'^GATE ([0-9a-f]{12}) ', out, re.M) or ['000000000000'])[0]
+            wait('wait gate')
+            argv = self.answer_line(3)
+            by = argv[-1].replace('<chat>: <their exact words>', f"{self.client} chat: 'merge it'")
+            self.lead('gate-ok before', 'gate-ok', self.job, self.ident, '--sha', SHA)
+            self.front('approve-gate inside', *argv[1:-1], by, where='core' if self.on_core else 'inside')
+            self.front('approve-gate', *argv[1:-1], by)
+            self.lead('gate-ok', 'gate-ok', self.job, self.ident, '--sha', SHA)
+            self.blocked(True)
+            wait('wait blocked')
+            self.blocked(False)
+            self.lead('finish', 'finish', self.job, SUMMARY)
+            wait('wait done')
+            self.gone()
+            wait('wait gone')
+        except Exception:
+            self.error = traceback.format_exc()
+        return self
+
+    def blocked(self, on):
+        """The lead held at a dialog: Core's blocked status on a native job, a question card in its pane on the TUI."""
+        if self.backend == 'native':
+            self.terminal(self.address(self.LEAD), status={'state': 'blocked', 'kind': 'permission'} if on else {'state': 'idle'},
+                          screen='Allow this command?' if on else '\u203a ')
+            return
+        state = json.loads((self.herdr / 'state.json').read_text())
+        state['agent read'] = 'Which db?\nEnter to select' if on else '\u203a Ask Codex to do anything'
+        (self.herdr / 'state.json').write_text(json.dumps(state))
+
+    def gone(self):
+        """The lead ends: Core holds no live lead, or Herdr no longer has the agent."""
+        if self.backend == 'native':
+            return self.terminal(self.address(self.LEAD), state='finished', reason='killed', status=None)
+        state = json.loads((self.herdr / 'state.json').read_text())
+        state['agent get ' + self.LEAD] = {'error': 'agent_not_found'}
+        (self.herdr / 'state.json').write_text(json.dumps(state))
 
     def workers(self):
         """O3: the lead starts one worker of every kind, each in its pane on the TUI; a kind this backend does not take is
