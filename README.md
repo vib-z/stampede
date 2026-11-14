@@ -735,7 +735,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 <details>
 <summary><b>Environment only, with defaults</b></summary>
 
-Other programs read these, so they stay environment variables. Export them in your shell profile, or in the shell file `~/.config/stampede/config` (`$XDG_CONFIG_HOME/stampede/config` when that is set) sourced from it. The relay scripts read that file themselves, so the plugin event, the hooks and the timers see it with no profile line; a value the environment already holds wins over the file. `stampede config show` lists them with their current values. A Core job passes them, and the environment names above, to every terminal it starts.
+Other programs read these, so they stay environment variables. Export them in your shell profile, or in the shell file `~/.config/stampede/config` (`$XDG_CONFIG_HOME/stampede/config` when that is set) sourced from it. The relay scripts read that file themselves, so the plugin event, the hooks and the timers see it with no profile line. They read only its plain lines, `NAME=value` or `export NAME=value` (the value bare or quoted, with `$HOME` or a leading `~/` at most), and run nothing in it: a value worked out by a command belongs in your shell profile, and `herdr-doctor --relay` names the lines they skip. A value the environment already holds wins over the file. `stampede config show` lists them with their current values. A Core job passes them, and the environment names above, to every terminal it starts.
 
 | variable | default | what it does |
 |---|---|---|
@@ -748,7 +748,6 @@ Other programs read these, so they stay environment variables. Export them in yo
 | `HERDR_EVENTS_STALE_MINUTES` | `30` | the watchdog's sweep of a Core job's lead, and a `--core --relay` job's follower: minutes a working terminal's screen may stay unchanged, with no status or turn change, before one `stale` (the TUI watchdog's fixed 30) |
 | `HERDR_EVENTS_DIR` | `~/.config/herdr-events` | owner tags (`owners/`), job markers (`jobs/`), handed panes' marks (`handed/`), and the routes when `HERDR_EVENTS_ROUTES_DIR` is unset |
 | `HERDR_EVENTS_FLUSH_LOG` | `~/.herdr-events/flush.log` | the flusher's log |
-| `HERDR_EVENTS_DRYRUN` | unset | `1`: `herdr-event-post` prints the event and the route it would take, and queues, logs and sends nothing (for debugging) |
 | `HERDR_EVENTS_OWNER` | unset | set per command by a bot, never in a config file: at `stampede new`, the bot that started the job (else the workspace's owner tag), so its gates go back to it |
 | `HC` | `hc` | the Herdr Core binary, 0.1.13 or later |
 | `HC_SESSION` | `default` | Herdr Core's own: which core; each name is a separate core with its own terminals and state. A Core job keeps the one it was made with (`<job>/endpoint`) and passes it to every terminal; a command from a shell set to another is refused |

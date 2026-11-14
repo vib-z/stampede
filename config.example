@@ -96,18 +96,17 @@ close = true                # closing a helper's terminals: the lead asks (a who
 method = "squash"  # how stampede merge merges: squash, merge or rebase
 
 # Environment only. Other programs read these, so they stay environment variables: export them in your shell
-# profile, or in the shell file ~/.config/stampede/config. The relay scripts read that file themselves (a timer too);
-# a value already in the environment wins.
+# profile, or in the shell file ~/.config/stampede/config. The relay scripts read that file themselves (a timer too):
+# only plain lines like these, NAME=value with $HOME or ~/ at most, and nothing in it runs. The environment wins.
 # FLEET_WATCH_INTERVAL=30  # seconds between passes of fleet-watch.sh
 # FLEET_WATCH_PASSES=0  # fleet-watch.sh stops after this many passes; 0 runs until stopped
 # FLEET_WATCH_NOTIFY=1  # 0 turns off the phone push for stalls and vanished agents
-# HERDR_EVENTS_MACHINE=$(hostname -s)  # short hostname sent with every event
+# HERDR_EVENTS_MACHINE=  # short hostname sent with every event; unset, the output of hostname -s
 # HERDR_EVENTS_HOME=~/.herdr-events  # the event queue and dead letters
 # HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes  # one file per route, holding URL= and KEY=
 # HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log  # the flusher's log
 # HERDR_EVENTS_DIR=~/.config/herdr-events  # owner tags, job markers, handed panes
 # HERDR_EVENTS_STALE_MINUTES=30  # minutes a working terminal's screen may stay unchanged before stale
-# HERDR_EVENTS_DRYRUN=  # 1: herdr-event-post prints what it would queue and queues nothing
 # HC=hc  # the Herdr Core binary
 # HC_SESSION=default  # which core
 # HC_SOCKET=  # that core's socket; empty is Core's default path for the session

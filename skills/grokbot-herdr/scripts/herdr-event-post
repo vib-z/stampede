@@ -9,7 +9,6 @@
 #    the queue write fails, so the follower tries it again; 0 means queued, or meant to stay on the machine.
 # Routes: $HERDR_EVENTS_ROUTES_DIR (default $HERDR_EVENTS_DIR/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
 # HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/, handed/ and the default routes/.
-# HERDR_EVENTS_DRYRUN=1: print DRYRUN, the summary and the payload it would queue; no log line, no de-dupe, no queue, no post.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
@@ -94,7 +93,6 @@ eid=$(jq -r '.event_id // empty' <<<"$payload")
 # the agent's own hook and the follower are one wake for one episode, whichever comes first; a later episode is new.
 akey=""; [ -n "$eid" ] && [ "${key#attention|}" != "$key" ] && akey="attention|$pane"
 DB="$STATE_DIR/dedupe.tsv"; now=$(date +%s)
-[ -n "${HERDR_EVENTS_DRYRUN:-}" ] && DB=/dev/null   # a dry run neither reads nor records de-dupe: it never hides a real event
 exec 9>"$STATE_DIR/dedupe.lock"; locked=1
 # Without the lock the de-dupe file is only read, never rewritten: a lost update could let a repeat through later, so
 # this event goes out (at worst twice) and the file stays as the lock holder leaves it.
@@ -117,7 +115,7 @@ if [ -n "$tkey" ]; then
   esac
 fi
 seen_now(){   # the de-dupe record of this event; only under the lock
-  [ "$locked" = 1 ] && [ "$DB" != /dev/null ] || return 0
+  [ "$locked" = 1 ] || return 0
   local tmp="$DB.tmp.$$"
   awk -F'\t' -v n="$now" -v k="$key" -v t="$tkey" -v a="$akey" '$1!=k && $1!=t && (a=="" || $1!=a) && n-$2<600' "$DB" >"$tmp"
   printf '%s\t%s\n' "$key" "$now" >>"$tmp"; [ -n "$tkey" ] && printf '%s\t%s\n' "$tkey" "$now" >>"$tmp"
@@ -134,7 +132,6 @@ route="default"; if [ -n "$owner" ] && [ -r "$RD/$owner" ]; then route="$owner";
 if [ "$STRICT" = 1 ] && { [ -z "$owner" ] || [ "$route" != "$owner" ]; }; then refuse 3 "no route of its own for owner ${owner:-(none)} in $RD"; fi
 payload=$(jq -c --arg o "${owner:-}" --arg w "$ws" --arg r "$route" '. + {owner:(if $o=="" then null else $o end), route:$r} + (if (.workspace//"")=="" and $w!="" then {workspace:$w} else {} end)' <<<"$payload")
 summary="$summary owner=${owner:--} route=$route"
-if [ -n "${HERDR_EVENTS_DRYRUN:-}" ]; then echo "DRYRUN $summary"; jq -c 'del(.last_assistant_message)' <<<"$payload"; exit 0; fi
 URL=""; KEY=""
 [ -r "$RD/$route" ] && . "$RD/$route"
 if [ -z "$URL" ]; then [ "$STRICT" = 1 ] && refuse 3 "route $route has no URL"; [ "$deferred" = 1 ] && seen_now; echo "$(date +%Y-%m-%dT%H:%M:%S%z) logged-only (no route URL):$summary" >> "$LOG"; exit 0; fi

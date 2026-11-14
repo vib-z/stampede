@@ -25,7 +25,6 @@ ENV_ONLY = (  # read by other programs too, so they stay environment variables: 
     ('HERDR_EVENTS_FLUSH_LOG', '~/.herdr-events/flush.log', "the flusher's log"),  # $HERDR_EVENTS_HOME/flush.log
     ('HERDR_EVENTS_DIR', '~/.config/herdr-events', 'owner tags, job markers, handed panes'),
     ('HERDR_EVENTS_STALE_MINUTES', '30', "minutes a working terminal's screen may stay unchanged before stale"),
-    ('HERDR_EVENTS_DRYRUN', '', 'herdr-event-post prints what it would queue and queues nothing'),
     ('HC', 'hc', 'the Herdr Core binary'),
     ('HC_SESSION', 'default', 'which core'),
     ('HC_SOCKET', '', "that core's socket; empty is Core's default path for the session"),

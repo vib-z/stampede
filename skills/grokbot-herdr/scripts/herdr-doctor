@@ -205,6 +205,7 @@ else warn "event plugin not enabled (optional): needed only for a remote bot's e
 
 if [ "$relay" = 1 ]; then
 command -v curl >/dev/null || problem "curl not on PATH: install it for the event relay"
+[ -z "$herdr_settings_skipped" ] || warn "settings file lines ${herdr_settings_skipped// /, }: not a plain NAME=value; a timer does not see them: export them in your profile, or make them plain"
 hooks=$(jq -r '[.hooks // {} | to_entries[] | select([.value[]?.hooks[]?.command] | any(test("herdr-event-claude-hook"))) | .key] | join(" ")' ~/.claude/settings.json 2>/dev/null)
 for h in Stop StopFailure Notification; do
   grep -qw "$h" <<<"$hooks" || problem "Claude hook $h missing herdr-event-claude-hook: the owner adds it to ~/.claude/settings.json"

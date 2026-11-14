@@ -1,6 +1,7 @@
 #!/bin/bash
 # herdr-plugin-event: the Herdr plugin hook (herdr-plugin.toml). Herdr passes pane.agent_status_changed in
 # HERDR_PLUGIN_EVENT_JSON; this sends done, blocked, and idle right after working, to herdr-event-post.
+[ -r "$HOME/.config/stampede/config" ] && . "$HOME/.config/stampede/config"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:$PATH"
 H="${HERDR_BIN_PATH:-herdr}"
 SD="${HERDR_PLUGIN_STATE_DIR:-$HOME/.local/state/herdr-events}/panes"; mkdir -p "$SD"

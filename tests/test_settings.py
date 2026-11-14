@@ -539,7 +539,7 @@ class Example(unittest.TestCase):
         self.assertEqual(text.split('\n[lead]\n')[1].split('\n# Environment only')[0],
                          st.DEFAULTS_FILE.read_text().split('\n[lead]\n')[1].rstrip('\n') + '\n')
         for name, default, _ in st.ENV_ONLY:
-            self.assertIn(f'\n# {name}=' + ('$(hostname -s)' if name == 'HERDR_EVENTS_MACHINE' else default) + '  # ', text)
+            self.assertIn(f'\n# {name}=' + ('' if name == 'HERDR_EVENTS_MACHINE' else default) + '  # ', text)
 
 
 class Readers(unittest.TestCase):

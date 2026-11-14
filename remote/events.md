@@ -23,7 +23,6 @@ printf 'URL=%s\nKEY=%s\n' '<webhook url>' '<secret>' > ~/.config/herdr-events/ro
 chmod 600 ~/.config/herdr-events/routes/<bot>        # and the same for a route named default
 herdr-events-owner <workspace id> <bot>              # tag; --clear removes it; no second argument shows it
 herdr-event-post source=test state=done pane=<pane id>   # a test event
-HERDR_EVENTS_DRYRUN=1 herdr-event-post source=test state=done pane=<pane id>   # its route, nothing sent
 herdr-event-flush                                    # send what is queued, oldest first
 ```
 

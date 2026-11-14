@@ -2,8 +2,10 @@
 Temporary HOME, fake herdr and curl; nothing leaves the machine (stdlib)."""
 import json
 import os
+import re
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -20,8 +22,9 @@ class Routes(unittest.TestCase):
         bin_dir.mkdir(parents=True)
         for name in ('herdr-event-post', 'herdr-event-flush', 'herdr-events-owner', 'herdr-doctor'):
             (bin_dir / name).symlink_to(SCRIPTS / name)
-        self.sent = self.home / 'sent'
-        (bin_dir / 'curl').write_text(f'#!/bin/bash\nfor a; do u=$a; done\nprintf "%s " "$@" >> {self.sent}; echo >> {self.sent}\nprintf 200\n')
+        self.sent, self.body = self.home / 'sent', self.home / 'body'
+        (bin_dir / 'curl').write_text(f'#!/bin/bash\nfor a; do u=$a; done\nprintf "%s " "$@" >> {self.sent}; echo >> {self.sent}\n'
+                                    f'case " $* " in *" @- "*) cat >> {self.body};; esac\nprintf 200\n')
         (bin_dir / 'herdr').write_text('#!/bin/bash\ncase "$1 $2" in "workspace get") [ "$3" = w1 ];; *) echo "{}";; esac\n')
         for f in ('curl', 'herdr'):
             (bin_dir / f).chmod(0o755)
@@ -63,77 +66,132 @@ class Routes(unittest.TestCase):
         routes = [l for l in doctor.stdout.splitlines() if 'route' in l]
         self.assertTrue(routes and all(l.startswith('ok ') for l in routes), doctor.stdout)
 
-    # The settings file, ~/.config/stampede/config: herdr-platform reads it, so a timer, which starts a script with no
-    # environment, sees what a shell does. The environment wins over the file.
+    # The settings file, ~/.config/stampede/config: herdr-platform reads its plain NAME=value lines as data, so a
+    # script a timer starts with no environment sees them. It never runs the file. The environment wins.
     def settings(self, text):
         config = self.home / '.config/stampede/config'
         config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text(text)
+        config.write_bytes(text.encode())
 
     def bare(self, script, *args, **env):
         """A script as a timer starts it: HOME and nothing else, plus what the caller names."""
         return subprocess.run(['/bin/bash', str(script), *args], env={'HOME': str(self.home), **env},
                               capture_output=True, text=True, timeout=30)
 
-    def queued(self):
-        return sorted((self.home / '.herdr-events/queue').glob('*.json'))
+    def read_back(self, bash, names, how='platform'):
+        """What a shell holds for each name after herdr-platform (or, how='source', after sourcing the file)."""
+        load = f'. {SCRIPTS / "herdr-platform"}' if how == 'platform' else 'set -a; . "$HOME/.config/stampede/config"'
+        show = '; '.join(f'printf "%s\\0" "${{{n}-<unset>}}"' for n in names)
+        out = subprocess.run([bash, '-c', f'{load} >/dev/null 2>&1; {show}'], env={'HOME': str(self.home)},
+                             capture_output=True, timeout=30).stdout.decode()
+        return dict(zip(names, out.split('\0')))
+
+    def bashes(self):
+        return sorted({'/bin/bash', *(b for b in ('/opt/homebrew/bin/bash', '/usr/local/bin/bash') if Path(b).exists())})
+
+    def test_a_line_the_reader_takes_holds_what_a_shell_that_sources_it_holds(self):
+        taken = ['N=plain', 'export N=plain', '  export   N=a.b/c:d@e%f+g,h=i-j_k', 'N=', 'N= # nothing',
+                 'N=x # a comment', 'N=x\t# a tab, then a comment', "N='a $b `c` \\d \"e\"'", "N='x' # it's",
+                 'N="a b $HOME ${HOME} ~/c \' !"', 'N="x" # c', 'N=$HOME/x', 'N=${HOME}/x', 'N=~/x', 'N=$HOME',
+                 'N=a=b', 'N="$HOME}"', 'N=trailing   ']
+        skipped = ['N=$(echo ran)', 'N=`echo ran`', 'N=$OTHER', 'N=$HOMEx', 'N=$HOME_x', 'N="${HOME:-x}"', 'N=${HOME:-x}',
+                   'N="a\\"b"', 'N=a\\ b', 'N=a b', 'N=(a b)', 'N=a#b', "N='a'#b", 'N="a"b', 'N=x\\', 'N=~', 'N=a:~/b',
+                   'N=*', 'N=a;b', 'export N', 'export -n N=x', 'readonly N=x', 'N=x; M=y', 'N=x && M=y', 'f() { N=x; }',
+                   'if true; then N=x; fi', 'N={a,b}', 'N="$1"', 'N=é']
+        for bash in self.bashes():
+            for line in taken + skipped:
+                with self.subTest(bash=bash, line=line):
+                    self.settings(line.replace('N', 'HERDR_EVENTS_MACHINE', 1) + '\n')
+                    got = self.read_back(bash, ['HERDR_EVENTS_MACHINE'])['HERDR_EVENTS_MACHINE']
+                    if line in skipped:
+                        self.assertEqual(got, '<unset>')
+                    else:
+                        self.assertEqual(got, self.read_back(bash, ['HERDR_EVENTS_MACHINE'], 'source')['HERDR_EVENTS_MACHINE'])
+                        self.assertNotEqual(got, '<unset>')
+
+    def test_crlf_no_final_newline_the_last_line_wins_and_an_oversized_file_is_skipped(self):
+        self.settings('HC=one\r\nHC=two\r\nHC_SESSION=s')
+        self.assertEqual(self.read_back('/bin/bash', ['HC', 'HC_SESSION']), {'HC': 'two', 'HC_SESSION': 's'})
+        self.settings('HC=one\n' + '# filler\n' * 500)
+        self.assertEqual(self.read_back('/bin/bash', ['HC']), {'HC': '<unset>'})
+        self.settings('HC=one\n# ' + 'x' * 5000 + '\n')
+        self.assertEqual(self.read_back('/bin/bash', ['HC']), {'HC': '<unset>'})
+
+    def test_every_setting_config_example_lists_is_read_and_no_identity_name_is(self):
+        text = (ROOT / 'config.example').read_text().split('\n# Environment only')[1]
+        names = sorted(set(re.findall(r'(?m)^# ([A-Z][A-Z0-9_]*)=', text))) + ['HERDR_BIN_PATH', 'HERDR_PLUGIN_STATE_DIR']
+        identity = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID', 'HERDR_PLUGIN_EVENT_JSON',
+                    'HERDR_EVENTS_OWNER', 'HC_TERMINAL_ID', 'HC_TERMINAL_SOCKET', 'HC_SCOPE', 'STAMPEDE_JOB_KEY', 'FLEET_JOB_DIR']
+        self.assertIn('HERDR_EVENTS_ROUTES_DIR', names)
+        self.settings(''.join(f'{n}=v-{n}\n' for n in names + identity + ['PATH', 'OTHER']))
+        got = self.read_back('/bin/bash', names + identity + ['OTHER'])
+        self.assertEqual({n: got[n] for n in names}, {n: f'v-{n}' for n in names})
+        self.assertEqual({n: got[n] for n in identity + ['OTHER']}, {n: '<unset>' for n in identity + ['OTHER']})
+        listed = [line[2:].split('  # ')[0] for line in text.splitlines() if re.match(r'# [A-Z][A-Z0-9_]*=', line)]
+        self.settings('\n'.join(listed) + '\n')   # each line of the block, uncommented, is one the reader takes
+        self.assertNotIn('<unset>', self.read_back('/bin/bash', [line.split('=')[0] for line in listed]).values())
 
     def test_the_settings_file_reaches_every_relay_script_started_with_no_environment(self):
         self.route('bot-alpha', 'https://alpha.invalid/hook')
         (self.home / 'repos/r').mkdir(parents=True)
         subprocess.run(['git', 'init', '-q', str(self.home / 'repos/r')], check=True)
-        event = json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'})
-        plugin = {'HERDR_BIN_PATH': str(self.home / '.local/bin/herdr'), 'HERDR_PLUGIN_EVENT_JSON': json.dumps(
-            {'data': {'pane_id': 'w1:p1', 'workspace_id': 'w1', 'agent_status': 'done', 'agent': 'codex'}})}
         # with no file: the default routes folder (empty here) and the default trust root (missing here)
         self.assertIn('no route for bot-alpha', self.bare(SCRIPTS / 'herdr-events-owner', 'w1', 'bot-alpha').stderr)
         self.assertIn('refused', self.bare(SCRIPTS / 'herdr-trust', str(self.home / 'repos/r')).stderr)
+        self.assertFalse(self.sent.exists())
         self.settings(f'export HERDR_EVENTS_ROUTES_DIR={self.routes}\nexport HERDR_EVENTS_MACHINE=box-one\n'
-                      f'FLEET_TRUST_ROOT={self.home}/repos\nexport HERDR_EVENTS_DRYRUN=1\nexport OTHER=1\n')
-        for shown in (self.bare(SCRIPTS / 'herdr-event-post', event), self.bare(ROOT / 'scripts/herdr-plugin-event', **plugin)):
-            first, payload = shown.stdout.splitlines()
-            self.assertTrue(first.endswith(' owner=bot-alpha route=bot-alpha'), shown.stdout + shown.stderr)
-            self.assertEqual(json.loads(payload)['machine'], 'box-one')
+                      'FLEET_TRUST_ROOT=$HOME/repos\n')
+        post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}))
+        self.assertEqual((post.returncode, post.stdout, post.stderr), (0, '', ''))
+        self.assertIn('https://alpha.invalid/hook', self.sent.read_text())
+        self.assertEqual(json.loads(self.body.read_text().splitlines()[-1])['machine'], 'box-one')
         tag = self.bare(SCRIPTS / 'herdr-events-owner', 'w1', 'bot-alpha')
         self.assertEqual((tag.returncode, tag.stderr), (0, ''))
         trust = self.bare(SCRIPTS / 'herdr-trust', str(self.home / 'repos/r'))
         self.assertIn('claude: trusted', trust.stdout, trust.stderr)
-        self.assertEqual(self.queued(), [])
+
+    def test_the_plugin_hook_uses_its_own_settings_from_the_file_and_hands_them_on(self):
+        self.route('bot-alpha', 'https://alpha.invalid/hook')
+        herdr = self.home / 'custom-herdr'
+        herdr.write_text(f'#!/bin/bash\necho "$*" >> {self.home}/custom-herdr-calls\necho "{{}}"\n')
+        herdr.chmod(0o755)
+        self.settings(f'export HERDR_EVENTS_ROUTES_DIR={self.routes}\nexport HERDR_EVENTS_MACHINE=box-one\n'
+                      'export HERDR_BIN_PATH=$HOME/custom-herdr\nexport HERDR_PLUGIN_STATE_DIR=$HOME/custom-state\n')
+        event = json.dumps({'data': {'pane_id': 'w1:p1', 'workspace_id': 'w1', 'agent_status': 'done', 'agent': 'codex'}})
+        hook = self.bare(ROOT / 'scripts/herdr-plugin-event', HERDR_PLUGIN_EVENT_JSON=event)
+        self.assertEqual(hook.returncode, 0, hook.stderr)
+        self.assertIn('pane get w1:p1', (self.home / 'custom-herdr-calls').read_text())
+        self.assertTrue((self.home / 'custom-state/panes/w1_p1').exists())
+        self.assertEqual(json.loads(self.body.read_text().splitlines()[-1])['machine'], 'box-one')
 
     def test_the_environment_wins_over_the_settings_file_even_when_empty(self):
+        self.settings('export HC_SESSION=from-file\nexport HC_SOCKET=/from/file\nexport HC=from-file\n')
+        script = f'. {SCRIPTS / "herdr-platform"}; printf "%s|%s|%s" "$HC_SESSION" "$HC_SOCKET" "${{HC-unset}}"'
+        shown = subprocess.run(['/bin/bash', '-c', script], env={'HOME': str(self.home), 'HC_SESSION': 'env', 'HC_SOCKET': ''},
+                               capture_output=True, text=True, timeout=30).stdout
+        self.assertEqual(shown, 'env||from-file')
+
+    def test_code_in_the_settings_file_never_runs_and_nothing_of_it_is_printed(self):
         self.route('bot-alpha', 'https://alpha.invalid/hook')
-        self.settings('export HERDR_EVENTS_MACHINE=box-one\nexport HERDR_EVENTS_DRYRUN=1\n')
-        event = json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'})
-        shown = self.bare(SCRIPTS / 'herdr-event-post', event, HERDR_EVENTS_MACHINE='box-two',
-                          HERDR_EVENTS_ROUTES_DIR=str(self.routes))
-        self.assertEqual(json.loads(shown.stdout.splitlines()[1])['machine'], 'box-two')
-        shown = self.bare(SCRIPTS / 'herdr-event-post', event, HERDR_EVENTS_DRYRUN='', HERDR_EVENTS_ROUTES_DIR=str(self.routes))
-        self.assertEqual(shown.stdout, '')   # an empty DRYRUN in the environment: a real event, sent
+        self.settings(f'export HERDR_EVENTS_ROUTES_DIR={self.routes}\n'
+                      'touch "$HOME/side-effect"\nexit 3\nset -x\nIFS=_\nsleep 5\nprintf() { :; }\nset -eu; false\n'
+                      'export HERDR_EVENTS_MACHINE="FAKE_SECRET_123\nexport HERDR_EVENTS_HOME=$HOME/q\n')
+        started = time.monotonic()
+        post = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}))
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual((post.returncode, post.stdout, post.stderr), (0, '', ''))
         self.assertIn('https://alpha.invalid/hook', self.sent.read_text())
-
-    def test_a_broken_settings_file_gives_one_line_and_the_event_still_goes(self):
-        self.route('bot-alpha', 'https://alpha.invalid/hook')
-        self.settings(f'export HERDR_EVENTS_ROUTES_DIR={self.routes}\nif then\nexport HERDR_EVENTS_MACHINE=never\n')
-        shown = self.bare(SCRIPTS / 'herdr-event-post', json.dumps({'source': 'test', 'pane': 'w1:p1', 'state': 'blocked'}))
-        self.assertEqual(shown.returncode, 0)
-        lines = shown.stderr.splitlines()
-        self.assertEqual(len(lines), 1, shown.stderr)
-        self.assertTrue(lines[0].startswith('stampede settings: ') and 'syntax error' in lines[0], lines)
-        self.assertIn('https://alpha.invalid/hook', self.sent.read_text())   # what came before the error was read
-
-    def test_a_dry_run_prints_the_event_and_leaves_no_log_queue_de_dupe_or_post(self):
-        self.route('bot-alpha', 'https://alpha.invalid/hook')
-        event = {'source': 'test', 'pane': 'w1:p1', 'state': 'done', 'last_assistant_message': 'long'}
-        shown = subprocess.run([str(SCRIPTS / 'herdr-event-post'), json.dumps(event)], capture_output=True, text=True,
-                               env={**self.env, 'HERDR_EVENTS_DRYRUN': '1'}, timeout=30)
-        first, payload = shown.stdout.splitlines()
-        self.assertEqual(first, 'DRYRUN test pane=w1:p1 state=done owner=bot-alpha route=bot-alpha')
-        self.assertEqual({k: json.loads(payload).get(k) for k in ('route', 'owner', 'workspace', 'last_assistant_message')},
-                         {'route': 'bot-alpha', 'owner': 'bot-alpha', 'workspace': 'w1', 'last_assistant_message': None})
-        self.assertEqual(self.queued(), [])
-        self.assertFalse(self.sent.exists())
-        self.assertFalse(any('pane=w1:p1' in p.read_text() for p in self.home.rglob('herdr-events.log')))
-        self.assertIn('https://alpha.invalid/hook', self.post('w1:p1'))   # recorded no de-dupe: the real one goes
+        doctor = self.bare(SCRIPTS / 'herdr-doctor', '--relay')
+        self.assertIn('warn settings file lines 2, 3, 4, 6, 7, 8, 9: not a plain NAME=value', doctor.stdout)
+        install = subprocess.run(['./install.sh', '--dry-run'], cwd=ROOT, env={'HOME': str(self.home), 'PATH': '/usr/bin:/bin'},
+                                 capture_output=True, text=True, timeout=60)
+        self.assertEqual(install.returncode, 0, install.stdout + install.stderr)
+        self.assertFalse((self.home / 'side-effect').exists())
+        config = self.home / '.config/stampede/config'
+        leaked = [p for p in self.home.rglob('*') if p.is_file() and p != config and b'FAKE_SECRET' in p.read_bytes()]
+        self.assertEqual(leaked, [])
+        for out in (post.stdout, post.stderr, doctor.stdout, doctor.stderr, install.stdout, install.stderr):
+            self.assertNotIn('FAKE_SECRET', out)
 
 
 if __name__ == '__main__':
