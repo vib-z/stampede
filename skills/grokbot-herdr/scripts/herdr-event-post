@@ -5,7 +5,7 @@
 #    --strict first (stampede's questions and gates): only the owner's own route, never default or the fallback; no de-dupe;
 #    exit 3 when that route has no URL, 4 when the queue write fails, 6 for a malformed workspace, 0 only once queued.
 #    An event for a Herdr Core pane (hc:..., the follower's and the agents' own hooks') is recorded for de-dupe only once
-#    it is queued, so a failed queue write suppresses no later copy. One with an event_id (the follower) exits 5 when
+#    it is queued, as is a codex-desktop one, so a failed queue write suppresses no later copy. One with an event_id (the follower) exits 5 when
 #    the queue write fails, so the follower tries it again; 0 means queued, or meant to stay on the machine.
 # Routes: $HERDR_EVENTS_ROUTES_DIR (default $HERDR_EVENTS_DIR/routes)/<owner|default> (URL=, KEY=); owners/<workspace-id> holds owner=<bot-slug>
 # HERDR_EVENTS_DIR (default ~/.config/herdr-events) holds owners/, jobs/, handed/ and the default routes/.
@@ -50,11 +50,11 @@ if [ "$malformed" = 1 ]; then
   log "dropped malformed workspace $(printf '%q' "$ws" | cut -c1-60): $summary"
   ws=""; payload=$(jq -c 'del(.workspace)' <<<"$payload")
 fi
-# The fallback route is only a plain file name in the routes folder (no slash, no leading dot); anything else is ignored,
-# and events go as they would without it.
-fallback=${HERDR_EVENTS_FALLBACK_ROUTE:-}
-if [ -n "$fallback" ] && { [[ "$fallback" == */* || "$fallback" == .* ]] || [ ! -f "$RD/$fallback" ]; }; then
-  log "ignored HERDR_EVENTS_FALLBACK_ROUTE $(printf '%q' "$fallback" | cut -c1-60): not a route file in $RD"; fallback=""
+# The fallback route is only a plain name of a regular file in the routes folder (herdr_fallback_route); anything else
+# is ignored, and events go as they would without it.
+fallback=$(herdr_fallback_route "$RD")
+if [ -n "${HERDR_EVENTS_FALLBACK_ROUTE:-}" ] && [ -z "$fallback" ]; then
+  log "ignored HERDR_EVENTS_FALLBACK_ROUTE $(printf '%q' "$HERDR_EVENTS_FALLBACK_ROUTE" | cut -c1-60): not a route file in $RD"
 fi
 esource=$(jq -r '.source // empty' <<<"$payload")
 if [ "$esource" = codex-desktop ] && [ -z "$fallback" ]; then log "skip: codex turn with no herdr pane (no fallback route): $summary"; exit 0; fi
@@ -134,8 +134,8 @@ seen_now(){   # the de-dupe record of this event; only under the lock
   [ -n "$akey" ] && printf '%s\t%s\t%s\n' "$akey" "$now" "$eid" >>"$tmp"
   mv "$tmp" "$DB"
 }
-deferred=0; case "$pane" in hc:*) deferred=1;; esac; [ -n "$eid" ] && deferred=1
-[ "$deferred" = 0 ] && seen_now   # a Core event is recorded only once queued: a failed or cut-off one is never taken as sent
+deferred=0; case "$pane" in hc:*) deferred=1;; esac; [ -n "$eid" ] && deferred=1; [ "$esource" = codex-desktop ] && deferred=1
+[ "$deferred" = 0 ] && seen_now   # a Core or desktop event is recorded only once queued: a failed one is never taken as sent
 if [ "$merged" = 1 ]; then seen_now; log "dedupe-skip (its hook sent this episode): $summary"; exit 0; fi
 
 # --- owner routing ---

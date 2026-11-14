@@ -29,7 +29,8 @@ class Doctor(unittest.TestCase):
                     if not k.startswith(('HERDR_', 'FLEET_', 'STAMPEDE_'))}
         self.env.update(HOME=str(self.home), PATH=f'{self.bin}:/opt/homebrew/bin:/usr/bin:/bin',
                         STAMPEDE_NO_UPDATE_CHECK='1', HC_SOCKET=str(self.home / 'no-core.sock'))  # never this machine's own core
-        self.env.pop('XDG_STATE_HOME', None)
+        for name in ('XDG_STATE_HOME', 'XDG_CONFIG_HOME'):   # a GitHub Linux runner sets both: the settings file is HOME's
+            self.env.pop(name, None)
         subprocess.run(['bash', str(ROOT / 'install.sh')], env=self.env, check=True,
                        capture_output=True, timeout=15)
         self.fake('herdr', '''case "$1 $2" in
@@ -267,6 +268,35 @@ echo disabled; exit 1
         config.parent.mkdir(parents=True)
         config.write_text(f'HERDR_DOCTOR_EXTRA={extra}\n')
         self.assertIn('ok half done', self.doctor().stdout)
+
+    def test_an_extra_check_that_hangs_is_ended_with_all_it_started(self):
+        copy = self.home / 'short/herdr-doctor'                    # the same doctor, its limit 2 s for the test
+        copy.parent.mkdir()
+        copy.write_text((ROOT / 'skills/grokbot-herdr/scripts/herdr-doctor').read_text().replace('EXTRA_SECS=30', 'EXTRA_SECS=2'))
+        copy.chmod(0o755)
+        shutil.copy(ROOT / 'skills/grokbot-herdr/scripts/herdr-platform', copy.parent / 'herdr-platform')
+        pids = self.home / 'pids'
+        extra = self.home / 'doctor-extra'
+        extra.write_text(f'#!/bin/bash\necho "ok started"\nsleep 60 &\necho $$ $! > {pids}\nwait\n')
+        extra.chmod(0o755)
+        began = time.monotonic()
+        result = subprocess.run([str(copy)], env={**self.env, 'HERDR_DOCTOR_EXTRA': str(extra)}, capture_output=True, text=True, timeout=15)
+        self.assertLess(time.monotonic() - began, 10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], 'warn HERDR_DOCTOR_EXTRA did not finish in 2 s: run it by hand to see why')
+        self.assertEqual(result.stdout.count('HERDR_DOCTOR_EXTRA'), 1)
+        for pid in pids.read_text().split():
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid), 0)
+
+    def test_an_extra_checks_control_bytes_never_reach_the_output(self):
+        extra = self.home / 'doctor-extra'
+        extra.write_text("#!/bin/bash\nprintf '\\033[2J\\033[Hok clean\\b!\\r\\n\\033]0;title\\007ok\\ttab\\n'\n")
+        extra.chmod(0o755)
+        result = self.doctor(HERDR_DOCTOR_EXTRA=str(extra))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ['ok clean!', 'ok\ttab'])
+        self.assertFalse(set(result.stdout) & {'\x1b', '\b', '\r', '\x07'})
 
     def test_a_copy_outside_a_checkout_needs_only_a_working_version(self):
         copy = self.home / 'skill-copy/scripts/herdr-doctor'  # no VERSION three folders up

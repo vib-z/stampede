@@ -37,7 +37,7 @@ herdr-event-flush                                    # send what is queued, olde
 - **Log:** `~/Library/Logs/herdr-events.log` on macOS, `${XDG_STATE_HOME:-~/.local/state}/herdr-events.log` on Linux.
 
 ## What a message holds
-- **Every event:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`.
+- **Every event:** `source`, `state`, `pane`, `workspace`, `owner`, `route`, `machine` (`HERDR_EVENTS_MACHINE`), `timestamp`; a `codex-desktop` event (a Codex turn outside Herdr) has no `pane` and no `workspace`.
 - **From Herdr** also `workspace_label`, `tab`, `agent`, `previous_state` and `output_tail` (the pane's last 40 lines). **From Claude and Codex** `cwd`, `session_id` or `thread_id`, and `last_assistant_message` (its first 2000 characters).
 - **A question:** `job`, `agent` (the lead), `lead_pane`, `ask`, `question`, `options`, and `answer` (`stampede tell <job> lead "<the owner's words>"`). Ask the owner in chat, then run `answer` with their words.
 - **A gate:** `job`, `agent`, `lead_pane`, `gate`, `action` (the exact action), `pr`, `sha`, `options` (`yes`, `no`), and two commands:

@@ -29,5 +29,5 @@ case "${2:-}" in
        done
      fi
      [ "$core" = 1 ] || herdr workspace report-metadata "$ws" --source bots --token "owner=$2" >/dev/null 2>&1 || echo "note: sidebar label not set" >&2
-     [ -r "${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the ${HERDR_EVENTS_FALLBACK_ROUTE:-default} route" >&2;;
+     [ -r "${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}/$2" ] || echo "note: no route for $2 yet; events relay via the $(herdr_fallback_route "${HERDR_EVENTS_ROUTES_DIR:-$EV/routes}" || echo default) route" >&2;;
 esac
