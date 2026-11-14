@@ -229,27 +229,6 @@ def core_status(terminal):
     return (terminal.get('status') or {}).get('state')
 
 
-EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›)[ \u00a0]*$',
-                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt; Claude Code draws it as ❯ and a no-break space
-
-
-def typed(screen, empty=EMPTY_PROMPT):
-    """True when a screen's last 8 non-empty lines show no empty-prompt marker: text already typed in the prompt."""
-    return not empty.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:]))
-
-
-def drafted(address, job=None):
-    """True when the last 8 non-empty screen lines show no empty-prompt marker: text already typed, which Core would
-    paste after. Core 0.1.20 holds a send only while a person is typing; a draft left alone past draft_wait, and text
-    typed with hc keys, still gets the message pasted after it. Cut here, since hc read may give the whole screen, whose
-    scrollback can hold a marker. A screen Core cannot read counts as empty."""
-    try:
-        screen = hc('read', address, '--lines', '8', job=job).get('text', '')
-    except HcError:
-        return False
-    return typed(screen)
-
-
 def shelled(terminal):
     """True when a terminal that carries an agent's labels no longer runs the job's launch: a kept terminal lost its
     program and Core put a shell in its place (the Herdr app turns keep on for a terminal it shows), live at the same

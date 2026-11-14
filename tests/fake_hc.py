@@ -189,8 +189,7 @@ def command(state, argv):
         if cmd == 'read':
             if state.get('read_error', {}).get(t['address']):
                 fail(state['read_error'][t['address']], 'no answer')
-            empty = '\u276f\u00a0' if (t.get('labels') or {}).get('stampede.kind') == 'claude' else '\u203a '  # Claude Code's, else Codex's
-            return print(json.dumps({'text': t.get('screen', empty), 'complete': True, 'how': 'screen'}))  # an empty prompt
+            return print(json.dumps({'text': t.get('screen', '\u203a '), 'complete': True, 'how': 'screen'}))  # an empty prompt
         if cmd == 'keys':
             t.setdefault('keys', []).append(rest[1:])
             for key in rest[1:]:

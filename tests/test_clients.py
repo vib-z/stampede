@@ -372,13 +372,12 @@ class Outcomes(unittest.TestCase):
 
     def test_o6_tell(self):
         def check(job):
-            if job.backend == 'native':  # every tell is one hc send, working or not, never after text already in the prompt
+            if job.backend == 'native':  # every tell is one hc send, working or not; Core holds it for a person's draft
                 self.ok(job, 'tell lead', f'SUBMITTED {Job.LEAD} ({job.address(Job.LEAD)})')
                 self.assertIn('Use the repo root', job.sent(Job.LEAD))
                 address = job.address(job.worker)
                 for step in ('tell worker', 'tell working worker', 'tell done worker'):
                     self.ok(job, step, f'SUBMITTED {job.worker} ({address})')
-                self.refused(job, 'tell drafted worker', f'FAILED {job.worker} (text is already typed in its prompt')
                 self.assertEqual(job.sent(job.worker), ['Check the path', 'And the error path', 'And the docs'])
                 self.assertFalse(any('--if' in c or '--force' in c for c in job.calls('send')), 'never guarded, never forced')
                 return

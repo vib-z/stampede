@@ -34,7 +34,6 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 | `running`, `cap`, `queued` | helpers running in the tree, the cap, starts waiting |
 | `reason` | why: the error, the dialog's kind, or for `SKIPPED` and `DONE` a short code (below) |
 | `retry` | the command to run next, where the line names one |
-| `kept` | a native job's `FAILED` answer to the lead: the file that keeps the line, `<job>/asks/<id>.answer` |
 | `to` | who hears a post or a question: the bot, `front door`, or null |
 | `repo` | `new` on Herdr Core: the repo the job works on, absolute, or null outside a repo |
 

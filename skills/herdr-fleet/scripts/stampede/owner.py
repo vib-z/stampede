@@ -64,7 +64,7 @@ def notify_lead(job, text, kept=None):
 
 def ask_now(job, question, options, command=None, gate=None, ident=None):
     """Ask the owner and wait; the answer, or why it failed, goes to the lead's inbox. On a native job Core types it in,
-    and a line the lead cannot take (blocked, text in its prompt, gone) stays in asks/<ident>.answer and the ask fails.
+    and a line hc send refuses (the lead is blocked or gone) stays in asks/<ident>.answer, mode 0600, and the ask fails.
     A gate always asks FLEET_ASK_CMD itself, with the question made from its own record, and its yes (exit 0, a yes or
     nothing on stdout) is recorded for gate-ok, only while the record is still the one asked about."""
     asked = load_gate(job, gate) if gate else None
@@ -97,7 +97,10 @@ def ask_now(job, question, options, command=None, gate=None, ident=None):
     if job_.backend(job) == 'native':
         kept = Path(job).absolute() / 'asks' / ((ident or uuid.uuid4().hex[:12]) + '.answer')
         kept.parent.mkdir(parents=True, exist_ok=True)
-        kept.write_text(line + '\n')  # first, so the answer outlives a send that fails or never returns
+        fd = os.open(kept, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # first, so the answer outlives a failed send
+        os.fchmod(fd, 0o600)  # the owner's words, private whatever the umask, and when an earlier try left the file
+        with os.fdopen(fd, 'w') as out:
+            out.write(line + '\n')
         if notify_lead(job, line, kept):
             return 1
         kept.unlink()
