@@ -15,7 +15,7 @@ Every `stampede` command and its output: [docs/CLI.md](../../docs/CLI.md). An ev
 2. **Health check:** `stampede doctor --tui` (a Core job: `--core`), read only.
    - Exit 0: go on; report each `warn`, fix only your own (a stale tag or worktree).
    - Exit 1: stop and tell the owner the `PROBLEM` lines. A `PROBLEM herdr`: never start the server.
-   - It says `event relay not installed`: run `herdr-doctor --tui --relay`; stop on its `PROBLEM` lines.
+   - `event relay not installed`: run `herdr-doctor --relay` with the same `--tui` or `--core`; stop on its `PROBLEM` lines.
 3. **Size the job** by herdr-fleet's sizing rule. Small: no job, one tagged pane of your own, `herdr-send` to a [brief](../herdr-fleet/references/brief.md); never a bare agent CLI over SSH or `nohup`.
 4. **Workspace and tag** (a TUI job):
    - Make your own: `herdr workspace create --cwd <repo> --label bot-<task> --no-focus`, and keep its literal ids.
@@ -32,7 +32,7 @@ HERDR_EVENTS_OWNER=<bot slug> stampede new --core --file /tmp/ask-<task>.md --cw
    - `--lead codex` when the owner asks for a Codex lead; `--review` when they asked to see the plan first ([share-plan](../share-plan/SKILL.md)). Never `--front-door`: a bot relays its own jobs.
    - The ask names every parallel step as a pane (`research-web`), or the lead runs it as a hidden subagent.
    - It prints `<lead> <job dir>`: tell the owner its name. Read the screen once: `herdr agent read <lead> --source visible --lines 30` (Core: `hc read <address>`); a dialog: [workspace.md](references/workspace.md).
-6. **End your turn.** The lead's own hooks wake it; nothing wakes you but an event.
+6. **End your turn.** Only an event wakes you; hooks wake the lead.
 7. **On an event,** read once, act, end your turn. A TUI job: first read the new lines of `<job dir>/inbox.log` once.
 
 | event (`source` `state`) | do |

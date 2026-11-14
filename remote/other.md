@@ -16,7 +16,7 @@ Any bot that has a computer of its own can drive stampede the way Grok Bot does:
 ## Run
 ```bash
 ssh -o BatchMode=yes -o ConnectTimeout=10 <host> 'stampede doctor --tui'   # the bot reaches the machine; --tui: a stopped Herdr is a PROBLEM even where Herdr Core runs
-ssh -o BatchMode=yes -o ConnectTimeout=10 <host> 'herdr-doctor --tui --relay'   # the event relay too, when doctor says it is not installed
+ssh -o BatchMode=yes -o ConnectTimeout=10 <host> 'herdr-doctor --tui --relay'   # the event relay too, when doctor says it is not installed (Core: --core --relay)
 herdr-event-post source=test state=done pane=<pane id>    # on the machine: the bot gets a message
 ```
 
@@ -26,5 +26,6 @@ herdr-event-post source=test state=done pane=<pane id>    # on the machine: the 
 | any bot with a computer | its own | SSH | its webhook, if it takes the JSON as sent | follow [grokbot/](grokbot/README.md) |
 
 - **The webhook body:** `herdr-event-post` sends the event JSON as is, with `Authorization: Bearer <KEY>`. A webhook that needs another shape (extra headers, the event wrapped in a text field) is planned.
-- **On Herdr Core:** the health check is `stampede doctor --core`, the start `HERDR_EVENTS_OWNER=<bot> stampede new --core --file <ask.md> --cwd <repo>` (only that makes the job the bot's), and the watchdog's events about the lead (blocked, error, dead, stale, within about 5 minutes) carry `pane` `hc:<key>/<address>`: read it with `hc read <address>`, never type into it ([core.md](../skills/herdr-fleet/references/core.md)).
+- **On Herdr Core:** the health check is `stampede doctor --core`, the start `HERDR_EVENTS_OWNER=<bot> stampede new --core --file <ask.md> --cwd <repo>` (only that makes the job the bot's).
+- The watchdog's events about the lead on Core (blocked, error, dead, stale, within about 5 minutes) carry `pane` `hc:<key>/<address>`: read it with `hc read <address>`, never type into it ([core.md](../skills/herdr-fleet/references/core.md)).
 - **Events and routes:** [events.md](events.md). The rules every front door follows: [README.md](README.md).
