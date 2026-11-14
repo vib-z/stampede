@@ -2,16 +2,40 @@
 
 ## Unreleased
 
-- **The Core-native sweep has a script of its own, `herdr-event-sweep`.** The watchdog and `herdr-doctor` call it for the sweep and for `--alive`, `--core-version` and `--socket`, which answer as before. `herdr-event-core` keeps only the `--relay` job's follower, built on the same code; its `--sweep`, `--alive`, `--core-version` and `--socket` are kept for one release and hand over to the new script. No behaviour change: `<job>/sweep-state.json`, its lock and every event stay as they were.
+## 0.2.1 (14 Nov 2026)
 
-Docs only: one page to start from, and one place for each fact.
+stampede, rebuilt to be easy for an agent to pick up: one page to start from, one command that starts a job anywhere, a CLI that explains itself, settings you can read and override, gates that code holds, and short playbooks. Jobs that are open keep working.
 
-- **`USING.md`:** the one page an agent reads to run a job: the command that starts it on the TUI and on Herdr Core, the commands that follow, where the job folder is on each path, and the gates. `CLAUDE.md`, `AGENTS.md`, the root `SKILL.md` and the README lead there.
-- **One gate list:** `skills/herdr-fleet/references/gates.md`. The lead's playbook, the front door, the bot front door and the remote guides link to it instead of each keeping a copy.
-- **Helper limits written once,** in herdr-fleet's The shape, for the TUI and for Herdr Core.
-- **A front door on Herdr Core:** what is true today is in docs/CORE-NATIVE.md (`--front-door` is refused); a native one is on the roadmap.
-- **`.ignore`** keeps `film/`, `site/`, `assets/` and `tests/evals/runs/` out of an agent's search.
-- The 21 Oct design spec is marked as history; the README and docs/CORE-NATIVE.md are the current contract.
+Changes in behaviour:
+
+- **`stampede new --file ask.md` works everywhere.** Outside a Herdr pane it now runs the job on Herdr Core and says so (the setting `backend`, default `auto`); it used to be an error with a hint. Inside a pane it is the Herdr TUI, as before.
+- **Every job folder is under the jobs root:** `<jobs_root>/jobs/<date>-<owner or local>-<slug>`, with the repo's path in `<job>/workdir`. A Core job is no longer made inside the repo. Old `<repo>/.herdr-*` jobs keep working.
+- **A merge goes through `stampede merge`,** which merges only the commit a passing review report names, at the PR's head, past a merge gate. A `pre-push` hook, installed in a repo that has none, stops a job's agents pushing to the default branch without a gate. A yes typed in a lead's pane no longer opens either: only the recorded gate does. Gates are settings, all on by default; an owner may switch one off, and each opt-out is logged.
+- **Errors start `stampede <command>:`** in place of `fleet-job <command>:`. `fleet-job` stays as an alias.
+- **A local question or gate whose ask command is not installed is refused,** instead of being shown as asked.
+
+What is new:
+
+- **`USING.md`:** the one page an agent reads to run a job: install, the one command, the commands that follow, where the job folder is, who records the owner's yes, and where to read more. `CLAUDE.md`, `AGENTS.md`, the root `SKILL.md` and the README lead there.
+- **A CLI that explains itself.** Bare `stampede` and `--help` list the commands in groups; each command's `--help` has an example; each error names the next step, often as a line to copy. Every command, status word and exit code is in [docs/CLI.md](docs/CLI.md).
+- **`stampede doctor`** checks Python, the checkout, the commands on PATH and the config, then runs `herdr-doctor`, and gives the fix for each problem. **`stampede check`** runs the fast tests in seconds (`--full` for all). The minimum Python is 3.9, checked at start and run in CI.
+- **Layered config.** Every setting comes from the defaults, your `~/.config/stampede/config.toml`, a repo's `.stampede.toml`, the environment names that always worked, then a command's flags and `--set key=value`. `stampede config show` prints each value and the layer that set it. A job remembers what was set when it started. Keys that run a command or lower a safety rule are taken only from your own file, the environment or a flag, never from a repo or a job folder. `config.example` is now TOML.
+- **Role defaults.** `stampede start <job> build-api --brief <file>` takes its CLI, model and effort from the helper's role (`roles.<role>`); `--kind` is no longer required. Also `--lead-model`, `--lead-effort`, and the settings `helpers.layout` and `review.step`.
+- **A front door on Herdr Core.** `stampede new --core --front-door` lets a chat outside Herdr run a Core job as the owner's only contact: the lead posts to `<job>/outbox`, `stampede wait` hands each item on, or says `BLOCKED` with the lead's screen, or `LEAD_GONE`.
+- **Gates of one kind.** `stampede ask --gate --kind merge` or `--kind push_default_branch`: a merge gate does not open a push, nor the reverse. `stampede new --no-gate <name>` switches one gate off for a job, logged in `<job>/gates.log`, named in the lead's brief and printed by `finish`.
+- **`--json` on every command an agent runs:** one object with `ok`, `command`, `status` and the facts the line names, or `error` and a runnable `retry` for a refusal, with the same exit code. Plain output is unchanged. The schema is [docs/CLI-JSON.md](docs/CLI-JSON.md).
+- **Short playbooks.** The lead's playbook went from 27 KB to 6 KB: the loop as numbered steps, the hard rules one per line, and what to read when. The front door, bot and plan skills and the remote guides are short too. One gate list, `skills/herdr-fleet/references/gates.md`, replaces three copies. `tests/test_shape.py` now limits every playbook in bytes and line length and fails on dates and history.
+- **A shorter README:** about a quarter off, with no section lost. Status says what works and was tested today; the release history is here.
+
+Under the hood:
+
+- **The CLI is a package.** `fleet_job.py` (3,000 lines, three backends in one file) and `core_native.py` are now `skills/herdr-fleet/scripts/stampede/`, one module per concern, with a test that guards the layers. No change in behaviour.
+- **The Core-native sweep has a script of its own, `herdr-event-sweep`,** so the earlier `--core --relay` path can go in the next minor release without taking the watchdog with it. `herdr-event-core` keeps only that path's follower; its `--sweep`, `--alive`, `--socket` and `--core-version` answer as before for one release.
+- **`stampede close` never ends another job's terminal,** even one under this job's tree.
+- **Fixes found on the way:** a settings read that could be stale within one process; a macOS test that could not remove its scratch folder; a fragment of a home path in recorded eval logs, which are now scrubbed before they are cut.
+- `.ignore` keeps `film/`, `site/`, `assets/` and `tests/evals/runs/` out of an agent's search. The 21 Oct design spec is marked as history.
+
+Not in this release: alerts for a job's helpers (planned), and the removal of `--core --relay` (the next minor release).
 
 ## 0.2.0 (13 Nov 2026)
 

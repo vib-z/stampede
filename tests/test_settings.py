@@ -281,6 +281,22 @@ class Wired(unittest.TestCase):
         self.assertEqual(agents_.missing_sections('## Goal\nShip it.\n')[:2], ['Why', 'Inputs'])
         self.assertEqual(hcapi_.hc_call(), 60)
 
+    def test_a_rewrite_within_the_clocks_grain_is_still_read(self):
+        """Two writes of a file can carry one modification time: each read takes the file as it is, never a kept copy."""
+        self.config('[helpers]\nmax = 5\n')
+        first = os.stat(self.user)
+        self.assertEqual(st.current().get('helpers.max'), 5)
+        self.config('[helpers]\nmax = 7\n')
+        os.utime(self.user, ns=(first.st_atime_ns, first.st_mtime_ns))
+        self.assertEqual(os.stat(self.user).st_mtime_ns, first.st_mtime_ns)
+        self.assertEqual(st.current().get('helpers.max'), 7)
+        (self.job / 'settings.json').write_text(json.dumps({'values': {'helpers.tab_panes': 2}, 'sources': {'helpers.tab_panes': 'user'}}))
+        saved = os.stat(self.job / 'settings.json')
+        self.assertEqual(st.current(self.job).get('helpers.tab_panes'), 2)
+        (self.job / 'settings.json').write_text(json.dumps({'values': {'helpers.tab_panes': 3}, 'sources': {'helpers.tab_panes': 'user'}}))
+        os.utime(self.job / 'settings.json', ns=(saved.st_atime_ns, saved.st_mtime_ns))
+        self.assertEqual(st.current(self.job).get('helpers.tab_panes'), 3)
+
     def test_a_job_keeps_what_it_saved_and_a_default_follows_the_live_layers(self):
         self.config('[helpers]\nmax = 5\n')
         with self.env(FLEET_LEAD_KIND='codex'):

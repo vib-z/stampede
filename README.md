@@ -8,7 +8,7 @@ Grok Bot is the setup we recommend, but you don't need it: stampede also runs wh
 
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="CHANGELOG.md"><img alt="Version 0.2.0" src="https://img.shields.io/badge/version-0.2.0-black"></a>
+  <a href="CHANGELOG.md"><img alt="Version 0.2.1" src="https://img.shields.io/badge/version-0.2.1-black"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black"></a>
   <a href="https://github.com/vib-z/stampede/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/vib-z/stampede?style=flat&color=black&label=stars"></a>
   <a href="https://herdr.dev"><img alt="Herdr 0.9.4 or later" src="https://img.shields.io/badge/Herdr-0.9.4%2B-black"></a>
@@ -279,7 +279,7 @@ cd ~/stampede
 ./install.sh --dry-run               # prints each link it would make, changes nothing
 ./install.sh                         # links the skills and the commands
 export PATH="$HOME/.local/bin:$PATH" # add this line to your shell profile too
-stampede --version                   # 0.2.0
+stampede --version                   # 0.2.1
 herdr-trust ~/code/my-app            # once per repo, before agents start there
 ```
 
@@ -317,7 +317,7 @@ Once a day stampede tells you when a newer release is out; it never updates anyt
 ```text
 $ stampede --version
 0.1.0
-stampede 0.2.0 is out, this is 0.1.0: run stampede update
+stampede 0.2.1 is out, this is 0.2.0: run stampede update
 ```
 
 In a plugin install the line ends `run herdr plugin update stampede --yes`. `stampede --version` puts that line on stderr and still exits 0; `herdr-doctor` prints it as a `warn`. Any failure (offline, rate-limited, a malformed reply) prints nothing and is cached too. Turn the check off with `export STAMPEDE_NO_UPDATE_CHECK=1` ([Configure](#configure)). How a release is cut: [RELEASING.md](RELEASING.md).
@@ -951,7 +951,7 @@ How to open an issue or a pull request: [CONTRIBUTING.md](CONTRIBUTING.md). The 
 
 ## Status and roadmap
 
-**0.2.0, 13 Nov 2026, and early:** commands and files may still change. What each release shipped, and how it was tested: [CHANGELOG.md](CHANGELOG.md). Real jobs, with timelines: [docs/RUNS.md](docs/RUNS.md).
+**0.2.1, 14 Nov 2026, and early:** commands and files may still change. What each release shipped, and how it was tested: [CHANGELOG.md](CHANGELOG.md). Real jobs, with timelines: [docs/RUNS.md](docs/RUNS.md).
 
 **Works and tested.** Every command in this README was run against a scratch job with the fakes, or against `--help`.
 - **A job on the Herdr TUI:** the job folder, the lead's start with its hooks, Claude, Codex and Cursor workers, complete worker briefs, plan approval, background questions and cancel, gates that go back to whoever started the job, quieter events while a job is open, a lead forked from the planning chat, a Codex lead, a front door outside Herdr, and reopen.
