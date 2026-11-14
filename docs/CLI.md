@@ -59,6 +59,8 @@ Three kinds of job, chosen at `new`, decide what some commands do:
 
 `new` writes `<job>/settings.json`: `{"values", "sources", "version"}`, every setting it resolved except the user-only keys (`ask.command`, `jobs_root`, `trust_root`, `gates.*`), which every command reads from your own file, environment and flags. Every later command of the job starts from it. `new` refuses, exit 2, while the config has a problem: each problem line, then `stampede new: fix it or remove the key: stampede config show`. The new keys of this kind are `backend`, `roles.<role>.kind|model|effort` (any role name), `helpers.layout` and `review.step`; a value outside a key's choices is a problem too. The layers and every key: [README, Configure](../README.md#configure).
 
+`alerts.helpers` (default `false`) is read from `<job>/settings.json` by the watchdog's `herdr-event-sweep`, not by a `stampede` command: with `true` it reports a Core-native job's helpers as it does the lead ([remote/events.md](../remote/events.md#a-herdr-core-job)).
+
 ## The machine
 
 | command | flags | prints |

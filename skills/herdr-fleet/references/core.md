@@ -33,6 +33,7 @@ stampede new --core --file ask.md [--cwd <repo>] [--name <slug>] [--space <name>
 | `tree.json` | the reopen record: every node's name, role, parent, kind, model, effort, session, brief, report, cwd, tab, how to start it again and its last seen state |
 | `REOPEN.md`, `reopen.sh` | the same record to read, and the command that rebuilds the tree |
 | `queue/` | helper starts waiting for a free place under the cap, oldest first; `queue/dropped/` holds those whose parent ended |
+| `close-intent.log` | the addresses each `stampede close` is about to end, written before it ends any: the watchdog raises no alarm for them |
 | `closed` | written by a whole-job `stampede close`, removed by `stampede reopen`: the watchdog stays quiet meanwhile |
 | `ask.md`, `plan.md`, `briefs/`, `reports/` | the ask, your plan, each helper's brief, each helper's result |
 
