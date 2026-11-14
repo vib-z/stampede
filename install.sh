@@ -2,14 +2,19 @@
 # Install stampede from this checkout: link its four skills into Claude Code and Codex, and its commands into
 # ~/.local/bin. Safe to re-run. Never replaces what is already there, except its own link into another checkout of this
 # same Herdr plugin install (Herdr deletes that one at its next start); never installs Herdr or an agent CLI.
+# --replace takes over an older install: whatever else is at a target (a copy, a link elsewhere, a folder) is moved into
+# one backup folder for this run, then linked; that folder's rollback.sh puts everything back. Nothing is deleted.
+# --no-skills links the commands only.
 set -euo pipefail
-usage() { echo 'usage: install.sh [--dry-run] [--from-plugin] [--supervise] [--no-supervise]'; }
+usage() { echo 'usage: install.sh [--dry-run] [--replace] [--no-skills] [--from-plugin] [--supervise] [--no-supervise]'; }
 DRY=0
+REPLACE=0
+SKILLS=1
 NO_SUPERVISE=0
 FORCE_SUPERVISE=0
 for option in "$@"; do
   case "$option" in
-    --dry-run) DRY=1;; --from-plugin) ;; --no-supervise) NO_SUPERVISE=1;; --supervise) FORCE_SUPERVISE=1;;
+    --dry-run) DRY=1;; --replace) REPLACE=1;; --no-skills) SKILLS=0;; --from-plugin) ;; --no-supervise) NO_SUPERVISE=1;; --supervise) FORCE_SUPERVISE=1;;
     -h|--help) usage; exit 0;;
     *) usage >&2; exit 2;;
   esac
@@ -24,19 +29,66 @@ ours() {  # ours <link value> <target>: the same file in another checkout of thi
   rest=${1#"$INSTALL"/}
   [[ "$rest" =~ ^[0-9]+-[0-9]+/checkout/ ]] && [ "${rest#"${BASH_REMATCH[0]}"}" = "${2#"$ROOT"/}" ]
 }
+BACKUP="${XDG_STATE_HOME:-$HOME/.local/state}/stampede/backup-$(date +%Y%m%d-%H%M%S)"
+JOURNAL=0   # 1 once this --replace run has made its backup folder, rollback.sh and journal
+open_backup() {  # the backup folder, rollback.sh and an empty journal, on this --replace run's first change
+  if [ "$JOURNAL" = 0 ]; then
+    mkdir -p "$(dirname "$BACKUP")"
+    mkdir "$BACKUP" || { echo "install.sh: $BACKUP is already there; run it again in a second" >&2; exit 1; }
+    JOURNAL=1
+    cat > "$BACKUP/rollback.sh" <<'ROLLBACK'
+#!/bin/bash
+# Undo one install.sh --replace: remove each link it made, and move back what it moved into this folder.
+# A path that changed since is left as it is, and named. Exit 0 all undone, 1 something left.
+B=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+status=0
+back() {  # back <target> <path> <where the old one was moved, or empty>
+  if [ -L "$2" ] && [ "$(readlink "$2")" = "$1" ]; then rm "$2" && echo "unlinked $2"
+  elif [ -z "$3" ]; then echo "left $2: not the link install.sh made" >&2; status=1; return 0; fi
+  [ -n "$3" ] || return 0
+  if [ -e "$2" ] || [ -L "$2" ]; then echo "left $2: something else is there now; its original is $3" >&2; status=1
+  elif [ ! -e "$3" ] && [ ! -L "$3" ]; then echo "left $2: $3 is gone" >&2; status=1
+  else mv "$3" "$2" && echo "restored $2"; fi
+}
+. "$B/journal"
+exit "$status"
+ROLLBACK
+    : > "$BACKUP/journal"
+  fi
+}
+journal() {  # journal <target> <path> <where the old one was moved, or empty>: one line rollback.sh reads
+  [ "$REPLACE" = 1 ] || return 0
+  open_backup
+  printf 'back %q %q %q\n' "$1" "$2" "$3" >> "$BACKUP/journal"
+}
+stopped() {  # stopped <what failed>: a --replace that cannot move or link stops here; the journal holds what it did
+  echo "install.sh: $1; stopped" >&2
+  if [ "$JOURNAL" = 1 ]; then echo "rollback: bash $BACKUP/rollback.sh" >&2; fi
+  exit 1
+}
 link() {  # link <target> <path>
   if [ -L "$2" ] && [ "$(readlink "$2")" = "$1" ]; then echo "ok $2"
-  elif [ -L "$2" ] && ours "$(readlink "$2")" "$1"; then
+  elif [ "$REPLACE" = 0 ] && [ -L "$2" ] && ours "$(readlink "$2")" "$1"; then
     if [ "$DRY" = 1 ]; then echo "would relink $2 -> $1"; else ln -sfn "$1" "$2" && echo "relinked $2 -> $1"; fi
-  elif [ -e "$2" ] || [ -L "$2" ]; then echo "skip $2: something else is there; left as is"
+  elif { [ -e "$2" ] || [ -L "$2" ]; } && [ "$REPLACE" = 0 ]; then echo "skip $2: something else is there; left as is (--replace backs it up and links)"
+  elif [ -e "$2" ] || [ -L "$2" ]; then
+    local saved="$BACKUP/${2#"$HOME"/}"
+    if [ "$DRY" = 1 ]; then echo "would replace $2 (backup in $BACKUP)"; return 0; fi
+    open_backup
+    mkdir -p "$(dirname "$saved")" && mv "$2" "$saved" || stopped "could not move $2 to $saved"
+    journal "$1" "$2" "$saved"   # before the link: a link that fails still has its move undone
+    ln -s "$1" "$2" || stopped "could not link $2"
+    echo "replaced $2 -> $1 (the old one is in $saved)"
   elif [ "$DRY" = 1 ]; then echo "would link $2 -> $1"
-  else mkdir -p "$(dirname "$2")" && ln -s "$1" "$2" && echo "linked $2 -> $1"; fi
+  else mkdir -p "$(dirname "$2")" && ln -s "$1" "$2" && journal "$1" "$2" "" && echo "linked $2 -> $1"; fi
 }
 for app in .claude .codex; do
+  [ "$SKILLS" = 1 ] || { echo "skip ~/$app/skills: --no-skills"; continue; }
   [ -d "$HOME/$app" ] || { echo "skip ~/$app/skills: no ~/$app"; continue; }
   for skill in stampede herdr-fleet grokbot-herdr share-plan; do link "$ROOT/skills/$skill" "$HOME/$app/skills/$skill"; done
 done
 for f in "$ROOT/scripts/stampede" "$ROOT"/skills/grokbot-herdr/scripts/*; do
+  [ -f "$f" ] || continue   # files only: a __pycache__ folder left by the tests is not a command
   case "${f##*/}" in test-*) continue;; esac
   link "$f" "$HOME/.local/bin/${f##*/}"
 done
@@ -127,3 +179,4 @@ WantedBy=timers.target' && n=$((n+1))
 }
 linux_timers
 echo "Next, once per repo: herdr-trust <repo dir>   (pre-trusts it for Claude and Codex, so agents start without a dialog)"
+if [ "$JOURNAL" = 1 ]; then echo "rollback: bash $BACKUP/rollback.sh"; fi

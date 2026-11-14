@@ -182,6 +182,148 @@ class Install(unittest.TestCase):
         self.assertEqual(self.run_install('--from-plugin').returncode, 0)
         self.assertEqual(self.run_install('--unknown').returncode, 2)
 
+    def older_install(self):
+        """What an older install leaves at the targets: a plain copy, a link into another checkout, a link whose target
+        is gone, a real skill folder, and a file of the owner's that is never a target."""
+        bin_dir, other = self.home / '.local/bin', self.home / 'old-checkout/scripts'
+        bin_dir.mkdir(parents=True)
+        other.mkdir(parents=True)
+        (other / 'fleet-job').write_text('#!/bin/bash\necho old fleet-job\n')
+        (bin_dir / 'herdr-send').write_text('an older copy of herdr-send')
+        (bin_dir / 'fleet-job').symlink_to(other / 'fleet-job')
+        (bin_dir / 'stampede').symlink_to(other / 'gone')
+        (self.home / '.claude/skills/herdr-fleet').mkdir(parents=True)
+        (self.home / '.claude/skills/herdr-fleet/SKILL.md').write_text('an older skill')
+        (bin_dir / 'my-own-tool').write_text('never a target')
+
+    def tree(self, skip='.local/state'):
+        """Every path under HOME but skip with what it is: a link's value, a file's bytes, or a folder."""
+        return {str(p.relative_to(self.home)): ('-> ' + os.readlink(p)) if p.is_symlink() else p.read_bytes() if p.is_file() else 'dir'
+                for p in self.home.rglob('*') if not str(p.relative_to(self.home)).startswith(skip)}
+
+    def rollback(self, result):
+        last = result.stdout.splitlines()[-1]
+        self.assertRegex(last, rf'^rollback: bash {re.escape(str(self.home))}/\.local/state/stampede/backup-\d{{8}}-\d{{6}}/rollback\.sh$')
+        return Path(last.split()[-1])
+
+    def test_replace_takes_over_an_older_install_with_a_backup_and_its_rollback_restores_it(self):
+        self.older_install()
+        before = self.tree()
+        result = self.run_install('--replace')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        backup = self.rollback(result).parent
+        bin_dir = self.home / '.local/bin'
+        for name in ('stampede', 'fleet-job'):
+            self.assertEqual((bin_dir / name).resolve(), ROOT / 'scripts/stampede', name)
+        self.assertEqual((bin_dir / 'herdr-send').resolve(), ROOT / 'skills/grokbot-herdr/scripts/herdr-send')
+        self.assertEqual((self.home / '.claude/skills/herdr-fleet').resolve(), ROOT / 'skills/herdr-fleet')
+        self.assertIn(f'replaced {bin_dir}/herdr-send -> {ROOT}/skills/grokbot-herdr/scripts/herdr-send '
+                      f'(the old one is in {backup}/.local/bin/herdr-send)', result.stdout)
+        self.assertEqual(len(re.findall(r'(?m)^replaced ', result.stdout)), 4)
+        self.assertEqual((backup / '.local/bin/herdr-send').read_text(), 'an older copy of herdr-send')
+        self.assertEqual(os.readlink(backup / '.local/bin/fleet-job'), str(self.home / 'old-checkout/scripts/fleet-job'))
+        self.assertEqual(os.readlink(backup / '.local/bin/stampede'), str(self.home / 'old-checkout/scripts/gone'))
+        self.assertEqual((backup / '.claude/skills/herdr-fleet/SKILL.md').read_text(), 'an older skill')
+        self.assertEqual((bin_dir / 'my-own-tool').read_text(), 'never a target')
+        installed = self.tree()
+        again = self.run_install('--replace')                                  # nothing in the way: no second backup
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn('rollback:', again.stdout)
+        self.assertEqual([p.name for p in backup.parent.iterdir()], [backup.name])
+        self.assertEqual(self.tree(), installed)
+        undone = subprocess.run(['bash', str(backup / 'rollback.sh')], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual((undone.returncode, undone.stderr), (0, ''))
+        self.assertIn(f'restored {bin_dir}/herdr-send', undone.stdout)
+        self.assertEqual(self.tree(), before)                                  # the links it made are gone too
+
+    def test_a_rollback_leaves_a_target_someone_changed_since(self):
+        self.older_install()
+        backup = self.rollback(self.run_install('--replace')).parent
+        mine = self.home / '.local/bin/herdr-send'
+        mine.unlink()
+        mine.write_text('put here after the install')
+        undone = subprocess.run(['bash', str(backup / 'rollback.sh')], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(undone.returncode, 1)
+        self.assertIn(f'left {mine}: something else is there now; its original is {backup}/.local/bin/herdr-send', undone.stderr)
+        self.assertEqual(mine.read_text(), 'put here after the install')
+        self.assertEqual((backup / '.local/bin/herdr-send').read_text(), 'an older copy of herdr-send')
+        self.assertIn(f'restored {self.home}/.local/bin/fleet-job', undone.stdout)   # the rest is still undone
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can move out of a read-only folder')
+    def test_a_move_that_fails_stops_before_the_link_and_leaves_the_folder(self):
+        own = self.home / '.claude/skills/stampede'  # the first target, so nothing was linked before it'
+        own.mkdir(parents=True)
+        (own / 'SKILL.md').write_text('an older skill')
+        own.parent.chmod(0o555)
+        self.addCleanup(own.parent.chmod, 0o755)
+        result = self.run_install('--replace')
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(f'install.sh: could not move {own} to ', result.stderr)
+        self.assertRegex(result.stderr, r'rollback: bash \S+/rollback\.sh')
+        self.assertFalse(own.is_symlink())
+        self.assertEqual((own / 'SKILL.md').read_text(), 'an older skill')
+        self.assertFalse((self.home / '.local/bin').exists(), 'it stopped before the commands')
+        journal = next((self.home / '.local/state/stampede').iterdir()) / 'journal'
+        self.assertEqual(journal.read_text(), '')   # a move that failed is not journaled
+
+    def test_dry_run_replace_names_each_target_and_changes_nothing(self):
+        self.older_install()
+        before = self.tree(skip='\0')
+        result = self.run_install('--dry-run', '--replace')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        replaced = re.findall(r'(?m)^would replace (\S+) \(backup in (\S+)\)$', result.stdout)
+        self.assertEqual(sorted(path for path, _ in replaced), sorted(str(self.home / p) for p in (
+            '.claude/skills/herdr-fleet', '.local/bin/fleet-job', '.local/bin/herdr-send', '.local/bin/stampede')))
+        self.assertRegex(replaced[0][1], rf'^{re.escape(str(self.home))}/\.local/state/stampede/backup-\d{{8}}-\d{{6}}$')
+        self.assertIn(f'would link {self.home}/.local/bin/herdr-doctor', result.stdout)
+        self.assertNotIn('rollback:', result.stdout)
+        self.assertEqual(self.tree(skip='\0'), before)
+
+    def test_without_replace_the_skip_names_the_flag_and_no_backup_is_made(self):
+        self.older_install()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'skip {self.home}/.local/bin/herdr-send: something else is there; left as is '
+                      '(--replace backs it up and links)', result.stdout)
+        self.assertNotIn('rollback:', result.stdout)
+        self.assertFalse((self.home / '.local/state').exists())
+        self.assertIn('[--replace] [--no-skills]', self.run_install('--bogus').stderr)
+
+    def test_no_skills_links_the_commands_and_leaves_every_skill_alone(self):
+        self.older_install()
+        (self.home / '.codex').mkdir()
+        result = self.run_install('--replace', '--no-skills')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('skip ~/.claude/skills: --no-skills', result.stdout)
+        self.assertIn('skip ~/.codex/skills: --no-skills', result.stdout)
+        self.assertEqual((self.home / '.claude/skills/herdr-fleet/SKILL.md').read_text(), 'an older skill')
+        self.assertFalse((self.home / '.claude/skills/stampede').exists())
+        self.assertFalse((self.home / '.codex/skills').exists())
+        self.assertEqual((self.home / '.local/bin/fleet-job').resolve(), ROOT / 'scripts/stampede')
+
+    def test_replace_in_a_managed_checkout_journals_its_relinks_so_the_rollback_points_them_back(self):
+        first, second = self.managed_checkout(1), self.managed_checkout(2)
+        self.assertEqual(self.run_install('--no-skills', '--no-supervise', root=first).returncode, 0)
+        before = self.tree()
+        result = self.run_install('--replace', '--no-skills', '--no-supervise', root=second)   # only relinks: still a rollback
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.readlink(self.home / '.local/bin/stampede'), str(second / 'scripts/stampede'))
+        undone = subprocess.run(['bash', str(self.rollback(result))], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual((undone.returncode, undone.stderr), (0, ''))
+        self.assertEqual(os.readlink(self.home / '.local/bin/stampede'), str(first / 'scripts/stampede'))
+        self.assertEqual(self.tree(), before)
+        plain = self.run_install('--no-skills', '--no-supervise', root=second)                 # without --replace: a relink, as before
+        self.assertIn(f'relinked {self.home}/.local/bin/stampede', plain.stdout)
+        self.assertNotIn('rollback:', plain.stdout)
+
+    def test_a_folder_among_the_helpers_is_not_linked(self):
+        root = self.managed_checkout(1)
+        (root / 'skills/grokbot-herdr/scripts/__pycache__').mkdir()
+        result = self.run_install(root=root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.lexists(self.home / '.local/bin/__pycache__'))
+        self.assertTrue((self.home / '.local/bin/herdr-doctor').is_symlink())
+
     @unittest.skipIf(tomllib is None, 'tomllib is in Python 3.11 and later')
     def test_manifest_commands_exist(self):
         manifest = tomllib.loads((ROOT / 'herdr-plugin.toml').read_text())
