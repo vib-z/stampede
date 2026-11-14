@@ -24,9 +24,10 @@ class CoreCase(unittest.TestCase):
     """A scratch trust root with a repo, events folder, fake hc and fake agent CLIs, outside any Herdr pane."""
 
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name).resolve()
+        scratch = tempfile.mkdtemp()
+        # a helper a test started may still be writing its bytecode cache into this HOME: never fail the test on it
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        self.root = Path(scratch).resolve()
         self.repo, self.events, self.core, self.bin = (self.root / n for n in ('code/repo', 'events', 'core', 'bin'))
         for folder in (self.repo, self.events, self.core, self.bin, self.root / 'home'):
             folder.mkdir(parents=True)

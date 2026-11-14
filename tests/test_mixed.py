@@ -427,6 +427,8 @@ class MixedFollower(FollowerCase):
                 time.sleep(0.05)
             (self.job_dir / 'finished').write_text('x\n')
             thread.join(timeout=20)
+            if follower.reader:
+                follower.reader.join(30)  # a read still running would write into the scratch HOME after cleanup began
         self.assertEqual(result, [0])
 
 
