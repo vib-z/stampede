@@ -26,7 +26,7 @@ ratio = 0.5
 on = true
 list = [1, -2, 3e2, "a \\"b\\""]
 '''
-# the table in skills/herdr-fleet/SKILL.md, Pick the agent and model: builders at medium, review on the other vendor
+# the table in skills/herdr-fleet/references/agents-and-models.md, Pick for the task: builders at medium, review on the other vendor
 ROLES = {'default': ('claude', 'claude-opus-5-5', 'medium'), 'build': ('claude', 'claude-opus-5-5', 'medium'),
          'research': ('claude', 'claude-opus-5-5', 'xhigh'), 'review': ('codex', 'gpt-6-astra', 'ultra'),
          'design': ('codex', 'gpt-6-astra', 'ultra'), 'qa': ('codex', 'gpt-6-astra', 'ultra'),

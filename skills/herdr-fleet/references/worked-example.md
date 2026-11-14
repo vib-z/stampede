@@ -1,145 +1,110 @@
 # Worked example: a lead, two builders and a reviewer
 
-A feature with a server half and a UI half. The lead is `lead-alerts`, started with its hooks by `fleet-job new --file <ask.md> --name alerts` in the project workspace, which made the job folder `~/code/herdr-jobs/jobs/<date>-local-alerts`. `build-api` is Claude Opus 5.5 at medium, `build-ui` is Codex `gpt-6.1-sol` at medium, and `review-alerts` is Codex `gpt-6-astra` at ultra. Each builder gets its own worktree because both halves touch shared code. Run everything from the lead's pane. IDs come from JSON responses, never from these examples. External callers (over ssh): see "Where are you?" in SKILL.md and put literal ids where this example uses `$HERDR_WORKSPACE_ID`.
+A feature with a server half and a UI half, on the Herdr TUI. `stampede new --file <ask.md> --name alerts` in the project workspace started the lead and made the job folder `<jobs_root>/jobs/<date>-local-alerts`. `build-api` and `build-ui` take their models from `roles.build` (here `build-ui` is Codex by `--kind codex`), `review-alerts` from `roles.review`.
+Each builder gets a worktree because both halves touch shared code. Ids come from Herdr's JSON, never from this page; from outside Herdr, see [tui.md](tui.md#from-outside-herdr).
 
-## 1. Contract, briefs, register (lead)
+## 1. Contract, briefs, register
 
 ```bash
-REPO=<abs repo dir>
-WT=~/code/herdr-jobs/worktrees
-B=~/code/herdr-jobs/jobs/<date>-local-alerts   # the folder fleet-job new printed
+REPO=<abs repo dir>; WT=<jobs_root>/worktrees; B=<the job folder new printed>
 git -C "$REPO" fetch origin main
-git -C "$REPO" worktree add "$WT/alerts" -b claude/alerts origin/main     # the lead's integration worktree
-ln -s "$REPO/node_modules" "$WT/alerts/node_modules"   # never copy .env.local or any env file: the owner adds keys
-mkdir -p "$B/reports"
+git -C "$REPO" worktree add "$WT/alerts" -b alerts origin/main     # the lead's integration worktree
+ln -s "$REPO/node_modules" "$WT/alerts/node_modules"               # never copy an env file: the owner adds keys
 ```
 
-In `$WT/alerts`, the lead writes the contract (`src/lib/alerts/types.ts`, stub files, one validation test) and commits it. Then it writes:
-- `$B/_common.md`: the ownership rules from [collaboration.md](collaboration.md), the dev-server ports (api 3151, ui 3152) and project facts.
-- `$B/build-api.md` and `$B/build-ui.md`, on the [hand-off template](brief.md), shaped like this:
+In `$WT/alerts` the lead commits the contract (`src/lib/alerts/types.ts`, stubs, one validation test), then writes:
+- `$B/_common.md`: the [ownership rules](collaboration.md#ownership-rules-paste-into-every-commonmd), the dev-server ports (api 3151, ui 3152) and project facts.
+- `$B/briefs/build-api.md` and `build-ui.md` on the [hand-off template](brief.md), such as:
 
 ```markdown
 # Brief: build-api
 ## Goal
-Build the alert rules API and hourly evaluator, as specified in the contract.
+Build the alert rules API and hourly evaluator, as the contract specifies.
 ## Why
-You build the server half of the alerts feature; a separate worker builds the UI. Your lead committed the shared contract so both halves agree.
+You build the server half of alerts; another worker builds the UI. The lead committed the shared contract so both halves agree.
 ## Inputs
-Read <abs job folder>/_common.md first.
-Worktree: ~/code/herdr-jobs/worktrees/alerts-api, branch alerts/api, starting commit <contract commit>.
-You own, under that worktree: src/app/api/alerts/**, src/lib/alerts/server.ts, tests/alerts-api.test.ts.
-Read its src/lib/alerts/types.ts contract.
+Read <job>/_common.md first. Worktree <jobs_root>/worktrees/alerts-api, branch alerts-api, from <contract commit>.
+You own src/app/api/alerts/**, src/lib/alerts/server.ts and tests/alerts-api.test.ts. Read src/lib/alerts/types.ts.
 ## Constraints
-Follow _common.md. Commit only to alerts/api. Do not change the contract; propose changes in your report.
+Follow _common.md. Commit only to alerts-api. Do not change the contract; propose changes in your report.
 ## Done when
-- `npx vitest run tests/alerts-api.test.ts` passes and the API and hourly evaluator match the contract. Run that test after the step, before the report.
+- `npx vitest run tests/alerts-api.test.ts` passes, run after the step and before the report.
 ## Report back
-Write <abs job folder>/reports/build-api.md last, under 60 lines: Status: DONE in the first 10 lines, what changed, files touched, unverified and decisions.
+<job>/reports/build-api.md, last, under 60 lines: Status: DONE in the first 10 lines, what changed, files, unverified, decisions.
 ## If blocked
-Your lead decides: write <abs job folder>/questions/build-api.md, say so in your last message and end your turn. Make the reasonable call where you can and record it.
+Write <job>/questions/build-api.md, say so in your last message and end your turn; make the reasonable call where you can.
 ```
 
-- `$B/register.md`: a roster table (agent, kind, model and effort, pane, worktree, port, status) and a "next step" line.
+- `$B/register.md`: a roster (agent, kind, model and effort, pane, worktree, port, status) and a "next step" line.
 
-## 2. Worktrees, tab and panes (lead)
+## 2. Worktrees, tab, panes, starts
 
 ```bash
 for s in api ui; do
-  git -C "$REPO" worktree add "$WT/alerts-$s" -b "alerts/$s" claude/alerts
-  ln -s "$REPO/node_modules" "$WT/alerts-$s/node_modules"   # no env file copied
+  git -C "$REPO" worktree add "$WT/alerts-$s" -b "alerts-$s" alerts
+  ln -s "$REPO/node_modules" "$WT/alerts-$s/node_modules"
 done
-T=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$WT/alerts-api" --label alerts --no-focus) # external caller: literal id, e.g. --workspace w1
-TAB=$(echo "$T" | jq -r .result.tab.tab_id)
-PA=$(echo "$T" | jq -r .result.root_pane.pane_id)
-herdr pane layout --pane "$PA" | jq --arg p "$PA" '.result.layout.panes[] | select(.pane_id==$p) | .rect'   # this pane's own size (.area is the tab); split right only if both halves keep 80 columns
-PU=$(herdr pane split --pane "$PA" --direction right --cwd "$WT/alerts-ui" --no-focus | jq -r .result.pane.pane_id)
-herdr pane rename "$PA" build-api
-herdr pane rename "$PU" build-ui
+T=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$WT/alerts-api" --label alerts --no-focus)
+TAB=$(echo "$T" | jq -r .result.tab.tab_id); PA=$(echo "$T" | jq -r .result.root_pane.pane_id)
+PU=$(herdr pane split --pane "$PA" --direction right --cwd "$WT/alerts-ui" --no-focus | jq -r .result.pane.pane_id)   # after checking 80 columns each
+stampede start "$B" build-api --pane "$PA" --brief "$B/briefs/build-api.md" --report reports/build-api.md
+stampede start "$B" build-ui --kind codex --pane "$PU" --brief "$B/briefs/build-ui.md" --report reports/build-ui.md
+herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # again after Codex's first turn, which reports its session id
 ```
 
-## 3. Start and brief the builders
-
-```bash
-# each: auto mode, the job's hooks, --add-dir "$B" for Codex, the reopen record, then the brief pointer
-fleet-job start "$B" build-api --kind claude --pane "$PA" --brief "$B/build-api.md" --model claude-opus-5-5 --effort medium --report reports/build-api.md
-fleet-job start "$B" build-ui --kind codex --pane "$PU" --brief "$B/build-ui.md" --model gpt-6.1-sol --effort medium --report reports/build-ui.md
-herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # REOPEN.md and reopen.sh in $B; Codex reports its session id after its first turn, so refresh later too
-```
-
-- If a start prints `BLOCKED`, read the screen, clear the startup dialog yourself ([unattended-setup.md](unattended-setup.md)), then send the `fleet-job tell` line it printed. If a start is denied by the classifier, stop and hand the owner those two `fleet-job start` lines, expanded with the real pane ids, to run as `!` commands.
-- If Codex shows "Trust this folder?" (a folder it has never opened), send `herdr agent send-keys build-ui enter`. When it then shows "Hooks need review", run `herdr agent rename "$PU" build-ui` if the name is missing, then `herdr agent send-keys build-ui down down enter` (continue without trusting), then `herdr agent wait build-ui --until idle --timeout 30000`. If Codex first shows "Update available", send `herdr agent send-keys build-ui esc` (Enter would update it). Read every pane's screen once before its first prompt: some dialogs show as `idle`.
-- Check the real model on each screen with `herdr agent read <name> --source visible --lines 40`. Claude prints the model and effort, and Codex prints it in its status line.
+- Read each screen before anything else (`herdr agent read build-ui --source visible --lines 40`): it shows the model too. A `BLOCKED` start or a dialog shown as `idle`: clear it ([unattended-setup.md](unattended-setup.md#startup-dialogs-the-lead-clears)), then send the printed `stampede tell` line.
+- A start the classifier denies: stop and hand the owner the two `stampede start` lines, with the real pane ids, to run as `!` commands.
 - Update `register.md` with panes and status.
 
-## 4. Wait for the hooks
+## 3. Wait, then integrate
 
-The lead does its own work (docs, gates, the next brief), then ends its turn. A builder's finished report, turn end, question or exit adds a line to `$B/inbox.log` (`REPORT reports/build-api.md`, `TURN`, `QUESTION`, `GONE`), and that line wakes the lead. No Monitor, no `herdr agent wait`, no polling; `fleet-watch.sh` is only for a bot outside Herdr.
+The lead does its own work, then ends its turn. A builder's report, turn end, question or exit adds a line to `$B/inbox.log` (`REPORT reports/build-api.md`, `TURN`, `QUESTION`, `GONE`), which wakes it.
+On each `REPORT`, read the report and the diff, then `git -C "$WT/alerts" merge --no-ff alerts-api -m "alerts: merge build-api"`. With both in, run the full checks once (type check, lint, suite, build).
 
-## 5. Integrate (lead)
-
-On `REPORT .../build-api.md`, read the report and the diff, then merge:
-
-```bash
-git -C "$WT/alerts" merge --no-ff alerts/api -m "alerts: merge build-api"
-```
-
-Do the same for `build-ui`. Then run the full gates once in `$WT/alerts` (type check, lint, whole suite, build).
-
-## 6. Independent review
+## 4. Review
 
 ```bash
-git -C "$REPO" worktree add --detach "$WT/alerts-review" claude/alerts
+git -C "$REPO" worktree add --detach "$WT/alerts-review" alerts
 PR=$(herdr pane split --pane "$PU" --direction down --cwd "$WT/alerts-review" --no-focus | jq -r .result.pane.pane_id)
-herdr pane rename "$PR" review-alerts
-fleet-job start "$B" review-alerts --kind codex --pane "$PR" --brief "$B/_review.md" --model gpt-6-astra --effort ultra --report reports/review-alerts.md
+stampede start "$B" review-alerts --pane "$PR" --brief "$B/briefs/_review.md" --report reports/review-alerts.md
 herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
 ```
 
-`_review.md` uses the [hand-off template](brief.md):
-- Goal: independently review the alerts feature; Why: you did not build it and it will ship.
-- Inputs: read `_common.md` first, then the absolute worktree path, branch, starting commit, diff (`git diff origin/main...HEAD`) and builder briefs.
-- Constraints: small fixes outside the builders' files only; report everything else, under the ownership rules.
-- Done when: check correctness, security, data loss and regressions, with proof for numbered findings `R1..Rn`. List style or wording nits in the report; do not treat them as bugs to send back.
-- Report back: the absolute report path, under 60 lines, `Status: PASS` or `Status: FINDINGS` in the first 10 lines, files touched, unverified and decisions.
-- If blocked: write the lead's question file, say so and end your turn; make and record reasonable calls.
+`_review.md` is on the same template: Goal, an independent review; Why, it will ship; Inputs, `_common.md`, the worktree, branch, diff (`git diff origin/main...HEAD`) and the builder briefs.
+Constraints, small fixes outside the builders' files only; Done when, numbered findings `R1..Rn` with proof for correctness, security, data loss and regressions, nits listed but not sent back; Report back, the header of [review.md](review.md#the-report-header).
 
-This is the one Codex review pass. Proof frames only for UI changes the owner will look at.
+## 5. Fix only real bugs
 
-## 7. Fix only real bugs
-
-If the review found a real bug (broken behaviour, a failing test, or a regression), the lead triages those into `$B/fixes-api.md` and `$B/fixes-ui.md` on the [hand-off template](brief.md), referencing unchanged sections from the original briefs. Style or wording nits stay in the review report and are not sent back. It fast-forwards each builder to the integration branch and prompts them:
+For real bugs only, the lead writes `$B/briefs/fixes-api.md` and `fixes-ui.md` on the template, then:
 
 ```bash
-git -C "$WT/alerts-api" merge --ff-only claude/alerts
-git -C "$WT/alerts-ui" merge --ff-only claude/alerts
-herdr agent prompt build-api "Review fixes: read $B/fixes-api.md and fix each finding, one commit per finding, same checks. Append 'Review fixes' to your report."
-herdr agent prompt build-ui "Review fixes: read $B/fixes-ui.md and fix each finding, one commit per finding, same checks. Append 'Review fixes' to your report."
+git -C "$WT/alerts-api" merge --ff-only alerts; git -C "$WT/alerts-ui" merge --ff-only alerts
+stampede tell "$B" build-api "Review fixes: read $B/briefs/fixes-api.md; one commit per finding, same checks; append 'Review fixes' to your report."
+stampede tell "$B" build-ui "Review fixes: read $B/briefs/fixes-ui.md; one commit per finding, same checks; append 'Review fixes' to your report."
 ```
 
-When both reports update, the lead:
-1. merges the fixes;
-2. moves the review worktree with `git -C "$WT/alerts-review" checkout --detach claude/alerts`;
-3. updates `_review.md` on the same template to recheck only those IDs at the integration commit, then sends `herdr agent prompt review-alerts "Recheck: read $B/_review.md; append to your report."`
+When both reports update: merge the fixes, `git -C "$WT/alerts-review" checkout --detach alerts`, point `_review.md` at those ids at the new commit, and `stampede tell "$B" review-alerts "Recheck: read $B/briefs/_review.md; append to your report."` Stop at pass.
 
-Stop at pass. There is no second loop for style. If the recheck still finds a real bug, the lead decides.
-
-## 8. Wrap up
-
-- Push `claude/alerts` and open a draft PR (no need to ask). Write `Reviewed: alerts <sha>` in the register. Ask the owner before the merge (`fleet-job ask <job> --gate --kind merge --sha <sha> --pr <n> "merge PR <n>"`), and once `gate-ok` prints `APPROVED` run `stampede merge <job> <n> --sha <sha> --review reports/review-alerts.md --gate <gate>`.
-- Keep the builder worktrees and branches until the PR merges.
-- Write the register's final state (commits, what was verified, what is left for the owner) and refresh the reopen record: `herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"`.
-- Leave every pane and tab open. End with a short summary and one question to the owner in the lead pane (AskUserQuestion; external callers: in their own chat): "Close the alerts tab? Reopen with $B/reopen.sh."
-
-Only after the owner's explicit yes (17 Oct 2026 rule), and as the last step:
+## 6. Merge and wrap up
 
 ```bash
-herdr agent prompt build-api "/exit"
-herdr agent prompt review-alerts "/exit"
-herdr agent prompt build-ui "/quit"
-for n in build-api review-alerts build-ui; do herdr agent wait "$n" --until unknown --timeout 30000; done   # each ends with agent_not_running once exited
-herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # keeps the exited agents' sessions from the earlier snapshots
-herdr pane close "$PR"; herdr pane close "$PU"; herdr tab close "$TAB"   # only what the fleet created; the lead's tab stays
-git -C "$REPO" worktree remove "$WT/alerts-review"
+git -C "$WT/alerts" push -u origin alerts && gh pr create --draft --fill      # no need to ask
+stampede ask "$B" --gate --kind merge --sha <sha> --pr <n> "merge PR <n>"        # GATE <gate>
+stampede gate-ok "$B" <gate> --sha <sha>                                         # once the owner said yes: APPROVED
+stampede merge "$B" <n> --sha <sha> --review "$B/reports/review-alerts.md" --gate <gate>
+stampede finish "$B" "PR <n> merged at <sha>"
 ```
 
-The lead's tab lives in the owner's project workspace, so there is no owner tag to clear and no workspace to close. A fleet that created its own workspace clears its tag (`herdr-events-owner <ws> --clear`) and then runs `herdr workspace close <ws>` instead of the pane and tab closes.
+- Write `Reviewed: alerts <sha>` and the final state in `register.md`; keep the builder worktrees and branches until the PR merges; refresh the reopen record.
+- Leave every pane open and ask the owner last: "Close the alerts tab? Reopen with $B/reopen.sh."
+
+Only on an explicit yes:
+
+```bash
+herdr agent prompt build-api "/exit"; herdr agent prompt review-alerts "/quit"; herdr agent prompt build-ui "/quit"
+for n in build-api review-alerts build-ui; do herdr agent wait "$n" --until unknown --timeout 30000; done   # agent_not_running once each exits
+herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
+herdr pane close "$PR"; herdr pane close "$PU"; herdr tab close "$TAB"; git -C "$REPO" worktree remove "$WT/alerts-review"
+```
+
+The lead's tab is in the owner's project workspace, so there is no owner tag to clear and no workspace to close.

@@ -1,139 +1,81 @@
 ---
 name: herdr-fleet
-description: The owner's playbook for running a multi-agent fleet in herdr. One workspace per project, a tab per workstream and a pane per agent, so the owner can watch everything. A lead agent writes briefs, starts Claude or Codex agents on models matched to each task, monitors them, runs a review and integrates the result. Use when asked to run agents in parallel in herdr, spin up a fleet or team of agents, delegate work to Claude or Codex agents in panes, act as the lead or orchestrator of a workspace, get agents to review or talk to each other, or pick agents and models for a multi-agent job. Also use whenever a brief inside a Herdr pane asks for work in parallel (research, ideas, builds, reviews): every lane runs as a Herdr pane, not a built-in subagent. Builds on the built-in herdr skill (`herdr --skill`), which covers single commands and pane control.
+description: The lead's playbook for a stampede job in Herdr: plan, brief and start agents in panes or Herdr Core terminals, review on another model, merge past the owner's gates. Use when you lead a job, or a brief in Herdr asks for parallel work: every lane is a pane, never a hidden subagent.
 ---
 
-> **Name:** Rancher is the official name of this skill. Herder Fleet (`herdr-fleet`) is the legacy alias; the folder and all references stay `herdr-fleet` so existing callers keep working.
+# herdr-fleet
 
-# herdr fleet
+You lead one stampede job: plan it, start workers in Herdr, review their work, and bring the owner only what is theirs.
+Herdr commands: `herdr --skill`. Every `stampede` command: [docs/CLI.md](../../docs/CLI.md).
 
-The built-in skill (`herdr --skill`) is the command reference. This is how the owner runs teams on top of it. The installed binary is the authority (herdr 0.9.5 when last checked, 2026-11-11): check syntax with `herdr agent`, `herdr pane`, `herdr tab`, `herdr workspace`. Never run bare `herdr` (it attaches the TUI).
+## Where you are
 
-> **Strict rule for bots launching jobs from outside Herdr (Grok Bots, executors):** tag the workspace with `herdr-events-owner <ws> <bot-slug>` before any agent starts, then launch and exit. Never poll or wait on a job: no `herdr agent wait` for its result, sleep loops, repeated pane reads or monitoring executors (bounded startup checks, as in grokbot-herdr Step 4, are fine). Stuck events, and one `fleet-job finish` when the job ends, are relayed to the owning bot, which reads the result once. See grokbot-herdr. This rule is for bots only; a lead inside Herdr is woken by hooks instead (The lead, item 6).
-
-## Where are you?
-
-- **Inside a Herdr pane** (`test "${HERDR_ENV:-}" = 1` succeeds): use `$HERDR_WORKSPACE_ID`, `$HERDR_PANE_ID` and `--current` as written below.
-- **External caller** (a bot or a session on another machine, reaching the Mac over ssh): first run your entry skill (connect, health check, workspace by label, safe start; for the bots that is `grokbot-herdr`). Skip the `HERDR_ENV` check and never set it. Everywhere below, replace `$HERDR_WORKSPACE_ID`, `$HERDR_PANE_ID` and `--current` with literal ids (e.g. `w1`, `w1:p1`). Variables inside single-quoted ssh commands expand on the Mac, where they are empty. Run herdr ON the Mac over ssh, never `herdr --remote` or `--machine` from the other machine (this Mac has no saved machine profiles). Only the owner's own machines, never a work machine. Report in your own chat, not in a lead pane.
-
-Read live state before changing anything (`<ws>` is `$HERDR_WORKSPACE_ID` inside Herdr, the literal id outside):
-
-```bash
-herdr workspace list
-herdr tab list --workspace <ws>
-herdr agent list | jq -r '.result.agents[] | "\(.pane_id) \(.name // "-") \(.agent) \(.agent_status)"'
-```
+- **Inside a Herdr pane** (`test "${HERDR_ENV:-}" = 1`): `stampede doctor`, then [tui.md](references/tui.md#look-first).
+- **On Herdr Core** (`<job>/backend` is `native`): `stampede tree <job>`, then [core.md](references/core.md).
+- **An external caller** (a bot, or a chat over ssh): your entry skill first (`grokbot-herdr` or `stampede`), then [tui.md](references/tui.md#from-outside-herdr).
 
 ## Size the job first: small or big
 
-Before opening any Herdr workspace, size the job on four questions: **length** (one sitting of under about an hour, or hours or overnight), **agents** (one agent family, or a mix such as Claude plus Codex, Cursor or another model), **risk** (does anything leave the machine: merge, push, send, spend, publish, deploy) and **durability** (must it survive a restart, or would the owner want to look in halfway).
+Four questions: **length** (under an hour, or hours), **agents** (one family, or a mix), **risk** (merge, push, send, spend, publish, deploy) and **durability** (must it survive a restart).
 
-- **Small** (all four small): no stampede job. Run it as one agent session with its built-in subagents, but still inside Herdr: its own pane (in the project's workspace, or a new workspace) with the `herdr-events-owner` tag, prompted with `herdr-send` pointing at a brief on the [hand-off template](references/brief.md), so the work stays organised and its finish arrives as an event. No extra panes and no reopen record. Never run a job as a bare agent CLI call over SSH or nohup outside Herdr. This is the answer to "why not subagents": for a small job, use them. Examples: find where a feature lives and explain it; review one PR from a few angles; fix one bug with its test; compare three pricing pages; a rename or docs tidy.
-- **Big** (any one big): run it as a stampede job under the rules below, with gates and a reopen record (and an owner tag when a bot starts it). Examples: a research, writing and review run for a long document; a feature to PR with a cross-model review and a merge gate; a batch of images or videos with review; an overnight or multi-repo job; anything that sends, spends, publishes or deploys.
-- **Unsure:** start small, and promote to big the moment a big signal appears (a merge or send is needed, it runs long, a second agent family is needed).
-- Write the decision and the reason as one line at the top of `plan.md` (or in the reply when small), e.g. `Size: big (merge gate, Codex review)`.
-
-Inside a big job, "Panes, not built-in subagents" still applies: subagents there are only for quick lookups the lead reads itself.
-
-## The shape
-
-- **Workspace = project or initiative**, one label per repo or initiative. Reuse the project's workspace if it exists. Otherwise: `herdr workspace create --cwd <repo> --label <project> --no-focus`.
-- **Tab = workstream** (`billing`, `compare`, `research`, `review`). The lead sits in the workspace's first tab. `herdr tab create --workspace <ws> --cwd <dir> --label <workstream> --no-focus`.
-- **First tab rule:** `workspace create` already makes tab 1 with a root pane. Never leave it empty: use it for the first workstream (`herdr tab rename <tab> <label>` on the returned `.result.tab.tab_id`, and put the lead or first agent in `.result.root_pane.pane_id`), and only `tab create` for further workstreams. Before creating tabs in an existing workspace, list its tabs; rename a leftover empty default tab and use it. When the owner says yes to closing (Wrap up) and you created the workspace, close the whole workspace (`herdr workspace close <ws>`), not tab by tab, so no stray tab 1 is left.
-- **Pane = one agent**, labelled with its name (`herdr pane rename <pane> <name>`). **Limits** (the one place they are written): on the Herdr TUI, at most 4 panes per tab on a laptop and 6 on a big monitor (open another tab rather than shrink panes), at most 4 parallel pieces, and at most 6 copies of a repeated task at once; on Herdr Core, at most 12 helpers at once in the lead's tree at any depth (`--max-helpers`, `STAMPEDE_MAX_HELPERS`) and 4 live terminals per tab (`STAMPEDE_TAB_PANES`), as in [The cap](../../docs/CORE-NATIVE.md#the-cap). **Agent names** are `<role>-<scope>`. Roles: `lead`, `build`, `research`, `review`, `design`, `qa`, `copy`. Examples: `build-api`, `review-api`, `research-pricing`. Must match `[a-z][a-z0-9_-]{0,31}` and be unique. Give Claude the same name with `-n <name>` so its session name matches.
-- **Geometry**: read the pane's own rect, `herdr pane layout --pane <id> | jq '.result.layout.panes[] | select(.pane_id=="<id>") | .rect'` (`.result.layout.area` is the whole tab). Split right while both halves keep at least 80 columns, else split down while both keep at least 15 rows. Always pass `--no-focus` and an explicit `--cwd`.
-- **Never close, rename or prompt what you did not create**, and never type into the pane the owner has focused (`herdr agent get <name> | jq .result.agent.focused`).
-- **Where job files live** (owner, 25 Oct 2026): one root, `~/code/herdr-jobs` (the setting `jobs_root`, or `FLEET_JOBS_ROOT`, overrides it). `fleet-job new` makes every job folder as `jobs/<YYYY-MM-DD>-<owner>-<slug>/` (owner: the workspace's bot tag, else `local`), even for a job on a repo: the repo stays the agents' cwd (in `<job>/workdir`) and `fleet-job start` gives each agent `--add-dir <job>`. A worktree or scratch clone for a job goes in `worktrees/<name>` (`git worktree add`, then only `git worktree move`), a finished item in `archive/`. Nothing Herdr-related goes in `~/code/<repo>` or `~`; an old in-repo `.herdr-*` folder still works but gets no new job.
+- **Small** (all four small): no stampede job. One agent with its own subagents, in a pane of its own with the `herdr-events-owner` tag, sent a [brief](references/brief.md) with `herdr-send`. Such as one bug fix.
+- **Big** (any one big): a stampede job, with gates and a reopen record.
+- **Unsure:** start small; promote at the first big signal.
+- Never a bare agent CLI over ssh or nohup.
+- The call is the first line of `plan.md` (or the reply): `Size: big (merge gate, Codex review)`.
 
 ## The lead
 
-One lead per workspace, started with its hooks by `fleet-job new --file <ask.md> [--lead claude|codex]`. The lead is Claude `claude-opus-5-5` xhigh unless the owner picks Codex `gpt-6-astra` ultra (`--lead codex`, or `FLEET_LEAD_KIND=codex` as a standing choice): whoever starts the job passes the lead the owner's request names. A `--fork` of a Claude chat takes a Claude lead only (a job on Herdr Core, `--core`, takes either lead and runs Core's own tree: the lead is a root terminal, each helper its Core child, no hooks or inbox, at most 12 helpers at once: [references/core.md](references/core.md); the earlier Core path, `--core --relay`, kept for one release, is the one that hands Cursor, Hermes or Kimi to TUI panes: [references/core-relay.md](references/core-relay.md)). The lead holds the state and the judgement; each worker gets everything it needs in its brief. A chat the owner started that will open panes hands the job to that hooked lead; a small job runs in a single tagged pane of its own, with no fleet. The lead alone:
+`stampede new` starts you with a brief that names the exact `stampede` to run. Each worker gets all it needs in its brief.
 
-1. Plans once in `<job>/plan.md`: the layout (workspace, tabs, panes with app, model and effort), then a tight spec for each task (what to build, files, done criteria, tests to run) and the pane that does it, then any questions with a safe default. Not a fleet (one file or question, steps that each need the last, under about 45 minutes): the lead does it alone. It does not re-plan mid-build unless a builder is blocked. Then it goes; only when the owner explicitly asks to see the plan first, it uses the share-plan skill.
-2. Opens a pane only when it pays: parallel pieces over about 30 minutes each, another model or tool, one reviewer on another model, or the same task many times (one pane per item, the next starting as one finishes), within the Limits in [The shape](#the-shape). A sub-lead only for more than 10 items or a workstream with 3+ parallel pieces.
-3. Writes the contract first (types, stubs, one validation test) and commits it.
-4. Writes briefs in the job folder (`<job>/briefs/`) on the [hand-off template](references/brief.md), fixing missing or empty sections before starting: `fleet-job start` refuses them. Keeps `register.md` there: agent, pane, model, worktree, status, so the fleet is resumable.
-5. Creates tabs, panes and worktrees, then starts every agent with `fleet-job start` (its hooks, auto mode, the reopen record and the brief pointer in one command).
-6. Is woken by hooks: `REPORT`, `TURN`, `QUESTION`, `GONE` and `UNDELIVERED` (a question, gate or post its bot has not heard) lines in `<job>/inbox.log`, answers and messages in its own `inbox/<lead>.md`. A Claude lead's file hook reads them; a Codex lead has none, so fleet-job types each new line into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`, once it is idle and unfocused (a short-lived deliverer the hooks, `tell` and the lead's own turn ends start). It ends its turn when idle: no watcher, no polling, no Monitor timeouts. Questions for the owner: `fleet-job ask`, in the background (to the bot that started the job, else a card on the phone); cancel an answered phone card with `fleet-job cancel`. Gates: how one is asked, passed and checked is in [references/gates.md](references/gates.md).
-7. Review: one Codex review pass at the end of what ships or reaches the owner, on a different model than the builder. Loop again only for a real bug (broken behaviour, a failing test, or a regression). Style or wording nits go in the report. Anything touching terms, money or law is checked as it happens.
-8. Integrates. It reads reports, runs the full gates once, does every git write on shared branches, and asks the owner only for decisions that are theirs. It exits each worker once its work is merged or accepted, so its app row archives itself.
-9. Stops at the owner's gates and waits for an explicit yes: the list, and what is allowed without asking, are in [references/gates.md](references/gates.md).
+1. **Plan** once in `<job>/plan.md`: the layout, a spec per task (files, done criteria, tests), questions with a default. Under 45 minutes, or strictly serial: do it alone. Re-plan only for a blocked builder.
+2. **Show the plan** only if asked: with `--review`, end your turn until `stampede approve` wakes you; on the owner's ask, the share-plan skill.
+3. **A lane only when it pays:** parallel work over 30 minutes, another model, the reviewer, or one item of many. A sub-lead only past 10 items.
+4. **Contract first:** types, stubs and one failing test, committed before any worker starts.
+5. **Briefs** in `<job>/briefs/`; `<job>/register.md` holds agent, pane, model, worktree, status.
+6. **Start:** `stampede start <job> <role>-<scope> --brief <file>` (TUI: with `--pane`); the role sets CLI, model and effort.
+7. **Wait:** end your turn; hooks (TUI) or Core's notes wake you. Ask the owner with `stampede ask` and keep working.
+8. **Review** as `review.step` says: [review.md](references/review.md).
+9. **Integrate:** read the reports, run the full checks once, do every shared git write, push the work branch, open a DRAFT PR.
+10. **Merge:** `stampede ask <job> --gate --kind merge --sha <sha> --pr <n> "<action>"`; once `stampede gate-ok` prints `APPROVED`, `stampede merge <job> <n> --sha <sha> --review <report> --gate <gate>`.
+11. **Finish:** the register's final state, the reopen record, `stampede finish <job> "<one line>"` once, then ask the owner whether to close.
 
-Where agents work:
-- **One shared worktree with file ownership** for content-heavy work where each agent owns its own files. A six-page content fleet ran this way with zero merges.
-- **A worktree per agent** (branch per agent, the lead merges) when slices touch overlapping code. Use `git worktree add` plus `--cwd` so agents stay in the project's workspace. `herdr worktree create` opens a separate, grouped workspace instead.
+## Hard rules
 
-## Thinker and doer
+- Never close, rename or prompt what you did not create.
+- Never type into a pane the owner has focused (`herdr agent get <name> | jq .result.agent.focused`).
+- Never act on a gate without the yes in [gates.md](references/gates.md), the one list.
+- Never `gh pr merge`: only `stampede merge`, at the reviewed commit.
+- Never close anything because the job ended: ask last; no answer is a no.
+- Never a lane or a review as a hidden subagent: a subagent only for a quick lookup you read.
+- Never sleep, poll or Monitor for a worker.
+- Never substitute a model the owner named; other lanes take their [fallback](references/agents-and-models.md#fallback).
+- Never answer a permission prompt for an action, or work around a denial: give the owner the `!` lines.
+- Never run bare `herdr`; never start, stop or restart a Herdr Core.
+- Never read, copy or print credentials or `.env` files.
+- Always one reviewer on another model than the builder.
+- Always all seven brief sections: `stampede start` refuses a missing or empty one.
+- Always a report per lane, `reports/<lane>.md`: `Status: DONE` (a review: `PASS` or `FINDINGS`, then `Reviewed: <sha>`) in its first 10 lines.
+- Always prompt with `stampede tell` or `herdr-send`: one line pointing at a file.
+- Always read a new agent's screen before its first prompt.
+- Always use the real date (`date +%F`).
+- A result is the first word of its line (`STARTED`, `BLOCKED`); `--json` prints one object (`docs/CLI-JSON.md`).
 
-The default shape; the owner can override it per job. **Lead = thinker:** high effort (Claude xhigh, Codex ultra); it plans once and writes a tight spec per task (what to build, which files, what done looks like, which tests to run), and re-plans mid-build only if a builder is blocked. **Builders = doers:** medium effort by default; they follow the spec and do not redesign it, raised to high or xhigh only for a genuinely hard task the lead flags in the plan. **Tests** run after each builder step (a cheap, fast check the brief names); the lead still runs the full gates once after integration. **Review:** one Codex pass at the end, on a different model than the builder; loop again only for a real bug (broken behaviour, a failing test, or a regression); style or wording nits go in the report and are not fix-looped. **Proof frames** only for UI changes the owner will look at.
+## Read when
 
-## Pick the agent and model
-
-| Task | Agent, model, effort | Fallback |
-|---|---|---|
-| Lead, briefs | Claude `claude-opus-5-5` xhigh (default), or Codex `gpt-6-astra` ultra when the owner picks `--lead codex` | The other of those two |
-| Planning | The lead's own model: Claude `claude-opus-5-5` xhigh under a Claude lead, Codex `gpt-6-astra` ultra under a Codex lead | The other of those two |
-| Plan review (optional: only if the owner asks, or the plan is high-risk) | Another vendor than the planner's: Codex `gpt-6-astra` ultra for a Claude plan, Claude `claude-opus-5-5` xhigh for a Codex plan, Cursor and others too; then the planner hardens the plan | Codex `gpt-6.1-sol` xhigh or Cursor, never the planner's model |
-| Architecture, hard trade-offs | Claude `claude-fable-5-1` max, with a Codex `gpt-6-astra` ultra second opinion | Codex `gpt-6-astra` ultra alone |
-| Implementation (against the lead's spec) | Claude `claude-opus-5-5` medium, or `claude-sonnet-5-5` medium for heavy coding the spec fully covers. Codex `gpt-6.1-sol` medium for a parallel slice. Raise to Claude xhigh or Codex `gpt-6-astra` ultra only when the lead flags the task as genuinely hard | The other vendor at medium: a Claude lane goes to Codex `gpt-6.1-sol` medium, a Codex lane to Claude `claude-opus-5-5` medium |
-| Independent review, QA | Codex `gpt-6-astra` ultra (default end review, never the builder's model). Claude `claude-fable-5-1` max when the work under review was itself built by Codex | The other vendor's reviewer, still never the builder's model |
-| Research with the browser | Claude `claude-opus-5-5` xhigh (Neo, treg, MCP tools) | Codex `gpt-6.1-sol` xhigh with `--search` (no Neo) |
-| Design direction, design review | Codex `gpt-6-astra` ultra writes or reviews; a Claude builder implements | Claude `claude-fable-5-1` max |
-| Image generation, layered HTML images | Codex. Grok only sparingly, for videos and the occasional photo (e.g. a painterly background) | none: wait or ask |
-| Docs and copy | Claude `claude-opus-5-5` high | Codex `gpt-6.1-sol` high |
-| Quick mechanical edits | The lead itself if under 10 minutes. Else Claude `claude-sonnet-5-5` medium or Codex `gpt-6.1-sol` medium | The other of those two |
-
-Models are per role and swappable: the lead's through `fleet-job new --lead claude|codex` (`lead.kind` or `FLEET_LEAD_KIND` for a standing choice), `lead.<cli>.model` and `.effort`, or `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` (a pair, only for the CLI the model belongs to), which a restarted lead keeps too, each worker's through `fleet-job start --model --effort`. Pick the lead for planning and decomposition, workers for execution, and swap freely unless the owner named a model. The table gives defaults (where older notes disagree, it wins); reviews follow Thinker and doer and The lead, item 7. The owner can override the effort or the review shape per job. Other skills point here when they run inside a fleet.
-
-Never substitute a model the owner named. **Fallback:** when a lane's agent hits a usage limit, or "at capacity" again after one retry, and the owner named no model for that lane, the lead restarts the lane on its Fallback (the plan's `fallback` column if it has one, else the table): exit the agent, start the fallback in the same pane under the same name, and prompt it with its brief plus one line saying it takes over from the stopped agent, whose work so far is on disk (`git status`) and in any partial report. A Claude usage limit covers every Claude model, so Claude lanes fall back to Codex. A lead falls back the same way: `fleet-job start <job> <lead> --kind claude|codex --pane <its pane> --brief <job>/briefs/<lead>.md` restarts it on the other CLI with the lead's hooks (not on Herdr Core). Note the switch in `register.md` and the report. Where the owner named the model, say so and wait or ask. Reasoning, both CLIs' flags and their gotchas: [references/agents-and-models.md](references/agents-and-models.md).
-
-## Panes, not built-in subagents
-
-Every lane is a Herdr pane with its own agent, so the owner sees it, Moshi reaches it, and the register, watch and review cover it. Open a pane for: parallel independent work (research, ideas, builds, asset generation) that pays a pane (The lead, item 2), even when the brief does not name a pane for it; work on another model family (Codex, Cursor, Hermes) or another Claude model; and every review (a reviewer is never a subagent of the agent it reviews).
-
-A built-in subagent (Claude's Agent or Task tool, a Codex sub-agent) is only for a quick lookup the lead reads itself: find a file, check a flag, skim one page. A brief that says "in parallel" without naming panes still means panes: name them `<role>-<scope>` (`research-web`, `research-local`) in a tab of their own. Seen 2026-10-17: a promo lead ran both research lanes as hidden subagents because its brief named a pane for every step except research.
-
-With pstack installed (optional, `/pstack:...`), a coding job's fan-out, models, commits, contract and todo list follow [references/pstack.md](references/pstack.md).
-
-## Start an agent
-
-```bash
-W=<abs work dir>; B=<abs job folder>
-# a new workstream gets a tab; its root pane takes the first agent ...
-P=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$W" --label research --no-focus | jq -r .result.root_pane.pane_id)
-# ... further agents in that tab split beside it
-P=$(herdr pane split --pane <id> --direction right --cwd "$W" --no-focus | jq -r .result.pane.pane_id)
-fleet-job start "$B" research-web --kind claude --pane "$P" --brief "$B/briefs/research-web.md" --model claude-opus-5-5 --effort xhigh --report reports/research-web.md   # names the pane; hooks, auto mode, reopen record, brief pointer
-herdr agent read research-web --source visible --lines 30   # on BLOCKED: clear the startup dialog (below), then fleet-job tell "$B" research-web "Read <brief>"
-herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # once the launch's agents run, and after every later start: REOPEN.md, reopen.sh
-```
-
-For Codex use `--kind codex --model gpt-6-astra --effort ultra`. `fleet-job start` adds `--approve-for-me`, which lets Codex write only inside its cwd, and gives every agent `--add-dir <job folder>`, so its report lands from any worktree or repo.
-
-Agents must start and run with no visit to their pane. That needs the one-time machine setup in [references/unattended-setup.md](references/unattended-setup.md), which the owner runs (agents cannot edit their own permissions). Before starting agents in a repo under `~/code`, pre-trust it with `~/.local/bin/herdr-trust <repo dir>` (owner-approved 2026-10-16; writes the repo's trust into `~/.claude.json` and `~/.codex/config.toml`, so Claude and Codex skip the trust dialog; its worktrees are covered). With that and the setup in place the lead clears the remaining startup dialogs itself: folder trust when one still shows (Kimi and Gemini always ask once), Codex "Update available" (`esc` skips it; the default, Enter, runs npm), Codex "Hooks need review" (continue without trusting) and Claude's "New MCP server found" (continue without). After clearing one, `herdr agent wait <name> --until idle --timeout 30000`, not a sleep. Herdr reports most of these dialogs as `idle`, not `blocked`, so after every start read the screen (`herdr agent read <name> --source visible --lines 30`) before the first prompt. It never answers a permission prompt for an action. Without the setup, or if the classifier still denies a start, do not work around it: finish every other step, then give the owner the exact lines to run as `!` commands.
-
-## Reopen record
-
-Every Herdr job keeps `REOPEN.md` and an executable `reopen.sh` in its job folder (owner's rule, 17 Oct 2026), written by `herdr-reopen-snapshot <ws> <job dir>` (grokbot-herdr/scripts, installed at `~/.local/bin`). They hold the workspace label and owner tag, the job's own tabs (those holding its agents in `agents.tsv`), every pane in them with label and cwd, and each agent's CLI, model, effort, session id, brief and exact start command. `bash <job dir>/reopen.sh` recreates the whole workspace after a close and resumes every agent's session (`--fresh` starts new sessions with the same flags, `--prompt` also re-sends each brief pointer); it refuses while a workspace with that label is open, or when a pane's cwd is gone (a removed worktree: add it back first). Herdr does not know start flags or briefs, so the recipe above records them at every start in `<job dir>/agents.tsv`. Refresh the snapshot after every start or restart and before any close; it keeps agents that already exited.
-
-## Talk, watch, review
-
-- A prompt is one line pointing at a file. The substance lives in briefs and reports. Agent-to-agent messages, Claude peer messaging, the review and the ownership rules every brief carries: [references/collaboration.md](references/collaboration.md).
-- Before every prompt, `herdr agent get <name>` (idle or done, not focused; an agent at a dialog rejects the prompt with `agent_blocked`). After a `timeout`, `agent_prompt_stalled` or ssh drop, read the screen (`agent read <name> --source recent-unwrapped --lines 40`) before any resend; resend only if the prompt clearly never landed.
-- Always prompt agents with `herdr-send <name-or-pane> "<text>"` (grokbot-herdr/scripts/herdr-send, installed at `~/.local/bin/herdr-send`) or `herdr agent prompt`, never `pane send-text` plus Enter (Codex leaves it unsubmitted), and never `ctrl+c` an idle Codex (on an empty prompt it quits). Continue only on `SUBMITTED`; on `FAILED` read the screen before any resend.
-- The report file is the completion signal: one per lane, `reports/<lane>.md` with `Status: DONE` (a review: `PASS` or `FINDINGS`) in its first 10 lines, named with `fleet-job start --report`. The lead is woken by hooks (`fleet-job`); `fleet-watch.sh` is only for a bot outside Herdr.
-- Known failures and their fixes: [references/failure-modes.md](references/failure-modes.md). A full run with exact commands: [references/worked-example.md](references/worked-example.md).
-
-## The owner's phone (Moshi)
-
-Every agent's questions, approvals and completions already reach the owner's iPhone through Moshi, tagged with the herdr workspace and tab, so name tabs and agents after the task. In a job started locally the lead adds three things: questions through AskUserQuestion (or `moshi-hook ask --require-remote` from a script), one live progress row per fleet (`moshi-hook job start/update/end`, id in `register.md`), and nothing else. For a bot outside Herdr, `fleet-watch.sh` pushes stalls and vanished agents; a lead hears `GONE` through its hooks. Commands and the settings to leave alone: [references/phone-moshi.md](references/phone-moshi.md). **A front-door job** (`fleet-job new --front-door`: the owner talks only to a chat outside Herdr) is different: nobody watches the panes, so the lead reaches the owner only through `fleet-job post`, as in [references/front-door.md](references/front-door.md). In a job a bot started, `fleet-job post` also sends that bot a `post` event, which it shows the owner; when the relay refuses, it exits 2 and the bot never heard it: fix the route (`herdr-doctor --relay`) and post again.
-
-## Wrap up
-
-Integrate, run the gates once, push the work branch and open a DRAFT PR (no need to ask), then ask before any merge (the gates above). Record the reviewed commit in `register.md` (`Reviewed: <sha>`); once a `--kind merge` gate's `gate-ok` prints `APPROVED` for that commit, merge it with `stampede merge <job> <n> --sha <sha> --review <report> --gate <gate>`, never `gh pr merge`. A commit pushed after the review withdraws the yes: rerun the gates (and the review, unless the review rules in collaboration.md say it stands) and ask again. Write the register's final state, refresh the reopen record and tell the owner what is left for them. When the job is done or stopped for good, run `fleet-job finish <job> "<one line on where it ended>"` once.
-
-**Ask before close (owner's rule, 17 Oct 2026).** Never close a pane, tab or workspace, and never clear the owner tag to close one, automatically when a job ends. Leave everything open; the very last step is a question to the owner: AskUserQuestion inside Herdr in a job started locally (it reaches the phone), or, in a job a bot started, the end of the lead's report and so the bot's chat or done event ("Close workspace <label>? Reopen with <job dir>/reopen.sh"). No answer is a no. Only after the owner's explicit yes, in this order: exit each agent gracefully so its session stays resumable (`/exit` for Claude, Hermes and Kimi, `/quit` for Codex), refresh the reopen record (`herdr-reopen-snapshot <ws> <job dir>`), clear the owner tag (`herdr-events-owner <ws> --clear`), then close only what you created: the whole workspace (`herdr workspace close <id>`) if the fleet created it, else only your own panes and tabs, never one of the owner's project workspaces. Remove only your worktrees, after their panes are closed (keep the branches, so `reopen.sh` can come back to them).
-
-## Official docs
-
-[CLI reference](https://herdr.dev/docs/cli-reference/) and [agent automation](https://herdr.dev/docs/agent-automation/). Re-check both, and `herdr <cmd> --help`, after Herdr is upgraded or when a command fails. Where they differ the installed binary wins (herdr 0.9.5 on 2026-11-11).
+- [tui.md](references/tui.md): a Herdr TUI job, start to close.
+- [core.md](references/core.md): a Herdr Core job.
+- [core-relay.md](references/core-relay.md): a `--core --relay` job (deprecated).
+- [front-door.md](references/front-door.md): a `--front-door` job.
+- [gates.md](references/gates.md): before a merge, push, deploy, publish, send, spend or close.
+- [brief.md](references/brief.md): writing a brief.
+- [agents-and-models.md](references/agents-and-models.md): a worker's model, or a usage limit.
+- [clis.md](references/clis.md): a CLI's flags, resume or quirks.
+- [collaboration.md](references/collaboration.md): the job's files, agent messages, `_common.md`.
+- [review.md](references/review.md): the review and its findings.
+- [unattended-setup.md](references/unattended-setup.md): a startup dialog or a denial.
+- [failure-modes.md](references/failure-modes.md): a start failed.
+- [failure-modes-run.md](references/failure-modes-run.md): a running agent, git, close or reopen failed.
+- [phone-moshi.md](references/phone-moshi.md): the owner's phone.
+- [pstack.md](references/pstack.md): pstack in a coding job.
+- [worked-example.md](references/worked-example.md): a whole TUI run.

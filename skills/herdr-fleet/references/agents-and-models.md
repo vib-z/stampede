@@ -1,112 +1,49 @@
 # Agents and models
 
-## Pick models per role
+How to pick the agent, model and effort for each lane. The flags and quirks of each CLI are in [clis.md](clis.md).
 
-The [routing table](../SKILL.md#pick-the-agent-and-model) gives defaults. Choose the lead for planning and decomposition with `fleet-job new --lead claude|codex` (Claude `claude-opus-5-5` xhigh by default, Codex `gpt-6-astra` ultra with `--lead codex`; the setting `lead.kind`, or `FLEET_LEAD_KIND`, holds a standing choice). The settings `lead.claude.model`, `lead.codex.effort` and so on, or `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT`, change its model and effort as a pair, for a restarted lead too, but only for the CLI the model belongs to: a `gpt-...` model sets a Codex lead, any other model (or none) a Claude lead, and the other CLI's lead keeps its defaults. Choose each worker for execution with `fleet-job start --model --effort`. You can swap them independently unless the owner named a model. Write every worker's brief on the [hand-off template](brief.md) before starting it.
+## Roles are settings
 
-A Codex lead runs like a Codex worker (`--approve-for-me`, `--add-dir <job>`, its model and effort), with three differences. Its sandbox has the network on (Herdr's socket, `git push`, `gh`) and two more writable roots, `<jobs root>/worktrees` and the repo's git folder (Codex keeps `.git` read-only otherwise). That last root lets the lead commit, and also lets it write `.git/hooks` and `.git/config`, which run later outside any sandbox; it is still narrower than a Claude lead in auto mode, which has no sandbox at all. Rarer writes, such as the relay queue behind `fleet-job ask`, `--gate` and `finish`, still go through Codex's approval review. Its notify hook forwards its own turn ends to the relay (`herdr-event-codex-notify`, which Codex's global notify would otherwise call) and never writes `TURN` to `inbox.log`. And, having no file hook, it is woken by `fleet-job _deliver`: a short-lived process that types the new lines of `inbox.log` and `inbox/<lead>.md` into its pane with herdr-send while it is idle or done, unfocused and with nothing typed in its prompt, moving the read offsets only after `SUBMITTED` (log: `<job>/hooks/deliver.log`). Because text is typed into its pane, only `fleet-job gate-ok` counts as the owner's yes, as on Herdr Core. Quit it with `herdr-send <lead> /quit`, never `/exit`: `fleet-job tell` puts text in its inbox, which is typed with a fleet-job mark, so a slash command there is just chat. A `--fork` or a Herdr Core job keeps a Claude lead.
+- `stampede start <job> <role>-<scope>` takes its kind, model and effort from the setting `roles.<role>` (the role is the name up to its first `-`), else `roles.default`. A flag given wins. A role's model and effort go only with its own kind.
+- `stampede config show` prints the current choice for every role and the layer that set it; `--set roles.build.effort=high` changes one for a command.
+- The roles: `build` (implementation against the spec), `research` (with the browser), `review` and `qa` (another vendor than build), `design` (direction and design review), `copy` (docs and copy), `test` (tests and quick mechanical edits), `default` (any other).
+- **The lead:** `stampede new --lead claude|codex` (the setting `lead.kind`), `--lead-model` and `--lead-effort` (the settings `lead.<its CLI>.model` and `.effort`).
+- `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set them as a pair, only for the CLI the model belongs to: a `gpt-...` model sets a Codex lead, any other a Claude lead. A restarted lead keeps its CLI and model. `--fork` takes a Claude lead.
+- The owner can override any choice, the effort or the review shape per job.
 
-- **Opus 5.5 at medium** is the default builder. It follows the lead's spec and does not redesign it. Raise it to xhigh only when the lead flags a genuinely hard task.
-- **Codex `gpt-6-astra` at ultra** is the default reviewer at the end of a job. Fable 5.1 at max is the fallback when the work under review was itself built by Codex. A reviewer on a different model from the builder does not share the builder's blind spots.
-- **Codex is the second vendor.** Use it for the end review, design direction and a parallel builder slice. The Codex lead stays at `gpt-6-astra` ultra. Builders on Codex default to `gpt-6.1-sol` at medium; raise to `gpt-6-astra` ultra only when the lead flags a hard task.
-- **Sonnet 5.5, Haiku 5.5, `gpt-6.1-sol` medium and `gpt-6-luna`** are for cheap, fully specified bulk work. If a slice needs judgement, it is not a Sonnet slice. Exception (2026-10): Sonnet 5.5 may take heavy coding once the lead's spec covers it fully.
-- **Effort follows the thinker and doer split.** The lead plans at high effort. A specified builder task runs at medium. Raise a builder to xhigh only for a hard or subtle task the lead flags.
-- If a model the owner named is unavailable or at capacity, say so and wait or ask. Do not quietly swap it. A lane whose model the owner did not name moves to its fallback after a usage limit or a second "at capacity" (the Fallback column in SKILL.md, or the plan's `fallback` column).
+## Thinker and doer
 
-| CLI | Auto mode (use) | Plan mode | Never |
-|---|---|---|---|
-| Claude | `--permission-mode auto` | `--permission-mode plan` | `--dangerously-skip-permissions` |
-| Codex | `--approve-for-me` | shift+tab once after start | `--yolo` |
-| Cursor | `--auto-review --trust` (asks about anything unsure: a worker on its own branch, not a lead) | `--plan` | `--yolo`, `--force` |
-| Hermes | its default (asks before a dangerous command) | | `--yolo` |
-| Kimi | `-y` (routine edits and commands run; risky actions, questions and plans ask) | `--plan` | `--auto` (never asks) |
+The default shape; the owner can change it per job.
 
-Yolo, case by case: a worker in its own git worktree may run without checks (`fleet-job start --yolo-in <worktree>`); never the lead, and its brief still forbids pushing to a shared branch, merging, spending and publishing, since a worktree walls off files, not the network or your logins.
+- **The lead thinks:** high effort. It plans once and writes a tight spec per task: what to build, which files, what done looks like, which tests to run.
+- **Builders do:** medium effort. They follow the spec and do not redesign it. Raise a builder to high or xhigh only for a hard task the lead flags in the plan.
+- **Tests** run after each builder step (a cheap check the brief names); the lead runs the full checks once after integration.
+- **Review:** one pass on a different model than the builder, which does not share the builder's blind spots ([review.md](review.md)).
+- **Proof frames** only for UI changes the owner will look at.
 
-## Claude Code (`--kind claude`)
+## Pick for the task
 
-- Models: `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5`, `claude-haiku-5-5` (aliases `opus`, `fable`, `sonnet`, `haiku`).
-- Effort: `low`, `medium`, `high`, `xhigh`, `max`.
-- Permission modes: `auto` is the fleet standard. `plan` suits a read-only planner. Fleet convention: no `bypassPermissions` in a fleet. The owner's policy allows skip-permission flags when he asks for them.
-- `-n <name>` sets the session name shown in `/resume`, the terminal title and Claude peer messaging. Use the herdr agent name.
+| Task | Pick | Fallback |
+|---|---|---|
+| Lead, planning, briefs | Claude `claude-opus-5-5` xhigh, or Codex `gpt-6-astra` ultra with `--lead codex` | the other of those two |
+| Plan review (only if the owner asks, or the plan is high risk) | another vendor than the planner's; the planner then hardens the plan | Codex `gpt-6.1-sol` xhigh or Cursor, never the planner's model |
+| Architecture, hard trade-offs | Claude `claude-fable-5-1` max, with a Codex `gpt-6-astra` ultra second opinion | Codex `gpt-6-astra` ultra alone |
+| Implementation against the spec | Claude `claude-opus-5-5` medium; `claude-sonnet-5-5` medium for heavy coding the spec fully covers; Codex `gpt-6.1-sol` medium for a parallel slice | the other vendor at medium |
+| Independent review, QA | Codex `gpt-6-astra` ultra; Claude `claude-fable-5-1` max when Codex built the work | the other vendor's reviewer, never the builder's model |
+| Research with the browser | Claude `claude-opus-5-5` xhigh (BrowserOS Neo, MCP tools) | Codex `gpt-6.1-sol` xhigh with `--search` (no Neo) |
+| Design direction, design review | Codex `gpt-6-astra` ultra writes or reviews; a Claude builder implements | Claude `claude-fable-5-1` max |
+| Images, layered HTML images | Codex; Grok only sparingly, for videos and the odd photo | none: wait or ask |
+| Docs and copy | Claude `claude-opus-5-5` high | Codex `gpt-6.1-sol` high |
+| Quick mechanical edits | the lead itself if under 10 minutes, else Claude `claude-sonnet-5-5` or Codex `gpt-6.1-sol` medium | the other of those two |
 
-Interactive in a pane, the fleet default:
+- Cheap models (`claude-sonnet-5-5`, `claude-haiku-5-5`, `gpt-6.1-sol` medium, `gpt-6-luna`) take fully specified bulk work. A slice that needs judgement is not theirs.
+- Codex is the second vendor: the end review, design direction, a parallel slice. Hermes, Kimi and Cursor run when the plan or the owner names them ([clis.md](clis.md#other-kinds)).
+- A plan may give each lane a `fallback` column; it wins over the table.
 
-```bash
-fleet-job start "$B" build-api --kind claude --pane "$P" --brief "$B/build-api.md" --model claude-opus-5-5 --effort medium \
-  --report reports/build-api.md   # adds --permission-mode auto, -n build-api, the job's hooks and the reopen record; sends the brief pointer
-```
+## Fallback
 
-Shortcut, for a raw `herdr agent start` outside a fleet job only (`fleet-job start` takes `--brief` instead): put the first prompt last, as a positional argument after the native flags, and the agent starts working at once. The start then often returns `timeout` while the agent is in fact working, and the name is not attached. Check `herdr pane read "$P" --source visible --lines 20`, then `herdr agent rename "$P" build-api`. On macOS `agent start` rejects a command longer than the terminal's line-input limit (about 1 KB), so keep that prompt to one short line or send it with `agent prompt`, which pastes.
-
-Smoke-tested 2026-10-14 with herdr 0.9.4 and Claude Code 2.1.300: the start line above, one prompt, `working` then `done`, and `/exit` clears the name within a few seconds.
-
-Resume a session in the same pane (after a hang or a restart). The id comes from `herdr agent get <name> | jq -r .result.agent.agent_session.value` (set at start for Claude; Codex, Hermes and Kimi report theirs after the first turn, so record it in the register then):
-
-```bash
-herdr agent start build-api --kind claude --pane "$P" --timeout 90000 -- \
-  --resume <session-id> --model claude-opus-5-5 --effort medium --permission-mode auto
-```
-
-A reviewer can take over a finished builder's pane, which keeps the tab small:
-
-```bash
-herdr agent prompt build-api "/exit"
-herdr agent wait build-api --until unknown --timeout 30000   # ends with agent_not_running once it exits and the name clears
-fleet-job start "$B" review-api --kind codex --pane "$P" --brief "$B/review-api.md" --model gpt-6-astra --effort ultra \
-  --report reports/review-api.md   # hooked like any start; sends the brief pointer
-```
-
-One-shot, no herdr state: `claude -p --model claude-sonnet-5-5 --output-format json "<prompt>"`. Use it for an isolated answer (a persona test, a classification), not for fleet members.
-
-## Codex (`--kind codex`)
-
-- Models (from `~/.codex/models_cache.json`): `gpt-6.1-sol` (latest workhorse, the config default), `gpt-6-astra` (frontier), `gpt-6-luna` (fast), `gpt-6-sol` (previous generation).
-- Effort is set with `-c 'model_reasoning_effort="<level>"'`: `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. `gpt-6-luna` tops out at `max`.
-- The owner's `~/.codex/config.toml` sets `model = "gpt-6.1-sol"`, `model_reasoning_effort = "xhigh"`, `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`. A bare `codex` therefore runs with full access and no approvals.
-
-Interactive in a pane:
-
-```bash
-fleet-job start "$B" build-db --kind codex --pane "$P" --brief "$B/build-db.md" --model gpt-6.1-sol --effort medium \
-  --report reports/build-db.md   # adds --approve-for-me, --add-dir "$B", the notify hook and the reopen record; sends the brief pointer
-```
-
-- `--approve-for-me` routes approvals to automatic review inside the workspace-write sandbox, so writes stay in the worktree. One fleet's Codex builder ran tests, type checks and a local Postgres this way. Network access inside that sandbox was not checked. Dropping the flag means the config's full access. By fleet convention do that only with the owner's OK (the owner's policy allows it when the owner asks).
-- The workspace-write sandbox refuses writes outside the cwd (checked 2026-10-16 with `codex sandbox`: a write to a sibling folder under `$HOME` was denied, and allowed once that folder was a writable root; `/tmp` is always writable). When the briefs or reports folder is not under the agent's cwd, add `--add-dir <abs dir>` (one per folder) to the start line.
-- `--search` turns on live web search.
-- A positional first prompt after the flags works as it does for Claude.
-- Quit with `/quit`.
-
-Non-interactive, useful from the lead or in a plain pane via `herdr pane run`:
-- `codex exec -m gpt-6.1-sol "<prompt>"` runs one task and exits.
-- `codex review --base main` (or `--commit <sha>`, `--uncommitted`) runs a quick cross-vendor code review.
-
-Codex gotchas (details in [failure-modes.md](failure-modes.md)):
-- A folder Codex has never opened asks "Trust this folder?" first (the start returns `agent_not_ready`, status `blocked`; Enter accepts "Trust and continue"), then "Hooks need review" (reported `idle`; `down down enter` continues without trusting). A fresh worktree asks the hooks question again. Smoke-tested 2026-10-14 with Codex 0.162.1: after both, one prompt went `working` then `done`, and `/quit` clears the name.
-- When a newer Codex is out it shows "Update available" at start: the start returns `agent_not_ready`, status `blocked`, and the highlighted default is "Update now" (runs npm). `herdr agent send-keys <name> esc` skips it for this launch, then `agent wait <name> --until idle --timeout 30000` (checked 2026-10-16, Codex 0.162.1 with 0.163.0 out). Enter updates Codex and it exits with "Please restart Codex".
-- `ctrl+c` on an empty idle Codex prompt quits Codex. Prompt with `herdr-send`, which sends `ctrl+c` only to clear typed leftovers.
-- Codex can sit in `unknown` after it answers (with herdr 0.9.4 and Codex 0.162 it reported `done`), so do not wait on a state; use the report file.
-- "Selected model is at capacity" ends a turn with no work done. Read the screen, then send the prompt again.
-
-## Other kinds on this Mac (smoke test, 2026-10-14)
-
-`herdr agent start --kind` lists 24 kinds; these are the ones installed here, each tried with a start, a one-line prompt that writes a file, and an exit. The routing table stays Claude and Codex as the defaults; the owner approved Hermes, Kimi and Cursor Agent as fleet kinds too (2026-10-14), with their unattended flags below. Use another kind when the plan or the owner names it. Owner prerequisites: Cursor Agent needs the macOS login keychain unlocked; Kimi needs `kimi login`; Gemini needs a Google sign-in (Kimi and Gemini are optional). Never do these for the owner.
-
-| Kind | Start (after `herdr agent start <name> --kind <kind> --pane "$P" --timeout 90000 --`) | Status and exit | Notes |
-|---|---|---|---|
-| `hermes` (0.21.5; flags checked on 0.22.5, 30 Oct 2026) | `--reasoning <level>` (`none` to `ultra`); the model comes from `~/.hermes/config.yaml`, `-m` overrides it; `--yolo` only with `--yolo-in` | idle, working, done; session id after the first turn. `/exit` | In a Herdr Core job on the relay path (`--core --relay`): `stampede start --kind hermes --pane` ([core-relay.md](core-relay.md#hand-an-agent-to-a-tui-pane)); a Core-native job runs it as a program ([core.md](core.md#start-a-helper)) adds these flags, and the follower writes its `TURN`; but Herdr 0.9.5 did not detect Hermes 0.22.5 (30 Oct 2026), so that start ends `FAILED` there, with Hermes perhaps still running in the pane (end it with `/exit`). `--yolo` is the approved unattended flag (it skips dangerous-command prompts). A caller's safety check may ask for approval the first time; that approval is sanctioned. Smoke-tested without `--yolo` (still wrote files in its cwd). No `STALL?` cover (its sessions live in `~/.hermes/state.db`). Hooks: herdr v5, Moshi current. |
-| `kimi` (2.1.1; flags checked on 2.2.0, 30 Oct 2026) | `-y`: since 2.2 "Ask When Needed" (routine edits and commands run; risky actions ask); `-m <model>`; no effort flag | Trust dialog reported `idle`; Enter trusts. Stayed `working` after an error turn. `/exit` | Optional. In a Herdr Core job on the relay path (`--core --relay`): `stampede start --kind kimi --pane` adds `-y`, and the follower writes its `TURN`. 2.2's `--auto` never asks: not an approved flag. Prerequisite (owner): `kimi login`; the smoke test hit "stored token rejected, re-login required". Hooks: herdr v7, Moshi current. |
-| `gemini` (0.62.0) | `--approval-mode auto_edit` | Trust dialog, then a sign-in picker, both reported `idle`. ctrl+c, esc and ctrl+d do not leave the picker, and `/quit` sent there is Enter on "Sign in with Google"; only closing the pane ended it | Optional. Prerequisite (owner): Google sign-in. Self-updates on start through npm. No `gemini` entry in `herdr integration status`; Moshi hooks current. |
-| `cursor` (`cursor-agent` 2026.10.01) | `--model <model>` (and `--force` to run commands without asking, if the installed `cursor-agent --help` lists it; not yet verified, the help itself needs the keychain) | Expected idle, working, done like the others; exit with `/quit` or ctrl+d (not yet verified live). While the login keychain is locked the CLI exits at once, so `agent start` waits out its timeout and returns `timeout` | Supported fleet kind. Prerequisite (owner): unlock the macOS login keychain (`security unlock-keychain` in the owner's own session). Verify flags with `cursor-agent --help` on first use and update this row. Hooks: herdr v1, Moshi current. |
-| `grok` | not installed (`~/.grok` holds hooks only) | | Not usable as a herdr agent on this Mac. |
-
-Every CLI prints its resume command on exit (`claude --resume <id>`, `codex resume <id>`, `hermes --resume <id>`, `kimi -S <id>` since Kimi 2.2); the register should hold the id before then.
-
-## Writing start commands in zsh
-
-- zsh does not word-split `$ARGS`, so `-- $ARGS` passes one argument. Write the flags literally, or use an array: `args=(--model claude-opus-5-5 --effort medium); ... -- "${args[@]}"`.
-- Keep the Codex `-c` value in single quotes so the inner double quotes reach TOML.
-- `echo ====` fails in zsh (`=` expansion). Use `printf`.
-- `herdr agent prompt` takes no `--` separator and no `--no-focus`; those belong to `agent start` and `pane split`. A wrong flag fails with "unknown option".
-- `agent prompt <name> "..." --wait --timeout <ms>` is the normal form (it matches idle, done or blocked by default). Add `--until <state>` only when you need one specific state; without `--wait` it is rejected ("--until requires --wait"). `--wait` does not track turns, so `agent get` first and read the screen before any resend.
+- Never substitute a model the owner named: when it is unavailable or at capacity, say so and wait or ask.
+- Any other lane moves to its fallback on a usage limit, or on "at capacity" again after one retry. A Claude usage limit covers every Claude model, so Claude lanes fall back to Codex.
+- To move a lane: exit the agent, start the fallback in the same pane under the same name, and prompt it with its brief plus one line: it takes over from the stopped agent, whose work is on disk (`git status`) and in any partial report.
+- A lead falls back the same way: `stampede start <job> <lead> --kind claude|codex --pane <its pane> --brief <job>/briefs/<lead>.md` (the Herdr TUI only).
+- Note the switch in `register.md` and in the report.
