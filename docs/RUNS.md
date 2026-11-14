@@ -10,6 +10,7 @@ Each run here really happened. Times are local, names are the real agent and tab
 - [Run 5: a property-data research and build job, by a fresh tester](#run-5-a-property-data-research-and-build-job-by-a-fresh-tester)
 - [Core-native sandbox fleet test, 13 Nov 2026](#core-native-sandbox-fleet-test-13-nov-2026)
 - [0.2.0 release check, 13 Nov 2026](#020-release-check-13-nov-2026)
+- [0.2.1 release check, 14 Nov 2026](#021-release-check-14-nov-2026)
 
 ## Run 1: the fleet that built stampede v0
 
@@ -344,3 +345,27 @@ What was real: `hc` and its core (a scratch session, `HC_SESSION` and XDG folder
 **One real Core-native job (check 8).** On the machine's own core, from this checkout's `scripts/stampede`: `stampede new --core --lead claude --space smoke-0200`, with a Claude Sonnet 5.5 lead at medium effort, asked to start one Codex helper, also at medium effort, that writes a one-line file and sends its path back, then to check the file and finish, asking the owner nothing. `new` took 1 s. The lead was a root terminal labelled `stampede.space=smoke-0200`, pane 1 of tab `main`; the helper `build-hello` was its Core child (its `parent` the lead, ending with it), pane 2, split right beside the lead. The helper's `hc send` reached the lead's screen as `<hc from="... build-hello">build-hello: done <job>/out/hello.txt</hc>`, the file held its line, and the lead wrote `Status: DONE` and ran `finish` 55 s after `new`. `stampede tree` showed the space, the lead and the helper, both done, and `stampede snapshot` wrote `tree.json` with both and their places. `stampede close` ended the helper, then the lead, in 3 s; afterwards Core listed no terminal of that job, and every other terminal was as before.
 
 **Not run here:** `herdr plugin update stampede --yes`, which needs the published release (the unit tests cover a plugin update's links), the full fleet test on Linux, and the native path from a live client.
+
+## 0.2.1 release check, 14 Nov 2026
+
+**14 Nov 2026, macOS 27.2 arm64, Herdr Core 0.1.21, Herdr 0.9.5, Python 3.14.7 (and the stock 3.9.6 for the suite).** The checks run before 0.2.1 was published, on the release commit's tree. Every agent was a stand-in: no signed-in agent CLI was used, and nothing ran on the machine's own core. Every check passed.
+
+| # | check | result | seconds | what it showed |
+|---|---|---|---|---|
+| 1 | unit suite | PASS | 642, 712 | `python3 -m unittest discover tests` in a scratch home with no `herdr` or `hc` on PATH: 777 tests OK, 25 skipped, 6 expected failures on Python 3.14.7; on the stock Python 3.9.6, 777 OK, 31 skipped, 6 expected failures |
+| 2 | `stampede check` | PASS | 4, 194 | from the scratch install: `check` printed `ok 128 tests in 4.4 s`, exit 0; `check --full` printed `ok 777 tests in 193.7 s`, exit 0 |
+| 3 | install | PASS | 2 | `./install.sh --dry-run` in an empty scratch home: exit 0 and nothing written (every entry's time and size the same before and after); then `./install.sh`: exit 0, and `stampede --version` from its bin printed `0.2.1`; `stampede doctor` exit 1, every link and module check ok, its one PROBLEM the Herdr server a scratch home does not have; `stampede config show` exit 0, every key with its layer |
+| 4 | CI's Core smoke run | PASS | 24 | [tests/core_smoke.py](../tests/core_smoke.py) in a scratch session, with the scratch install first on PATH: hc basics, the relay path, and the native path (`new --core --front-door`, a program helper, `tree`, `post`, `wait`, `close`, `finish`) |
+| 5 | fixture evals | PASS | 124 | `tests/evals/run.py`: 57 pass, 0 fail, 2 blocked (D01 and D04 cannot be staged beside Homebrew's `herdr` and the system `jq`), 1 gap (G15, the documented ceiling), the same as 0.2.0 |
+| 6 | relay sample payloads | PASS | 20 | `bash skills/grokbot-herdr/scripts/test-relay.sh`, as CI runs it |
+| 7 | update from 0.2.0 | PASS | 1 | a clone of `v0.2.0` on `main`, installed in a scratch home, with a local release reply for `v0.2.1`: `--version` printed `0.2.0` and `stampede 0.2.1 is out, this is 0.2.0: run stampede update`, and `update --check` exited 1. No real update was run |
+| 8 | a job opened on 0.2.0 | PASS | 6 | against the fake `hc`, 0.2.0 made a Core-native job and a `--core --relay` job, each in `<repo>/.herdr-<slug>`; then on 0.2.1 the native job took `tell`, `tree`, `snapshot`, `reopen` and `finish`, all exit 0, and the relay job took `tell` and `finish`, with `tree`, `snapshot` and `reopen` refused as being for a native job, as [CLI.md](CLI.md) says. Both folders stayed where they were |
+| 9 | Core-native sandbox fleet test | PASS | 61 | [tests/evals/live/native_fleet.py](../tests/evals/live/native_fleet.py): all ten checks, each within 0.3 s of the [13 Nov table](#core-native-sandbox-fleet-test-13-nov-2026) |
+| 10 | one whole job, as an agent runs it | PASS | 36 | on a real scratch core, with stand-in `claude` and `codex`, using only the commands in [USING.md](../USING.md): below |
+| 11 | hygiene | PASS | 2 | `tests.test_shape` and `tests.test_version`: 19 tests OK; no home paths, keys or `.env` files in the tracked files; the largest tracked file is 6.9 MB |
+
+**One whole job (check 10).** From inside a scratch git repo with a bare remote, 15 steps, 9 of them with `--json`, each object checked against [CLI-JSON.md](CLI-JSON.md): `stampede new --file ask.md` picked Herdr Core and named the repo first; `start` took a Claude helper from its role and a program after `--`; `tell` was `SUBMITTED`; `ask --gate --kind merge` was answered by a scratch ask command and `gate-ok` printed `APPROVED`; `stampede merge` with a fake `gh` and a review report headed `Status: PASS` and `Reviewed: <sha>` ran `gh pr merge 3 --squash --match-head-commit <sha>`; a push to `main` from a helper inside the job was refused by the `pre-push` hook while a push from outside the job went through; then `finish`, `close` (the helpers, then the lead) and `reopen` (a finished job: nothing started).
+
+**A cold walk, earlier the same day.** Before the last pull requests of this release, a fresh agent was given only [USING.md](../USING.md) and told to use stampede: it installed it in a scratch home and ran a whole job on a scratch core. It got the job done and listed 21 places where it had to guess or a line was unclear; this release fixes them.
+
+**Not run here:** a real signed-in agent, the Herdr TUI path live, a relay job's `reopen.sh` (it names the machine's default core), a real `stampede update` against the published release, `herdr plugin update`, and Linux beyond CI.
