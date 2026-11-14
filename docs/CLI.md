@@ -35,7 +35,7 @@ Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=fa
 | `post <job> <text>` | `--file <path>` (repeatable) | `POSTED <n> to <bot> (and <item>)` in a job a bot started; `POSTED <n> for the front door to relay (<item>)` in a `--front-door` job; otherwise `POSTED <n> to the outbox only (<item>): no bot or front door hears it`, with how the owner would be told |
 | `wait <job>` | `--timeout <s>` (default: the setting `timeouts.wait`, 3600) | every outbox item not shown yet, `BLOCKED_ON_CARD` with the lead's screen, or `LEAD_GONE <lead>: ...`; on a Core job `BLOCKED <lead>: <kind>. Core says it waits at a dialog in its terminal <address> (hc read <address>)` and its screen, or `LEAD_GONE <lead>: Herdr Core holds no live lead of this job ...`; `TIMEOUT nothing new ...` |
 | `next <job>` (a Core job) | | `STARTED` per queued helper, `DROPPED <name>: its parent ... is gone`, then `WAITING <k> queued (...)` or `NOTHING QUEUED` |
-| `tree <job>` (a Core job) | `--json` | `space <name> (<key>)`, then one line per terminal, indented by depth, then the queue; `NO LEAD` |
+| `tree <job>` (a Core job) | `--json` | `space <name> (<key>)`, then one line per terminal, indented by depth (a shell Core left in a lost agent's place is a plain terminal of kind `shell`, never the agent), then the queue; `NO LEAD` |
 
 ## Gates
 

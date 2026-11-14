@@ -1024,6 +1024,30 @@ class ReopenedLead(NativeCase):
         node = json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD]
         self.assertEqual((node['address'], node['state']), ('t2', 'finished'))
 
+    def test_tree_shows_the_shell_as_a_plain_terminal_and_one_lead(self):
+        self.start('build-api')                                                   # t3, under the new lead t2
+        self.terminal('t3', argv=['/bin/zsh'], status=None)                       # the helper lost too: a shell in its place
+        code, out = self.quiet(native_.tree, self.job)
+        self.assertEqual(code, 0, out)
+        lines = [line.strip() for line in out.splitlines()[1:]]
+        self.assertEqual([line for line in lines if line.startswith(LEAD)], [f'{LEAD} (t2) lead claude idle tab main pane 1'])
+        self.assertIn(f"t1 (t1) plain shell live tab main pane 1 left in {LEAD}'s place", lines)
+        self.assertIn("t3 (t3) plain shell live tab main pane 2 left in build-api's place", lines)
+        self.assertFalse([line for line in lines if line.startswith('build-api')])
+        nodes = json.loads(self.quiet(native_.tree, self.job, True)[1])['nodes']
+        self.assertEqual([(n['name'], n['address'], n['role'], n['kind'], n['shell_of']) for n in nodes if n['kind'] != 'claude'],
+                         [('t3', 't3', 'plain', 'shell', 'build-api'), ('t1', 't1', 'plain', 'shell', LEAD)])
+        self.assertEqual([n['address'] for n in nodes if n['name'] == LEAD], ['t2'])
+
+    def test_a_job_with_only_a_shell_for_its_lead_has_no_lead(self):
+        hcapi_.hc('kill', 't2')
+        hcapi_.hc('rm', 't2')
+        code, out = self.quiet(native_.tree, self.job)
+        self.assertEqual(code, 1, out)
+        self.assertFalse(native_.lead_alive(self.job))
+        self.assertIn(f"t1 (t1) plain shell live tab main pane 1 left in {LEAD}'s place", out)
+        self.assertTrue(out.splitlines()[-1].startswith('NO LEAD: Herdr Core holds no lead of '), out)
+
     def test_close_ends_the_new_lead_its_helpers_and_the_shell(self):
         self.start('build-api')
         code, out = self.quiet(native_.close, self.job)
@@ -1125,6 +1149,13 @@ class Selection(NativeCase):
                 state['terminals'][address] = {**json.loads(json.dumps(base)), 'address': address, **form}
         (self.core / 'state.json').write_text(json.dumps(state))
         lead, blocked = native_.lead_of(job_.core_key(self.job), native_.listing(self.job)), native_.lead_blocked(self.job)
+        name, terminals = LEAD if who == 'lead' else 'build-api', native_.listing(self.job)
+        rows = [r for r in json.JSONDecoder().raw_decode(self.quiet(native_.tree, self.job, True)[1])[0]['nodes'] if r['address'] in ('tA', 'tB')]
+        shells = {t['address'] for t in terminals if hcapi_.shelled(t)}
+        self.assertFalse([r for r in rows if r['name'] == name and r['address'] in shells])  # a shell is never the agent's row
+        self.assertTrue(all((r['name'], r['kind'], r['shell_of']) == (r['address'], 'shell', name) for r in rows if r['address'] in shells))
+        if shells:
+            self.assertLessEqual(sum(r['name'] == name for r in rows), 1)
         self.quiet(native_.snapshot, self.job)
         node = json.loads((self.job / 'tree.json').read_text())['nodes'][LEAD if who == 'lead' else 'build-api']
         got = [lead and lead['address'], native_.lead_alive(self.job), blocked and blocked[1],

@@ -594,15 +594,19 @@ def tree(job, as_json=False):
     key, terminals = job_.core_key(job), listing(job)
     lead = lead_of(key, terminals)
     rows, shown = [], job_tree(key, terminals)
-    named = {name_of(t) for _, t, _ in shown}
+    named = {name_of(t) for _, t, _ in shown if not hcapi_.shelled(t)}
     for t in reversed(terminals):  # a helper reopen left ended (a program, a codex): its newest terminal, under no live lead
-        if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'helper' and name_of(t) not in named:
+        if labels(t).get('stampede.job') == key and labels(t).get('stampede.role') == 'helper' and name_of(t) not in named \
+                and not hcapi_.shelled(t):
             shown.append((1, t, None))
             named.add(name_of(t))
     for depth, t, outlived in shown:
-        tags = labels(t)
-        rows.append({'depth': depth, 'name': name_of(t), 'address': t['address'], 'parent': t.get('parent'),
-                     'role': tags.get('stampede.role') or 'plain', 'kind': tags.get('stampede.kind') or '-',
+        tags, shell = labels(t), hcapi_.shelled(t)  # a shell Core left in a lost agent's place, which keeps the agent's Core
+        # name too, is a plain terminal of kind shell, named by its address
+        rows.append({'depth': depth, 'name': t['address'] if shell else name_of(t), 'address': t['address'], 'parent': t.get('parent'),
+                     'role': 'plain' if shell else tags.get('stampede.role') or 'plain',
+                     'kind': 'shell' if shell else tags.get('stampede.kind') or '-',
+                     'shell_of': name_of(t) if shell else None,
                      'status': hcapi_.core_status(t) or t.get('state'), 'state': t.get('state'), 'tab': tags.get('herdr.tab') or '-',
                      'outlived': outlived, **{k: v for k, v in where_of(tags).items() if k != 'tab'}})
     waiting = [{k: r[k] for k in ('name', 'parent', 'kind', 'tab')} for _, r in queued(job)]
@@ -612,7 +616,7 @@ def tree(job, as_json=False):
         print(f'space {read(job, "space")} ({key})')
         for r in rows:
             print('  ' * (r['depth'] + 1) + f'{r["name"]} ({r["address"]}) {r["role"]} {r["kind"]} {r["status"]} tab {r["tab"]}' + (f' pane {r["pane"]}' if r['pane'] else '')
-                  + (f' outlived {r["outlived"]}' if r['outlived'] else ''))
+                  + (f' outlived {r["outlived"]}' if r['outlived'] else '') + (f' left in {r["shell_of"]}\'s place' if r['shell_of'] else ''))
         for r in waiting:
             print(f'  queued {r["name"]} under {r["parent"]} ({r["kind"]})')
     if not lead:
