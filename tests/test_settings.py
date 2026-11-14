@@ -1,9 +1,11 @@
 """stampede/settings.py: layers, sources, the environment names, problems, show, and the two TOML readers."""
-import json, sys, tempfile, unittest
+import json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'skills' / 'herdr-fleet' / 'scripts'))
-from stampede import settings as st
+SCRIPTS = Path(__file__).resolve().parent.parent / 'skills' / 'herdr-fleet' / 'scripts'
+sys.path.insert(0, str(SCRIPTS))
+from stampede import settings as st, agents as agents_, job as job_, owner as owner_, hcapi as hcapi_, native as native_, cli as cli_
 
 SAMPLE = '''# a user file
 jobs_root = "~/jobs"   # a comment after a value
@@ -183,6 +185,159 @@ class Settings(unittest.TestCase):
         self.assertEqual(set(data['environment']), {name for name, _, _ in st.ENV_ONLY})
         self.assertEqual(data['files']['user']['exists'], True)
         self.assertEqual(len(data['problems']), 1)
+
+
+LIVE = ('FLEET_LEAD_KIND', 'FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_JOBS_ROOT', 'FLEET_TRUST_ROOT',
+        'STAMPEDE_MAX_HELPERS', 'STAMPEDE_TAB_PANES', 'XDG_CONFIG_HOME')
+
+
+class Wired(unittest.TestCase):
+    """Each key as the code reads it: the old way (its environment name, <job>/max-helpers, a flag) still sets it, a
+    config file sets it, and a higher layer beats the file. A job keeps what it saved at new."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name).resolve()
+        patch = mock.patch.dict(os.environ, {'HOME': str(self.dir), **{name: '' for name in LIVE}})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(st.SETS.clear)
+        self.user = self.dir / '.config' / 'stampede' / 'config.toml'
+        self.user.parent.mkdir(parents=True)
+        self.job = self.dir / 'job'
+        self.job.mkdir()
+
+    def config(self, text):
+        self.user.write_text(text)
+
+    def env(self, **values):
+        return mock.patch.dict(os.environ, values)
+
+    def test_the_lead(self):
+        self.config('[lead]\nkind = "codex"\n[lead.claude]\nmodel = "claude-fable-5-1"\neffort = "high"\n[lead.codex]\neffort = "low"\n')
+        self.assertEqual(st.current().get('lead.kind'), 'codex')
+        self.assertEqual(agents_.lead_model('claude'), ('claude-fable-5-1', 'high'))
+        self.assertEqual(agents_.lead_model('codex'), ('gpt-6-astra', 'low'))
+        with self.env(FLEET_LEAD_KIND='claude', FLEET_LEAD_MODEL='gpt-6.1-sol', FLEET_LEAD_EFFORT='xhigh'):
+            self.assertEqual(st.current().get('lead.kind'), 'claude')
+            self.assertEqual(agents_.lead_model('codex'), ('gpt-6.1-sol', 'xhigh'))
+            self.assertEqual(agents_.lead_model('claude'), ('claude-fable-5-1', 'high'), 'a gpt model leaves the Claude pair')
+        st.SETS[:] = ['lead.codex.effort=medium']
+        self.assertEqual(agents_.lead_model('codex'), ('gpt-6-astra', 'medium'))
+        self.assertEqual(agents_.lead_model('codex', 'gpt-6-luna', 'max'), ('gpt-6-luna', 'max'), 'the start flags win')
+
+    def test_the_ask_command(self):
+        self.config('[ask]\ncommand = "ask-from-file"\n')
+        self.assertEqual(owner_.ask_command(self.job), 'ask-from-file')
+        with self.env(FLEET_ASK_CMD='ask-from-env'):
+            self.assertEqual(owner_.ask_command(self.job), 'ask-from-env')
+        with mock.patch.object(owner_, 'ASK_CMD', 'stand-in'):
+            self.assertEqual(owner_.ask_command(self.job), 'stand-in')
+
+    def test_the_jobs_root_and_the_trust_root(self):
+        repo = self.dir / 'trusted' / 'repo'
+        repo.mkdir(parents=True)
+        self.config(f'jobs_root = "~/from-file"\ntrust_root = "{self.dir / "trusted"}"\n')
+        self.assertEqual(job_.jobs_root(), self.dir / 'from-file')
+        self.assertEqual(job_.core_repo(str(repo)), repo)
+        with self.env(FLEET_JOBS_ROOT=str(self.dir / 'from-env'), FLEET_TRUST_ROOT=str(self.dir / 'elsewhere')):
+            self.assertEqual(job_.jobs_root(), self.dir / 'from-env')
+            with self.assertRaisesRegex(ValueError, 'is not a folder under FLEET_TRUST_ROOT'):
+                job_.core_repo(str(repo))
+        st.SETS[:] = ['jobs_root=~/from-set']  # a user-only key from --set: the user's own act
+        self.assertEqual(job_.jobs_root(), self.dir / 'from-set')
+
+    def test_the_helpers_and_the_tab_panes(self):
+        self.config('[helpers]\nmax = 5\ntab_panes = 2\n')
+        self.assertEqual((native_.cap(self.job), native_.setting(self.job, None, 'helpers.tab_panes')), (5, 2))
+        with self.env(STAMPEDE_MAX_HELPERS='3', STAMPEDE_TAB_PANES='6'):
+            self.assertEqual((native_.cap(self.job), native_.setting(self.job, None, 'helpers.tab_panes')), (3, 6))
+            (self.job / 'max-helpers').write_text('2\n')
+            self.assertEqual(native_.cap(self.job), 2, '<job>/max-helpers wins for its job')
+        self.config('[helpers]\nmax = 0\n')
+        (self.job / 'max-helpers').unlink()
+        with self.assertRaisesRegex(ValueError, 'helpers.max holds .0., not a whole number of 1 or more'):
+            native_.cap(self.job)
+
+    def test_the_brief_sections_and_the_timeouts(self):
+        self.config('[brief]\nsections = ["Goal", "Risks"]\n[timeouts]\nhc_call = 7\nwait = 9\nleave = 4\nhold_settle = 2\n')
+        self.assertEqual(agents_.missing_sections('## Goal\nShip it.\n'), ['Risks'])
+        self.assertEqual(hcapi_.hc_call(), 7)
+        self.assertEqual([st.current(self.job).get('timeouts.' + k) for k in ('wait', 'leave', 'hold_settle')], [9, 4, 2])
+        st.SETS[:] = ['timeouts.hc_call=8']
+        self.assertEqual(hcapi_.hc_call(), 8)
+        self.config('')
+        st.SETS.clear()
+        self.assertEqual(agents_.missing_sections('## Goal\nShip it.\n')[:2], ['Why', 'Inputs'])
+        self.assertEqual(hcapi_.hc_call(), 60)
+
+    def test_a_job_keeps_what_it_saved_and_a_default_follows_the_live_layers(self):
+        self.config('[helpers]\nmax = 5\n')
+        with self.env(FLEET_LEAD_KIND='codex'):
+            st.save(self.job, st.load(repo=None, env=os.environ, flags={'helpers.max': None}))
+        saved = json.loads((self.job / 'settings.json').read_text())
+        self.assertEqual((saved['values']['lead.kind'], saved['sources']['lead.kind'], saved['sources']['helpers.max']),
+                         ('codex', 'env:FLEET_LEAD_KIND', 'user'))
+        self.assertEqual(saved['version'], (SCRIPTS.parents[2] / 'VERSION').read_text().strip())
+        self.config('[helpers]\nmax = 9\n')
+        with self.env(FLEET_LEAD_KIND='claude', STAMPEDE_TAB_PANES='3'):
+            s = st.current(self.job)
+            self.assertEqual((s.get('lead.kind'), s.source('lead.kind')), ('codex', 'env:FLEET_LEAD_KIND'))
+            self.assertEqual((s.get('helpers.max'), s.source('helpers.max')), (5, 'user'))
+            self.assertEqual(native_.cap(self.job), 5)
+            self.assertEqual(s.get('helpers.tab_panes'), 3, 'nobody set it at new: it follows the environment')
+            self.assertEqual(s.files['job'], {'path': str(self.job / 'settings.json'), 'exists': True})
+            st.SETS[:] = ['lead.kind=claude']
+            self.assertEqual(st.current(self.job).source('lead.kind'), 'set')
+        st.SETS.clear()
+        self.assertEqual(st.current(self.dir / 'old-job').get('helpers.max'), 9, 'a job without settings.json: the live layers')
+
+    def test_new_refuses_while_the_config_has_problems(self):
+        repo = self.dir / 'code' / 'repo'
+        repo.mkdir(parents=True)
+        ask = self.dir / 'ask.md'
+        ask.write_text('Fix the login bug\n')
+        (repo / '.stampede.toml').write_text('jobs_root = "/x"\n[helpers]\nmaxx = 2\n')
+        with self.env(FLEET_TRUST_ROOT=str(self.dir / 'code')), mock.patch('sys.stderr') as err, \
+                self.assertRaisesRegex(ValueError, 'fix it or remove the key: stampede config show'):
+            cli_.new(str(ask), None, core=True, cwd=str(repo))
+        printed = ''.join(call.args[0] for call in err.write.call_args_list)
+        self.assertIn('jobs_root is taken only from your own', printed)
+        self.assertIn('helpers.maxx is not a setting (did you mean helpers.max?)', printed)
+        self.assertEqual([p.name for p in repo.iterdir()], ['.stampede.toml'], 'nothing was made')
+
+    def test_config_show(self):
+        def show(*args, **env):
+            return subprocess.run([str(SCRIPTS / 'fleet-job'), 'config', 'show', *args], capture_output=True, text=True,
+                                  cwd=self.dir, env={**os.environ, **env})
+        self.config('[helpers]\nmax = 5\n')
+        out = show(STAMPEDE_TAB_PANES='3')
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('helpers.max = 5  (user)', out.stdout)
+        self.assertIn('helpers.tab_panes = 3  (env:STAMPEDE_TAB_PANES)', out.stdout)
+        data = json.loads(show('--json').stdout)
+        self.assertEqual(data['sources']['helpers.max'], 'user')
+        st.save(self.job, st.load(env={'STAMPEDE_TAB_PANES': '2'}))
+        out = show('--job', str(self.job), STAMPEDE_TAB_PANES='6')
+        self.assertIn('helpers.tab_panes = 2  (env:STAMPEDE_TAB_PANES)', out.stdout, 'the saved value, not today\'s')
+        self.config('[helpers]\nmaxx = 5\n')
+        out = show()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn('helpers.maxx is not a setting', out.stdout.split('# problems')[1])
+        out = show('--job', str(self.dir / 'nowhere'))
+        self.assertEqual((out.returncode, out.stderr.strip()), (2, f'fleet-job config: {self.dir / "nowhere"} is not a job folder'))
+
+
+class Example(unittest.TestCase):
+    def test_config_example_is_the_defaults(self):
+        """config.example holds every key with the default defaults.toml gives it, and every environment-only name."""
+        text = (SCRIPTS.parents[2] / 'config.example').read_text()
+        self.assertEqual(st.flatten(st.parse(text)), st.DEFAULTS)
+        self.assertEqual(text.split('\n[lead]\n')[1].split('\n# Environment only')[0],
+                         st.DEFAULTS_FILE.read_text().split('\n[lead]\n')[1].rstrip('\n') + '\n')
+        for name, default, _ in st.ENV_ONLY:
+            self.assertIn(f'\n# {name}=' + ('$(hostname -s)' if name == 'HERDR_EVENTS_MACHINE' else default) + '  # ', text)
 
 
 class Readers(unittest.TestCase):

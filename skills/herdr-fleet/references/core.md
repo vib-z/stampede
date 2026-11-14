@@ -54,7 +54,7 @@ stampede start <job> <name> [--cwd <dir>] [--tab <label>] [--parent <agent>] [--
 
 ## The cap and the queue
 
-- At most 12 helpers run at once in your whole tree, at any depth. `--max-helpers` at `new`, or the number in `<job>/max-helpers`, changes it for this job; `STAMPEDE_MAX_HELPERS` changes the default.
+- At most 12 helpers run at once in your whole tree, at any depth. `--max-helpers` at `new`, or the number in `<job>/max-helpers`, changes it for this job; the setting `helpers.max` (or `STAMPEDE_MAX_HELPERS`) changes the default.
 - A helper counts while it works: its terminal is live and it has not yet gone `idle` or `done` after its task. A program counts while it lives. You and plain children never count.
 - A start over the cap is queued, never refused. On each child's note from Core, run `stampede next <job>`: it starts queued helpers, oldest first, while fewer than the cap run, one `STARTED` line each, then `WAITING <k> queued (<n> running, cap <c>)` while any wait, or `NOTHING QUEUED`. Exit 0; 1 when a start failed. Every `stampede start` drains the queue first too.
 - A queued start whose parent is itself still queued waits for it. `DROPPED <name>: its parent <p> is gone` when its parent is neither live nor queued.
@@ -110,7 +110,7 @@ It carries no stampede label and is in the tree by its parent link alone. Its ex
 Labels only; Core's tree never depends on them.
 
 - You and every helper carry `herdr.space=<the space's name>` and `herdr.tab=<its tab>`, so the Herdr app shows the job as one space. The app takes both as ids: it shows the space by its first terminal's folder and a tab by its place until someone renames it there.
-- You are pane 1 of tab `main`, top left. A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job (`STAMPEDE_TAB_PANES` changes the 4), at the lowest free pane number.
+- You are pane 1 of tab `main`, top left. A helper goes to the first of `main`, `main-2`, `main-3` and so on that holds fewer than 4 live terminals of the job (`helpers.tab_panes` or `STAMPEDE_TAB_PANES` changes the 4), at the lowest free pane number.
 - The order, as `stampede.pane`, `stampede.split` and `stampede.beside` labels: pane 2 splits pane 1 right, pane 3 splits pane 2 down, pane 4 splits pane 1 down. That is a 2x2 of top left, top right, bottom right, bottom left. Every later tab fills the same way.
 - `--tab <label>` names a workstream tab instead; it fills the same way and overflows to `<label>-2`, `<label>-3`.
 - The Herdr app reads only `herdr.space` and `herdr.tab` and adds each terminal to the tab's row; a client draws the places from the `stampede.*` labels.

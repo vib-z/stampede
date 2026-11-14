@@ -2,7 +2,7 @@
 1 defaults.toml beside this file (the list of keys), 2 the user's config.toml, 3 <repo>/.stampede.toml, 4 the
 environment (the variable names stampede always read), 5 a command's flags, then its --set key=value pairs.
 A bad value, an unknown key or a file that does not parse is skipped and named in problems; it never stops a command."""
-import difflib, json, os, re, socket
+import difflib, json, os, re, socket, sys
 from pathlib import Path
 
 try:
@@ -185,9 +185,9 @@ def parse_set(pair):
         return key, text
 
 
-def load(repo=None, env=None, flags=None, sets=(), home=None):
-    """Every setting with the layer it came from. A job's saved, resolved values can later stand in for layers 1 to 4:
-    start values and sources from them instead of the defaults, files and environment, then apply flags and sets."""
+def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
+    """Every setting with the layer it came from. saved: a job's settings.json, whose values beat the files and the
+    environment; a key it holds as a default follows them, as before the job had the file."""
     env = os.environ if env is None else env
     user = Path(env.get('XDG_CONFIG_HOME') or Path(home or Path.home()) / '.config') / 'stampede' / 'config.toml'
     paths = {'user': user} if repo is None else {'user': user, 'repo': Path(repo) / '.stampede.toml'}
@@ -218,6 +218,9 @@ def load(repo=None, env=None, flags=None, sets=(), home=None):
         text = env[name]
         number = isinstance(DEFAULTS[key], int) and re.fullmatch(r'[+-]?\d+', text)
         put(key, int(text) if number else text, 'env:' + name, 'environment ' + name)
+    for key, value in (saved or {}).get('values', {}).items():
+        if saved.get('sources', {}).get(key, 'default') != 'default':
+            put(key, value, saved['sources'][key], 'the job\'s settings.json')
     for key, value in (flags or {}).items():
         if value is not None:  # a flag the command was not given
             put(key, value, 'flag', 'flag ' + key)
@@ -226,6 +229,48 @@ def load(repo=None, env=None, flags=None, sets=(), home=None):
     files = {source: {'path': str(path), 'exists': path.is_file()} for source, path in paths.items()}
     environment = {name: env.get(name) or default for name, default, _ in ENV_ONLY}  # an empty one means unset
     return Settings(values, sources, problems, files, environment)
+
+
+SETS = []  # this command's --set pairs (cli puts them here): every setting it reads applies them
+VERSION_FILE = Path(__file__).resolve().parents[4] / 'VERSION'
+_seen = {}
+
+
+def current(job=None):
+    """The settings this process works with: a job's settings.json when it has one, else the user file and the
+    environment as they are now; then this command's --set pairs. Resolved once until one of its inputs changes."""
+    path = Path(job) / 'settings.json' if job else None
+    user = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'stampede' / 'config.toml'
+    names = list(ENV) + ['FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT']
+    stamp = tuple(p.stat().st_mtime_ns if p and p.is_file() else None for p in (path, user))
+    key = (str(path), str(user), stamp, tuple(os.environ.get(n) for n in names), tuple(SETS))
+    if key not in _seen:
+        try:
+            saved = json.loads(path.read_text()) if stamp[0] else None
+        except (OSError, ValueError):
+            saved = None  # a damaged file: the live layers, as for a job made before settings.json
+        settings = load(env=os.environ, sets=SETS, saved=saved)
+        if saved:
+            settings.files['job'] = {'path': str(path), 'exists': True}
+        _seen[key] = settings
+    return _seen[key]
+
+
+def for_new(repo, flags):
+    """stampede new's settings: every layer, with the job's repo, then new's own flags and --set pairs. While the
+    config has problems no job starts: each is printed, then a ValueError says what to do."""
+    settings = load(repo=repo, env=os.environ, flags=flags, sets=SETS)
+    if settings.problems:
+        print('\n'.join(settings.problems), file=sys.stderr)
+        raise ValueError('fix it or remove the key: stampede config show')
+    return settings
+
+
+def save(job, settings):
+    """<job>/settings.json: what the job resolved at new, so every later command for it keeps those choices."""
+    version = VERSION_FILE.read_text().strip() if VERSION_FILE.is_file() else ''
+    (Path(job) / 'settings.json').write_text(json.dumps({'values': settings.values, 'sources': settings.sources,
+                                                         'version': version}, indent=2) + '\n')
 
 
 def show(settings, as_json=False):

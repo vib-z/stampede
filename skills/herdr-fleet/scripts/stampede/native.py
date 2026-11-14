@@ -4,9 +4,8 @@ is the contract."""
 import contextlib, fcntl, json, os, shlex, subprocess, time, uuid
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_
+from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_, settings as settings_
 
-CAP, PANES = 12, 4  # helpers running at once in a lead's tree, live terminals of the job per tab (the defaults)
 KINDS = ('claude', 'codex')
 
 
@@ -16,9 +15,9 @@ def listing():
     request = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'terminal.list', 'params': {'all': True}})
     try:
         done = subprocess.run([os.environ.get('HC') or 'hc', 'connect'], input=request + '\n', capture_output=True, text=True,
-                              timeout=hcapi_.HC_CALL)
+                              timeout=hcapi_.hc_call())
     except subprocess.TimeoutExpired:
-        raise hcapi_.HcError(f'hc connect: no answer in {hcapi_.HC_CALL} s, so it was stopped', 'timeout', 124) from None
+        raise hcapi_.HcError(f'hc connect: no answer in {hcapi_.hc_call()} s, so it was stopped', 'timeout', 124) from None
     except OSError as error:
         raise ValueError('Herdr Core is not installed (' + base_.line(error) + '): install hc, or set HC') from None
     try:
@@ -103,29 +102,29 @@ def running(terminal):
     return word != 'done' and not (word == 'idle' and (terminal.get('turn') or 0) >= 1)
 
 
-def setting(job, file, name, default):
-    """A whole number of at least 1: <job>/<file>, else the environment's name, else default."""
-    path = Path(job) / file if file else None
-    where = path if path and path.is_file() else name
-    value = path.read_text().strip() if where == path else os.environ.get(name) or str(default)
+def setting(job, file, key):
+    """A whole number of at least 1: <job>/<file> when there is one, else the setting key (the job's)."""
+    path = Path(job) / file if job and file else None
+    where = path if path and path.is_file() else key
+    value = path.read_text().strip() if where == path else str(settings_.current(job).get(key))
     if not value.isdigit() or int(value) < 1:
         raise ValueError(f'{where} holds {value!r}, not a whole number of 1 or more')
     return int(value)
 
 
 def cap(job):
-    return setting(job, 'max-helpers', 'STAMPEDE_MAX_HELPERS', CAP)
+    return setting(job, 'max-helpers', 'helpers.max')
 
 
 SPLITS = {2: (1, 'right'), 3: (2, 'down'), 4: (1, 'down')}  # the owner's 2x2: 1 top left, 2 top right, 3 bottom right, 4 bottom left
 
 
-def place(key, terminals, base, want=None):
+def place(key, terminals, base, want=None, job=None):
     """A terminal's place: (tab, pane, labels). The tab is the first of base, base-2, ... that holds fewer than
-    STAMPEDE_TAB_PANES live terminals of the job; the pane is the lowest number none of them holds (want, a recorded
+    helpers.tab_panes live terminals of the job; the pane is the lowest number none of them holds (want, a recorded
     (tab, pane), when that place is still free). Pane 2 splits pane 1 right, 3 splits 2 down, 4 splits 1 down, and each
     from 5 the one before it right; when that pane is free, panes 2 and 3 split pane 1 right and 4 splits it down."""
-    panes, mine = setting(None, None, 'STAMPEDE_TAB_PANES', PANES), live(key, terminals)
+    panes, mine = setting(job, None, 'helpers.tab_panes'), live(key, terminals)
 
     def held(name):
         on = [t for t in mine if labels(t).get('herdr.tab') == name]
@@ -300,7 +299,7 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
             + f'When the job is done or stopped for good, run {s} finish {job} "<one line on where it ended>" once.\n')
 
 
-def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, front=False):
+def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, front=False, settings=None):
     """The job folder, its record and marker, then the lead as a root Core terminal with the space's name.
     front: a chat outside Herdr and Core stays the owner's only contact (<job>/front-door), never in a bot's job."""
     if fork is not None and not base_.SESSION.fullmatch(fork):
@@ -310,6 +309,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     if max_helpers is not None and max_helpers < 1:
         raise ValueError('--max-helpers takes 1 or more')
     repo, program = job_.core_repo(cwd), agents_.cli(kind)
+    settings = settings or settings_.for_new(repo, {'lead.kind': kind, 'helpers.max': max_helpers})
     ask = Path(ask_file).expanduser().read_text()
     owner = job_.starter(os.environ.get('HERDR_WORKSPACE_ID'))
     if front and owner:
@@ -331,6 +331,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
            for t in terminals):
         space += '-' + key[3:7]
     lead = job_.make_job(repo, job, ask, owner, review, front=front)
+    settings_.save(job, settings)
     (job / 'backend').write_text('native\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
                                               'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')
@@ -345,7 +346,7 @@ def new(ask_file, name, review, fork, cwd, kind, space=None, max_helpers=None, f
     brief = job / 'briefs' / (lead + '.md')
     brief.parent.mkdir()
     brief.write_text(lead_brief(job, lead, owner, review, fork, key, space, cap(job), front))
-    model, effort = agents_.lead_model(kind)
+    model, effort = agents_.lead_model(kind, job=job)
     session = str(uuid.uuid4()) if kind == 'claude' else ''
     again = ([program] + agent_args(job, lead, kind, model, effort, lead=True) + (['--session-id', session] if session else [])
              + [f'You are {lead}. Read {brief} and do everything it says.'])  # the fork stays out: a reopen resumes its own session
@@ -507,7 +508,7 @@ def launch(job, key, request, parent, terminals, existing=None):
     when Core stopped answering before its outcome was known."""
     name, kind = request['name'], request['kind']
     want = (request['place'][0], request['place'][1]) if request.get('place') else None
-    _, _, spot = place(key, terminals, request['tab'] or 'main', want)
+    _, _, spot = place(key, terminals, request['tab'] or 'main', want, job)
     report = request['report']
     session = labels(existing).get('stampede.session') or '' if existing else str(uuid.uuid4()) if kind == 'claude' else ''
     tags = {'stampede.job': key, 'stampede.role': 'helper', 'stampede.agent': name, 'stampede.kind': kind,
@@ -828,7 +829,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
     return 1 if failed else 0
 
 
-LEAVE_FOR = 15  # seconds an idle agent has to leave after /exit or /quit
+LEAVE_FOR = None  # a test's stand-in for the setting timeouts.leave: seconds an idle agent has to leave after /exit or /quit
 LEAVE = {'claude': ['/', 'e', 'x', 'i', 't', 'enter'], 'codex': ['/', 'q', 'u', 'i', 't', 'enter']}
 
 
@@ -855,7 +856,7 @@ def close(job, name=None):
             if t.get('state') == 'live':
                 if tags.get('stampede.kind') in LEAVE and hcapi_.core_status(t) in ('idle', 'done'):
                     hcapi_.hc('keys', address, *LEAVE[tags['stampede.kind']])
-                    gone = time.monotonic() + LEAVE_FOR  # hc wait returns at once for an idle terminal: look until it ends
+                    gone = time.monotonic() + (settings_.current(job).get('timeouts.leave') if LEAVE_FOR is None else LEAVE_FOR)  # hc wait returns at once for an idle terminal: look until it ends
                     while time.monotonic() < gone and hcapi_.hc('get', address).get('state') == 'live':
                         time.sleep(0.5)
                 if hcapi_.hc('get', address).get('state') == 'live':

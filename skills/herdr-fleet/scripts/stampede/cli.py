@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
-    doctor as doctor_, check as check_
+    doctor as doctor_, check as check_, settings as settings_
 
 
 def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
@@ -24,7 +24,7 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     if lead and kind not in agents_.LEAD:
         raise ValueError('the lead runs on claude or codex')
     if lead:  # a restarted lead keeps the lead model and effort of its CLI unless told otherwise
-        model, effort = agents_.lead_model(kind, model, effort)
+        model, effort = agents_.lead_model(kind, model, effort, job)
     if not lead:
         if not Path(brief).is_file():
             raise ValueError(f'brief {brief} does not exist')
@@ -88,21 +88,27 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     from . import relay as relay_
     if (space or max_helpers) and (relay or not core):
         raise ValueError('--space and --max-helpers are for a native job: new --core without --relay')
-    kind = kind or os.environ.get('FLEET_LEAD_KIND') or 'claude'
-    if kind not in agents_.LEAD:
-        raise ValueError(f'the lead runs on claude or codex, not {kind!r} (--lead, or FLEET_LEAD_KIND)')
-    if kind != 'claude' and fork:
-        raise ValueError('--fork forks a Claude chat, so it takes a Claude lead: drop --lead codex, or start without --fork')
-    if core and kind == 'codex' and hcapi_.typing_unsafe():
-        raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + hcapi_.typing_unsafe())
+    flags = {'lead.kind': kind, 'helpers.max': max_helpers}
+
+    def check(kind):
+        if kind not in agents_.LEAD:
+            raise ValueError(f'the lead runs on claude or codex, not {kind!r} (--lead, or the setting lead.kind)')
+        if kind != 'claude' and fork:
+            raise ValueError('--fork forks a Claude chat, so it takes a Claude lead: drop --lead codex, or start without --fork')
+        if core and kind == 'codex' and hcapi_.typing_unsafe():
+            raise ValueError('a Codex lead on Herdr Core gets its inbox typed into its terminal, and ' + hcapi_.typing_unsafe())
+        return kind
+    kind = check(kind or settings_.current().get('lead.kind'))
     if core:
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
         if front and relay:
             raise ValueError('--front-door on Herdr Core is for a native job: drop --relay (a --core --relay job has no front door)')
+        settings = settings_.for_new(repo_of(cwd), flags)  # a repo's .stampede.toml may name another lead
+        kind = kind if settings.get('lead.kind') == kind else check(settings.get('lead.kind'))
         if not relay:
-            return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front)
-        return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1')
+            return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front, settings)
+        return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings)
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if not (workspace or pane):
@@ -122,6 +128,8 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         raise herdrapi_.HerdrError(base_.line(error) + relay_.core_hint(), error.code) from None
     except ValueError as error:  # no herdr on PATH, or one that gave no answer
         raise ValueError(base_.line(error) + relay_.core_hint()) from None
+    settings = settings_.for_new(repo, flags)
+    kind = kind if settings.get('lead.kind') == kind else check(settings.get('lead.kind'))
     ws_id = info.get('workspace_id', pane.split(':')[0]) if info else workspace
     owner = job_.starter(ws_id)
     if front and owner:
@@ -136,6 +144,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     else:
         raise ValueError(f'99 jobs named {base} today: pass --name')
     lead = job_.make_job(repo, job, ask, owner, review, name, front)
+    settings_.save(job, settings)
     if info:
         herdrapi_.herdr('tab', 'rename', info['tab_id'], 'lead')
     else:
@@ -143,7 +152,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     brief = job / 'briefs' / (lead + '.md')
     brief.parent.mkdir()
     brief.write_text(agents_.lead_brief(job, lead, owner, review, fork, front=front, kind=kind))
-    args = agents_.cli_args(job, lead, kind, *agents_.lead_model(kind), [], lead=True)
+    args = agents_.cli_args(job, lead, kind, *agents_.lead_model(kind, job=job), [], lead=True)
     herdrapi_.herdr('pane', 'rename', pane, lead)
     blocked = tui_.launch(lead, kind, pane, (['--resume', fork, '--fork-session'] if fork else []) + args)
     # the reopen record leaves the fork out: a reopen resumes the lead's own session, not the planning chat
@@ -177,6 +186,7 @@ GROUPS = (  # the top-level help, in the order an agent meets the commands; hook
                         ('snapshot', 'a native job: save how to reopen it'),
                         ('reopen', 'a native job: start again what is not live'),
                         ('close', "a native job: end an agent's subtree, or the whole job"))),
+    ('settings', (('config', 'config show: every setting, and the layer that set it'),)),
     ('the machine', (('doctor', 'check this machine and this checkout, with the fix for each problem'),
                      ('check', "run this checkout's fast tests (--full: all of them)"),
                      ('update', 'update this checkout to the latest release'))),
@@ -226,8 +236,18 @@ EXAMPLES = {
     'close': 'examples:\n  stampede close <job> build-api\n  stampede close <job>     # the whole job',
     'doctor': 'examples:\n  stampede doctor\n  stampede doctor --core --json',
     'check': 'examples:\n  stampede check\n  stampede check --full',
+    'config': '''examples:
+  stampede config show
+  stampede config show --json
+  stampede config show --job <job>''',
 }
 JOB = 'the job folder (new prints it)'
+def repo_of(cwd=None):
+    """The folder whose .stampede.toml applies: cwd, else the git root of the current folder; None outside a repo."""
+    if cwd:
+        return Path(cwd).expanduser().resolve()
+    top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    return Path(top.stdout.strip()) if top.returncode == 0 else None
 
 
 def main(argv):
@@ -262,7 +282,9 @@ def main(argv):
     p.add_argument('--relay', action='store_true', help='with --core: the earlier Core job (a follower, inbox files, hooks), which hands '
                    'cursor, hermes or kimi to Herdr TUI panes with start --pane')
     p.add_argument('--space', help='with --core: the space\'s name (default: the job\'s name)')
-    p.add_argument('--max-helpers', type=int, help='with --core: helpers running at once (default $STAMPEDE_MAX_HELPERS, else 12)')
+    p.add_argument('--max-helpers', type=int, help='with --core: helpers running at once (default: the setting helpers.max, 12)')
+    p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE', help='a setting for this job, above every '
+                   'other layer, such as helpers.max=6 (repeatable; saved in <job>/settings.json; stampede config show lists them)')
     p = start_parser = command('start', 'Start a worker in the job, or restart its lead: its brief pointer is its first message.\n'
                                         'Kinds: on a Herdr TUI job claude, codex or cursor; on a --core --relay job claude or codex in a\n'
                                         'Core terminal, and cursor, hermes or kimi handed to a Herdr TUI --pane; on a native job\n'
@@ -281,6 +303,8 @@ def main(argv):
     p.add_argument('--effort', help='its reasoning effort, where the CLI takes one')
     p.add_argument('--report', action='append', default=[], help='a report it must write before it may stop, such as reports/build-api.md in the job folder (repeatable: any one will do)')
     p.add_argument('--yolo-in', metavar='WORKTREE', help='a worker in its own git worktree: no-checks mode, never the lead')
+    p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE', help='a setting for this start only, such as '
+                   'lead.codex.effort=high (repeatable)')
     p = command('tell', 'Send a message to an agent of the job (lead names the lead). A Claude agent or the lead of a Herdr TUI\n'
                         'or --relay job reads it from its inbox file; every other agent gets it typed into its pane or terminal.')
     p.add_argument('job', help=JOB); p.add_argument('agent', help='the agent\'s name, or lead')
@@ -300,7 +324,7 @@ def main(argv):
                         'question card (a native job: BLOCKED when Core says it waits at a dialog), or LEAD_GONE.\n'
                         'Exit 0 with output, 3 when nothing came in --timeout seconds.')
     p.add_argument('job', help=JOB)
-    p.add_argument('--timeout', type=int, default=3600, help='seconds (default 3600); exit 3 when nothing came')
+    p.add_argument('--timeout', type=int, help='seconds (default: the setting timeouts.wait, 3600); exit 3 when nothing came')
     for verb in ('next', 'snapshot'):
         command(verb).add_argument('job', help=JOB)
     p = command('tree'); p.add_argument('job', help=JOB); p.add_argument('--json', action='store_true', help='one JSON document')
@@ -335,6 +359,15 @@ def main(argv):
                          'on PATH, so nothing reaches a live job. One line per test module, then the total. Exit 0 or 1.')
     p.add_argument('--full', action='store_true', help='run the whole suite (minutes)')
     p.add_argument('--json', action='store_true', help='{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
+    p = command('config', 'The settings: config show prints every setting as key = value (source), the source being the layer\n'
+                          'that set it (default, user, repo, env:<NAME>, flag or set), then the environment-only variables,\n'
+                          'then any problems. Exit 1 when the config has problems.')
+    p = p.add_subparsers(dest='action', metavar='show')
+    p.required = True
+    p = p.add_parser('show', description='Every setting and the layer that set it; exit 1 when the config has problems.',
+                     epilog=EXAMPLES['config'], formatter_class=form)
+    p.add_argument('--json', action='store_true', help='{"values", "sources", "files", "environment", "problems"}')
+    p.add_argument('--job', help='a job folder: the settings it saved at new (else the repo is the git root here)')
     p = sub.add_parser('hook'); p.add_argument('action'); p.add_argument('job'); p.add_argument('--agent', required=True)
     p.add_argument('payload', nargs='?', help="Codex's notify JSON, passed as the last argument; other hooks read stdin")
     p = sub.add_parser('_reopen'); p.add_argument('job')
@@ -415,6 +448,13 @@ def run(a):
         return doctor_.main(a.core, a.tui, a.json)
     if a.cmd == 'check':
         return check_.main(a.full, a.json)
+    for pair in getattr(a, 'set', None) or []:
+        settings_.parse_set(pair)  # a bad pair is refused before anything runs
+    settings_.SETS[:] = getattr(a, 'set', None) or []
+    if a.cmd == 'config':
+        found = settings_.current(a.job) if a.job else settings_.load(repo=repo_of())
+        print(settings_.show(found, a.json).rstrip('\n'))
+        return 1 if found.problems else 0
     if a.cmd == 'new':
         if a.core:
             return new(a.file, a.workspace, a.name, a.review, a.pane, a.fork, core=True, cwd=a.cwd, front=a.front_door, kind=a.lead,

@@ -7,7 +7,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, relay as relay_, cli as cli_
+from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, relay as relay_, cli as cli_, settings as settings_
 
 FAKE_HC = ROOT / 'tests/fake_hc.py'
 SNAPSHOT = ROOT / 'skills/grokbot-herdr/scripts/herdr-reopen-snapshot'
@@ -122,7 +122,7 @@ class CoreCase(unittest.TestCase):
 
     def brief(self, job, agent):
         brief = job / 'briefs' / (agent + '.md')
-        brief.write_text('\n'.join('## ' + name + '\nDo the assigned work.\n' for name in agents_.BRIEF_SECTIONS))
+        brief.write_text('\n'.join('## ' + name + '\nDo the assigned work.\n' for name in settings_.DEFAULTS['brief.sections']))
         return brief
 
     def entries(self, job):
@@ -229,7 +229,8 @@ class CoreContract(CoreCase):
         self.assertFalse([a for a in sets if a.startswith(('HC_TERMINAL', 'HC_SCOPE', 'SECRET', 'HERDR_PANE', 'HERDR_ENV'))])
 
     def test_the_launch_environment_carries_every_config_example_key(self):
-        keys = re.findall(r'(?m)^export ([A-Z_]+)=', (ROOT / 'config.example').read_text())
+        text = (ROOT / 'config.example').read_text()  # its environment names: each key's (env NAME), then the environment-only list
+        keys = sorted(set(re.findall(r'\benv ([A-Z_]+)', text)) | set(re.findall(r'(?m)^# ([A-Z_]+)=', text)))
         self.assertEqual(sorted(hcapi_.CONFIG_KEYS), sorted(keys))
         for key in ('HC', 'HC_SESSION', 'HC_SOCKET', 'HERDR_EVENTS_DIR'):
             self.assertIn(key, keys)
@@ -732,7 +733,7 @@ class CoreReopen(CoreCase):
         self.relay = 'relay-' + self.key[3:]
         for agent, kind in (('build-api', 'claude'), ('review-api', 'codex')):
             brief = self.job / 'briefs' / (agent + '.md')
-            brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in agents_.BRIEF_SECTIONS))
+            brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in settings_.DEFAULTS['brief.sections']))
             self.quiet(cli_.start, self.job, agent, kind, None, str(brief))
         self.sessions = {r.split('\t')[0]: r.split('\t')[2] for r in (self.job / 'agents.tsv').read_text().splitlines()[1:]}
         self.ran = len(self.calls('run'))
@@ -1070,7 +1071,7 @@ class ReviewEndpoint(CoreCase):
             code, out = self.quiet(relay_.reopen, self.job, lead_only=True)
         self.assertEqual(code, 0, out)
         brief = self.job / 'briefs/review-api.md'
-        brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in agents_.BRIEF_SECTIONS))
+        brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in settings_.DEFAULTS['brief.sections']))
         self.assertEqual(self.quiet(cli_.start, self.job, 'review-api', 'codex', None, str(brief))[0], 0)
         self.quiet(owner_.tell, self.job, 'review-api', 'Check the error path')
         state, calls = self.other('isolated')
@@ -1082,7 +1083,7 @@ class ReviewEndpoint(CoreCase):
     def test_a_caller_on_another_core_is_refused(self):
         self.make()
         brief = self.job / 'briefs/review-api.md'
-        brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in agents_.BRIEF_SECTIONS))
+        brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in settings_.DEFAULTS['brief.sections']))
         for env in ({'HC_SESSION': 'other'}, {'HC_SOCKET': '/tmp/another-core.sock'}):
             with mock.patch.dict(os.environ, env):
                 for call in (lambda: relay_.reopen(self.job), lambda: cli_.start(self.job, 'review-api', 'codex', None, str(brief))):
@@ -1147,7 +1148,7 @@ class ReviewSmallOnes(CoreCase):
 
     def test_an_empty_setting_stays_out_of_the_launch_environment(self):
         job, _ = self.core_job()
-        settings = dict(re.findall(r'(?m)^export ([A-Z_]+)=(\S*)', (ROOT / 'config.example').read_text()))
+        settings = dict(re.findall(r'(?m)^# ([A-Z_]+)=(\S*)', (ROOT / 'config.example').read_text()))
         self.assertEqual(settings['HC_SOCKET'], '', 'config.example ships HC_SOCKET empty')
         with mock.patch.dict(os.environ, {'HC_SOCKET': '', 'FLEET_ASK_CMD': '', 'HC_SESSION': 'smoke'}):
             env = hcapi_.launch_env(job)
@@ -1295,7 +1296,7 @@ class ReviewReopenParity(CoreCase):
         self.key, self.trees = job_.job_key(self.job), {}
         for agent, kind in (('build-api', 'claude'), ('review-api', 'codex')):
             brief = self.job / 'briefs' / (agent + '.md')
-            brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in agents_.BRIEF_SECTIONS))
+            brief.write_text('\n'.join('## ' + name + '\nWork.\n' for name in settings_.DEFAULTS['brief.sections']))
             cwd = None
             if trees:
                 cwd = self.trees[agent] = self.root / 'code' / ('tree-' + agent)

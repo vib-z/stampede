@@ -3,9 +3,13 @@ import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, subprocess, 
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, herdrapi as herdrapi_, tui as tui_
+from . import base as base_, job as job_, herdrapi as herdrapi_, tui as tui_, settings as settings_
 
-ASK_CMD = os.environ.get('FLEET_ASK_CMD', 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h')
+ASK_CMD = None  # a test's stand-in for the setting ask.command
+
+
+def ask_command(job):
+    return ASK_CMD or settings_.current(job).get('ask.command')
 
 
 def tell(job, name, text):
@@ -54,7 +58,7 @@ def ask_now(job, question, options, command=None, gate=None):
         if asked['route'] != 'local':
             raise PermissionError(f'gate {gate} goes to {asked["route"]}, not to the phone')
         question, options = gate_question(asked), []
-    argv = shlex.split(ASK_CMD if gate else command or ASK_CMD)
+    argv = shlex.split(ask_command(job) if gate else command or ask_command(job))
     for option in options:
         argv += ['--option', option]
     yes = False
@@ -85,7 +89,7 @@ def ask_background(job, question, options, command=None, gate=None):
     folder = job / 'asks'
     folder.mkdir(parents=True, exist_ok=True)
     ident = uuid.uuid4().hex[:12]
-    argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command or ASK_CMD,
+    argv = [sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_ask', str(job), '--ident', ident, '--command', command or ask_command(job),
             *(['--gate', gate] if gate else []), *['--option=' + option for option in options], '--', question]
     with (folder / (ident + '.log')).open('a') as output:
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True)
@@ -193,7 +197,7 @@ def lead_alive(job):
         return True
 
 
-def wait(job, timeout=3600, every=5):
+def wait(job, timeout=None, every=5):
     """The front door's wait, run in the background: returns with every outbox item it has not shown yet, or when the
     lead sits at a question card (on a native job: when Core says the lead is blocked). Exit 0 with output, 3 on timeout.
     Marks what it printed as seen."""
@@ -201,7 +205,7 @@ def wait(job, timeout=3600, every=5):
     job = Path(job).absolute()
     native = job_.backend(job) == 'native'
     seen_path, log = job / 'outbox' / '.seen', job / 'outbox.log'
-    deadline, checks = time.monotonic() + timeout, 0
+    deadline, checks = time.monotonic() + (settings_.current(job).get('timeouts.wait') if timeout is None else timeout), 0
     while True:
         seen = int(seen_path.read_text() or 0) if seen_path.is_file() else 0
         rows = [r for r in (log.read_text().splitlines() if log.is_file() else []) if r[:3].isdigit() and int(r[:3]) > seen]

@@ -3,7 +3,7 @@ import fcntl, json, os, shlex, subprocess, time, uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_
+from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_, settings as settings_
 
 
 def deliver_core(job, lead):
@@ -54,15 +54,15 @@ def deliver_core(job, lead):
             return 0
 
 
-HOLD_SETTLE = 5  # seconds a terminal must have been at rest before its turn count can start a hold
+HOLD_SETTLE = None  # a test's stand-in for the setting timeouts.hold_settle
 
 
 def settled(terminal):
-    """The terminal's turn count when it is at rest (idle or done) and has been for HOLD_SETTLE seconds by Core's own
+    """The terminal's turn count when it is at rest (idle or done) and has been for timeouts.hold_settle seconds by Core's own
     clock (status_ms): no turn is under way, and none has only just ended whose count might not show yet. Else None."""
-    since = terminal.get('status_ms')
+    since, settle = terminal.get('status_ms'), settings_.current().get('timeouts.hold_settle') if HOLD_SETTLE is None else HOLD_SETTLE
     if terminal.get('state') == 'live' and hcapi_.core_status(terminal) in ('idle', 'done') and isinstance(since, (int, float)) \
-            and not isinstance(since, bool) and time.time() * 1000 - since >= HOLD_SETTLE * 1000:
+            and not isinstance(since, bool) and time.time() * 1000 - since >= settle * 1000:
         return terminal.get('turn') or 0
     return None
 
@@ -582,7 +582,7 @@ def core_hint():
     return '; Herdr Core answers here, so this job can run on it: new --core --file <ask.md> [--cwd <repo>]'
 
 
-def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False):
+def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False, settings=None):
     """A whole job on Herdr Core. The record first (folder, backend, key, owner and its tag, marker, the lead's row), then
     the follower, then the lead with its brief pointer as the first prompt. Only a confirmed failure (the relay or the lead
     never ran, or its terminal already finished) takes the start back; a live lead that is not ready stays one job.
@@ -591,6 +591,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False):
     if fork is not None and not base_.SESSION.fullmatch(fork):
         raise ValueError(f'--fork takes a Claude session id (a UUID, such as $CLAUDE_CODE_SESSION_ID), not {fork!r}')
     repo, program = job_.core_repo(cwd), agents_.cli(kind)
+    settings = settings or settings_.for_new(repo, {'lead.kind': kind})
     ask = Path(ask_file).expanduser().read_text()
     owner = job_.starter(os.environ.get('HERDR_WORKSPACE_ID'))
     job = repo / ('.herdr-' + (name or job_.slug(ask)))
@@ -605,6 +606,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False):
         raise ValueError('terminals of an earlier job at this path still run: kill them '
                          f'(hc ls --all --label stampede.job={key}) or use another --name')
     lead = job_.make_job(repo, job, ask, owner, review)
+    settings_.save(job, settings)
     (job / 'backend').write_text('core\n')
     (job / 'endpoint').write_text(json.dumps({'session': (os.environ.get('HC_SESSION') or '').strip(),
                                               'socket': os.environ.get('HC_SOCKET') or ''}) + '\n')
@@ -614,7 +616,7 @@ def new_core(ask_file, name, review, fork, cwd, kind='claude', app=False):
     if app:
         (job / 'app-space').write_text('stampede-' + key[3:] + '\n')
     brief.write_text(agents_.lead_brief(job, lead, owner, review, fork, key, kind=kind))
-    args = agents_.cli_args(job, lead, kind, *agents_.lead_model(kind), [], lead=True)
+    args = agents_.cli_args(job, lead, kind, *agents_.lead_model(kind, job=job), [], lead=True)
     args += ['--no-daemon'] if kind == 'codex' else []  # else Codex runs its commands outside the terminal
     session = str(uuid.uuid4()) if kind == 'claude' else ''  # Codex names its own session, at its first turn end
     job_.record(job, lead, kind, brief, args, session)  # the fork stays out: a reopen resumes the lead's own session

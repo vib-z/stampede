@@ -1,41 +1,56 @@
-# stampede settings. Every key is optional: the value shown is the default.
-# They are environment variables. Copy this file to ~/.config/stampede/config and source it from your shell
-# profile (add the line: . ~/.config/stampede/config). The Herdr plugin event reads the same file.
+# stampede's settings, as TOML. Every key is optional: the value shown is its default, so keep only what you change.
+# Yours: copy this file to ~/.config/stampede/config.toml ($XDG_CONFIG_HOME/stampede/config.toml when that is set).
+# A project: commit a .stampede.toml at the repo root with the keys every job there should use.
+# User only: jobs_root, trust_root and ask.command run a command or widen what is trusted, so they are read from your
+# file, the environment or a flag, never from a repo's .stampede.toml.
+# Last one wins: these defaults, your file, the repo's file, the environment (the names below), then a command's flags
+# and --set key=value. stampede new saves the result in <job>/settings.json. See it all: stampede config show
 
-# The lead and its questions (fleet-job, also called stampede)
-export FLEET_LEAD_KIND=claude                       # the lead's CLI when stampede new has no --lead: claude, or codex (gpt-6-astra, ultra), on the Herdr TUI and on Herdr Core; --fork takes claude
-export FLEET_LEAD_MODEL=claude-opus-5-5             # the lead's model, for the CLI it belongs to: a gpt-... model sets a Codex lead, any other a Claude lead; the other CLI's lead keeps its default
-export FLEET_LEAD_EFFORT=xhigh                      # the lead's effort, for the same CLI as FLEET_LEAD_MODEL (a Codex lead's default is ultra)
-export FLEET_ASK_CMD="moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this, for a question or a gate, in a job started locally; the question and options are appended
+jobs_root = "~/code/herdr-jobs"  # every TUI job folder goes in <root>/jobs, never in a repo (user only; env FLEET_JOBS_ROOT)
+trust_root = "~/code"            # herdr-trust trusts repos only under this folder; a Core job's repo must be there (user only; env FLEET_TRUST_ROOT)
 
-export FLEET_JOBS_ROOT=~/code/herdr-jobs         # every job folder goes in <root>/jobs/<date>-<bot or local>-<slug>, never in a repo
+[lead]
+kind = "claude"  # the lead's CLI when stampede new has no --lead: claude or codex; --fork takes claude (env FLEET_LEAD_KIND)
 
-# Trust (herdr-trust, herdr-doctor)
-export FLEET_TRUST_ROOT=~/code                      # herdr-trust trusts repos only under this folder; herdr-doctor checks worktrees here
+[lead.claude]
+model = "claude-opus-5-5"  # a Claude lead's model (env FLEET_LEAD_MODEL, when it is not a gpt-... model)
+effort = "xhigh"           # a Claude lead's effort (env FLEET_LEAD_EFFORT, with that model or none)
 
-# The watch, for a bot outside Herdr (fleet-watch.sh)
-export FLEET_WATCH_INTERVAL=30                      # seconds between passes
-export FLEET_WATCH_PASSES=0                         # stop after this many passes; 0 runs until stopped
-export FLEET_WATCH_NOTIFY=1                         # 0 turns off the phone push for stalls and vanished agents; a Herdr Core job's follower pushes only when this is 1
+[lead.codex]
+model = "gpt-6-astra"  # a Codex lead's model (env FLEET_LEAD_MODEL, when it is a gpt-... model)
+effort = "ultra"       # a Codex lead's effort (env FLEET_LEAD_EFFORT, with a gpt-... model)
 
-# The event relay to a remote bot (herdr-event-post, herdr-event-flush)
-export HERDR_EVENTS_MACHINE=$(hostname -s 2>/dev/null || hostname | cut -d. -f1)  # short hostname sent with every event
-export HERDR_EVENTS_HOME=~/.herdr-events            # the queue and dead letters
-export HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes   # one file per route, holding URL= and KEY=
-export HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log        # the flusher's log
-export HERDR_EVENTS_DIR=~/.config/herdr-events     # owner tags (owners/), job markers (jobs/), handed panes (handed/), and routes/ when HERDR_EVENTS_ROUTES_DIR is unset
-export HERDR_EVENTS_STALE_MINUTES=30                # a Herdr Core job's follower: minutes a working terminal's screen may stay unchanged before stale
-# HERDR_EVENTS_OWNER=<bot-slug> is set per command, for a one-off command in a pane; never here. At fleet-job new it names
-# the bot that started the job (else the workspace's owner tag), and that job's gates go back to that bot.
+[ask]
+command = "moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # stampede ask runs this for a question or a gate in a local job; the question and options are appended (user only; env FLEET_ASK_CMD)
 
-# Herdr Core (hc), for a job started with stampede new --core (or --core --relay)
-export HC=hc                                        # the Herdr Core binary, 0.1.13 or later
-export HC_SESSION=default                           # Core's own: which core; each name is a separate core with its own terminals
-export HC_SOCKET=                                   # Core's own: that core's socket; empty is Core's default path for the session
-export STAMPEDE_APP_SPACE=0                         # 1: every new --core --relay job labels its lead and workers for the Herdr app (as --app-space)
-export STAMPEDE_MAX_HELPERS=12                      # a Core job: helpers that may work at once in the lead's tree; more starts queue (--max-helpers per job)
-export STAMPEDE_TAB_PANES=4                         # a Core job: live terminals per layout tab label (main, main-2, ...) before the next
+[brief]
+sections = ["Goal", "Why", "Inputs", "Constraints", "Done when", "Report back", "If blocked"]  # the headings every worker's brief must fill
 
-# The daily check for a newer release (stampede --version, stampede update --check, herdr-doctor)
-export STAMPEDE_NO_UPDATE_CHECK=0                   # 1 turns the check off
-export STAMPEDE_UPDATE_URL=https://api.github.com/repos/vib-z/stampede/releases/latest  # where it reads the latest release
+[helpers]
+max = 12       # a Core job: helpers that may work at once in the lead's tree; more starts queue; <job>/max-helpers wins (env STAMPEDE_MAX_HELPERS)
+tab_panes = 4  # a Core job: live terminals per layout tab label (main, main-2, ...) before the next (env STAMPEDE_TAB_PANES)
+
+[timeouts]
+wait = 3600      # seconds stampede wait runs before it gives up (exit 3); --timeout per call
+hc_call = 60     # seconds one hc call may take on top of what the command itself waits for
+leave = 15       # seconds an idle agent has to leave after /exit or /quit, at stampede close
+hold_settle = 5  # seconds a terminal must have been at rest before its turn count can start a hold
+
+# Environment only. Other programs read these, so they stay environment variables: export them in your shell
+# profile, or in the shell file ~/.config/stampede/config, which the Herdr plugin event also sources.
+# FLEET_WATCH_INTERVAL=30  # seconds between passes of fleet-watch.sh
+# FLEET_WATCH_PASSES=0  # fleet-watch.sh stops after this many passes; 0 runs until stopped
+# FLEET_WATCH_NOTIFY=1  # 0 turns off the phone push for stalls and vanished agents
+# HERDR_EVENTS_MACHINE=$(hostname -s)  # short hostname sent with every event
+# HERDR_EVENTS_HOME=~/.herdr-events  # the event queue and dead letters
+# HERDR_EVENTS_ROUTES_DIR=~/.config/herdr-events/routes  # one file per route, holding URL= and KEY=
+# HERDR_EVENTS_FLUSH_LOG=~/.herdr-events/flush.log  # the flusher's log
+# HERDR_EVENTS_DIR=~/.config/herdr-events  # owner tags, job markers, handed panes
+# HERDR_EVENTS_STALE_MINUTES=30  # minutes a working terminal's screen may stay unchanged before stale
+# HC=hc  # the Herdr Core binary
+# HC_SESSION=default  # which core
+# HC_SOCKET=  # that core's socket; empty is Core's default path for the session
+# STAMPEDE_APP_SPACE=0  # 1: every new --core --relay job labels its agents for the Herdr app
+# STAMPEDE_NO_UPDATE_CHECK=0  # 1 turns the daily check for a newer release off
+# STAMPEDE_UPDATE_URL=https://api.github.com/repos/vib-z/stampede/releases/latest  # where it reads the latest release
+# HERDR_EVENTS_OWNER is set per command by a bot, never here: at stampede new it names the bot that started the job.

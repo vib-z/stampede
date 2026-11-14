@@ -10,6 +10,7 @@ A job runs on the Herdr TUI (tabs and panes) or on Herdr Core (a tree of termina
 - `stampede --help` lists every command; `stampede <command> --help` gives its flags and an example.
 - `herdr-trust <repo>` once per repo, so Claude and Codex skip the trust dialog. The repo must sit under `FLEET_TRUST_ROOT` (default `~/code`).
 - Write the ask (the owner's words, and any agreed plan) to a file outside the repo.
+- See what a job will do: `stampede config show` (every setting, and the layer that set it).
 
 ## Start a job
 

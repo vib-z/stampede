@@ -1,32 +1,32 @@
 # Every stampede setting, with its default. This file is the list of keys: a key not here is not a setting.
 # Set one in ~/.config/stampede/config.toml (you), <repo>/.stampede.toml (a project), the environment or --set key=value.
 
-jobs_root = "~/code/herdr-jobs"  # every job folder goes in <root>/jobs, never in a repo (user only)
-trust_root = "~/code"            # herdr-trust trusts repos only under this folder; herdr-doctor checks worktrees here (user only)
+jobs_root = "~/code/herdr-jobs"  # every TUI job folder goes in <root>/jobs, never in a repo (user only; env FLEET_JOBS_ROOT)
+trust_root = "~/code"            # herdr-trust trusts repos only under this folder; a Core job's repo must be there (user only; env FLEET_TRUST_ROOT)
 
 [lead]
-kind = "claude"  # the lead's CLI when stampede new has no --lead: claude or codex
+kind = "claude"  # the lead's CLI when stampede new has no --lead: claude or codex; --fork takes claude (env FLEET_LEAD_KIND)
 
 [lead.claude]
-model = "claude-opus-5-5"  # a Claude lead's model
-effort = "xhigh"           # a Claude lead's effort
+model = "claude-opus-5-5"  # a Claude lead's model (env FLEET_LEAD_MODEL, when it is not a gpt-... model)
+effort = "xhigh"           # a Claude lead's effort (env FLEET_LEAD_EFFORT, with that model or none)
 
 [lead.codex]
-model = "gpt-6-astra"  # a Codex lead's model
-effort = "ultra"       # a Codex lead's effort
+model = "gpt-6-astra"  # a Codex lead's model (env FLEET_LEAD_MODEL, when it is a gpt-... model)
+effort = "ultra"       # a Codex lead's effort (env FLEET_LEAD_EFFORT, with a gpt-... model)
 
 [ask]
-command = "moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # fleet-job ask runs this for a question or a gate in a local job; the question and options are appended (user only)
+command = "moshi-hook ask --require-remote --source herdr-fleet --timeout 24h"  # stampede ask runs this for a question or a gate in a local job; the question and options are appended (user only; env FLEET_ASK_CMD)
 
 [brief]
-sections = ["Goal", "Why", "Inputs", "Constraints", "Done when", "Report back", "If blocked"]  # the headings every brief must fill
+sections = ["Goal", "Why", "Inputs", "Constraints", "Done when", "Report back", "If blocked"]  # the headings every worker's brief must fill
 
 [helpers]
-max = 12       # a Core job: helpers that may work at once in the lead's tree; more starts queue
-tab_panes = 4  # a Core job: live terminals per layout tab label (main, main-2, ...) before the next
+max = 12       # a Core job: helpers that may work at once in the lead's tree; more starts queue; <job>/max-helpers wins (env STAMPEDE_MAX_HELPERS)
+tab_panes = 4  # a Core job: live terminals per layout tab label (main, main-2, ...) before the next (env STAMPEDE_TAB_PANES)
 
 [timeouts]
-wait = 3600      # seconds the front door's wait runs before it gives up
+wait = 3600      # seconds stampede wait runs before it gives up (exit 3); --timeout per call
 hc_call = 60     # seconds one hc call may take on top of what the command itself waits for
-leave = 15       # seconds an idle agent has to leave after /exit or /quit
+leave = 15       # seconds an idle agent has to leave after /exit or /quit, at stampede close
 hold_settle = 5  # seconds a terminal must have been at rest before its turn count can start a hold

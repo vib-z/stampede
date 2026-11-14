@@ -2,7 +2,7 @@
 import json, math, os, re, subprocess
 from pathlib import Path
 
-from . import base as base_, job as job_
+from . import base as base_, job as job_, settings as settings_
 
 
 def default_socket(session):
@@ -35,7 +35,11 @@ class HcError(RuntimeError):
         self.kind, self.code = kind, code
 
 
-HC_CALL = 60  # seconds one hc call may take on top of what the command itself waits for
+def hc_call():
+    """Seconds one hc call may take on top of what the command itself waits for (timeouts.hc_call)."""
+    return settings_.current().get('timeouts.hc_call')
+
+
 # A send is stopped SEND_MARGIN seconds before Core's draft hold could run out, so it never goes in after a draft someone
 # began after stampede looked at the prompt and then left: Core types after a draft only once its hold is over, and a
 # send stopped while held types nothing. SEND_FLOOR is what a send needs with no draft (Core's quiet pause, then its
@@ -106,7 +110,7 @@ def core_env():
     {name: value}, or None when it cannot be read. Core reads its config from the folders this names, which need not
     be this process's."""
     try:
-        shown = subprocess.run([os.environ.get('HC') or 'hc', 'exec', '--', '/usr/bin/env'], capture_output=True, text=True, timeout=HC_CALL)
+        shown = subprocess.run([os.environ.get('HC') or 'hc', 'exec', '--', '/usr/bin/env'], capture_output=True, text=True, timeout=hc_call())
     except (OSError, subprocess.TimeoutExpired):
         return None
     if shown.returncode:
@@ -126,8 +130,8 @@ def hc_version():
     that holds a send and an hc on PATH may be newer than it; with no core up, what hc --version prints. None when
     neither says."""
     try:
-        shown = subprocess.run([str(base_.FOLLOWER), '--core-version'], capture_output=True, text=True, timeout=HC_CALL).stdout.strip()
-        shown = shown or subprocess.run([os.environ.get('HC') or 'hc', '--version'], capture_output=True, text=True, timeout=HC_CALL).stdout
+        shown = subprocess.run([str(base_.FOLLOWER), '--core-version'], capture_output=True, text=True, timeout=hc_call()).stdout.strip()
+        shown = shown or subprocess.run([os.environ.get('HC') or 'hc', '--version'], capture_output=True, text=True, timeout=hc_call()).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
     found = re.search(r'(\d+)\.(\d+)\.(\d+)', shown)
@@ -160,10 +164,10 @@ def typing_unsafe():
 
 def hc(*args, wait=0, limit=None):
     """One Herdr Core command (HC names the binary) and its JSON answer; on failure Core's error kind and exit code.
-    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer HC_CALL seconds after that
+    wait: seconds the command itself may wait (hc wait --timeout). A call with no answer hc_call() seconds after that
     (or after limit seconds, when given) is stopped, kind 'timeout': a hung hc never holds a lock or a lead. Core
     cancels a send whose caller is gone before it typed anything."""
-    limit = limit or HC_CALL + wait
+    limit = limit or hc_call() + wait
     try:
         result = subprocess.run([os.environ.get('HC') or 'hc', args[0], '--json', *args[1:]], capture_output=True, text=True,
                                 timeout=limit)
