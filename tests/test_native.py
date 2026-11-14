@@ -424,6 +424,37 @@ class TreeTell(NativeCase):
         self.assertEqual(self.quiet(owner_.notify_lead, self.job, 'lost')[0], 2)
 
 
+RULE = '─' * 160
+# Screens as hc read --lines 8 gives them (Herdr Core 0.1.21), made from captures of live agents: the prompt line and the
+# lines around it kept byte for byte, the no-break space Claude Code draws after its prompt character included; paths,
+# PR numbers, task ids and names replaced with neutral text.
+CLAUDE_IDLE = ('  Checks:\n  - Unit suite: every test passes.\n  - Install dry run: install.sh --dry-run exits 0.\n\n'
+               '✻ Cooked for 1m 1s · done 11:41\n\n' + RULE + '\n❯ \n' + RULE + '\n'
+               '  ⏵⏵ auto mode on (shift+tab to cycle) · PR #1 · ← 2 agents' + ' ' * 40 + '\n')
+CLAUDE_WORKING = ('⏺ Monitor(wait for the evals exit line)\n  ⎿  Monitor started · task abc123 · timeout 300s\n'
+                  '  ⎿  Allowed by auto mode\n  ⎿  Running… (1m 43s · timeout 10m)\n'
+                  '     (ctrl+b to run in background)\n✢ Precipitating… (5m 53s · ↓ 22.8k tokens)\n'
+                  '  ⎿  Tip: Name your conversations with /rename to find them easily in /resume later\n'
+                  + RULE + '\n❯ \n' + RULE + '\n  ⏵⏵ auto mode on · PR #1 · 1 shell, 1 monitor · '
+                  'esc to interrupt · ← 2 agents · ↓ to manage' + ' ' * 30 + '\n')
+CODEX_IDLE = ('• Review complete: FINDINGS, two bugs.\n  Review report (reports/review.md)\n  Full suite: every test passed.\n'
+              '  Worked for 18m 11s • 11:35\n\n› Ask Codex to do anything\n\n'
+              '  GPT-6-Astra high · ~/repo · Read the brief\n  ← for agents · ? for shortcuts' + ' ' * 40 + '\n')
+CLAUDE_DIALOG = (RULE + '\n Bash command\n\n   make clean\n   Remove the build folder\n\n Do you want to proceed?\n'
+                 ' ❯ 1. Yes\n   2. No, and tell Claude what to do differently (esc)\n')
+
+
+class RealScreens(unittest.TestCase):
+    """hcapi.typed on screens made from live Claude Code and Codex terminals."""
+
+    def test_an_empty_prompt_is_not_typed_and_words_after_it_are(self):
+        for name, screen in (('claude idle', CLAUDE_IDLE), ('claude working', CLAUDE_WORKING), ('codex idle', CODEX_IDLE)):
+            self.assertFalse(hcapi_.typed(screen), name)
+        for name, screen in (('claude idle', CLAUDE_IDLE), ('claude working', CLAUDE_WORKING)):
+            self.assertTrue(hcapi_.typed(screen.replace('❯ \n', '❯ fix the flaky test\n')), name)
+        self.assertTrue(hcapi_.typed(CLAUDE_DIALOG), 'a dialog has no prompt line')
+
+
 class Shared(NativeCase):
     def setUp(self):
         super().setUp()

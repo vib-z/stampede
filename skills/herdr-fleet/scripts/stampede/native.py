@@ -635,7 +635,8 @@ def tell(job, name, text, kept=None):
             names = {labels(t).get('stampede.agent') for t in live(job_.core_key(job), terminals)} - {lead, None}
             return failed(f'no live terminal of this job is {name}; it has: {", ".join(["lead"] + sorted(names))}')
         address = found['address']
-        if labels(found).get('stampede.kind') in ('claude', 'codex') and hcapi_.drafted(address, job):  # clearing it could erase someone's typing
+        if labels(found).get('stampede.kind') in ('claude', 'codex') and hcapi_.core_status(found) != 'blocked' \
+                and hcapi_.drafted(address, job):  # clearing it could erase someone's typing; hc send refuses a blocked one
             return failed(f'text is already typed in its prompt; Core cannot clear it safely: read it with hc read {address}, '
                           f'clear it with hc keys {address} ctrl+c when hc get shows idle, then tell again')
         hcapi_.hc('send', '--', address, text, limit=hcapi_.send_limit(timeout=hcapi_.hc_call(job)), job=job)

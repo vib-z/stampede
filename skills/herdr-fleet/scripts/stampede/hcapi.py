@@ -229,8 +229,8 @@ def core_status(terminal):
     return (terminal.get('status') or {}).get('state')
 
 
-EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›) *$',
-                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt
+EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›)[ \u00a0]*$',
+                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt; Claude Code draws it as ❯ and a no-break space
 
 
 def typed(screen, empty=EMPTY_PROMPT):
