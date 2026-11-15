@@ -37,16 +37,19 @@ fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 # After an outage the queue holds every state a pane went through; only its newest is still true, and each sent
 # event wakes a bot. Keep the newest per route+pane, move older ones to dead/ as *.superseded. No pane: kept.
+# Names sort by bytes (LC_ALL=C here, whatever the user's locale), and a name starts with its post time to the
+# microsecond (herdr-event-post), so the sorted glob is oldest first. supersede leaves the queue in files.
 supersede(){
+  local LC_ALL=C
   for f in "$Q"/*.json; do printf '%s\t%s\n' "$(jq -r '(.route//"default")+"|"+(.payload.pane//"")' "$f" 2>/dev/null)" "$f"; done |
     awk -F'\t' '$1 ~ /\|./ { if ($1 in last) print last[$1]; last[$1]=$2 }' |
     while IFS= read -r f; do mv "$f" "$DEAD/$(basename "$f" .json).superseded" && log "dead (superseded): $(basename "$f")"; done
+  files=("$Q"/*.json)
 }
 while :; do
-  supersede
-  files=("$Q"/*.json); [ ${#files[@]} -eq 0 ] && exit 0
+  supersede; [ ${#files[@]} -eq 0 ] && exit 0
   progressed=0
-  for f in "${files[@]}"; do   # glob is sorted; names start with UTC timestamp -> oldest first
+  for f in "${files[@]}"; do   # oldest first (supersede)
     [ -f "$f" ] || continue
     name=$(basename "$f")
     age=$(( $(date +%s) - $(file_mtime "$f") ))
