@@ -11,7 +11,7 @@ stampede reads each setting from these layers; the last one that sets it wins:
 2. yours: `~/.config/stampede/config.toml` (`$XDG_CONFIG_HOME/stampede/config.toml` when that is set);
 3. the project's: `.stampede.toml` at the root of the repo (your project's folder), which it can commit (save in its history);
 4. the environment: the variable names stampede has always read;
-5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, the format of these files, and a bare word is a string (text).
+5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, the format of these files, and a bare word is a string (text)).
 
 [config.example](../config.example) holds every key with its default. Copy it to `~/.config/stampede/config.toml` and keep only what you change:
 

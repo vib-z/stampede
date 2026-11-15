@@ -1,6 +1,6 @@
 # Status and roadmap
 
-**0.2.2, 14 Nov 2026, and early:** commands and files may still change. What each release shipped, and how it was tested: [CHANGELOG.md](../CHANGELOG.md). Real jobs, with timelines: [docs/RUNS.md](RUNS.md).
+**0.2.3, 15 Nov 2026, and early:** commands and files may still change. What each release shipped, and how it was tested: [CHANGELOG.md](../CHANGELOG.md). Real jobs, with timelines: [docs/RUNS.md](RUNS.md).
 
 **Works and tested.** Every command in the README and the pages under `docs/` was run against a scratch job with the fakes, or against `--help`.
 - **A job on the Herdr TUI:** the job folder, the lead's start with its hooks, Claude, Codex and Cursor workers, complete worker briefs, plan approval, background questions and cancel, gates that go back to whoever started the job, quieter events while a job is open, a lead forked from the planning chat, a Codex lead, a front door outside Herdr, and reopen.
@@ -19,7 +19,7 @@
 - **The cross-client suite:** every client drives one job per backend through the real `stampede` command against the fakes; live runs on one Mac covered a Herdr chat, Claude, Codex, Hermes and a test bot over SSH (a real Grok Bot and Cursor were not run; Claude on Core, Codex and Hermes passed all but O4, O5 and O7, which wait on the owner's tap). The matrix, and which client does worse: [docs/CLIENTS.md](CLIENTS.md).
 - **Posts to a bot:** in a job a bot started, `stampede post` also sends that bot a `post` event; tested with the unit tests and the cross-client suite, not yet with a live bot.
 - **The evals:** the fixture cases run in CI on macOS and Linux; the live runners and the before and after runs: [tests/evals/README.md](../tests/evals/README.md).
-- **The command:** layered config with `stampede config show`, `--help` for every command, `stampede doctor` and `stampede check`, and `--json` on every command an agent runs (tested on all three backends, on Python 3.9 too, and on a real scratch core).
+- **The command:** layered config with `stampede config show` and `stampede config set backend`, `--help` for every command, `stampede doctor` and `stampede check`, and `--json` on every command an agent runs (tested on all three backends, on Python 3.9 too, and on a real scratch core).
 - **The site** is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 
 **Next:**

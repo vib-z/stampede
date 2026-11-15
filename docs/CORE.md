@@ -8,7 +8,7 @@ This page shows how a job runs on Herdr Core, the second place a job can run.
 - [One Core job, start to finish](#one-core-job-start-to-finish)
 - [The earlier path](#the-earlier-path---core---relay)
 
-[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime: a server that runs programs in terminals that stay open. Each program reports its own status (OSC 7501, a code it prints to its terminal). Core gives each terminal a parent link and labels, and sends a stream of events. It has no workspaces, tabs or panes.
+[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime: a server that runs programs in terminals that stay open. An agent reports its own status (OSC 7501, a code it prints to its terminal); a plain program reports none. Core gives each terminal a parent link and labels, and sends a stream of events. It has no workspaces, tabs or panes.
 
 On top of Core, stampede adds only the space's name, the owner tag, the reopen record, your gates (steps that need your yes), a cap on helpers and the layout labels. The shape a client reads (labels, parent links, events): [docs/CORE-NATIVE.md](CORE-NATIVE.md). The lead's playbook: [references/core.md](../skills/herdr-fleet/references/core.md). For Core's own basics, read `hc --skill`.
 
