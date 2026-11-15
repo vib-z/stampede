@@ -152,7 +152,12 @@ if [ -z "$URL" ]; then [ "$STRICT" = 1 ] && refuse 3 "route $route has no URL"; 
 unset URL KEY
 # durable queue: write atomically, then flush (fast path). Queue holds route name only, never URL/KEY.
 QH="${HERDR_EVENTS_HOME:-$HOME/.herdr-events}"; mkdir -p "$QH/queue" 2>/dev/null || { [ "$STRICT" = 1 ] && refuse 4 "cannot make $QH/queue"; }
-qname="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.json"
+# The order is in the name: the UTC second, then its microseconds from the same jq clock reading, so a name's text
+# order is post order whatever the pid (two posts in one microsecond are concurrent: no order to keep). "-u" sorts
+# after "-<pid>", so a file of the old shape, <second>-<pid>-<random>, goes before a new one of its second.
+qname=$(jq -rn 'now as $t | ($t|floor) as $s | ($s|strftime("%Y%m%dT%H%M%SZ")) + "-u" + ((($t-$s)*1000000|floor|tostring) | ("000000"+.)[-6:])' 2>/dev/null)
+[[ $qname =~ ^[0-9]{8}T[0-9]{6}Z-u[0-9]{6}$ ]] || qname=$(date -u +%Y%m%dT%H%M%SZ)   # no jq answer: the old shape
+qname="$qname-$$-$RANDOM.json"
 if jq -c --arg r "$route" '{route:$r, payload:.}' <<<"$payload" >"$QH/queue/.tmp-$qname" && mv "$QH/queue/.tmp-$qname" "$QH/queue/$qname"; then
   [ "$deferred" = 1 ] && seen_now
   log "queued $qname: $summary"

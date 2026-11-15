@@ -106,16 +106,40 @@ rm "$F/down"; herdr-event-flush
 grep -q '"state":"blocked"' "$F/sent.jsonl" && fail "B10 an out-of-date state was sent"
 [ "$(ls "$T/.herdr-events/dead" | grep -c superseded)" = 1 ] || fail "B10 superseded event not moved to dead/"
 [ -z "$(ls "$Q")" ] || fail "B10 queue not empty"
-# B10b: two posts in one second, named as before (time-pid-random): pid 10000 sorts before 9999 as text,
-# so the name of the older state sorts last. The file's own time decides: done is sent, blocked superseded.
-: > "$F/sent.jsonl"; s=$(date -u +%Y%m%dT%H%M%SZ)
-q(){ jq -nc --arg st "$1" '{route:"bot-alpha",payload:{source:"herdr",state:$st,pane:"w1:p9b",owner:"bot-alpha",route:"bot-alpha"}}'; }
-q blocked > "$Q/$s-9999-1.json"; TZ=UTC touch -t "$(jq -nr 'now-2|strftime("%Y%m%d%H%M.%S")')" "$Q/$s-9999-1.json"
-q done > "$Q/$s-10000-1.json"
-herdr-event-flush
-[ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10b sent $(cat "$F/sent.jsonl"), want only done"
-[ -f "$T/.herdr-events/dead/$s-9999-1.superseded" ] || fail "B10b the older state was not superseded"
+# B10b: the state posted last is kept, whatever the pids. done is started first (the smaller pid) but waits for a
+# marker; blocked posts (a larger pid); then done posts. Before, a name was <date's second>-<pid>-<random>, so in one
+# second the smaller pid sorted first and done was dropped. A fake date holds that second still, so the old naming
+# meets the case every time; a name's order no longer comes from date. Pids of two widths cannot show it: up to 8 tries.
+DD="$T/.herdr-events/dead"; shown=0
+printf '#!/bin/bash\n[ "$*" = "-u +%%Y%%m%%dT%%H%%M%%SZ" ] && { echo 20261115T034512Z; exit 0; }\nexec /bin/date "$@"\n' > "$B/date"; chmod +x "$B/date"
+qpidw(){ local r=${1#*Z-}; r=${r#u??????-}; r=${r%%-*}; echo ${#r}; }   # width of the pid in a queue name
+for try in 1 2 3 4 5 6 7 8; do
+  : > "$F/sent.jsonl"; touch "$F/down"; rm -f "$F/go"; p="w1:p9$try"
+  ( until [ -f "$F/go" ]; do sleep 0.02; done; exec herdr-event-post "{\"source\":\"herdr\",\"state\":\"done\",\"pane\":\"$p\"}" ) & bg=$!
+  post "{\"source\":\"herdr\",\"state\":\"blocked\",\"pane\":\"$p\"}"; touch "$F/go"; wait "$bg"
+  names=$(cd "$Q" && grep -l "\"$p\"" -- *.json 2>/dev/null; cd "$DD" && grep -l "\"$p\"" -- * 2>/dev/null); set -- $names
+  [ $# = 2 ] || fail "B10b want two queued files for $p, got: $names"
+  if [ "$(qpidw "$1")" = "$(qpidw "$2")" ]; then
+    rm "$F/down"; herdr-event-flush
+    [ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10b sent $(cat "$F/sent.jsonl"), want only the done posted last"
+    grep -l '"state":"blocked"' "$DD"/*.superseded | grep -q . || fail "B10b blocked was not superseded"
+    shown=1; break; fi
+  rm -f "$Q"/*.json; rm "$F/down"   # pids of two widths: try a new pane
+done
+rm "$B/date"; [ "$shown" = 1 ] || fail "B10b no pair of posts with pids of one width in 8 tries"
 [ -z "$(ls "$Q")" ] || fail "B10b queue not empty"
+# B10c: a file queued by the old code (<second>-<pid>-<random>) goes before a new one of the same second
+: > "$F/sent.jsonl"; touch "$F/down"
+post '{"source":"herdr","state":"done","pane":"w1:p9c"}'; n=$(cd "$Q" && ls); o="${n:0:16}-99999-1.json"
+jq -nc '{route:"bot-alpha",payload:{source:"herdr",state:"blocked",pane:"w1:p9c",owner:"bot-alpha",route:"bot-alpha"}}' > "$Q/$o"
+rm "$F/down"; herdr-event-flush
+[ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10c an old-shape file sorted after a new one of its second"
+[ -f "$DD/${o%.json}.superseded" ] || fail "B10c the old-shape file was not superseded"
+# B10d: pane-less events posted in an outage are all sent, in post order
+: > "$F/sent.jsonl"; touch "$F/down"
+for k in 1 2 3; do post "{\"source\":\"cron$k\",\"state\":\"done\",\"n\":$k}"; done   # three sources: no de-dupe
+rm "$F/down"; herdr-event-flush
+[ "$(grep . "$F/sent.jsonl" | jq -r .n | tr -d '\n')" = 123 ] || fail "B10d pane-less events sent as $(grep . "$F/sent.jsonl" | jq -r .n | tr '\n' ' '), want 1 2 3"
 
 # B12: an open job drops plain turn ends. Finish, blocked, StopFailure and a pane with no marker still post.
 mkdir -p "$T/.config/herdr-events/jobs"
