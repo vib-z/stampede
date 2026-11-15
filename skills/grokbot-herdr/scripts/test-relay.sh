@@ -106,6 +106,16 @@ rm "$F/down"; herdr-event-flush
 grep -q '"state":"blocked"' "$F/sent.jsonl" && fail "B10 an out-of-date state was sent"
 [ "$(ls "$T/.herdr-events/dead" | grep -c superseded)" = 1 ] || fail "B10 superseded event not moved to dead/"
 [ -z "$(ls "$Q")" ] || fail "B10 queue not empty"
+# B10b: two posts in one second, named as before (time-pid-random): pid 10000 sorts before 9999 as text,
+# so the name of the older state sorts last. The file's own time decides: done is sent, blocked superseded.
+: > "$F/sent.jsonl"; s=$(date -u +%Y%m%dT%H%M%SZ)
+q(){ jq -nc --arg st "$1" '{route:"bot-alpha",payload:{source:"herdr",state:$st,pane:"w1:p9b",owner:"bot-alpha",route:"bot-alpha"}}'; }
+q blocked > "$Q/$s-9999-1.json"; TZ=UTC touch -t "$(jq -nr 'now-2|strftime("%Y%m%d%H%M.%S")')" "$Q/$s-9999-1.json"
+q done > "$Q/$s-10000-1.json"
+herdr-event-flush
+[ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10b sent $(cat "$F/sent.jsonl"), want only done"
+[ -f "$T/.herdr-events/dead/$s-9999-1.superseded" ] || fail "B10b the older state was not superseded"
+[ -z "$(ls "$Q")" ] || fail "B10b queue not empty"
 
 # B12: an open job drops plain turn ends. Finish, blocked, StopFailure and a pane with no marker still post.
 mkdir -p "$T/.config/herdr-events/jobs"
