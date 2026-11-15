@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **A recorded yes is written whole.** A `gate-ok` run while your yes lands sees no yes or the whole one; until now it could fail with a JSON error for a valid approval. A record that does not parse is refused as a malformed yes that names the gate.
+- **After an outage the relay sends a pane's newest state.** That holds even when two of its events were queued within one second; until now the order inside a second followed process numbers, so the bot could be told a pane was blocked after it had finished.
 
 ## 0.2.3 (15 Nov 2026)
 
