@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A recorded yes is written whole.** A `gate-ok` run while your yes lands sees no yes or the whole one; until now it could fail with a JSON error for a valid approval. A record that does not parse is refused as a malformed yes that names the gate.
+
 ## 0.2.3 (15 Nov 2026)
 
 The Herdr TUI is the default again, the README is a short front page and the manual behind it is in plain words, the skills have one source, and `stampede tree` tells a leftover shell from an agent.
