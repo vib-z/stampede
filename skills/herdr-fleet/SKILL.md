@@ -33,7 +33,7 @@ Four questions: **length** (under an hour, or hours), **agents** (one family, or
 3. **A lane only when it pays:** parallel work over 30 minutes, another model, the reviewer, or one item of many. A sub-lead only past 10 items.
 4. **Contract first:** types, stubs and one failing test, committed before any worker starts.
 5. **Briefs** in `<job>/briefs/`; `<job>/register.md` holds agent, pane, model, worktree, status.
-6. **Start:** `stampede start <job> <role>-<scope> --brief <file>` (TUI: with `--pane`); the role sets CLI, model and effort.
+6. **Start:** `stampede start <job> <role>-<scope> --brief <file>` (TUI: `--pane`); its role sets CLI, model and effort (`medium`).
 7. **Wait:** end your turn; hooks (TUI) or Core's notes wake you. Ask the owner with `stampede ask` and keep working.
 8. **Review** as `review.step` says: [review.md](references/review.md).
 9. **Integrate:** read the reports, run the full checks once, do every shared git write, push the work branch, open a DRAFT PR.

@@ -90,7 +90,7 @@ Every rule, and who records your yes: [docs/SAFETY.md](docs/SAFETY.md).
 - [Setup](docs/SETUP.md): the full install, updating, the one-time settings and uninstalling.
 - [Herdr Core](docs/CORE.md): how to run a job on Herdr Core, a second way to run jobs without Herdr's tabs and panes.
 - [Safety](docs/SAFETY.md): every step that needs your yes, and what the code holds.
-- [Configure](docs/CONFIGURE.md): every setting and its default.
+- [Configure](docs/CONFIGURE.md): every setting and its default, such as effort (how hard an agent thinks): extra high for the lead, medium for the others.
 - [Troubleshoot](docs/TROUBLESHOOT.md): each message you may see, its fix, and the FAQ.
 - [Reference](docs/REFERENCE.md): every command and script with its exit codes, how the code is laid out, every doc, and the credits.
 - [Status and roadmap](docs/STATUS.md): what works, how it was tested, and what comes next.

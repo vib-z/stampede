@@ -2,6 +2,7 @@
 
 This page lists every setting, its default and where to change it. You need to set none.
 
+- [Effort: the default, and how to change it](#effort-the-default-and-how-to-change-it)
 - [Every key, with its default](#every-key-with-its-default)
 - [Environment only, with defaults](#environment-only-with-defaults)
 
@@ -31,6 +32,27 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 **Problems.** `stampede config show` names, one line each, what stampede skips: an unknown key, a value of the wrong type or not one of the key's choices, a file that does not parse. `stampede new` refuses to start a job while there is one (exit 2); no other command fails on them.
 
+## Effort: the default, and how to change it
+
+Effort is how hard an agent thinks before it acts. By default:
+
+- **The lead** runs at extra high: `xhigh` on Claude, `ultra` on Codex (Codex has no `xhigh`; `ultra` is its extra high).
+- **Every worker** runs at `medium`: build, research, review, design, qa, copy, test, and any other role, which takes `roles.default`.
+- **On any model.** Picking another model keeps the effort. Only an effort you set changes it.
+
+It is a default, not a limit: stampede passes any effort you name to the CLI, and refuses none. Each CLI's levels are in [clis.md](../skills/herdr-fleet/references/clis.md).
+
+| to change | do this |
+|---|---|
+| the lead, for one job | `stampede new --file ask.md --lead-effort max` |
+| the lead, for every job | `effort = "max"` under `[lead.claude]` (or `[lead.codex]`) in your config |
+| one role, for one job | `stampede new --file ask.md --set roles.research.effort=high` (the job saves it) |
+| one role, for every job | `effort = "high"` under `[roles.research]` in your config, or in a repo's `.stampede.toml` |
+| one worker | `stampede start <job> build-api --brief <file> --effort high` |
+| one worker on another model or CLI | `stampede start <job> build-ui --brief <file> --kind codex --model <model> --effort high` |
+
+A role's effort goes only with its own CLI. With `--kind codex` on a Claude role, give `--effort` too, or Codex uses its own default.
+
 ## Every key, with its default
 
 | key | default | environment | what it does |
@@ -42,7 +64,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 | `lead.forbid` | `[]` | `FLEET_LEAD_FORBID` (comma-separated) | models that may not lead a job. Before it makes anything, `stampede new` refuses a lead whose model is on the list, from `--lead-model`, a setting or the default, in one line naming the model and `lead.forbid` (user only). Workers are not checked |
 | `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
 | `lead.codex.model`, `lead.codex.effort` | GPT-6 Astra (its id is in config.example), `ultra` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
-| `roles.<role>.kind`, `.model`, `.effort` | `build`, `default`: Claude Opus 5.5 `medium`; `research`: Claude Opus 5.5 `xhigh`; `copy`: Claude Opus 5.5 `high`; `test`: Claude Sonnet 5.5 `medium`; `review`, `qa`, `design`: Codex GPT-6 Astra `ultra` (the ids are in config.example) | | what `stampede start <job> <role>-<scope>` gives a helper that names no `--kind`, `--model` or `--effort`. The role is the name up to its first `-`; any other role takes `roles.default`. A role's model and effort go only with its own kind, so `--kind codex` on a Claude role leaves the model to Codex. Add a role of your own as `[roles.<name>]`. Not for a program after `--` |
+| `roles.<role>.kind`, `.model`, `.effort` | every role at `medium`: `build`, `research`, `copy`, `default`: Claude Opus 5.5; `test`: Claude Sonnet 5.5; `review`, `qa`, `design`: Codex GPT-6 Astra (the ids are in config.example) | | what `stampede start <job> <role>-<scope>` gives a helper that names no `--kind`, `--model` or `--effort`. The role is the name up to its first `-`; any other role takes `roles.default`. A role's model and effort go only with its own kind, so `--kind codex` on a Claude role leaves the model to Codex. Add a role of your own as `[roles.<name>]`. Not for a program after `--` |
 | `review.step` | `end` | | the review step the lead's brief asks for, with its reviewer from `roles.review`: `end` (one pass at the end, by another model than the builder's), `each` (one per pull request or step) or `none` (no review step: the brief says you switched it off). Nothing enforces it |
 | `ask.command` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | `FLEET_ASK_CMD` | what `stampede ask` runs, for a question or a gate, in a job started here (a bot's job asks its bot). The options and the question are added at the end (user only) |
 | `brief.sections` | the seven headings of the [hand-off template](../skills/herdr-fleet/references/brief.md) | | the sections every worker's brief must fill |

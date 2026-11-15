@@ -20,6 +20,7 @@
 - **Posts to a bot:** in a job a bot started, `stampede post` also sends that bot a `post` event; tested with the unit tests and the cross-client suite, not yet with a live bot.
 - **The evals:** the fixture cases run in CI on macOS and Linux; the live runners and the before and after runs: [tests/evals/README.md](../tests/evals/README.md).
 - **The command:** layered config with `stampede config show` and `stampede config set backend`, `--help` for every command, `stampede doctor` and `stampede check`, and `--json` on every command an agent runs (tested on all three backends, on Python 3.9 too, and on a real scratch core).
+- **Effort:** by default the lead at extra high (`xhigh` on Claude, `ultra` on Codex) and every worker at `medium`, on any model, changed per job, per role or per worker. Tested with the unit suite (the settings, and the start of each role); not yet checked in a live job.
 - **The site** is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 
 **Next:**
