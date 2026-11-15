@@ -383,6 +383,7 @@ DELIVERED lead-seller-copy (inbox file)
 $ stampede ask $J --gate --sha <commit> --pr 12 "mark PR #12 ready for review"        # the lead
 GATE 83307febaa1a posted to the front door as outbox 002; act after stampede gate-ok ... prints APPROVED, or on the owner's yes typed in your pane
 $ stampede approve-gate $J 83307febaa1a --sha <commit> --digest <digest> --by "owner in desktop chat: 'mark it ready'"
+DELIVERED lead-seller-copy (inbox file)
 APPROVED 83307febaa1a at <commit>
 ```
 
