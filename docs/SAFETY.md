@@ -22,9 +22,9 @@ The one list, and what never counts as a yes: [gates.md](../skills/herdr-fleet/r
 `stampede new` records the bot that started the job (`HERDR_EVENTS_OWNER`, else the workspace's owner tag) in `<job>/owner`.
 The lead asks each gate with `stampede ask <job> --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>"`. A gate for anything but those two has no kind.
 
-- **Started by a bot:** a `gate` event goes to that bot ([remote/events.md](../remote/events.md)). The bot asks you in chat and, on your yes, runs `stampede approve-gate <job> <gate> --sha <commit> --by "owner in <bot> chat"` over SSH, recorded in `<job>/gates/`.
+- **Started by a bot:** a `gate` event goes to that bot ([remote/events.md](../remote/events.md)). The bot asks you in chat. On your yes, it runs the approve line the event hands it, as written, over SSH: `stampede approve-gate <job> <gate> --sha <commit> --digest <d> --by "owner in <bot> chat"`. That records your yes in `<job>/gates/`.
 - **Started locally:** your phone, through `FLEET_ASK_CMD` (Moshi), records your tap the same way; or the lead's own question card.
-- **Started by a front door** (`--front-door`, on the Herdr TUI or on Herdr Core): a post in `<job>/outbox/`. It shows you the exact action and, on your yes in its chat, runs `stampede approve-gate ... --by "owner in <chat>: '<your words>'"`.
+- **Started by a front door** (`--front-door`, on the Herdr TUI or on Herdr Core): a post in `<job>/outbox/`. It shows you the exact action and, on your yes in its chat, runs the post's approve line as written: `stampede approve-gate <job> <gate> --sha <commit> --digest <d> --by "owner in <chat>: '<your words>'"`.
   An explicit order you already gave there for that exact action counts, quoted; anything vaguer goes back to you.
 
 ## Which yes counts
@@ -61,7 +61,7 @@ These guard against a forgetful agent, not a hostile one. An agent runs as your 
 
 Every gate is on by default (`[gates]` in [Configure](CONFIGURE.md)). Switching one off is allowed, and logged.
 
-- For one job: `stampede new --no-gate merge` (repeatable, the same as `--set gates.merge=false`).
+- For one job: `stampede new --file <ask.md> --no-gate merge` (repeatable, the same as `--set gates.merge=false`).
 - For every job: your own `config.toml`. A repo's `.stampede.toml` can never switch a gate off.
 
 `stampede new` records the job's gates, and each remote's default branch, outside the job folder, in `$HERDR_EVENTS_DIR/gates/<job key>.json`.
@@ -70,7 +70,7 @@ Each gate off shows in:
 
 - a line `<UTC time> OFF <name> (<layer>)` in `<job>/gates.log`;
 - the lead's brief;
-- `stampede config show --job`;
+- `stampede config show --job <job>`;
 - `stampede finish`, which prints `gates off: <names>` and sends it with the done event.
 
 Two rules have no switch: never close what the job did not create, and merge only the reviewed commit.

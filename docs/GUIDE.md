@@ -20,7 +20,7 @@ The [README](../README.md#what-it-is) explains agent, pane, terminal, git, branc
 - **Front door:** the chat or bot you talk to. **Gate:** a step that needs your yes ([Safety](SAFETY.md)).
 - **Brief:** a worker's written task. **Hook:** a command an agent program runs by itself, such as at the end of a turn.
 - **Auto mode:** the agent does small steps without asking you, with its own safety checks still on.
-- **Grok Bot:** an agent with its own computer, which you text from your phone. It logs in to yours over SSH, on a private Tailscale network.
+- **Grok Bot:** an agent with its own computer, which you text from your phone. It logs in to yours over SSH (a safe way to run commands on another computer), on a private Tailscale network.
 
 ## What is stampede
 
@@ -83,7 +83,7 @@ Then open your repo in Herdr, start Claude in a pane, and type:
 **Then from your phone (recommended).** Set up Grok Bot's SSH, Tailscale and webhook once ([remote/grokbot/](../remote/grokbot/README.md)). A webhook is a web address your computer calls to tell the bot what happened. Then send the same ask in the Grok chat.
 
 **On Herdr Core instead of the Herdr TUI.** Set up and check [Herdr Core](CORE.md) first, then ask *"With stampede, on Herdr Core: ..."*.
-The front door then runs `stampede new --core`. A job runs on Herdr Core only when you ask for it.
+The front door then runs `stampede new` with `--core`. A job runs on Herdr Core only when you ask for it.
 
 **Limits.**
 
@@ -160,7 +160,7 @@ The marks belong to their owners and imply no endorsement ([sources](images/logo
 
 ### Works well with
 
-**[pstack](https://github.com/michael-denyer/pstack-claude), optional.** For a coding job, the lead uses pstack if you have it: data shape first, a contract commit, proof on the real surface.
+**[pstack](https://github.com/michael-denyer/pstack-claude), optional.** For a coding job, the lead uses pstack if you have it. It settles how the data looks first, commits a skeleton of the code with one failing test before the rest, and proves the work on the real program.
 The lead is a normal Claude Code session, so an installed pstack loads on its own. stampede's rules keep the extra agents pstack starts as Herdr panes you can watch.
 Without pstack, nothing changes. The rules: [references/pstack.md](../skills/herdr-fleet/references/pstack.md).
 
@@ -303,7 +303,7 @@ recorded review-hello (claude) in ~/code/herdr-jobs/jobs/2026-10-29-local-make-h
 DELIVERED review-hello (inbox file)
 ```
 
-The reviewer writes `reports/review-hello.md`, with `Status: PASS` in its first 10 lines, and ends its turn. Its hook then adds `REPORT reports/review-hello.md` to `inbox.log`, which wakes the lead.
+The reviewer writes `reports/review-hello.md`, with `Status: PASS` and `Reviewed: <sha>` in its first 10 lines (the sha is the full id of the commit it reviewed), and ends its turn. Its hook then adds `REPORT reports/review-hello.md` to `inbox.log`, which wakes the lead.
 Next, the lead asks you a question and keeps working:
 
 ```console
@@ -382,7 +382,7 @@ $ stampede approve $J --by "owner in desktop chat: 'approve as written'"
 DELIVERED lead-seller-copy (inbox file)
 $ stampede ask $J --gate --sha <commit> --pr 12 "mark PR #12 ready for review"        # the lead
 GATE 83307febaa1a posted to the front door as outbox 002; act after stampede gate-ok ... prints APPROVED, or on the owner's yes typed in your pane
-$ stampede approve-gate $J 83307febaa1a --sha <commit> --by "owner in desktop chat: 'mark it ready'"
+$ stampede approve-gate $J 83307febaa1a --sha <commit> --digest <digest> --by "owner in desktop chat: 'mark it ready'"
 APPROVED 83307febaa1a at <commit>
 ```
 
@@ -392,7 +392,7 @@ If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `B
 The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead.
 The front door's loop: [skills/stampede](../skills/stampede/SKILL.md#steps). The lead's side: [front-door.md](../skills/herdr-fleet/references/front-door.md).
 
-**On Herdr Core** the same loop runs with `stampede new --core --front-door`, from a chat outside Herdr. Here is one run against the test suite's fake `hc`, every command from outside Herdr:
+**On Herdr Core** the same loop runs with `--core --front-door` on `stampede new`, from a chat outside Herdr. Here is one run against the test suite's fake `hc`, every command from outside Herdr:
 
 ```console
 $ stampede new --core --file ask.md --name login --front-door --review
