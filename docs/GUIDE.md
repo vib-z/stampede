@@ -1,26 +1,52 @@
 # The stampede guide
 
-What stampede is at length, how a job flows, and one job walked through command by command. Install: [SETUP.md](SETUP.md). The short version: the [README](../README.md).
+This page shows how a job runs, what stampede works with, and one job, command by command.
+To install stampede, see [SETUP.md](SETUP.md). The short version is the [README](../README.md).
 
-**You text a task to your Grok Bot. It reaches your Mac over Tailscale, where a Claude Code lead does the job in [Herdr](https://herdr.dev) and adds Codex or Cursor panes only when parallel work helps. Nothing is merged, pushed, sent or spent until you say yes.**
-
-Grok Bot is the setup we recommend, but you don't need it: stampede also runs when you start it straight from Claude, Codex or any agent ([Without a bot](#without-a-bot)). Either way you can watch every agent in Herdr, and every question comes back to you.
-
-**Let a Grok Bot set it up.** [Stompy](https://x.ai/bot/_mNMq-0M5aA02AQMNOHTy) is a Grok Bot that sets up stampede between your Grok Bot and your Mac, end to end, and keeps it healthy.
-
-New releases: on [GitHub](https://github.com/vib-z/stampede), **Watch**, then **Custom**, then **Releases**. The site: [vib-z.github.io/stampede](https://vib-z.github.io/stampede/).
-
-## Contents
-
-- [How it flows](#how-it-flows), [Without a bot](#without-a-bot), [Quick start](#quick-start)
-- [What is stampede?](#what-is-stampede), [Works with](#works-with), [Works well with](#works-well-with), [See it](#see-it)
-- [How it works](#how-it-works), with [the job folder](#the-job-folder)
+- [Words on this page](#words-on-this-page), [What is stampede](#what-is-stampede), [How it flows](#how-it-flows), [Quick start](#quick-start)
+- [Works with](#works-with), [See it](#see-it), [How it works](#how-it-works), with [the job folder](#the-job-folder)
 - [Use: one job, start to finish](#use-one-job-start-to-finish), [Share the plan first](#share-the-plan-first), [A front door outside Herdr](#a-front-door-outside-herdr-the-claude-desktop-app)
-- [Front doors](#front-doors)
+- [Front doors](#front-doors), [New releases](#new-releases)
+
+## Words on this page
+
+The [README](../README.md#what-it-is) explains agent, pane, terminal, git, branch, pull request (PR) and merge. This page adds:
+
+- **Lead:** the one agent that plans and does the job. **Worker:** an extra agent it brings in (on Herdr Core, a helper).
+- **Tab:** a group of panes in Herdr. The Herdr app, with its tabs and panes, is the Herdr TUI.
+- **Herdr Core:** a second way to run a job, in terminals with no tabs or panes ([Herdr Core](CORE.md)).
+- **CLI:** a program you run in a terminal. **Repo:** your project's git folder.
+- **Commit:** one saved change. **Push:** sending commits to GitHub.
+- **Front door:** the chat or bot you talk to. **Gate:** a step that needs your yes ([Safety](SAFETY.md)).
+- **Brief:** a worker's written task. **Hook:** a command an agent program runs by itself, such as at the end of a turn.
+- **Auto mode:** the agent does small steps without asking you, with its own safety checks still on.
+- **Grok Bot:** an agent with its own computer, which you text from your phone. It logs in to yours over SSH (a safe way to run commands on another computer), on a private Tailscale network.
+
+## What is stampede
+
+stampede runs a team of Claude Code and Codex agents in Herdr. You ask once, in plain words, from a [front door](#front-doors).
+One lead plans the job and does it, and brings in workers only when they earn their place ([How it works](#how-it-works)).
+
+**Why.** Running many agents by hand goes wrong in four ways: stops between steps, too many small agents, rounds that wait on each other, and a lead that spends its day writing briefs.
+Real jobs showed all four ([docs/RUNS.md](RUNS.md)). stampede's answer: plan and go, work alone by default, wake on hooks, and ask you only what is yours to decide.
+
+**Who it is for.** Anyone who runs Claude Code, Codex or Cursor and wants a whole job done from one ask, watched in Herdr and answered from a phone.
+
+**What it is made of.** Four skills and one command. A skill is a set of written steps an agent follows. You install them with a script or as a Herdr plugin.
+
+| part | what it does |
+|---|---|
+| [`stampede`](../skills/stampede/SKILL.md) (skill) | the front door: say "use stampede" in any project chat, and it writes the ask, opens a Herdr workspace for the project and starts the lead |
+| [`herdr-fleet`](../skills/herdr-fleet/SKILL.md) | the steps the lead follows: plan, panes, hooks, review, gates, report, reopen |
+| [`grokbot-herdr`](../skills/grokbot-herdr/SKILL.md) | the front door for a bot that reaches your computer over SSH |
+| [`share-plan`](../skills/share-plan/SKILL.md) | shows you the plan before any agent starts, only when you ask |
+| [`stampede`](../scripts/stampede) (command) | the command: `new`, `start`, `tell`, `ask`, `cancel`, `approve` and more ([docs/CLI.md](CLI.md)) |
 
 ## How it flows
 
-Started from Grok Bot, the setup we recommend:
+The setup we recommend: you text a task to your Grok Bot, and it reaches your Mac over Tailscale.
+A Claude Code lead does the job there, in [Herdr](https://herdr.dev). It adds Codex or Cursor panes only when parallel work helps.
+No agent merges, pushes, sends or spends until you say yes.
 
 ```mermaid
 flowchart LR
@@ -37,61 +63,41 @@ flowchart LR
     lead -. "result, by webhook" .-> bot
 ```
 
-## Without a bot
+**Let a Grok Bot set it up.** [Stompy](https://x.ai/bot/_mNMq-0M5aA02AQMNOHTy) is a Grok Bot that sets up stampede between your Grok Bot and your Mac, end to end. It also keeps the setup healthy.
 
-stampede works fully on its own with Herdr, Claude Code and this repo: start a job straight from Claude, Codex, Cursor or any agent, or from a Claude pane in Herdr ([Front doors](#front-doors)). Gate questions then reach your phone through Moshi, if you use it, or you answer in Herdr.
+### Without a bot
 
-Either way:
-- **One ask, one lead.** A Claude Code lead plans the job and does it.
-- **Workers only when it's worth it.** The lead opens a Codex or Claude Code worker in its own Herdr pane for parallel work, another model or a reviewer, and works alone otherwise.
-- **Hooks, not polling.** Workers report to the lead through hooks, and you can watch every pane in Herdr.
-- **Your yes on every merge, push, send, spend or close.** The gate question goes back to whoever started the job ([Safety](SAFETY.md)), and the lead keeps working while it waits.
+You do not need a bot. stampede works on its own with Herdr, Claude Code and this repo.
+Start a job from Claude, Codex, Cursor or any agent, or from a Claude pane in Herdr ([Front doors](#front-doors)).
+Gate questions then reach your phone through Moshi, a phone app, if you use it. Otherwise you answer in Herdr.
 
 ## Quick start
 
-**An agent told to run a job with stampede:** start at [USING.md](../USING.md), one short page.
+**An agent told to run a job with stampede** starts at [USING.md](../USING.md), one short page.
 
-Install it as the [README](../README.md#install) shows.
-
-**Your first ask.** Once per Mac, run the [unattended setup](../skills/herdr-fleet/references/unattended-setup.md), so the lead can start workers with no visit to their panes. Run `herdr-trust ~/code/my-app` once for your repo, open it in Herdr, start Claude in a pane, and type:
+**Your first ask, from a chat in Herdr.** Install stampede and do steps 1 and 2 of [your first job](../README.md#your-first-job): the [one-time settings](SETUP.md#unattended-agents), and `herdr-trust` for your repo.
+Then open your repo in Herdr, start Claude in a pane, and type:
 
 > With stampede: add a /health endpoint with a test, have a reviewer on another model check it, then open a draft PR.
 
-**Then from your phone (recommended).** Set up Grok Bot's SSH, Tailscale and webhook once ([remote/grokbot/](../remote/grokbot/README.md)), and send the same ask in chat.
+**Then from your phone (recommended).** Set up Grok Bot's SSH, Tailscale and webhook once ([remote/grokbot/](../remote/grokbot/README.md)). A webhook is a web address your computer calls to tell the bot what happened. Then send the same ask in the Grok chat.
 
-**On Herdr Core instead of the Herdr TUI.** With [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) installed and running, run `herdr-doctor`, then ask *"With stampede, on Herdr Core: ..."*. The front door runs `stampede new --core`: a job runs on Herdr Core only when you ask for it ([Herdr Core](CORE.md)).
+**On Herdr Core instead of the Herdr TUI.** Set up and check [Herdr Core](CORE.md) first, then ask *"With stampede, on Herdr Core: ..."*.
+The front door then runs `stampede new` with `--core`. A job runs on Herdr Core only when you ask for it.
 
 **Limits.**
-- macOS and Linux. On macOS you load the event relay's two launchd jobs yourself; on Linux `install.sh` starts the same timers. What ran live on Linux, and what has not yet: [docs/LINUX.md](LINUX.md).
-- The lead is Claude by default, or Codex with `stampede new --lead codex`. Workers can be Claude, Codex or Cursor; on Herdr Core any program runs as a helper.
-- Early: commands and files may still change.
-- For big jobs. A small job runs as one agent session in a single tagged Herdr pane ([FAQ](TROUBLESHOOT.md)).
+
+- It runs on macOS and Linux. What differs on Linux: [docs/LINUX.md](LINUX.md).
+- stampede is early: commands and files may still change.
+- It is for big jobs. A small job runs as one agent session in a single tagged Herdr pane ([FAQ](TROUBLESHOOT.md)).
 
 The full install, with every prerequisite: [Install](SETUP.md#install). A whole job, command by command: [the walkthrough](#use-one-job-start-to-finish).
 
-## What is stampede?
-
-stampede is multi-agent orchestration for Claude Code and Codex in Herdr: four skills and one command, installed by script or as a Herdr plugin. You ask once, in plain words: in a Claude pane in Herdr, from Claude or Codex desktop or Cursor, or, as we recommend, from your phone through Grok Bot.
-
-stampede starts **one lead agent** for the job. The lead writes a short plan and starts working at once. It brings in Codex workers, or Claude Code or Cursor ones, each in its own Herdr pane, only when that agent earns its place: work that runs in parallel, a different model, one reviewer, or the same task many times over. Workers report through hooks, so nobody polls. Gate questions come back to wherever you asked, and nothing that matters happens without your own yes.
-
-**Why.** Running many agents by hand means stops between steps, too many small agents, rounds that wait on each other, and a lead that spends its day writing briefs. Real jobs showed all four ([docs/RUNS.md](RUNS.md)). stampede is the lean answer: plan and go, work alone by default, wake on hooks, and ask you only what is yours to decide.
-
-**Who it is for.** Anyone who runs Claude Code, Codex or Cursor and wants a whole job done from one ask, watched in Herdr and answered from a phone.
-
-**What it is.** Four skills and one command:
-
-| part | what it does |
-|---|---|
-| [`stampede`](../skills/stampede/SKILL.md) (skill) | the front door: say "use stampede" in any project chat and it writes the ask, opens a Herdr workspace for the project and starts the lead |
-| [`herdr-fleet`](../skills/herdr-fleet/SKILL.md) | the playbook the lead follows: plan, panes, hooks, review, gates, report, reopen |
-| [`grokbot-herdr`](../skills/grokbot-herdr/SKILL.md) | the front door for a bot that reaches your machine over SSH |
-| [`share-plan`](../skills/share-plan/SKILL.md) | shows you the plan before any agent starts, only when you ask |
-| [`stampede`](../scripts/stampede) (command) | the command: `new`, `start`, `tell`, `ask`, `cancel`, `approve` |
-
 ## Works with
 
-**Agents.** The lead runs on Claude Code, or on Codex when you pick it (`stampede new --lead codex`, on the Herdr TUI or on Herdr Core). Workers run on Claude Code, Codex or Cursor, each started by `stampede start --kind claude|codex|cursor` with its own hooks and auto mode. A [Herdr Core](CORE.md) job runs any other CLI as a program, and the earlier `--core --relay` path hands Hermes and Kimi workers to Herdr TUI panes.
+**Agents.** The lead runs on Claude Code, or on Codex when you pick it, on the Herdr TUI or on Herdr Core ([Pick the lead](#use-one-job-start-to-finish)).
+Workers run on Claude Code, Codex or Cursor. `stampede start --kind claude|codex|cursor` starts each one with its own hooks and auto mode.
+A [Herdr Core](CORE.md) job runs any other CLI as a program. The earlier `--core --relay` path hands Hermes and Kimi workers to Herdr TUI panes.
 
 <table>
   <tr>
@@ -148,13 +154,15 @@ stampede starts **one lead agent** for the job. The lead writes a short plan and
   </tr>
 </table>
 
-**Herdr Core** (`hc` 0.1.13 or later), Herdr's terminal runtime, can run a whole job in place of the Herdr TUI: [Herdr Core](CORE.md).
+Herdr itself detects many more agent CLIs: its `herdr agent start --help` lists 24, from Gemini and Kimi to OpenCode and Copilot.
+That is Herdr's support, not stampede's yet. `stampede start` refuses any other kind. Starting workers on them is [planned](STATUS.md).
+The marks belong to their owners and imply no endorsement ([sources](images/logos/SOURCES.md)).
 
-Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 24, from Gemini and Kimi to OpenCode and Copilot). That is Herdr's support, not stampede's yet: `stampede start` refuses any other kind (a Core job runs any CLI as a plain program), and starting workers on them is [planned](STATUS.md). The marks belong to their owners and imply no endorsement ([sources](images/logos/SOURCES.md)).
+### Works well with
 
-## Works well with
-
-**[pstack](https://github.com/michael-denyer/pstack-claude), optional.** For coding jobs, the lead picks up pstack if you have it: data shape first, a contract commit, proof on the real surface. The lead is a normal Claude Code session, so an installed pstack loads on its own, and stampede's rules keep pstack's fan-out as Herdr panes you can watch. Not required: without it nothing changes. The rules: [references/pstack.md](../skills/herdr-fleet/references/pstack.md).
+**[pstack](https://github.com/michael-denyer/pstack-claude), optional.** For a coding job, the lead uses pstack if you have it. It settles how the data looks first, commits a skeleton of the code with one failing test before the rest, and proves the work on the real program.
+The lead is a normal Claude Code session, so an installed pstack loads on its own. stampede's rules keep the extra agents pstack starts as Herdr panes you can watch.
+Without pstack, nothing changes. The rules: [references/pstack.md](../skills/herdr-fleet/references/pstack.md).
 
 ## See it
 
@@ -164,26 +172,48 @@ Herdr itself detects many more agent CLIs (its `herdr agent start --help` lists 
 
 ## How it works
 
-The flow is the [diagram in How it flows](#how-it-flows), step by step, for any front door:
+These are the steps of the [diagram above](#how-it-flows), the same for every front door.
 
-1. **You ask once**, in plain words, in a [front door](#front-doors). It writes the ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name, and steps back.
-2. **One lead plans and goes.** `lead-<slug>` starts on Claude (Opus 5.5 at `xhigh` effort by default), or on Codex (GPT-6 Astra at `ultra`) with `--lead codex`, in auto mode, in a `lead` tab. It writes `plan.md` (the tasks, who does each, questions with a safe default, and the gates) and starts work.
-3. **A pane only when it's worth it:** parallel pieces of about 30 minutes or more (at most 4), another model or tool, one reviewer on another model, or the same task many times (6 at once). Each worker gets its own Herdr pane.
-4. **Hooks, not polling.** A worker's report, turn end, question or exit lands as a line in `<job>/inbox.log` (`REPORT`, `TURN`, `QUESTION`, `GONE`, and `UNDELIVERED` for a question, gate or post its bot has not heard), and Claude's file hook wakes the lead. A Codex lead has no file hook: stampede types each new line into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`, once it is idle and unfocused.
-5. **Review only what ships**, on another model, at most two rounds.
-6. **Questions and gates go back to whoever started the job**: a bot gets a `question` or `gate` event, asks you in chat and passes your answer back (a gate's yes recorded with `approve-gate`); a job you started locally asks on your phone through Moshi. Which yes counts where: [Safety](SAFETY.md). The lead keeps working while it waits, and an agent's own say-so never counts.
-7. **The lead reports back once.** When the job is done or stopped for good it runs `stampede finish <job> "<summary>"`, the one done event a bot outside Herdr gets for the job. While the job is open, plain turn ends stay on the machine; blocked, permission prompts, StopFailure, a stale or dead pane, questions, gates and the lead's posts (`stampede post`) still go out. Then the lead asks whether to close.
+1. **You ask once**, in plain words, in a [front door](#front-doors). It writes your ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name and steps back.
+2. **One lead plans and goes.** The lead, `lead-<slug>`, starts in auto mode in a `lead` tab.
+   By default it runs on Claude (Opus 5.5 at `xhigh` effort). With `--lead codex` it runs on Codex (GPT-6 Astra at `ultra`).
+   It writes `plan.md`: the tasks, who does each, questions with a safe default, and the gates. Then it starts work.
+3. **A pane only when it's worth it.** The lead starts a worker for one of these:
+   - parallel pieces of about 30 minutes or more (at most 4);
+   - another model or tool;
+   - one reviewer on another model;
+   - the same task many times (6 at once).
+
+   Each worker gets its own Herdr pane.
+4. **Hooks, not polling.** When a worker reports, ends a turn, asks a question or exits, a line lands in `<job>/inbox.log`.
+   The lines are `REPORT`, `TURN`, `QUESTION` and `GONE`, and `UNDELIVERED` for a question, gate or post its bot has not heard.
+   Claude's file hook then wakes the lead. A Codex lead has no file hook, so stampede types the lines into its pane ([Pick the lead](#use-one-job-start-to-finish)).
+5. **Review only what ships**, on another model, in at most two rounds.
+6. **Questions and gates go back to whoever started the job.** A bot gets a `question` or `gate` event. It asks you in chat, passes your answer back, and records a gate's yes with `approve-gate`.
+   A job you started locally asks on your phone through Moshi. Which yes counts where: [Safety](SAFETY.md).
+   The lead keeps working while it waits, and an agent's own say-so never counts.
+7. **The lead reports back once.** When the job is done, or stopped for good, the lead runs `stampede finish <job> "<summary>"`. That is the one done event a bot outside Herdr gets for the job.
+   While the job is open, plain turn ends stay on the machine. These still go out: blocked, permission prompts, StopFailure, a stale or dead pane, questions, gates and the lead's posts (`stampede post`).
+   Then the lead asks whether to close.
 8. **Workers exit when their work is merged** or accepted. Nothing closes without your yes, and `reopen.sh` brings a closed job back.
 
-**Stateful lead, stateless workers.** The lead holds your ask, the plan, the decisions and the judgement. A worker gets one brief and nothing else, so that brief carries the state: Goal, Why, Inputs, Constraints, Done when, Report back and If blocked, on the [hand-off template](../skills/herdr-fleet/references/brief.md). A thin brief is the usual cause of weak worker output. `stampede start` refuses a worker brief with a missing or empty section before starting anything. Pick a strong planner for the lead and a fast, capable executor for workers; both are [settings](CONFIGURE.md), not code.
+**The lead keeps the state; a worker gets a brief.** The lead holds your ask, the plan, the decisions and the judgement. A worker gets only its brief, so the brief carries the state.
+A brief has seven sections: Goal, Why, Inputs, Constraints, Done when, Report back and If blocked, on the [hand-off template](../skills/herdr-fleet/references/brief.md).
+A thin brief is the usual cause of weak work from a worker. `stampede start` refuses a brief with a missing or empty section, before it starts anything.
+Pick a strong planner for the lead, and a fast, capable model for the workers. Both are [settings](CONFIGURE.md), not code.
 
-**What lives where.** Your Mac, always on, runs Herdr, the lead and the workers. A bot such as Grok Bot runs on its own computer and reaches the Mac over SSH and Tailscale. Or the whole thing runs on one remote computer. Either way, the lead and its workers share one machine; workers on a second machine are [planned](STATUS.md).
+**What lives where.** Your Mac, always on, runs Herdr, the lead and the workers. A bot such as Grok Bot runs on its own computer and reaches the Mac over SSH and Tailscale.
+Or everything runs on one remote computer. Either way, the lead and its workers share one machine. Workers on a second machine are [planned](STATUS.md).
 
-**On Herdr Core** the flow keeps its steps, but Core holds the tree: the lead is a root terminal, each helper its Core child (any depth, at most 12 working at once), and the lead is woken by Core's notes about its children and by messages sent with `hc send`, never by hooks or inbox files. Questions, gates, posts and finish reach the owner as above; a blocked, failed, dead or stalled lead reaches the owner from the machine's watchdog within about 5 minutes ([Herdr Core](CORE.md)).
+**On Herdr Core** the steps stay the same, but Core holds the tree: the lead is a root terminal, and each helper its child, at any depth, at most 12 working at once.
+Core's notes about the children and messages sent with `hc send` wake the lead, never hooks or inbox files. Questions, gates, posts and finish reach you as above.
+If the lead is blocked, failed, dead or stalled, the machine's watchdog tells you within about 5 minutes ([Herdr Core](CORE.md)).
 
 ### The job folder
 
-`stampede new` makes `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/` on every backend (the setting `jobs_root` moves the root), never inside your repo, so nothing lands in git. A job an older stampede made in `<repo>/.herdr-<slug>` keeps working. The repo stays the agents' working folder, and every agent gets `--add-dir <job>` to write there:
+`stampede new` makes a folder for each job, on every backend: `~/code/herdr-jobs/jobs/<date>-<bot or local>-<slug>/`. The setting `jobs_root` moves the root.
+The folder is never inside your repo, so nothing in it lands in git. A job an older stampede made in `<repo>/.herdr-<slug>` keeps working.
+The agents still work in the repo, and `--add-dir <job>` lets each one write here. The folder holds:
 
 ```text
 ask.md        your ask, word for word
@@ -227,7 +257,8 @@ REOPEN.md, reopen.sh   written by herdr-reopen-snapshot before a close (a Core j
 
 ## Use: one job, start to finish
 
-In a Herdr pane in your repo, ask your Claude chat: *"With stampede: make hello.txt with hi, then have a reviewer on another model confirm it."* The chat (a front door) writes the ask and starts the lead:
+In a Herdr pane in your repo, ask your Claude chat: *"With stampede: make hello.txt with hi, then have a reviewer on another model confirm it."*
+The chat, your front door, writes the ask and starts the lead:
 
 ```console
 $ printf 'Make hello.txt with hi.\nThen have a reviewer on another model confirm it.\n' > ask.md
@@ -237,11 +268,16 @@ DELIVERED lead-make-hello-txt-with-hi (inbox file)
 lead-make-hello-txt-with-hi ~/code/herdr-jobs/jobs/2026-10-29-local-make-hello-txt-with-hi
 ```
 
-Inside Herdr, `--workspace` defaults to the current workspace and the lead gets a new `lead` tab; `--pane <id>` puts it in an empty pane instead, and `--name <slug>` names the job. A front door outside Herdr has no current workspace: for the Herdr TUI it passes `--workspace` or `--pane`, and for Herdr Core `--core`; with none of them `new` refuses and makes nothing ([skills/stampede](../skills/stampede/SKILL.md)). The chat tells you `lead-make-hello-txt-with-hi` and stops.
+Inside Herdr, `--workspace` defaults to the current workspace, and the lead gets a new `lead` tab. `--pane <id>` puts it in an empty pane instead, and `--name <slug>` names the job.
+A front door outside Herdr has no current workspace: for the Herdr TUI it passes `--workspace` or `--pane`, and for Herdr Core `--core`.
+With none of them, `new` refuses and makes nothing ([skills/stampede](../skills/stampede/SKILL.md)). Here the chat tells you `lead-make-hello-txt-with-hi` and stops.
 
-**Plan in chat, then fork it into the lead.** A Claude chat where you and Claude already worked out the plan adds `--fork "$CLAUDE_CODE_SESSION_ID"`: the lead starts as a fork of that chat (`claude --resume <id> --fork-session`), keeps the whole conversation and writes the agreed plan into `plan.md`. Your chat stays as it was. Put the agreed plan in the ask file too: it stays the source of truth. Guide: [remote/claude-code.md](../remote/claude-code.md#plan-here-then-fork-the-lead).
+**Plan in chat, then fork it into the lead.** If you and a Claude chat already worked out the plan, the chat adds `--fork "$CLAUDE_CODE_SESSION_ID"`.
+The lead starts as a fork (a copy) of that chat, with `claude --resume <id> --fork-session`. It keeps the whole conversation and writes the agreed plan into `plan.md`. Your chat stays as it was.
+Put the agreed plan in the ask file too: it stays the source of truth. Guide: [remote/claude-code.md](../remote/claude-code.md#plan-here-then-fork-the-lead).
 
-**Pick the lead.** The lead is Claude unless you ask for Codex: then the front door adds `--lead codex` (`FLEET_LEAD_KIND=codex` makes it your standing choice). A Codex lead runs GPT-6 Astra at `ultra` with its hooks and `--approve-for-me`; its brief pointer is typed into its pane at once:
+**Pick the lead.** The lead is Claude unless you ask for Codex. Then the front door adds `--lead codex`, and `FLEET_LEAD_KIND=codex` makes Codex your standing choice.
+A Codex lead runs GPT-6 Astra at `ultra`, with its hooks and `--approve-for-me`. stampede types its brief pointer into its pane at once. `--fork` takes only a Claude lead:
 
 ```console
 $ stampede new --file ask.md --lead codex
@@ -252,7 +288,9 @@ $ stampede new --file ask.md --lead codex --fork "$CLAUDE_CODE_SESSION_ID"
 stampede new: --fork forks a Claude chat, so it takes a Claude lead: drop --lead codex, or start without --fork
 ```
 
-A Codex lead has no file hook: a short-lived deliverer types its new inbox lines into its pane once it is idle, unfocused and has nothing typed in its prompt (on Herdr Core, Core delivers them). Because text is typed there, it acts on a gate only after `stampede gate-ok` prints `APPROVED`.
+A Codex lead has no file hook. A short-lived deliverer types its new inbox lines into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`,
+once the pane is idle, unfocused and has nothing typed in its prompt. On Herdr Core, Core delivers them.
+Since this text is typed in, a Codex lead acts on a gate only after `stampede gate-ok` prints `APPROVED`.
 
 The lead reads `ask.md`, writes `plan.md` and goes on at once. Here it writes `briefs/review-hello.md` on the [hand-off template](../skills/herdr-fleet/references/brief.md), then starts one reviewer on another model:
 
@@ -265,7 +303,8 @@ recorded review-hello (claude) in ~/code/herdr-jobs/jobs/2026-10-29-local-make-h
 DELIVERED review-hello (inbox file)
 ```
 
-When the reviewer writes `reports/review-hello.md` with `Status: PASS` in its first 10 lines and ends its turn, its hook adds `REPORT reports/review-hello.md` to `inbox.log`, which wakes the lead. A question for you, with the lead still working:
+The reviewer writes `reports/review-hello.md`, with `Status: PASS` and `Reviewed: <sha>` in its first 10 lines (the sha is the full id of the commit it reviewed), and ends its turn. Its hook then adds `REPORT reports/review-hello.md` to `inbox.log`, which wakes the lead.
+Next, the lead asks you a question and keeps working:
 
 ```console
 $ stampede ask $J "Keep the file in the repo root?" \
@@ -273,7 +312,10 @@ $ stampede ask $J "Keep the file in the repo root?" \
 ASKED 1fecfa0be4dc (the answer goes to the lead inbox; cancel with: stampede cancel <job> 1fecfa0be4dc)
 ```
 
-Your tap comes back as `ANSWER ...` in the lead's inbox. A gate (say, merging the draft PR) goes back to whoever started the job ([Safety](SAFETY.md)); you started this one in Herdr, so it goes to your phone. The lead merges only with `stampede merge`, which checks the review report and the PR head first and names the gate it needs:
+Your tap comes back as `ANSWER ...` in the lead's inbox.
+
+A gate, such as merging the draft PR, goes back to whoever started the job ([Safety](SAFETY.md)). You started this one in Herdr, so it goes to your phone.
+The lead merges only with `stampede merge`. It checks the review report and the PR's newest commit (its head) first, and names the gate it needs:
 
 ```console
 $ sha=$(gh pr view 12 --json headRefOid -q .headRefOid)
@@ -286,11 +328,12 @@ $ stampede merge $J 12 --sha $sha --review $J/reports/review-hello.md --gate 328
 MERGED 12 9c2d7e1f0a4b6c8d3e5f7a9b1c2d4e6f8a0b1c3d
 ```
 
-It marked the draft ready, merged with `--match-head-commit $sha`, and wrote `<job>/merges.log`: a `MERGING` line before it touched GitHub, then `MERGED`. Only the recorded yes opens a merge gate ([Safety](SAFETY.md)). Then the lead writes a short report and asks whether to close the workspace; `<job>/reopen.sh` brings it back later.
+`stampede merge` marked the draft ready and merged with `--match-head-commit $sha`. It wrote `<job>/merges.log`: a `MERGING` line before it touched GitHub, then `MERGED`.
+Only your recorded yes opens a merge gate ([Safety](SAFETY.md)). Then the lead writes a short report and asks whether to close the workspace. `<job>/reopen.sh` brings it back later.
 
 ### Share the plan first
 
-Say "share the plan first" and the front door adds `--review`. The lead then writes `plan.md` and ends its turn, and no pane can open until you approve that exact plan:
+Say "share the plan first", and the front door adds `--review`. The lead then writes `plan.md` and ends its turn. No pane can open until you approve that exact plan:
 
 ```console
 $ stampede new --file ask.md --name hello-review --review
@@ -307,11 +350,18 @@ $ cat $J/approved
 Approved: 2026-10-21 21:35 by owner in chat, plan 6ef5e2effdb06d6adf70e17da8726c05dd2d057a4a7ba23c4fbe3836eed14ffa
 ```
 
-The `start` refusal exits 2. The approval holds a fingerprint of `plan.md`; any later change locks `start` again until a new approve. A change you ask for goes to the lead with `stampede tell <job> lead "<your words>"`. The steps: [share-plan](../skills/share-plan/SKILL.md).
+The `start` refusal exits 2. The approval holds a fingerprint of `plan.md`, and any later change locks `start` again until a new approve.
+A change you ask for goes to the lead with `stampede tell <job> lead "<your words>"`. The steps: [share-plan](../skills/share-plan/SKILL.md).
 
 ### A front door outside Herdr (the Claude desktop app)
 
-When you talk to a chat outside Herdr, nobody watches the lead's pane. The front door then starts the job with `--front-door`: the lead posts everything that is for you (the plan, questions, gates, files, its report) to `<job>/outbox/`, a hook turns its own question cards and SendUserFile into posts, and the front door waits on the outbox in the background and relays each item. Here a review job:
+When you talk to a chat outside Herdr, nobody watches the lead's pane. So the front door starts the job with `--front-door`. Then:
+
+- the lead posts everything that is for you to `<job>/outbox/`: the plan, questions, gates, files and its report;
+- a hook turns the lead's own question cards and SendUserFile into posts;
+- the front door waits on the outbox in the background and relays each item to you.
+
+Here is a job with plan review:
 
 ```console
 $ stampede new --file ask.md --pane <pane id> --name seller-copy --front-door --review
@@ -332,13 +382,18 @@ $ stampede approve $J --by "owner in desktop chat: 'approve as written'"
 DELIVERED lead-seller-copy (inbox file)
 $ stampede ask $J --gate --sha <commit> --pr 12 "mark PR #12 ready for review"        # the lead
 GATE 83307febaa1a posted to the front door as outbox 002; act after stampede gate-ok ... prints APPROVED, or on the owner's yes typed in your pane
-$ stampede approve-gate $J 83307febaa1a --sha <commit> --by "owner in desktop chat: 'mark it ready'"
+$ stampede approve-gate $J 83307febaa1a --sha <commit> --digest <digest> --by "owner in desktop chat: 'mark it ready'"
+DELIVERED lead-seller-copy (inbox file)
 APPROVED 83307febaa1a at <commit>
 ```
 
-The front door shows you the plan file itself, and a yes to its own summary is never an approval. A gate's item carries the exact `approve-gate` line, which the front door runs with your words quoted. If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `BLOCKED_ON_CARD`. The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead. The front door's loop: [skills/stampede](../skills/stampede/SKILL.md#steps); the lead's side: [front-door.md](../skills/herdr-fleet/references/front-door.md).
+The front door shows you the plan file itself. A yes to its own summary is never an approval.
+A gate's item carries the exact `approve-gate` line, and the front door runs it with your words quoted.
+If the lead is held at a card anyway, `stampede wait` and `stampede tell` say `BLOCKED_ON_CARD`.
+The lead's `finish` posts a `done` item, and `stampede wait` says `LEAD_GONE` when Herdr no longer has the lead.
+The front door's loop: [skills/stampede](../skills/stampede/SKILL.md#steps). The lead's side: [front-door.md](../skills/herdr-fleet/references/front-door.md).
 
-**On Herdr Core** the same loop runs with `stampede new --core --front-door` from a chat outside Herdr. One run against the test suite's fake `hc`, every command from outside Herdr:
+**On Herdr Core** the same loop runs with `--core --front-door` on `stampede new`, from a chat outside Herdr. Here is one run against the test suite's fake `hc`, every command from outside Herdr:
 
 ```console
 $ stampede new --core --file ask.md --name login --front-door --review
@@ -373,11 +428,12 @@ Allow this command?
 ...
 ```
 
-`SUBMITTED` means Core typed the line into the lead's terminal: there is no inbox file. The lead has no hooks there, so its brief tells it never to use a question card or a file-send tool. [Front door](CORE-NATIVE.md#front-door) has the whole contract.
+`SUBMITTED` means Core typed the line into the lead's terminal: there is no inbox file.
+The lead has no hooks there, so its brief tells it never to use a question card or a file-send tool. The whole contract: [Front door](CORE-NATIVE.md#front-door).
 
 ## Front doors
 
-Every front door writes the ask and runs `stampede new`; none plans or runs the job itself.
+Every front door writes the ask and runs `stampede new`. None of them plans or runs the job itself.
 
 | front door | how you ask | where answers arrive | guide |
 |---|---|---|---|
@@ -387,8 +443,13 @@ Every front door writes the ask and runs `stampede new`; none plans or runs the 
 | Cursor | a Cursor chat on the machine runs the same two commands | Moshi | [remote/other.md](../remote/other.md) |
 | **Grok Bot** (preferred bot) | the bot reaches your Mac over SSH and Tailscale | the Grok chat, woken by a webhook | [remote/grokbot/](../remote/grokbot/README.md), [grokbot-herdr](../skills/grokbot-herdr/SKILL.md) |
 | any other bot | the same as Grok Bot | its webhook | [remote/other.md](../remote/other.md) |
-| a whole remote computer | Herdr, the CLIs and stampede on one box | any of the above | [remote/any-machine/](../remote/any-machine/README.md) |
+| a whole remote computer | Herdr, the CLIs and stampede on one computer | any of the above | [remote/any-machine/](../remote/any-machine/README.md) |
 
-Any of them can run the job on Herdr Core instead, when asked: it passes `--core --cwd <repo>` ([Herdr Core](CORE.md)). It then hears a question, a gate, a post and done from the lead's own commands, and blocked, error, dead or stale for the lead from the machine's watchdog within about 5 minutes.
+Any front door can run the job on Herdr Core instead, when you ask: it passes `--core --cwd <repo>`. What it then hears: [How it works](#how-it-works), and [Herdr Core](CORE.md).
 
-Moshi, the phone side of every front door: [remote/moshi.md](../remote/moshi.md).
+Moshi is the phone side of every front door: [remote/moshi.md](../remote/moshi.md).
+
+## New releases
+
+To hear about new releases, open stampede on [GitHub](https://github.com/vib-z/stampede) and pick **Watch**, then **Custom**, then **Releases**.
+The site: [vib-z.github.io/stampede](https://vib-z.github.io/stampede/).
