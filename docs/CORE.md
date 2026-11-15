@@ -2,13 +2,19 @@
 
 This page shows how a job runs on Herdr Core, the second place a job can run.
 
-[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime. It runs programs in terminals that stay open, and each program reports its own status (OSC 7501). Core gives each terminal a parent link and labels, and sends a stream of events. It has no workspaces, tabs or panes.
+- [When a job runs on Herdr Core](#when-a-job-runs-on-herdr-core)
+- [The parts of a Core job](#the-parts-of-a-core-job)
+- [Check the computer first](#check-the-computer-first)
+- [One Core job, start to finish](#one-core-job-start-to-finish)
+- [The earlier path](#the-earlier-path---core---relay)
 
-Core holds a job's tree of terminals. stampede adds only the space's name, the owner tag, the reopen record, your gates (steps that need your yes), a cap on helpers and the layout labels. The shape a client reads (labels, parent links, events): [docs/CORE-NATIVE.md](CORE-NATIVE.md). The lead's playbook: [references/core.md](../skills/herdr-fleet/references/core.md). For Core's own basics, read `hc --skill`.
+[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later; checked against 0.1.20) is Herdr's terminal runtime: a server that runs programs in terminals that stay open. Each program reports its own status (OSC 7501, a code it prints to its terminal). Core gives each terminal a parent link and labels, and sends a stream of events. It has no workspaces, tabs or panes.
+
+On top of Core, stampede adds only the space's name, the owner tag, the reopen record, your gates (steps that need your yes), a cap on helpers and the layout labels. The shape a client reads (labels, parent links, events): [docs/CORE-NATIVE.md](CORE-NATIVE.md). The lead's playbook: [references/core.md](../skills/herdr-fleet/references/core.md). For Core's own basics, read `hc --skill`.
 
 ## When a job runs on Herdr Core
 
-A job runs on the Herdr TUI by default. It runs on Herdr Core only when you ask:
+A job runs on the Herdr TUI (Herdr's window, with tabs and panes) by default. It runs on Herdr Core only when you ask:
 - with `--core` on `stampede new`, for one job;
 - with the setting `backend`: `tui` by default. `core` makes Core your standing choice. `auto`, if you set it, runs a job on the TUI inside a Herdr pane and on Core anywhere else, and says so on the first line.
 
@@ -26,12 +32,11 @@ A job runs on the Herdr TUI by default. It runs on Herdr Core only when you ask:
 **What lives where.**
 - Core holds the tree and each terminal's status. Read it with `stampede tree <job>`.
 - The job folder holds the ask, the plan, the briefs, the reports, your gates and `tree.json`, the reopen record.
-- Messages go only through Core: `hc send`, Core's notes to a parent about each child (its turn ended, it is blocked, it exited), `hc wait --children`, and results in files with the path sent.
-- A Core job has no follower terminal, no inbox files and no hooks.
+- Messages go only through Core. A Core job has no follower terminal, inbox files or hooks ([Messages](CORE-NATIVE.md#messages)).
 
 ## Check the computer first
 
-Check the computer once with `herdr-doctor`, then start the job from the repo. The last backend line says where a job can run; one usable backend is enough. This ran on a Mac with Herdr 0.9.5 installed but no Herdr server for that home, against Herdr Core 0.1.20 running in a scratch session named `probe1`:
+Check the computer once with `herdr-doctor`, then start the job from the repo. The last backend line says where a job can run. This ran on a Mac with Herdr 0.9.5 installed but no Herdr server for that home, against Herdr Core 0.1.20 running in a scratch session named `probe1`:
 
 ```console
 $ herdr-doctor
@@ -73,7 +78,7 @@ STARTED review-health (t3) under lead-add-health
 $ stampede start $J lint -- npm run lint
 STARTED lint (t4) under lead-add-health
 ```
-**The cap.** At most 12 helpers work at once in one lead's tree, at any depth (`--max-helpers <n>` at `new`, `<job>/max-helpers`, or `STAMPEDE_MAX_HELPERS`). This job's cap is 3, so a fourth start waits in the queue. The lead runs `stampede next` when a child's note says it is done:
+**The cap.** At most 12 helpers work at once in one lead's tree, at any depth (the setting [helpers.max](CONFIGURE.md#every-key-with-its-default)). This job's cap is 3, so a fourth start waits in the queue. The lead runs `stampede next` when a child's note says it is done:
 
 ```console
 $ stampede start $J docs-health --brief $J/briefs/docs-health.md

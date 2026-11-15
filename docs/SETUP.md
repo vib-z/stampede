@@ -46,11 +46,11 @@ herdr-trust ~/code/my-app            # once per repo, before agents start there
 stampede config set backend core     # optional: Herdr Core by default (the default is the Herdr TUI)
 ```
 
-**What the installer does.** It makes links: a link is a pointer to a file, so the file itself stays in this checkout.
+**What the installer does.** It makes links (pointers to files), so the files stay in this checkout.
 - It links the four skills into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists. A skill is a set of instructions an agent reads. The four are `skills/stampede` (the front door, the part you talk to), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan`.
 - It links `scripts/stampede` (also as `fleet-job`, its first name) and every `skills/grokbot-herdr/scripts/herdr-*` helper into `~/.local/bin`.
 - Your PATH (the list of folders your terminal looks in for commands) must hold `~/.local/bin`. If a bot will run stampede over SSH, set it for non-interactive SSH shells too.
-- On Linux it starts the event relay's two timers, the watchdog and the flusher. How it starts them, and how `--replace` and a rollback treat their files: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
+- On Linux it starts the event relay's two timers, the watchdog and the flusher. When `--replace` saves an older timer file of stampede's first, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
 - It never installs Herdr or an agent CLI. Start each agent CLI once by hand to sign in.
 - Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run prints its rollback line after it.
 
@@ -99,7 +99,7 @@ Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: 
 
 ## Update
 
-stampede tells you when a newer release is out, and never updates anything by itself. You update this way:
+stampede never updates anything by itself. You update this way:
 
 | installed with | update with |
 |---|---|
@@ -151,7 +151,7 @@ Run `stampede doctor` after you install, while the Herdr server is running.
 
 `stampede doctor` checks Python, this checkout (its `VERSION`, and that every module imports), and that `stampede`, `fleet-job` and the `herdr-*` helpers on your PATH point into this checkout. Then it passes on the lines of `herdr-doctor`. You can run `herdr-doctor` alone too; `stampede doctor` passes `--core` and `--tui` on to it.
 
-`herdr-doctor` checks each backend that is installed. A backend is where a job runs: the Herdr TUI (Herdr's window, with tabs and panes), and Herdr Core when `hc` is on PATH. One usable backend is enough, and the last backend line names it. `--tui` or `--core` checks only that one, and each gap there is a `PROBLEM`; a bot runs that before a job on that backend. It also checks:
+`herdr-doctor` checks each backend that is installed. A backend is where a job runs: the Herdr TUI (Herdr's window, with tabs and panes), and Herdr Core when `hc` is on PATH. One usable backend is enough, and the last backend line names it. While one is usable, the other's gaps are only `warn` lines. `--tui` or `--core` checks only that one, and each gap there is a `PROBLEM`; a bot runs that before a job on that backend. It also checks:
 - `herdr`, `jq`, `git` and `python3`, and the Herdr client and server versions;
 - `stampede --version` against the checkout's `VERSION`;
 - all four skill links, for each agent home folder that exists;
@@ -213,7 +213,7 @@ The doctor's checks on Herdr Core:
 - It warns about terminals opened before the core's current bundle was installed (macOS), and a core started from inside an agent or a pane (`hc server restart --fresh` fixes it from Herdr Core 0.1.20 on). Each fix: [Troubleshoot, Install](TROUBLESHOOT.md#install-update-and-the-health-check).
 - The doctor never starts, stops or restarts a core.
 
-**Its settings.** `HC`, `HC_SESSION` and `HC_SOCKET` are environment-only: export them with the others. stampede passes them, with the rest of your settings, to every terminal of a Core job. A setting left empty (such as config.example's `HC_SOCKET=`) is not passed, and Herdr Core reads an empty `HC_SOCKET` as unset too. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events-core.md](../remote/events-core.md)).
+**Its settings.** `HC`, `HC_SESSION` and `HC_SOCKET` are environment-only: export them with the others ([Configure](CONFIGURE.md#environment-only-with-defaults)). A Core job does not pass on one left empty (such as config.example's `HC_SOCKET=`), and Herdr Core reads an empty `HC_SOCKET` as unset too. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events-core.md](../remote/events-core.md)).
 
 ## Uninstall
 

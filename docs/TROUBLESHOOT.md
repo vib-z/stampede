@@ -1,6 +1,6 @@
 # Troubleshoot
 
-Find the message you see, then follow its fix.
+Find your message, then follow its fix.
 
 - [Install, update and the health check](#install-update-and-the-health-check)
 - [Starting and running a job](#starting-and-running-a-job)
@@ -12,14 +12,14 @@ Find the message you see, then follow its fix.
 
 ## Install, update and the health check
 
-More: [Setup problems](SETUP.md#setup-problems).
+PATH is the list of folders your terminal searches for commands. More: [Setup problems](SETUP.md#setup-problems).
 
 | what you see | fix |
 |---|---|
 | `stampede needs Python 3.9 or later (this is <version>)` | put a newer `python3` first on PATH: stampede runs the first one there |
 | `PROBLEM not on PATH: ...` from `stampede doctor` | run this checkout's `install.sh`, and put `~/.local/bin` first on PATH |
 | `PROBLEM on PATH from another checkout: ...` from `stampede doctor`, or `skip ...: something else is there; left as is` from `install.sh` | an older copy, or a link into another checkout, is in the way. Run this checkout's `install.sh --replace`: it backs each one up first and prints its `rollback.sh` ([Install](SETUP.md#install)). Put `~/.local/bin` first on PATH |
-| `PROBLEM` from `stampede doctor` or `herdr-doctor` | the line names the broken part and its fix ([Health check](SETUP.md#health-check)) |
+| `PROBLEM` from `stampede doctor` or `herdr-doctor` | the line names the broken part and its fix. When a gap is only a `warn`: [Health check](SETUP.md#health-check) |
 | `PROBLEM herdr <version> is older than 0.9.4` or `herdr --version printed no version` | update Herdr, then restart its server yourself |
 | `PROBLEM herdr server not running` (a `warn` while Herdr Core is usable) | start Herdr (run `herdr` in a terminal), then run `herdr-doctor` again |
 | `PROBLEM Herdr Core not running` from `herdr-doctor --core` | start the core yourself (`hc server start`), then check again. The doctor and stampede never start one |
@@ -44,9 +44,9 @@ A refused `new` makes nothing.
 | `stampede <command>: job folder not found: <path>`, or `not a job folder, it has no lead or ask.md file: <path>` | pass the folder `stampede new` printed (`<jobs_root>/jobs/<date>-<owner>-<name>`, or `<repo>/.herdr-<name>` for an older job) |
 | `<file>: helpers.maxx is not a setting (did you mean helpers.max?); skipped`, then `stampede new: fix it or remove the key: stampede config show` (exit 2) | a config file, the environment or a `--set` holds an unknown key, a value of the wrong type, a file that is not TOML, or a user-only key in a repo's `.stampede.toml`. Fix or remove what the line names, check with `stampede config show` (exit 0 when clean), then run `new` again |
 | `stampede new: new runs the job on the Herdr TUI and needs a Herdr pane: ...` (exit 2) | run it inside Herdr, pass `--workspace <id>` or `--pane <id>`, or add `--core` to run the job on Herdr Core (for every job: `stampede config set backend core`) |
-| `on Herdr Core (backend auto: not inside a Herdr pane), repo <path>` then `stampede new: Herdr Core did not answer ...` (or `is not installed`, or `needs --cwd`) | your setting `backend` (`auto` or `core`) chose Herdr Core, which is not running. Start it (`hc server start`), or pass `--cwd <repo>` outside a git repo. For the Herdr TUI, run `new` inside a Herdr pane or pass `--workspace` or `--pane` |
+| `on Herdr Core (backend auto: not inside a Herdr pane), repo <path>` then `stampede new: Herdr Core did not answer ...` (or `is not installed`, or `needs --cwd`) | your `backend` setting chose Herdr Core, which is not running. Start it (`hc server start`), or pass `--cwd <repo>` outside a git repo. For the Herdr TUI, run `new` inside a Herdr pane or pass `--workspace` or `--pane` |
 | `stampede new: ...; Herdr Core answers here, so this job can run on it: new --core ...` | start Herdr, or run the job on Core with `--core` |
-| `stampede new: --fork forks a Claude chat, so it takes a Claude lead` (exit 2) | a Codex lead never starts as a fork. Drop `--lead codex` (or unset `FLEET_LEAD_KIND`), or start it without `--fork` |
+| `stampede new: --fork forks a Claude chat, so it takes a Claude lead` (exit 2) | drop `--lead codex` (or unset `FLEET_LEAD_KIND`), or start it without `--fork` |
 | `stampede start: brief ... is missing: ...` or `brief ... does not exist` | write the brief on the [hand-off template](../skills/herdr-fleet/references/brief.md), fill every missing or empty section, then start again |
 | `stampede start: fleet-job starts claude, codex or cursor ...`, or `hermes runs only as a handed agent of a Herdr Core job ...` (or kimi) | in a Core job, run any other CLI as a program (`stampede start <job> <name> -- <cli> ...`), or start it by hand and record it with `herdr-reopen-snapshot` |
 | `stampede start: <agent> is already running in pane <pane>`, `... not as the launch this job recorded`, or `pane <pane> is handed to <agent> of <job>` | tell that agent instead, or pick another pane. For a replacement the job did not start, read it with `herdr agent get <pane>`, then end it or use another name |
@@ -57,7 +57,7 @@ A refused `new` makes nothing.
 | `BLOCKED <lead>: <kind>` from `stampede wait` on a Core job | the lead waits at a dialog (a permission, a trust prompt). Show the owner the screen `wait` printed, clear it only as they say (`hc keys <address> <keys>`), then run `wait` again |
 | the lead's pane shows Claude's sign-in or first-run screen, though `stampede new` printed `DELIVERED` | sign in to Claude Code once in a plain terminal (`claude`) before your first ask. Then finish the screen in the lead's pane and send `stampede tell <job> lead "Read <job>/briefs/<lead>.md"` |
 | a Codex lead does not react to a worker's report or your `tell` | its lines are typed only while it is idle or done, unfocused, with nothing typed in its prompt. Leave its pane, clear a draft, and see `<job>/hooks/deliver.log` (`GAVE UP` after 4 h, `CANNOT REACH HERDR`). `stampede _wake <job>` starts the deliverer again |
-| `refused: a workspace labelled <label> is already open` from `reopen.sh`, with `none of this job's agents runs there` | after a Herdr server restart, Herdr brings the job's workspace back with plain shells. Close that workspace (your yes, as for any close), then run `reopen.sh` again |
+| `refused: a workspace labelled <label> is already open` from `reopen.sh`, with `none of this job's agents runs there` | a Herdr server restart brought the job's workspace back with plain shells. Close that workspace (your yes, as for any close), then run `reopen.sh` again |
 | `reopen.sh: workspace <id> is open but not tagged for <bot>` (exit 5) | `herdr-events-owner` failed, so the bot would not hear that workspace: run the command it prints, then carry on |
 | `SKIPPED <name> (<address>): it carries another job's key ...` from `stampede close` | another job's terminal runs under this job's: close it from its own job. This one stays open around it |
 
@@ -68,9 +68,9 @@ A gate is a step that needs your yes ([Safety](SAFETY.md)).
 | what you see | fix |
 |---|---|
 | `stampede start: the owner asked to see this plan` | a `--review` job: approve the plan as it stands with `stampede approve <job> --by <who>` |
-| `stampede approve: the owner has not been shown this plan` | a `--front-door` job. The lead posts `plan.md` (`stampede post <job> "PLAN READY" --file <job>/plan.md`), the front door sends that file to you, and only your yes to it is approved. Post again after any change |
+| `stampede approve: the owner has not been shown this plan.md` (or `this fleet-plan.md`) | a `--front-door` job. The lead posts `plan.md` (`stampede post <job> "PLAN READY" --file <job>/plan.md`), the front door sends that file to you, and only your yes to it is approved. Post again after any change |
 | `stampede approve: the front door has not received this plan.md yet` | the front door has not run `stampede wait` since the lead posted the plan. Run it, send the owner the file it names, and approve only their yes to that file |
-| `stampede merge: no review report <file>`, `... says Status: FINDINGS, not PASS` or `... names no Reviewed: <full sha>` | the reviewer writes `Status: PASS` and `Reviewed: <full sha>` in its report's first 10 lines. Fix any findings and review again, then merge |
+| `stampede merge: no review report <file>`, `... says Status: FINDINGS, not PASS` or `... names no Reviewed: <full sha>` | the reviewer writes `Status: PASS` and `Reviewed: <full sha>` in its report's first 10 lines. Fix any findings, review again, then merge |
 | `stampede merge: the review report <file> has 2 Status: lines ...`, `line <n> ... comes before or inside its header` or `says Reviewed: <text>: it takes one full sha and nothing else` | the header is a title line, then one `Status:` line and one `Reviewed: <40-hex sha>` line, before any code block, quote, comment or indented line. The reviewer fixes it |
 | `stampede merge: the review report passes <a>, not <b>`, or `... but the PR head is <b>: review the new commit` | merge only the reviewed commit: review the new head, then ask the gate at it |
 | `stampede merge: the merge gate is on ...`, `gate <id> is not a merge gate for PR <n> ...`, `gate <id> has no recorded yes` or `... was approved for <a>, not <b>` | run the `stampede ask ... --kind merge` line it prints for this PR at this commit. Wait for your yes, then merge with `--gate <id>` |
@@ -81,7 +81,7 @@ A gate is a step that needs your yes ([Safety](SAFETY.md)).
 | `stampede approve-gate: approve-gate needs --digest` | a bot built the command itself: run the gate event's `approve` line as given, which carries the digest |
 | `stampede approve-gate: approve-gate runs only outside Herdr` | it is the starting bot's command, over plain ssh, never `hc exec`. On the Herdr TUI, type yes in a Claude lead's pane instead, except for a merge or a push to the default branch ([Safety](SAFETY.md)) |
 | `stampede prepush: a push of <sha> to main needs the owner's yes. Ask it with the next line ...` | a job's agent pushed to the default branch. Run the `stampede ask ... --kind push_default_branch` line it prints, then push again once `gate-ok` prints `APPROVED`. Or push the work branch |
-| `stampede-hook: stampede is not on PATH, so this job's push gate was not checked` (or `stampede prepush failed (exit <n>)`) | put stampede on PATH (`./install.sh`) or run `stampede update` |
+| `stampede-hook: stampede is not on PATH, so the push gate was not checked` (or `stampede prepush failed (exit <n>)`) | put stampede on PATH (`./install.sh`) or run `stampede update` |
 | `stampede new: the push gate is not enforced by a hook in this repo, because it has its own (...)` | the repo has its own `pre-push` or `core.hooksPath`. A push to the default branch is the lead's to ask; `stampede merge` still holds the merge gate |
 | `stampede new: --no-gate <name> is no gate` | use one of the names it lists: `merge`, `push_default_branch`, `deploy`, `publish`, `send`, `spend`, `close` |
 
@@ -120,7 +120,7 @@ A gate is a step that needs your yes ([Safety](SAFETY.md)).
 - Startup dialogs: [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md).
 
 ## FAQ
-- *Do I need stampede for this?* Only for a big job: hours long, more than one agent family, anything that leaves your computer (merge, push, send, spend, publish, deploy), or work that must survive a restart. A small job runs as one agent session with its built-in subagents (its own helpers). It still runs inside Herdr, in a single tagged pane of its own, so its finish arrives as an event. That also answers "why not subagents": for small jobs, use them. The rule: [Size the job first](../skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
+- *Do I need stampede for this?* Only for a big job: hours long, more than one agent family, anything that leaves your computer (merge, push, send, spend, publish, deploy), or work that must survive a restart. A small job runs as one agent session with its built-in subagents. It still runs inside Herdr, in a single tagged pane of its own, so its finish arrives as an event. That also answers "why not subagents": for small jobs, use them. The rule: [Size the job first](../skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
 - *Why two names?* `stampede` is the public name of `fleet-job`, its first name. Both run the same command.
 - *Can Codex or Cursor lead?* Codex can, on the Herdr TUI and on Herdr Core: `stampede new --lead codex` ([Pick the lead](GUIDE.md#use-one-job-start-to-finish)). Cursor not yet ([roadmap](STATUS.md)).
 - *Can workers run on Gemini, Kimi or the other agents Herdr knows?* In a Core job, any CLI runs as a program (`stampede start <job> <name> -- <cli> ...`). In a `--core --relay` job, Hermes and Kimi are handed to Herdr TUI panes. As first-class kinds, not yet ([roadmap](STATUS.md)).
