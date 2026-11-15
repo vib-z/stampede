@@ -474,10 +474,44 @@ class WholeYes(Scratch):
 
     def test_the_plans_yes_is_written_whole(self):
         (self.job / 'plan.md').write_text('the plan\n')
+        (self.job / 'review').write_text('')
         with mock.patch.object(owner_, 'tell'):
+            owner_.approve(self.job, 'owner')  # a yes to this plan already stands; the owner says it again
+        real, seen = Path.write_text, []
+
+        def write(path, text, *args, **kwargs):  # stop between the two steps of a write: the file made, still empty
+            path.open('w').close()
+            try:
+                owner_.require_approval(self.job)
+                seen.append('approved')
+            except Exception as error:
+                seen.append(error)
+            return real(path, text, *args, **kwargs)
+        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
             owner_.approve(self.job, 'owner')
+        self.assertEqual(seen, ['approved'], 'a check mid-write sees the standing yes, never a half-written one')
         self.assertTrue((self.job / 'approved').read_text().endswith('plan ' + owner_.plan_digest(self.job) + '\n'))
         self.assertEqual(sorted(p.name for p in self.job.iterdir() if p.name.startswith('.')), [], 'no temporary left')
+
+    def test_a_record_written_again_keeps_its_mode_and_a_new_one_takes_the_umasks(self):
+        (self.job / 'plan.md').write_text('the plan\n')
+        ident = self.gate(approve=False)
+        records = {'gate': self.job / 'gates' / (ident + '.approved'), 'plan': self.job / 'approved'}
+        write = {'gate': lambda: owner_.record_yes(self.job, ident, SHA, 'owner'), 'plan': lambda: owner_.approve(self.job, 'owner')}
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)
+        with mock.patch.object(owner_, 'tell'):
+            for which, record in records.items():
+                for umask, new, existing in ((0o022, 0o644, 0o600), (0o077, 0o600, 0o644)):
+                    with self.subTest(which, umask=oct(umask)):
+                        os.umask(umask)
+                        if record.exists():
+                            record.unlink()
+                        write[which]()
+                        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(new), 'a new record takes the umask\'s mode')
+                        record.chmod(existing)
+                        write[which]()
+                        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(existing), 'a record written again keeps its mode')
 
     def test_a_record_that_does_not_parse_is_a_malformed_yes(self):
         ident = self.gate(approve=False)

@@ -1,5 +1,5 @@
 """Reaching the owner and the lead: questions, gates, plan approval, posts, tell, wait and finish."""
-import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, subprocess, sys, time, uuid
+import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, stat, subprocess, sys, time, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -154,10 +154,17 @@ def keep(pin, name, text):
 
 def publish(path, text):
     """Write text as path whole: a temporary file beside it, then os.replace, so a reader sees no file or all of it. The
-    temporary name (.<name>.<hex>) matches no reader's glob and is removed if the write fails."""
+    temporary name (.<name>.<hex>) matches no reader's glob and is removed if the write fails. A file written again keeps
+    its permission bits, as write_text kept them; a new one takes the umask's."""
     temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}')
     try:
+        try:
+            old = os.lstat(path).st_mode
+        except FileNotFoundError:
+            old = 0
         temporary.write_text(text)
+        if stat.S_ISREG(old):
+            os.chmod(temporary, stat.S_IMODE(old))
         os.replace(temporary, path)
     except BaseException:
         with contextlib.suppress(OSError):
