@@ -3,7 +3,8 @@
 # no live queue, route, Herdr or network is touched. Run: bash test-relay.sh   (prints PASS or the first FAIL)
 set -u
 SRC="$(cd "$(dirname "$0")" && pwd)"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d); kid=""   # kid: a background post this script started and has not reaped
+trap '[ -n "$kid" ] && { kill "$kid" 2>/dev/null; wait "$kid" 2>/dev/null; }; rm -rf "$T"' EXIT; trap 'exit 130' INT TERM
 export HOME="$T" PATH="$T/.local/bin:/opt/homebrew/bin:/usr/bin:/bin" CODEX_HOME="$T/.codex"
 unset XDG_STATE_HOME XDG_CONFIG_HOME
 unset HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_EVENTS_OWNER HERDR_EVENTS_HOME HERDR_EVENTS_ROUTES_DIR HERDR_EVENTS_DIR
@@ -115,19 +116,41 @@ printf '#!/bin/bash\n[ "$*" = "-u +%%Y%%m%%dT%%H%%M%%SZ" ] && { echo 20261115T03
 qpidw(){ local r=${1#*Z-}; r=${r#u??????-}; r=${r%%-*}; echo ${#r}; }   # width of the pid in a queue name
 for try in 1 2 3 4 5 6 7 8; do
   : > "$F/sent.jsonl"; touch "$F/down"; rm -f "$F/go"; p="w1:p9$try"
-  ( until [ -f "$F/go" ]; do sleep 0.02; done; exec herdr-event-post "{\"source\":\"herdr\",\"state\":\"done\",\"pane\":\"$p\"}" ) & bg=$!
-  post "{\"source\":\"herdr\",\"state\":\"blocked\",\"pane\":\"$p\"}"; touch "$F/go"; wait "$bg"
+  ( n=0; until [ -f "$F/go" ]; do n=$((n+1)); [ $n -gt 250 ] && exit 9; sleep 0.02; done   # gives up after 5 s or more
+    exec herdr-event-post "{\"source\":\"herdr\",\"state\":\"done\",\"pane\":\"$p\"}" ) & kid=$!
+  post "{\"source\":\"herdr\",\"state\":\"blocked\",\"pane\":\"$p\"}"
+  touch "$F/go" && [ -f "$F/go" ] || fail "B10b could not make the marker $F/go"
+  n=0; while kill -0 "$kid" 2>/dev/null; do n=$((n+1)); [ $n -gt 1500 ] && fail "B10b the held done post did not end in 30 s"; sleep 0.02; done
+  wait "$kid"; st=$?; kid=""; [ "$st" = 0 ] || fail "B10b the held done post exited $st"
   names=$(cd "$Q" && grep -l "\"$p\"" -- *.json 2>/dev/null; cd "$DD" && grep -l "\"$p\"" -- * 2>/dev/null); set -- $names
   [ $# = 2 ] || fail "B10b want two queued files for $p, got: $names"
   if [ "$(qpidw "$1")" = "$(qpidw "$2")" ]; then
     rm "$F/down"; herdr-event-flush
     [ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10b sent $(cat "$F/sent.jsonl"), want only the done posted last"
-    grep -l '"state":"blocked"' "$DD"/*.superseded | grep -q . || fail "B10b blocked was not superseded"
+    ok=0; for d in "$DD"/*.superseded; do jq -e --arg p "$p" '.payload.pane==$p and .payload.state=="blocked"' "$d" >/dev/null && ok=1; done
+    [ "$ok" = 1 ] || fail "B10b blocked of $p was not superseded"
     shown=1; break; fi
   rm -f "$Q"/*.json; rm "$F/down"   # pids of two widths: try a new pane
 done
 rm "$B/date"; [ "$shown" = 1 ] || fail "B10b no pair of posts with pids of one width in 8 tries"
 [ -z "$(ls "$Q")" ] || fail "B10b queue not empty"
+# B10e: a post whose queue jq fails queues nothing and says so; the next post is queued and ordered as ever
+RJQ=$(command -v jq); printf '#!/bin/bash\n[ -f "%s/jq-fail" ] && case "$*" in *qkey*) exit 3;; esac\nexec "%s" "$@"\n' "$F" "$RJQ" > "$B/jq"; chmod +x "$B/jq"
+: > "$F/sent.jsonl"; touch "$F/down"
+post '{"source":"herdr","state":"blocked","pane":"w1:p9e"}'
+touch "$F/jq-fail"; post '{"source":"herdr","state":"done","pane":"w1:p9e"}'; rm "$F/jq-fail"
+[ "$(ls "$Q" | wc -l | tr -d ' ')" = 1 ] || fail "B10e a failed queue write left a file: $(ls "$Q")"
+grep -q 'queue-write-failed: .*w1:p9e' "$EVLOG" || fail "B10e the failed queue write was not logged"
+age 130; post '{"source":"herdr","state":"done","pane":"w1:p9e"}'; rm "$B/jq"   # as on main, the failed one counted for de-dupe
+rm "$F/down"; herdr-event-flush
+[ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10e sent $(cat "$F/sent.jsonl"), want only the done posted last"
+# B10f: the key (herdr_qkey_def) at chosen times: fixed width, leading zeros, both ends of a second, the next second
+( . "$SRC/herdr-platform"; s=1794714312   # 2026-11-15T03:45:12Z
+  k(){ jq -rn "$herdr_qkey_def $1|qkey"; }
+  [ "$(k $s.0000005)" = 20261115T034512Z-u000000 ] && [ "$(k $s.0042115)" = 20261115T034512Z-u004211 ] &&
+  [ "$(k $s.9999995)" = 20261115T034512Z-u999999 ] && [ "$(k $((s+1)).0000005)" = 20261115T034513Z-u000000 ] &&
+  [[ $(k $s.9999995) < $(k $((s+1)).0000005) ]] && [[ $(k $s.0000005) =~ $herdr_qkey_re ]] ) ||
+  fail "B10f the queue key is wrong at a chosen time"
 # B10c: a file queued by the old code (<second>-<pid>-<random>) goes before a new one of the same second
 : > "$F/sent.jsonl"; touch "$F/down"
 post '{"source":"herdr","state":"done","pane":"w1:p9c"}'; n=$(cd "$Q" && ls); o="${n:0:16}-99999-1.json"

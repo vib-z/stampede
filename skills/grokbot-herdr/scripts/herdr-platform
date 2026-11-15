@@ -98,6 +98,11 @@ fi
 # MD5 of stdin, the same hex on both (pane output, compared only with itself).
 hash_stdin() { python3 -c 'import hashlib,sys; print(hashlib.md5(sys.stdin.buffer.read()).hexdigest())'; }
 
+# A queue file's key, from a time in seconds (jq now): its UTC second, then its microseconds, fixed width, so the
+# keys' text order is time order. herdr-event-post names a queue file <key>-<pid>-<random>.json.
+herdr_qkey_def='def qkey: . as $t | ($t|floor) as $s | ($s|strftime("%Y%m%dT%H%M%SZ")) + "-u" + ((($t-$s)*1000000|floor|tostring) | ("000000"+.)[-6:]);'
+herdr_qkey_re='^[0-9]{8}T[0-9]{6}Z-u[0-9]{6}$'
+
 # ~/Library/Logs on macOS; on Linux the state dir (XDG_STATE_HOME, else ~/.local/state).
 herdr_events_log() {
   case "$(uname -s)" in
