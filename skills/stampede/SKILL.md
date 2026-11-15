@@ -25,7 +25,7 @@ stampede new --core --file "$ASK" --cwd "$R" --name <job> --front-door      # ou
 ```
 
    - The TUI is the default; Herdr Core only when the owner asks: `--core`, or for every job `stampede config set backend core`; outside Herdr the TUI needs `--pane` or `--workspace <id>`.
-   - `--lead codex` only when the owner asks for a Codex lead; else the setting `lead.kind` decides.
+   - `--lead codex` or `--lead-effort <e>` only when the owner asks for one; else the settings decide.
    - `--fork "$CLAUDE_CODE_SESSION_ID"` only when the plan was worked out in this chat and the lead is Claude (refused with `--lead codex`).
    - `--review` only when the owner asked to see the plan first ([share-plan](../share-plan/SKILL.md)).
    - On Core, drop `--front-door` only if the owner watches the lead's terminal. `--core --relay` only to hand Cursor, Hermes or Kimi to a TUI pane ([core-relay.md](../herdr-fleet/references/core-relay.md)); it refuses `--front-door`.

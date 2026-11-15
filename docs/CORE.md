@@ -67,7 +67,7 @@ hook pre-push installed in ~/code/my-app/.git/hooks/pre-push: a job's agent cann
 STARTED lead-add-health (t1)
 lead-add-health ~/code/herdr-jobs/jobs/2026-11-14-local-add-health
 ```
-**Helpers.** The lead writes `plan.md` and starts its helpers. A helper's role is its name up to the first `-`. The role gives its kind, model and effort, from the settings `roles.<role>`: `build-health` is a Claude builder at medium effort, `review-health` a Codex reviewer. `--kind`, `--model` and `--effort` override them. Any CLI runs as a program:
+**Helpers.** The lead writes `plan.md` and starts its helpers. A helper's role is its name up to the first `-`. The role gives its kind, model and effort, from the settings `roles.<role>`: `build-health` is a Claude builder at medium effort, `review-health` a Codex reviewer, also at medium (every worker's default). `--kind`, `--model` and `--effort` override them. Any CLI runs as a program:
 
 ```console
 $ J=~/code/herdr-jobs/jobs/2026-11-14-local-add-health

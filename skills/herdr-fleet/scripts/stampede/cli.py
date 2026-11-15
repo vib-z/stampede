@@ -314,7 +314,8 @@ def parse_and_run(argv):
     p.add_argument('--lead', choices=sorted(agents_.LEAD), help='the lead\'s CLI: claude (claude-opus-5-5) or codex (gpt-6-astra); default '
                    '$FLEET_LEAD_KIND, else claude. --fork takes claude only')
     p.add_argument('--lead-model', help='the lead\'s model (the setting lead.<its CLI>.model)')
-    p.add_argument('--lead-effort', help='the lead\'s reasoning effort (the setting lead.<its CLI>.effort)')
+    p.add_argument('--lead-effort', help='the lead\'s reasoning effort (the setting lead.<its CLI>.effort; default xhigh '
+                   'on Claude, ultra on Codex)')
     p.add_argument('--app-space', action='store_true', help='with --core --relay: label the lead and workers for the Herdr app '
                    '(herdr.space, herdr.tab), so it shows the job in a space; a native job always carries them')
     p.add_argument('--relay', action='store_true', help='with --core: the earlier Core job (a follower, inbox files, hooks), which hands '
@@ -342,7 +343,8 @@ def parse_and_run(argv):
     p.add_argument('--cwd', help='a Herdr Core job: the folder the agent starts in (default: the repo)')
     p.add_argument('--model', help='its model (default: the role\'s, roles.<role>.model, when the kind is the role\'s; a restarted '
                    'lead keeps the lead\'s)')
-    p.add_argument('--effort', help='its reasoning effort, where the CLI takes one (default: the role\'s, as for --model)')
+    p.add_argument('--effort', help='its reasoning effort, where the CLI takes one (default: the role\'s, as for --model: '
+                   'medium for every built-in role)')
     p.add_argument('--report', action='append', default=[], help='a report it must write before it may stop, such as reports/build-api.md in the job folder (repeatable: any one will do)')
     p.add_argument('--yolo-in', metavar='WORKTREE', help='a worker in its own git worktree: no-checks mode, never the lead')
     p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE', help='a setting for this start only, such as '

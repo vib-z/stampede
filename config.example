@@ -23,6 +23,8 @@ effort = "xhigh"           # a Claude lead's effort (env FLEET_LEAD_EFFORT, with
 model = "gpt-6-astra"  # a Codex lead's model (env FLEET_LEAD_MODEL, when it is a gpt-... model)
 effort = "ultra"       # a Codex lead's effort (env FLEET_LEAD_EFFORT, with a gpt-... model)
 
+# Effort, by default: the lead at extra high (xhigh on Claude; ultra on Codex, which has no xhigh), every worker at medium,
+# on whatever model is picked. A default, never a limit: new --lead-effort, start --effort or --set roles.<role>.effort=<e>.
 # stampede start <job> <role>-<scope>: the kind, model and effort a helper gets when start names none; add a role of your own as [roles.<name>]
 
 [roles.default]  # any role not listed below
@@ -38,27 +40,27 @@ effort = "medium"
 [roles.research]  # research with the browser
 kind = "claude"
 model = "claude-opus-5-5"
-effort = "xhigh"
+effort = "medium"
 
 [roles.review]  # independent review: another vendor than build
 kind = "codex"
 model = "gpt-6-astra"
-effort = "ultra"
+effort = "medium"
 
 [roles.design]  # design direction and design review
 kind = "codex"
 model = "gpt-6-astra"
-effort = "ultra"
+effort = "medium"
 
 [roles.qa]  # QA: another vendor than build
 kind = "codex"
 model = "gpt-6-astra"
-effort = "ultra"
+effort = "medium"
 
 [roles.copy]  # docs and copy
 kind = "claude"
 model = "claude-opus-5-5"
-effort = "high"
+effort = "medium"
 
 [roles.test]  # tests and quick mechanical edits
 kind = "claude"

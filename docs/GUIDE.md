@@ -176,7 +176,8 @@ These are the steps of the [diagram above](#how-it-flows), the same for every fr
 
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes your ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name and steps back.
 2. **One lead plans and goes.** The lead, `lead-<slug>`, starts in auto mode in a `lead` tab.
-   By default it runs on Claude (Opus 5.5 at `xhigh` effort). With `--lead codex` it runs on Codex (GPT-6 Astra at `ultra`).
+   By default it runs on Claude (Opus 5.5 at `xhigh` effort). With `--lead codex` it runs on Codex (GPT-6 Astra at `ultra`, Codex's extra high).
+   Every worker it starts runs at `medium` effort, whatever its model. Both are defaults you can change per job or per worker: [Configure](CONFIGURE.md#effort-the-default-and-how-to-change-it).
    It writes `plan.md`: the tasks, who does each, questions with a safe default, and the gates. Then it starts work.
 3. **A pane only when it's worth it.** The lead starts a worker for one of these:
    - parallel pieces of about 30 minutes or more (at most 4);

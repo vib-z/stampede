@@ -369,7 +369,17 @@ class Roles(Choices):
 
     def test_review_is_codex(self):
         argv, _ = self.start('review-api')
-        self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra"', argv)
+        self.assertIn('-m gpt-6-astra -c model_reasoning_effort="medium"', argv)  # every worker at medium, the reviewer too
+
+    def test_a_jobs_role_effort_and_one_workers_own(self):
+        code, out, err = self.new('--core', '--set', 'roles.research.effort=high')  # per job: saved in its settings.json
+        self.assertEqual(code, 0, out + err)
+        settings_.SETS.clear()
+        for name, flags, want in (('research-web', (), 'high'), ('research-api', ('--effort', 'max'), 'max'), ('build-api', (), 'medium')):
+            code, out, err = self.main('start', self.job, name, '--brief', self.brief(self.job, name), *flags)
+            self.assertEqual(code, 0, out + err)
+            (run,) = [r for r in self.calls('run') if self.labels(r).get('stampede.agent') == name]
+            self.assertIn(f'--effort {want}', ' '.join(self.program(run)), name)
 
     def test_an_unknown_role_takes_roles_default(self):
         self.config('[roles.default]\nmodel = "claude-sonnet-5-5"\neffort = "low"\n')
@@ -532,7 +542,7 @@ class Review(Choices):
     def test_end_is_the_default_with_the_reviewer_of_roles_review(self):
         for brief in self.briefs():
             self.assertIn('Review: one review pass at the end of what ships or reaches the owner, by another model than the '
-                          "builder's: start review-<scope>, which gets codex gpt-6-astra ultra.", brief.read_text())
+                          "builder's: start review-<scope>, which gets codex gpt-6-astra medium.", brief.read_text())
 
     def test_each_and_none(self):
         self.config('[review]\nstep = "each"\n[roles.review]\nkind = "claude"\nmodel = "claude-fable-5-1"\neffort = "max"\n')

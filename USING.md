@@ -35,7 +35,7 @@ stampede new --core --file ask.md   # Herdr Core, only when asked
 | `stampede post <job> "<text>" [--file <path>]` | the lead | the plan, a report; prints `POSTED <n>` |
 | `stampede finish <job> "<one line>"` | the lead | ends the job; prints `FINISHED <job dir>` |
 
-On Herdr Core also: `stampede start <job> <role>-<scope> --brief <file>` (or `-- <program>`) starts a helper, its model from its role (`roles.build` for `build-api`).
+On Herdr Core also: `stampede start <job> <role>-<scope> --brief <file>` (or `-- <program>`) starts a helper, its model and effort from its role (`roles.build`).
 `stampede tree <job>` lists the tree. `stampede close <job> [<agent>]` ends a subtree or the job: ask the owner first (code only stops a close from inside the job).
 `stampede reopen <job>` brings back what stopped, and a whole job `close <job>` put away; a helper closed by name stays closed. A finished job reopens read-only.
 

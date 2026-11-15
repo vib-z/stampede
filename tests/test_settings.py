@@ -26,11 +26,11 @@ ratio = 0.5
 on = true
 list = [1, -2, 3e2, "a \\"b\\""]
 '''
-# the table in skills/herdr-fleet/references/agents-and-models.md, Pick for the task: builders at medium, review on the other vendor
+# the table in skills/herdr-fleet/references/agents-and-models.md, Pick for the task: every worker at medium, review on the other vendor
 ROLES = {'default': ('claude', 'claude-opus-5-5', 'medium'), 'build': ('claude', 'claude-opus-5-5', 'medium'),
-         'research': ('claude', 'claude-opus-5-5', 'xhigh'), 'review': ('codex', 'gpt-6-astra', 'ultra'),
-         'design': ('codex', 'gpt-6-astra', 'ultra'), 'qa': ('codex', 'gpt-6-astra', 'ultra'),
-         'copy': ('claude', 'claude-opus-5-5', 'high'), 'test': ('claude', 'claude-sonnet-5-5', 'medium')}
+         'research': ('claude', 'claude-opus-5-5', 'medium'), 'review': ('codex', 'gpt-6-astra', 'medium'),
+         'design': ('codex', 'gpt-6-astra', 'medium'), 'qa': ('codex', 'gpt-6-astra', 'medium'),
+         'copy': ('claude', 'claude-opus-5-5', 'medium'), 'test': ('claude', 'claude-sonnet-5-5', 'medium')}
 
 
 class Settings(unittest.TestCase):
@@ -49,6 +49,17 @@ class Settings(unittest.TestCase):
 
     def load(self, env=None, **kw):
         return st.load(repo=self.repo, env=env or {}, home=self.home, **kw)
+
+    def test_the_effort_rule_is_a_default_never_a_limit(self):
+        s = self.load()  # the lead at extra high (xhigh on Claude, ultra on Codex), every worker at medium
+        self.assertEqual((s.get('lead.claude.effort'), s.get('lead.codex.effort')), ('xhigh', 'ultra'))
+        self.assertEqual({k: v for k, v in s.values.items() if k.endswith('.effort') and k.startswith('roles.')},
+                         {f'roles.{role}.effort': 'medium' for role in ROLES})
+        self.write('user', '[roles.review]\neffort = "ultra"\n[roles.mine]\nkind = "claude"\neffort = "max"\n')
+        s = self.load(sets=['roles.research.effort=xhigh', 'lead.codex.effort=high'])  # per role, per job: any value
+        self.assertEqual([s.get(k) for k in ('roles.review.effort', 'roles.mine.effort', 'roles.research.effort', 'lead.codex.effort')],
+                         ['ultra', 'max', 'xhigh', 'high'])
+        self.assertEqual(s.problems, [])
 
     def test_defaults_are_todays_values(self):
         s = self.load()
