@@ -1,5 +1,5 @@
 """Reaching the owner and the lead: questions, gates, plan approval, posts, tell, wait and finish."""
-import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, subprocess, sys, time, uuid
+import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, stat, subprocess, sys, time, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -150,6 +150,38 @@ def keep(pin, name, text):
         with contextlib.suppress(OSError):
             os.unlink(temporary, dir_fd=pin)
         return False
+
+
+def publish(path, text):
+    """Write text as path whole: a temporary file beside it, then os.replace, so a reader sees no file or all of it. The
+    temporary (.<name>.<hex>) matches no reader's glob and is removed if the write fails. A file written again keeps its
+    permission bits, as write_text kept them, and its copy is 0600 until then; a new one takes the umask's. Writers take
+    turns on the lock file .<name>.lock beside it (left in place; readers take none), so none samples the mode another
+    is about to change. When that lock cannot be opened or taken (an unwritable folder, a lock file this user cannot
+    read, a file system without flock), the write goes ahead without it; an unwritable folder then fails at the temporary."""
+    temporary, lock = path.with_name(f'.{path.name}.{uuid.uuid4().hex}'), None
+    try:
+        with contextlib.suppress(OSError):  # read-only, so a lock file any umask made opens again; 0600 from then on
+            lock = os.open(path.with_name(f'.{path.name}.lock'), os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            os.fchmod(lock, 0o600)
+        try:
+            old = os.lstat(path).st_mode
+        except FileNotFoundError:
+            old = 0
+        again = stat.S_ISREG(old)
+        with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600 if again else 0o666), 'w') as out:
+            out.write(text)
+        if again:
+            os.chmod(temporary, stat.S_IMODE(old))
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
+    finally:
+        if lock is not None:
+            os.close(lock)  # closing drops the lock
 
 
 def ask_background(job, question, options, command=None, gate=None):
@@ -488,8 +520,8 @@ def record_yes(job, ident, sha, by, asked=None):
     if sha != gate['sha']:
         raise PermissionError(f'gate {ident} asked about {gate["sha"]}, not {sha}: a stale yes; ask again')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
-    (Path(job) / 'gates' / (ident + '.approved')).write_text(json.dumps({'gate': ident, 'sha': sha, 'by': base_.line(by), 'at': when,
-                                                                         'digest': gate_digest(gate)}) + '\n')
+    publish(Path(job) / 'gates' / (ident + '.approved'), json.dumps({'gate': ident, 'sha': sha, 'by': base_.line(by), 'at': when,
+                                                                     'digest': gate_digest(gate)}) + '\n')
     tell(job, 'lead', f'GATE {ident} APPROVED by {base_.line(by)} at {when}: {gate["action"]} at {sha}. '
                       f'Run fleet-job gate-ok {Path(job).absolute()} {ident} --sha <the commit you act on>, then act.')
 
@@ -530,7 +562,10 @@ def gate_ok(job, ident, sha):
     if not path.is_file():
         raise PermissionError(f'gate {ident} has no recorded yes: wait for it'
                               + (', or the owner\'s yes typed in your pane' if pane_yes(job) and gate.get('kind') not in HELD else ''))
-    record = json.loads(path.read_text())
+    try:
+        record = json.loads(path.read_text())
+    except ValueError:
+        record = None
     if not isinstance(record, dict) or not all(base_.line(record.get(k, '')) for k in ('gate', 'sha', 'by', 'at')):
         raise PermissionError(f'the yes recorded for gate {ident} is malformed: ask again')
     if record.get('gate') != ident:
@@ -580,7 +615,7 @@ def approve(job, by):
                 raise PermissionError(f'the front door has not received this {name} yet: run fleet-job wait <job>, send the owner '
                                       'the file it names, and approve only their yes to that file')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
-    (Path(job) / 'approved').write_text(f'Approved: {when} by {base_.line(by)}, plan {digest}\n')
+    publish(Path(job) / 'approved', f'Approved: {when} by {base_.line(by)}, plan {digest}\n')
     started = 'helpers' if job_.backend(job) == 'native' else 'panes'
     tell(job, 'lead', f'Approved by {base_.line(by)} at {when}. Start the {started} the plan names.')
 
