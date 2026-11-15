@@ -116,11 +116,11 @@ printf '#!/bin/bash\n[ "$*" = "-u +%%Y%%m%%dT%%H%%M%%SZ" ] && { echo 20261115T03
 qpidw(){ local r=${1#*Z-}; r=${r#u??????-}; r=${r%%-*}; echo ${#r}; }   # width of the pid in a queue name
 for try in 1 2 3 4 5 6 7 8; do
   : > "$F/sent.jsonl"; touch "$F/down"; rm -f "$F/go"; p="w1:p9$try"
-  ( n=0; until [ -f "$F/go" ]; do n=$((n+1)); [ $n -gt 250 ] && exit 9; sleep 0.02; done   # gives up after 5 s or more
+  ( t0=$SECONDS; until [ -f "$F/go" ]; do [ $((SECONDS - t0)) -ge 10 ] && exit 9; sleep 0.02; done   # gives up after 10 s
     exec herdr-event-post "{\"source\":\"herdr\",\"state\":\"done\",\"pane\":\"$p\"}" ) & kid=$!
   post "{\"source\":\"herdr\",\"state\":\"blocked\",\"pane\":\"$p\"}"
   touch "$F/go" && [ -f "$F/go" ] || fail "B10b could not make the marker $F/go"
-  n=0; while kill -0 "$kid" 2>/dev/null; do n=$((n+1)); [ $n -gt 1500 ] && fail "B10b the held done post did not end in 30 s"; sleep 0.02; done
+  t0=$SECONDS; while kill -0 "$kid" 2>/dev/null; do [ $((SECONDS - t0)) -ge 30 ] && fail "B10b the held done post did not end in 30 s"; sleep 0.02; done
   wait "$kid"; st=$?; kid=""; [ "$st" = 0 ] || fail "B10b the held done post exited $st"
   names=$(cd "$Q" && grep -l "\"$p\"" -- *.json 2>/dev/null; cd "$DD" && grep -l "\"$p\"" -- * 2>/dev/null); set -- $names
   [ $# = 2 ] || fail "B10b want two queued files for $p, got: $names"
@@ -144,6 +144,14 @@ grep -q 'queue-write-failed: .*w1:p9e' "$EVLOG" || fail "B10e the failed queue w
 age 130; post '{"source":"herdr","state":"done","pane":"w1:p9e"}'; rm "$B/jq"   # as on main, the failed one counted for de-dupe
 rm "$F/down"; herdr-event-flush
 [ "$(sent)" = 1 ] && grep -q '"state":"done"' "$F/sent.jsonl" || fail "B10e sent $(cat "$F/sent.jsonl"), want only the done posted last"
+# B10g: a large event (1.5 MB, on stdin) is queued whole even when the caller exports out or _qbuf (the buffer)
+: > "$F/sent.jsonl"; touch "$F/down"; rm -f "$Q"/*.json
+jq -nc '{source:"big",state:"done",pane:"w1:p9g",blob:("x"*1500000)}' > "$F/big.json"
+out=caller _qbuf=caller herdr-event-post <"$F/big.json"   # a Nix shell exports out
+set -- "$Q"/*.json; [ $# = 1 ] && [ -f "$1" ] || fail "B10g the large event was not queued: $(ls -a "$Q" | tr '\n' ' ')"
+[ "$(jq -r '.payload.blob|length' "$1")" = 1500000 ] || fail "B10g the large event's body is not whole"
+[ -z "$(ls -a "$Q" | grep '^\.tmp-')" ] || fail "B10g a .tmp- file was left: $(ls -a "$Q" | tr '\n' ' ')"
+rm -f "$Q"/*.json "$F/big.json"; rm "$F/down"
 # B10f: the key (herdr_qkey_def) at chosen times: fixed width, leading zeros, both ends of a second, the next second
 ( . "$SRC/herdr-platform"; s=1794714312   # 2026-11-15T03:45:12Z
   k(){ jq -rn "$herdr_qkey_def $1|qkey"; }
