@@ -51,7 +51,7 @@ It is a default, not a limit: stampede passes any effort you name to the CLI, an
 | one worker | `stampede start <job> build-api --brief <file> --effort high` |
 | one worker on another model or CLI | `stampede start <job> build-ui --brief <file> --kind codex --model <model> --effort high` |
 
-A role's effort goes only with its own CLI. With `--kind codex` on a Claude role, give `--effort` too, or Codex uses its own default.
+On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in. A role's effort goes only with its own CLI. With `--kind codex` on a Claude role, give `--effort` too, or Codex uses its own default.
 
 ## Every key, with its default
 
