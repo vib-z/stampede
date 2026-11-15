@@ -110,8 +110,8 @@ stampede never updates anything by itself. You update this way:
 
 ```text
 $ stampede --version
-0.2.1
-stampede 0.2.2 is out, this is 0.2.1: run stampede update
+0.2.2
+stampede 0.2.3 is out, this is 0.2.2: run stampede update
 ```
 
 - In a plugin install the line ends `run herdr plugin update stampede --yes`.
@@ -120,7 +120,7 @@ stampede 0.2.2 is out, this is 0.2.1: run stampede update
 - Turn the check off with `export STAMPEDE_NO_UPDATE_CHECK=1` ([Configure](CONFIGURE.md)). How a release is made: [RELEASING.md](../RELEASING.md).
 
 **`stampede update`** updates only a clean checkout on `main`, and never overwrites a file of yours.
-- It runs `git fetch`, moves forward with `git merge --ff-only`, and runs `./install.sh` again, which links any new skill or command. It ends with `stampede 0.2.1 -> 0.2.2`.
+- It runs `git fetch`, moves forward with `git merge --ff-only`, and runs `./install.sh` again, which links any new skill or command. It ends with `stampede 0.2.2 -> 0.2.3`.
 - It refuses, says why and changes no file when the checkout has local changes or untracked files, is on another branch, or holds an ignored file at a path the update adds.
 - In a Herdr plugin install it changes nothing, and prints `herdr plugin update stampede --yes` to run instead.
 - Your links keep pointing at the same checkout.

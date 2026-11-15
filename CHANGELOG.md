@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.2.3 (15 Nov 2026)
+
+The Herdr TUI is the default again, the README is a short front page and the manual behind it is in plain words, the skills have one source, and `stampede tree` tells a leftover shell from an agent.
+
+Changes in behaviour:
+
+- **The Herdr TUI is the default backend, and Herdr Core runs a job only when you ask** (`--core` on `stampede new`, or the setting `backend`). In 0.2.1 and 0.2.2 the setting defaulted to `auto`, which put a job started outside a Herdr pane on Herdr Core by itself. A bare `stampede new` outside a Herdr pane is now refused, exit 2, before anything is made, with a line that names `--pane`, `--workspace` and `--core`. A job that is already open keeps its backend, and a config that already says `core` or `auto` is unchanged. To keep the old behaviour: `stampede config set backend auto`.
+- **`backend` is a setting only you can set.** A repo's `.stampede.toml` can no longer set it: a `backend` line there is a problem that `stampede config show` names and `stampede new` refuses on, so a repo can never put a job on Herdr Core.
+- **`stampede tree` no longer shows a shell Herdr Core left in a lost lead's or helper's place as a second row for that agent.** It is listed as a plain terminal of kind `shell`, named by its address, and its line ends `left in <agent>'s place`; in `tree --json` every row has a `shell_of` key, null unless the row is such a shell. This closes the known issue of 0.2.2.
+- **A lead may ask on its own card.** A Claude lead on the Herdr TUI, in a job you started yourself (no bot and no chat outside Herdr), is told it may ask you a question on its own question card in its pane, as it already may for a gate. A first job needs no phone app. Every other lead's brief is unchanged.
+- **`install.sh` ends with one more line,** naming the default backend and how to change it.
+
+What is new:
+
+- **A short README.** The README is now a 100-line front page in plain words: what stampede is, what you need, install, your first job and how it keeps you safe. The manual moved into [docs/GUIDE.md](docs/GUIDE.md), [docs/SETUP.md](docs/SETUP.md), [docs/CORE.md](docs/CORE.md), [docs/SAFETY.md](docs/SAFETY.md), [docs/CONFIGURE.md](docs/CONFIGURE.md), [docs/TROUBLESHOOT.md](docs/TROUBLESHOOT.md), [docs/REFERENCE.md](docs/REFERENCE.md) and [docs/STATUS.md](docs/STATUS.md), and [CONTRIBUTING.md](CONTRIBUTING.md) took the Contribute section. A link to an old README section now points at the page that holds it.
+- **The manual in plain words.** The guide, safety, setup, Herdr Core, troubleshooting and settings pages are rewritten for a reader new to coding: short sentences, each term explained once, lists and tables in place of packed paragraphs. No command, setting or rule changed. Lines that were wrong are fixed on the way: `approve-gate` is shown with its required `--digest`, three other commands with a flag they need, two messages as the code prints them, and the health check's four skill links.
+- **`stampede config set backend <tui|core|auto>`** writes your default backend to your own config file and leaves the rest of the file as it is.
+- **The one-time settings work from nothing.** The settings command in `skills/herdr-fleet/references/unattended-setup.md` makes `~/.claude/settings.json` when there is none, keeps every other setting, says which one setting it switches off, writes nothing when nothing would change, and never overwrites an older backup.
+- **One source.** The four skills are changed in this repo first, and every machine runs them from a checkout through `install.sh`. What one setup wants and others do not is a setting with a default. Four such settings are new, each off or neutral until you set it:
+  - **`lead.forbid`** (your own file, the environment as `FLEET_LEAD_FORBID`, or a flag; never a repo or a job folder): exact model names that may not lead a job. `stampede new` refuses one before it makes anything.
+  - **`HERDR_EVENTS_FALLBACK_ROUTE`:** the name of a route in the routes folder, for an owner with no route file and for a Codex turn outside Herdr (the Codex desktop app), which is then sent as source `codex-desktop`, with no pane or workspace, each thread and turn its own event.
+  - **`HERDR_EVENTS_LAUNCHD`:** the label prefix of the two macOS launchd jobs `herdr-doctor` looks for (default `local`).
+  - **`HERDR_DOCTOR_EXTRA`:** an executable of your own that `herdr-doctor` runs last, never through a shell. It and its process group are ended after 30 seconds; its first 64 KB print with control bytes removed; each line that starts `PROBLEM` counts, shown or not.
+
+Not in this release: refusing a message when a draft is already typed in an agent's prompt on a Core-native job, alerts for a job's helpers (planned), and the removal of `--core --relay` (the next minor release).
+
 ## 0.2.2 (14 Nov 2026)
 
 Three pieces of earlier work that were never merged, rebuilt on 0.2.1: an installer that can take over an older install and undo it, timers and hooks that honour the settings file, and two fixes for jobs on Herdr Core.
