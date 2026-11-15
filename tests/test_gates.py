@@ -435,6 +435,58 @@ class Polish(Scratch):
         self.assertFalse((self.job / 'asks' / '0123456789ab.pid').exists())
 
 
+class WholeYes(Scratch):
+    """A recorded yes appears whole or not at all: a gate-ok run while the yes is being written never errors."""
+
+    def test_a_check_during_the_write_sees_no_yes_or_the_whole_yes(self):
+        ident = self.gate(approve=False)
+        record, real, seen = self.job / 'gates' / (ident + '.approved'), Path.write_text, []
+
+        def write(path, text, *args, **kwargs):  # stop between the two steps of a write: the file made, still empty
+            path.open('w').close()
+            try:
+                with mock.patch('sys.stdout'):
+                    owner_.gate_ok(self.job, ident, SHA)
+                seen.append('APPROVED')
+            except Exception as error:
+                seen.append(error)
+            return real(path, text, *args, **kwargs)
+        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+            owner_.record_yes(self.job, ident, SHA, 'owner')
+        self.assertEqual(len(seen), 1)
+        self.assertIsInstance(seen[0], PermissionError, 'a check mid-write is a plain "no recorded yes", never a JSON error')
+        self.assertRegex(str(seen[0]), 'has no recorded yes')
+        with mock.patch('sys.stdout'):
+            owner_.gate_ok(self.job, ident, SHA)
+        self.assertEqual(sorted(p.name for p in record.parent.iterdir()), [ident + '.approved', ident + '.json'], 'no temporary left')
+
+    def test_a_failed_write_leaves_neither_a_record_nor_a_temporary(self):
+        ident = self.gate(approve=False)
+        real = Path.write_text
+
+        def write(path, text, *args, **kwargs):
+            real(path, text[:5])
+            raise OSError(28, 'No space left on device')
+        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+            with self.assertRaises(OSError):
+                owner_.record_yes(self.job, ident, SHA, 'owner')
+        self.assertEqual([p.name for p in (self.job / 'gates').iterdir()], [ident + '.json'])
+
+    def test_the_plans_yes_is_written_whole(self):
+        (self.job / 'plan.md').write_text('the plan\n')
+        with mock.patch.object(owner_, 'tell'):
+            owner_.approve(self.job, 'owner')
+        self.assertTrue((self.job / 'approved').read_text().endswith('plan ' + owner_.plan_digest(self.job) + '\n'))
+        self.assertEqual(sorted(p.name for p in self.job.iterdir() if p.name.startswith('.')), [], 'no temporary left')
+
+    def test_a_record_that_does_not_parse_is_a_malformed_yes(self):
+        ident = self.gate(approve=False)
+        (self.job / 'gates' / (ident + '.approved')).write_text('{')
+        result = subprocess.run([str(FLEET), 'gate-ok', str(self.job), ident, '--sha', SHA], capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stderr.strip()),
+                         (2, f'stampede gate-ok: the yes recorded for gate {ident} is malformed: ask again'))
+
+
 class Round1Keys(Scratch):
     def test_r8_a_job_with_no_record_shows_every_gate_on_whatever_the_user_says(self):
         (self.job / 'ask.md').write_text('x\n')

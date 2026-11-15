@@ -152,6 +152,19 @@ def keep(pin, name, text):
         return False
 
 
+def publish(path, text):
+    """Write text as path whole: a temporary file beside it, then os.replace, so a reader sees no file or all of it. The
+    temporary name (.<name>.<hex>) matches no reader's glob and is removed if the write fails."""
+    temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}')
+    try:
+        temporary.write_text(text)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
+
+
 def ask_background(job, question, options, command=None, gate=None):
     """Detach the question in its own process group, so cancel stops it and its child card together."""
     job = Path(job).absolute()
@@ -488,8 +501,8 @@ def record_yes(job, ident, sha, by, asked=None):
     if sha != gate['sha']:
         raise PermissionError(f'gate {ident} asked about {gate["sha"]}, not {sha}: a stale yes; ask again')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
-    (Path(job) / 'gates' / (ident + '.approved')).write_text(json.dumps({'gate': ident, 'sha': sha, 'by': base_.line(by), 'at': when,
-                                                                         'digest': gate_digest(gate)}) + '\n')
+    publish(Path(job) / 'gates' / (ident + '.approved'), json.dumps({'gate': ident, 'sha': sha, 'by': base_.line(by), 'at': when,
+                                                                     'digest': gate_digest(gate)}) + '\n')
     tell(job, 'lead', f'GATE {ident} APPROVED by {base_.line(by)} at {when}: {gate["action"]} at {sha}. '
                       f'Run fleet-job gate-ok {Path(job).absolute()} {ident} --sha <the commit you act on>, then act.')
 
@@ -530,7 +543,10 @@ def gate_ok(job, ident, sha):
     if not path.is_file():
         raise PermissionError(f'gate {ident} has no recorded yes: wait for it'
                               + (', or the owner\'s yes typed in your pane' if pane_yes(job) and gate.get('kind') not in HELD else ''))
-    record = json.loads(path.read_text())
+    try:
+        record = json.loads(path.read_text())
+    except ValueError:
+        record = None
     if not isinstance(record, dict) or not all(base_.line(record.get(k, '')) for k in ('gate', 'sha', 'by', 'at')):
         raise PermissionError(f'the yes recorded for gate {ident} is malformed: ask again')
     if record.get('gate') != ident:
@@ -580,7 +596,7 @@ def approve(job, by):
                 raise PermissionError(f'the front door has not received this {name} yet: run fleet-job wait <job>, send the owner '
                                       'the file it names, and approve only their yes to that file')
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
-    (Path(job) / 'approved').write_text(f'Approved: {when} by {base_.line(by)}, plan {digest}\n')
+    publish(Path(job) / 'approved', f'Approved: {when} by {base_.line(by)}, plan {digest}\n')
     started = 'helpers' if job_.backend(job) == 'native' else 'panes'
     tell(job, 'lead', f'Approved by {base_.line(by)} at {when}. Start the {started} the plan names.')
 
