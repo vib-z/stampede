@@ -1,6 +1,6 @@
 """Gates held by code (stampede/gates.py): the [gates] keys and the job's owner-side record, logged opt-outs, stampede merge
 with a fake gh on PATH, and the pre-push hook in a real scratch repo with a scratch bare remote."""
-import json, os, subprocess, sys, tempfile, unittest
+import contextlib, json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -438,90 +438,130 @@ class Polish(Scratch):
 class WholeYes(Scratch):
     """A recorded yes appears whole or not at all: a gate-ok run while the yes is being written never errors."""
 
+    def setUp(self):
+        super().setUp()
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)  # whatever a test sets, the umask comes back
+        patch = mock.patch.object(owner_, 'tell')
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def writing(self, before=lambda: None, after=lambda: None, fail=False):
+        """publish's text write, with a hook as the temporary is made (still empty) and once the text is down."""
+        real = open
+
+        @contextlib.contextmanager
+        def opened(fd, *args, **kwargs):
+            before()
+            with real(fd, *args, **kwargs) as out:
+                if fail:
+                    out.write('{"gat')
+                    raise OSError(28, 'No space left on device')
+                yield out
+            after()
+        return mock.patch.object(owner_, 'open', opened, create=True)
+
+    def mode(self, path):
+        return oct(path.stat().st_mode & 0o777)
+
     def test_a_check_during_the_write_sees_no_yes_or_the_whole_yes(self):
         ident = self.gate(approve=False)
-        record, real, seen = self.job / 'gates' / (ident + '.approved'), Path.write_text, []
+        record, seen = self.job / 'gates' / (ident + '.approved'), []
 
-        def write(path, text, *args, **kwargs):  # stop between the two steps of a write: the file made, still empty
-            path.open('w').close()
+        def check():
             try:
                 with mock.patch('sys.stdout'):
                     owner_.gate_ok(self.job, ident, SHA)
                 seen.append('APPROVED')
             except Exception as error:
                 seen.append(error)
-            return real(path, text, *args, **kwargs)
-        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+        with self.writing(before=check):
             owner_.record_yes(self.job, ident, SHA, 'owner')
         self.assertEqual(len(seen), 1)
         self.assertIsInstance(seen[0], PermissionError, 'a check mid-write is a plain "no recorded yes", never a JSON error')
         self.assertRegex(str(seen[0]), 'has no recorded yes')
         with mock.patch('sys.stdout'):
             owner_.gate_ok(self.job, ident, SHA)
-        self.assertEqual(sorted(p.name for p in record.parent.iterdir()), [ident + '.approved', ident + '.json'], 'no temporary left')
+        self.assertEqual(sorted(p.name for p in record.parent.iterdir()), [f'.{ident}.approved.lock', ident + '.approved',
+                                                                           ident + '.json'], 'only the lock file is left')
 
     def test_a_failed_write_leaves_neither_a_record_nor_a_temporary(self):
         ident = self.gate(approve=False)
-        real = Path.write_text
-
-        def write(path, text, *args, **kwargs):
-            real(path, text[:5])
-            raise OSError(28, 'No space left on device')
-        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
-            with self.assertRaises(OSError):
-                owner_.record_yes(self.job, ident, SHA, 'owner')
-        self.assertEqual([p.name for p in (self.job / 'gates').iterdir()], [ident + '.json'])
+        with self.writing(fail=True), self.assertRaises(OSError):
+            owner_.record_yes(self.job, ident, SHA, 'owner')
+        self.assertEqual(sorted(p.name for p in (self.job / 'gates').iterdir()), [f'.{ident}.approved.lock', ident + '.json'])
 
     def test_the_plans_yes_is_written_whole(self):
         (self.job / 'plan.md').write_text('the plan\n')
         (self.job / 'review').write_text('')
-        with mock.patch.object(owner_, 'tell'):
-            owner_.approve(self.job, 'owner')  # a yes to this plan already stands; the owner says it again
-        real, seen = Path.write_text, []
+        owner_.approve(self.job, 'owner')  # a yes to this plan already stands; the owner says it again
+        seen = []
 
-        def write(path, text, *args, **kwargs):  # stop between the two steps of a write: the file made, still empty
-            path.open('w').close()
+        def check():
             try:
                 owner_.require_approval(self.job)
                 seen.append('approved')
             except Exception as error:
                 seen.append(error)
-            return real(path, text, *args, **kwargs)
-        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+        with self.writing(before=check):
             owner_.approve(self.job, 'owner')
         self.assertEqual(seen, ['approved'], 'a check mid-write sees the standing yes, never a half-written one')
         self.assertTrue((self.job / 'approved').read_text().endswith('plan ' + owner_.plan_digest(self.job) + '\n'))
-        self.assertEqual(sorted(p.name for p in self.job.iterdir() if p.name.startswith('.')), [], 'no temporary left')
+        self.assertEqual(sorted(p.name for p in self.job.iterdir() if p.name.startswith('.')), ['.approved.lock'])
 
-    def test_a_record_written_again_keeps_its_mode_and_a_new_one_takes_the_umasks(self):
+    def records(self):
         (self.job / 'plan.md').write_text('the plan\n')
         ident = self.gate(approve=False)
-        records = {'gate': self.job / 'gates' / (ident + '.approved'), 'plan': self.job / 'approved'}
-        write = {'gate': lambda: owner_.record_yes(self.job, ident, SHA, 'owner'), 'plan': lambda: owner_.approve(self.job, 'owner')}
-        previous = os.umask(0o022)
-        self.addCleanup(os.umask, previous)
-        with mock.patch.object(owner_, 'tell'):
-            for which, record in records.items():
-                for umask, new, existing in ((0o022, 0o644, 0o600), (0o077, 0o600, 0o644)):
-                    with self.subTest(which, umask=oct(umask)):
-                        os.umask(umask)
-                        if record.exists():
-                            record.unlink()
-                        write[which]()
-                        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(new), 'a new record takes the umask\'s mode')
+        return {'gate': (self.job / 'gates' / (ident + '.approved'), lambda: owner_.record_yes(self.job, ident, SHA, 'owner')),
+                'plan': (self.job / 'approved', lambda: owner_.approve(self.job, 'owner'))}
+
+    def test_a_record_written_again_keeps_its_mode_and_a_new_one_takes_the_umasks(self):
+        for which, (record, write) in self.records().items():
+            for umask, new, existing in ((0o022, 0o644, 0o600), (0o077, 0o600, 0o644)):
+                with self.subTest(which, umask=oct(umask)):
+                    os.umask(umask)
+                    if record.exists():
+                        record.unlink()
+                    write()
+                    self.assertEqual(self.mode(record), oct(new), 'a new record takes the umask\'s mode')
+                    record.chmod(existing)
+                    write()
+                    self.assertEqual(self.mode(record), oct(existing), 'a record written again keeps its mode')
+
+    def test_odd_folders_and_umasks_record_the_yes_as_main_did(self):
+        for which, (record, write) in self.records().items():
+            for case, umask, folder_mode, existing, final in (
+                    ('folder0300', 0o022, 0o300, None, 0o644), ('umask0222-new', 0o222, None, None, 0o444),
+                    ('umask0222-existing', 0o222, None, 0o600, 0o600), ('umask0200-new', 0o200, None, None, 0o466),
+                    ('umask0200-existing', 0o200, None, 0o600, 0o600)):
+                with self.subTest(which, case=case):
+                    for leftover in (record, record.with_name(f'.{record.name}.lock')):
+                        if leftover.exists():
+                            leftover.chmod(0o600)
+                            leftover.unlink()
+                    if existing is not None:
+                        record.write_text('old\n')
                         record.chmod(existing)
-                        write[which]()
-                        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(existing), 'a record written again keeps its mode')
+                    os.umask(umask)
+                    if folder_mode is not None:
+                        record.parent.chmod(folder_mode)
+                    try:
+                        write()
+                    finally:
+                        record.parent.chmod(0o755)
+                        os.umask(0o022)
+                    self.assertEqual(self.mode(record), oct(final))
+                    self.assertNotEqual(record.read_text(), 'old\n')
+                    write()  # again, over the lock file and record this umask made (main could not reopen a 0444 or 0466 one)
+                    self.assertEqual(self.mode(record), oct(final))
 
     def test_two_writers_take_turns_and_the_second_keeps_the_firsts_mode(self):
         ident = self.gate(approve=False)
-        record, gates = self.job / 'gates' / (ident + '.approved'), self.job / 'gates'
-        previous = os.umask(0o022)
-        self.addCleanup(os.umask, previous)
-        real_write, real_flock, seen = Path.write_text, owner_.fcntl.flock, []
+        record = self.job / 'gates' / (ident + '.approved')
+        real_flock, seen = owner_.fcntl.flock, []
 
-        def write(path, text, *args, **kwargs):  # writer A has read the record's state and not yet written
-            other = os.open(gates, os.O_RDONLY)
+        def second():  # writer A has read the record's state and not yet written
+            other = os.open(record.with_name(f'.{record.name}.lock'), os.O_RDONLY)
             try:
                 real_flock(other, owner_.fcntl.LOCK_EX | owner_.fcntl.LOCK_NB)
                 seen.append('a second writer got in')
@@ -529,8 +569,7 @@ class WholeYes(Scratch):
                 seen.append('refused')
             finally:
                 os.close(other)
-            return real_write(path, text, *args, **kwargs)
-        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+        with self.writing(before=second):
             owner_.record_yes(self.job, ident, SHA, 'owner')
         self.assertEqual(seen, ['refused'], 'no second writer runs between reading the mode and replacing the record')
         record.unlink()
@@ -543,31 +582,25 @@ class WholeYes(Scratch):
                 os.umask(0o022)
             return real_flock(fd, op)
         flock.calls = 0
-        with mock.patch.object(owner_.fcntl, 'flock', flock), mock.patch.object(owner_, 'tell'):
+        with mock.patch.object(owner_.fcntl, 'flock', flock):
             owner_.record_yes(self.job, ident, SHA, 'owner')
         self.assertEqual(flock.calls, 2)
-        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(0o600), 'as on main: A writes after B and keeps its 0600')
+        self.assertEqual(self.mode(record), oct(0o600), 'as on main: A writes after B and keeps its 0600')
 
     def test_a_record_written_again_is_never_more_readable_on_the_way(self):
         ident = self.gate(approve=False)
-        record = self.job / 'gates' / (ident + '.approved')
-        previous = os.umask(0o022)
-        self.addCleanup(os.umask, previous)
-        with mock.patch.object(owner_, 'tell'):
-            owner_.record_yes(self.job, ident, SHA, 'owner')
+        record, modes = self.job / 'gates' / (ident + '.approved'), {}
+        owner_.record_yes(self.job, ident, SHA, 'owner')
         record.chmod(0o600)
-        real, modes = Path.write_text, {}
 
-        def write(path, text, *args, **kwargs):  # just after the text is down, before the mode is set and the copy moved
-            result = real(path, text, *args, **kwargs)
-            modes.update({p.name: oct(p.stat().st_mode & 0o777) for p in record.parent.iterdir()
-                          if p.name != ident + '.json' and SHA in p.read_text()})
-            return result
-        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+        def look():  # the text is down; the mode is not yet set and the copy not yet moved
+            modes.update({p.name: self.mode(p) for p in record.parent.iterdir() if p.is_file() and p.stat().st_size
+                          and p.name != ident + '.json' and SHA in p.read_text()})
+        with self.writing(after=look):
             owner_.record_yes(self.job, ident, SHA, 'owner')
         self.assertEqual(len(modes), 2, 'the record and its copy')
         self.assertEqual(set(modes.values()), {oct(0o600)}, 'no file holding the yes is more readable than 0600')
-        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(0o600))
+        self.assertEqual(self.mode(record), oct(0o600))
 
     def test_a_record_that_does_not_parse_is_a_malformed_yes(self):
         ident = self.gate(approve=False)
