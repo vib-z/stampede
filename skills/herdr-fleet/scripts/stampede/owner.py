@@ -155,21 +155,28 @@ def keep(pin, name, text):
 def publish(path, text):
     """Write text as path whole: a temporary file beside it, then os.replace, so a reader sees no file or all of it. The
     temporary name (.<name>.<hex>) matches no reader's glob and is removed if the write fails. A file written again keeps
-    its permission bits, as write_text kept them; a new one takes the umask's."""
+    its permission bits, as write_text kept them, and its copy is 0600 until then; a new one takes the umask's. Writers
+    take turns on a lock of the folder itself, so none samples the mode another is about to change; readers take none."""
     temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}')
+    folder = os.open(path.parent, os.O_RDONLY)
     try:
+        fcntl.flock(folder, fcntl.LOCK_EX)
         try:
             old = os.lstat(path).st_mode
         except FileNotFoundError:
             old = 0
+        again = stat.S_ISREG(old)
+        os.close(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600 if again else 0o666))
         temporary.write_text(text)
-        if stat.S_ISREG(old):
+        if again:
             os.chmod(temporary, stat.S_IMODE(old))
         os.replace(temporary, path)
     except BaseException:
         with contextlib.suppress(OSError):
             temporary.unlink()
         raise
+    finally:
+        os.close(folder)  # closing drops the lock
 
 
 def ask_background(job, question, options, command=None, gate=None):

@@ -513,6 +513,62 @@ class WholeYes(Scratch):
                         write[which]()
                         self.assertEqual(oct(record.stat().st_mode & 0o777), oct(existing), 'a record written again keeps its mode')
 
+    def test_two_writers_take_turns_and_the_second_keeps_the_firsts_mode(self):
+        ident = self.gate(approve=False)
+        record, gates = self.job / 'gates' / (ident + '.approved'), self.job / 'gates'
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)
+        real_write, real_flock, seen = Path.write_text, owner_.fcntl.flock, []
+
+        def write(path, text, *args, **kwargs):  # writer A has read the record's state and not yet written
+            other = os.open(gates, os.O_RDONLY)
+            try:
+                real_flock(other, owner_.fcntl.LOCK_EX | owner_.fcntl.LOCK_NB)
+                seen.append('a second writer got in')
+            except BlockingIOError:
+                seen.append('refused')
+            finally:
+                os.close(other)
+            return real_write(path, text, *args, **kwargs)
+        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+            owner_.record_yes(self.job, ident, SHA, 'owner')
+        self.assertEqual(seen, ['refused'], 'no second writer runs between reading the mode and replacing the record')
+        record.unlink()
+
+        def flock(fd, op):  # the reviewer's interleaving: A has seen no record and pauses; B (umask 077) writes first
+            flock.calls += 1
+            if flock.calls == 1:
+                os.umask(0o077)
+                owner_.record_yes(self.job, ident, SHA, 'owner')
+                os.umask(0o022)
+            return real_flock(fd, op)
+        flock.calls = 0
+        with mock.patch.object(owner_.fcntl, 'flock', flock), mock.patch.object(owner_, 'tell'):
+            owner_.record_yes(self.job, ident, SHA, 'owner')
+        self.assertEqual(flock.calls, 2)
+        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(0o600), 'as on main: A writes after B and keeps its 0600')
+
+    def test_a_record_written_again_is_never_more_readable_on_the_way(self):
+        ident = self.gate(approve=False)
+        record = self.job / 'gates' / (ident + '.approved')
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)
+        with mock.patch.object(owner_, 'tell'):
+            owner_.record_yes(self.job, ident, SHA, 'owner')
+        record.chmod(0o600)
+        real, modes = Path.write_text, {}
+
+        def write(path, text, *args, **kwargs):  # just after the text is down, before the mode is set and the copy moved
+            result = real(path, text, *args, **kwargs)
+            modes.update({p.name: oct(p.stat().st_mode & 0o777) for p in record.parent.iterdir()
+                          if p.name != ident + '.json' and SHA in p.read_text()})
+            return result
+        with mock.patch.object(Path, 'write_text', write), mock.patch.object(owner_, 'tell'):
+            owner_.record_yes(self.job, ident, SHA, 'owner')
+        self.assertEqual(len(modes), 2, 'the record and its copy')
+        self.assertEqual(set(modes.values()), {oct(0o600)}, 'no file holding the yes is more readable than 0600')
+        self.assertEqual(oct(record.stat().st_mode & 0o777), oct(0o600))
+
     def test_a_record_that_does_not_parse_is_a_malformed_yes(self):
         ident = self.gate(approve=False)
         (self.job / 'gates' / (ident + '.approved')).write_text('{')
