@@ -91,11 +91,11 @@ How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per c
 
 ## Add a client
 
-1. One row in `CLIENTS` in [tests/test_clients.py](../tests/test_clients.py): its README front-door row (or `None`), `where` (`inside`, `outside` or `ssh`), its `backends`, and for a bot its slug (`bot`) and `owner_from` (`tag` or `env`).
+1. One row in `CLIENTS` in [tests/test_clients.py](../tests/test_clients.py): its front-door row in [docs/GUIDE.md](GUIDE.md#front-doors) as `door` (or `None`), `where` (`inside`, `outside` or `ssh`), its `backends`, and for a bot its slug (`bot`) and `owner_from` (`tag` or `env`).
 2. One row in the [Clients](#clients) table above, with its automated result once the suite passes.
 3. A live run from the real client ([Live runbook](#live-runbook)), and its row's live cells.
 
-`ClientsInSync` fails until README's front doors, `CLIENTS` and this table agree. A client that behaves differently in code (a new environment, flag or channel) needs that difference in `tests/clients_run.py`, and the matching line in [What differs](#what-differs-between-clients).
+`ClientsInSync` fails until the front doors in docs/GUIDE.md, `CLIENTS` and this table agree. A client that behaves differently in code (a new environment, flag or channel) needs that difference in `tests/clients_run.py`, and the matching line in [What differs](#what-differs-between-clients).
 
 **A lead kind** is not a client either: add it to `LEADS` under each backend whose `stampede new --lead` takes it; a backend that does not would refuse it with `LEAD_REFUSED` before making anything (O2); today both backends take both leads.
 
@@ -134,7 +134,7 @@ Leave the test workspaces open; the owner closes them.
 - **F1, a bot on Core, from its own guide. Fixed, before release.** Over SSH a bot has no workspace on Core, so only `HERDR_EVENTS_OWNER` makes a job its own. Without it the job is local: its questions and gates go to the phone, its finish to the default route, and the bot never hears them. [remote/grokbot/herdr.md](../remote/grokbot/herdr.md), [remote/other.md](../remote/other.md) and the grokbot-herdr skill now put `HERDR_EVENTS_OWNER=<bot>` in front of the Core start. Test: `test_f1_a_bots_core_start_names_its_owner`.
 - **F2, a bot that names itself by `HERDR_EVENTS_OWNER` on the TUI.** `stampede new` records it in `<job>/owner`, so questions, gates and finish reach it, but it does not tag the workspace, so the panes' own `blocked`, permission, `stale` and `dead` events go to the default route. On Core, `new` tags the job's key, so the follower's events do reach it. Fix: `new` on the TUI tags the workspace as `new --core` tags the key, or the guides say to tag first. Test: `test_f2_an_owner_set_by_env_hears_its_panes`.
 - **F17, a native ask said the answer goes to an inbox (every client, native). Fixed on 13 Nov 2026, before release.** On a native job the answer is typed into the lead's terminal and there is no inbox file, but `stampede ask` printed `the answer goes to the lead inbox` (the phone) or `the answer comes to your inbox` (a bot). Now it says Core types the answer into the lead's terminal. Test: `test_f17_a_native_ask_says_where_the_answer_goes`.
-- **Hermes has no front-door guide.** It is in `CLIENTS`, passes like the other local clients, and worked live from `hermes -z`, but README's front doors and `remote/` do not name it.
+- **Hermes has no front-door guide.** It is in `CLIENTS`, passes like the other local clients, and worked live from `hermes -z`, but the front doors in docs/GUIDE.md and `remote/` do not name it.
 
 ### Found by the live runs
 

@@ -1,7 +1,7 @@
 """The cross-client suite: stampede driven from every client it claims, with like-for-like outcomes (docs/CLIENTS.md).
 
-CLIENTS is the one list the suite runs over, and WORKERS the one list of worker kinds. A front door added to README's
-table, or a client added here, fails ClientsInSync until both docs/CLIENTS.md and this table name it. Outcomes plays
+CLIENTS is the one list the suite runs over, and WORKERS the one list of worker kinds. A front door added to the table in
+docs/GUIDE.md, or a client added here, fails ClientsInSync until both docs/CLIENTS.md and this table name it. Outcomes plays
 one job per client and backend against the repo's fakes (tests/clients_run.py) and asserts each outcome's command
 contract, O1 to O9, as subtests named "<client>/<backend> <outcome>". A gap between clients is a finding: a test
 marked as an expected failure, named after it. Stdlib only; nothing leaves the machine.
@@ -13,20 +13,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tests'))
 
-# name: README front-door row (None: not a README front door yet), where it runs (inside Herdr, outside it, or over ssh),
+# name: its front-door row in docs/GUIDE.md (None: not a front door there yet), where it runs (inside Herdr, outside it, or over ssh),
 # the backends it can start. A bot also names its slug (its route, and the owner of its jobs) and how it makes a TUI job
 # its own: the workspace's owner tag (grokbot-herdr, Step 3) or HERDR_EVENTS_OWNER at new. On Core there is no workspace
 # to tag, so every bot sets HERDR_EVENTS_OWNER there. The backends: tui (the Herdr TUI), core (Herdr Core's relay path,
 # new --core --relay) and native (a Core-native job, new --core: docs/CORE-NATIVE.md).
 CLIENTS = {
-    'herdr-chat': {'readme': 'a chat in Herdr', 'where': 'inside', 'backends': ('tui', 'core', 'native')},
-    'claude-code': {'readme': 'Claude desktop or the Claude app', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
-    'codex': {'readme': 'Codex desktop or the ChatGPT app', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
-    'cursor': {'readme': 'Cursor', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
-    'hermes': {'readme': None, 'where': 'outside', 'backends': ('tui', 'core', 'native')},
-    'grokbot': {'readme': 'Grok Bot', 'where': 'ssh', 'backends': ('tui', 'core', 'native'), 'bot': 'grokbot', 'owner_from': 'tag'},
-    'other-bot': {'readme': 'any other bot', 'where': 'ssh', 'backends': ('tui', 'core', 'native'), 'bot': 'other-bot', 'owner_from': 'env'},
-    'remote-computer': {'readme': 'a whole remote computer', 'where': 'inside', 'backends': ('tui', 'core', 'native')},
+    'herdr-chat': {'door': 'a chat in Herdr', 'where': 'inside', 'backends': ('tui', 'core', 'native')},
+    'claude-code': {'door': 'Claude desktop or the Claude app', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'codex': {'door': 'Codex desktop or the ChatGPT app', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'cursor': {'door': 'Cursor', 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'hermes': {'door': None, 'where': 'outside', 'backends': ('tui', 'core', 'native')},
+    'grokbot': {'door': 'Grok Bot', 'where': 'ssh', 'backends': ('tui', 'core', 'native'), 'bot': 'grokbot', 'owner_from': 'tag'},
+    'other-bot': {'door': 'any other bot', 'where': 'ssh', 'backends': ('tui', 'core', 'native'), 'bot': 'other-bot', 'owner_from': 'env'},
+    'remote-computer': {'door': 'a whole remote computer', 'where': 'inside', 'backends': ('tui', 'core', 'native')},
 }
 # the one worker registry: what start takes on each backend. A Core relay job runs claude and codex in Core terminals and
 # hands the HANDED kinds, which report no OSC 7501 status, to Herdr TUI panes (start --pane); without --pane it refuses
@@ -66,10 +66,10 @@ def table_rows(text, heading):
 
 
 class ClientsInSync(unittest.TestCase):
-    def test_every_readme_front_door_is_a_client(self):
-        named = {c['readme'] for c in CLIENTS.values()}
-        for door in table_rows((ROOT / 'README.md').read_text(), '## Front doors'):
-            self.assertIn(door, named, f'README front door {door!r} has no CLIENTS row in tests/test_clients.py')
+    def test_every_front_door_is_a_client(self):
+        named = {c['door'] for c in CLIENTS.values()}
+        for door in table_rows((ROOT / 'docs/GUIDE.md').read_text(), '## Front doors'):
+            self.assertIn(door, named, f'docs/GUIDE.md front door {door!r} has no CLIENTS row in tests/test_clients.py')
 
     def test_every_client_has_a_docs_row(self):
         rows = table_rows((ROOT / 'docs/CLIENTS.md').read_text(), '## Clients')
@@ -516,7 +516,7 @@ class Outcomes(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_f2_an_owner_set_by_env_hears_its_panes(self):
-        """F2: on the TUI, a bot that names itself with HERDR_EVENTS_OWNER at new (README, Safety) owns the job's
+        """F2: on the TUI, a bot that names itself with HERDR_EVENTS_OWNER at new (docs/SAFETY.md) owns the job's
         questions, gates and finish, but new does not tag the workspace, so the panes' own blocked, permission, stale and
         dead events go to the default route. On Core, new tags the job's key, so the follower's do reach it."""
         for job in self.jobs:

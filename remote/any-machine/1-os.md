@@ -19,6 +19,6 @@ for t in bash python3 jq git curl; do printf '%s: %s\n' "$t" "$(command -v "$t" 
 python3 --version; bash --version | head -1
 ```
 
-- **Tools stampede needs:** bash, Python 3, jq, git and curl. The tested versions are in the [README](../../README.md#install).
+- **Tools stampede needs:** bash, Python 3, jq, git and curl. The tested versions are in [docs/SETUP.md](../../docs/SETUP.md#what-you-need).
 - **A user bin folder:** stampede links its commands into `~/.local/bin`; make sure it is on PATH for non-interactive shells too.
 - **Next:** [2-herdr.md](2-herdr.md).

@@ -24,4 +24,4 @@ This machine is ready for stampede: Herdr <version>, agents <list>, health check
 
 On Herdr Core instead of the Herdr TUI: `stampede doctor --core` in place of the first two lines ([core.md](../../skills/herdr-fleet/references/core.md)).
 
-Anything failed: the fix is in [README, Troubleshoot](../../README.md#troubleshoot) and [docs/SETUP.md](../../docs/SETUP.md#setup-problems). Setup B is done; the job flow is the same as on any machine ([README](../../README.md#how-it-works)).
+Anything failed: the fix is in [Troubleshoot](../../docs/TROUBLESHOOT.md) and [docs/SETUP.md](../../docs/SETUP.md#setup-problems). Setup B is done; the job flow is the same as on any machine ([the guide](../../docs/GUIDE.md#how-it-works)).

@@ -192,12 +192,15 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
              f'Reach the owner with: fleet-job post {job} "<text>" --file <path> (the plan, files to look at, decisions, your '
              f'report): it goes to {owner}, which shows the owner in chat; if the relay refuses it, fix the route and post again. '
              if owner else '')
+    # A Claude lead on the Herdr TUI that the owner watches may ask in its own pane, as it may for a gate (card above).
+    ask = ('Ask the owner with your own question card, or with ' if kind == 'claude' and not (key or owner or front)
+           else 'Ask the owner with: ')
     return (f'Every fleet-job below means {base_.SCRIPTS / "fleet-job"}: the one that started this job, so run it by that path '
             f'(a fleet-job on PATH may be older and lack its commands). '
             f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
             f'Plan in {job / "plan.md"}: {layout}, then the tasks with the pane that does each, then any questions with a default. {gate} '
-            + reach +
-            f'Ask the owner with: fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
+            + reach + ask +
+            f'fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
             f'Answer a worker with: fleet-job tell {job} <agent> "<text>". {workers}'
             f'A merge or another gate (the herdr-fleet list): {gate_route} {review_step(job)} {gates_.brief_text(job, "fleet-job")}'
             f'When idle, end your turn; {wake}.\n'

@@ -29,7 +29,7 @@ _src=${BASH_SOURCE[0]}; [ -L "$_src" ] && _src=$(readlink "$_src")
 case $_src in /*) ;; *) _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "$_src")";; esac
 . "$(dirname "$_src")/herdr-platform"
 bad=0
-HERDR_MIN=0.9.4 HC_MIN=0.1.13 CLAUDE_CORE_MIN=2.1.295   # the minimums; herdr-plugin.toml and the README state the same
+HERDR_MIN=0.9.4 HC_MIN=0.1.13 CLAUDE_CORE_MIN=2.1.295   # the minimums; herdr-plugin.toml, the README and docs/SETUP.md state the same
 HC_REC=0.1.20   # the Herdr Core this version was checked against; older ones run, with a warn
 ok(){ echo "ok $*"; }
 warn(){ echo "warn $*"; }

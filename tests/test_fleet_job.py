@@ -1652,6 +1652,24 @@ class LeadChoice(unittest.TestCase):
         self.assertNotIn('card', local.split('(a phone card)')[0])
 
 
+class LeadQuestions(unittest.TestCase):
+    """A Claude lead on the Herdr TUI that the owner watches may ask a question on its own card, as it may a gate; every
+    other lead keeps fleet-job ask alone (a Codex lead and Herdr Core have no card that counts, a front door or a bot is
+    the owner's only contact)."""
+
+    def test_only_a_watched_claude_tui_lead_is_offered_its_card(self):
+        job = job_with([('lead-demo', 'claude')]).absolute()
+        ask = f'fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits.'
+        claude = agents_.lead_brief(job, 'lead-demo', '', False, None)
+        self.assertIn('Ask the owner with your own question card, or with ' + ask, claude)
+        for name, brief in (('codex', agents_.lead_brief(job, 'lead-demo', '', False, None, kind='codex')),
+                            ('front door', agents_.lead_brief(job, 'lead-demo', '', False, None, front=True)),
+                            ('bot', agents_.lead_brief(job, 'lead-demo', 'stompy', False, None)),
+                            ('core relay', agents_.lead_brief(job, 'lead-demo', '', False, None, key='hc-0123456789ab'))):
+            self.assertIn('Ask the owner with: ' + ask, brief, name)
+            self.assertNotIn('question card, or with fleet-job ask', brief, name)
+
+
 class Deliver(unittest.TestCase):
     """The deliverer types a Codex lead's unread inbox lines into its pane, once each, only while it is idle and unfocused."""
 
