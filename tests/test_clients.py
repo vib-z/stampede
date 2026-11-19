@@ -224,7 +224,8 @@ class Outcomes(unittest.TestCase):
                     self.assertTrue(lead[-1].startswith(pointer), 'the brief pointer is the first prompt')
                     lead = ' '.join(lead)
                     self.assertIn('/codex ', lead)
-                    self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra" --no-daemon', lead)
+                    self.assertIn('-m gpt-6.2-sol -c model_reasoning_effort="xhigh" --no-daemon', lead)
+                    self.assertIn('FLEET_LEAD_ALLOW=test-lead-model,gpt-6.2-sol', lead)
                     self.assertIn('-c sandbox_workspace_write.network_access=true', lead)
                     self.assertNotIn('--session-id', lead, 'Codex names its own session')
                     brief = (job.job / 'briefs' / (Job.LEAD + '.md')).read_text()
@@ -243,7 +244,7 @@ class Outcomes(unittest.TestCase):
                     self.assertIn(f'--model {LEAD_MODEL} --effort low', lead)
                     self.assertIn(pointer, job.inbox())
                     continue
-                self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra"', lead, 'a Claude FLEET_LEAD_MODEL stays with Claude')
+                self.assertIn('-m gpt-6.2-sol -c model_reasoning_effort="xhigh"', lead, 'a Claude FLEET_LEAD_MODEL stays with Claude')
                 self.assertIn('-c sandbox_workspace_write.network_access=true', lead)
                 self.assertIn('codex-notify', lead)
                 self.assertTrue(any(c.startswith(f'agent prompt {Job.LEAD} {pointer}') for c in job.herdr_calls()), 'typed at once')

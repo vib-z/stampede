@@ -86,6 +86,27 @@ def lead_model(kind, model=None, effort=None, job=None):
     return model or settings.get(f'lead.{kind}.model'), effort or settings.get(f'lead.{kind}.effort')
 
 
+def check_lead_model(settings, model):
+    """Refuse a forbidden lead model or one outside a configured allow list."""
+    allow = settings.get('lead.allow')
+    if model in settings.get('lead.forbid'):
+        rule = 'lead.forbid'
+    elif allow and model not in allow:
+        rule = 'lead.allow: ' + ', '.join(allow)
+    else:
+        return
+    raise ValueError(f'the lead may not run on {model} ({rule}): pick another with --lead-model, or another CLI with --lead')
+
+
+def check_worker(settings, agent, model, effort):
+    """Check the worker's model and effort after applying its role defaults."""
+    if model in settings.get('workers.forbid'):
+        raise ValueError(f'{agent} may not run on {model} (workers.forbid)')
+    cap = settings.get('workers.max_effort')
+    if cap and effort and effort not in settings_.EFFORTS[:settings_.EFFORTS.index(cap) + 1]:
+        raise ValueError(f'{agent} may not run at {effort} effort (workers.max_effort: {cap})')
+
+
 def lead_brief_for(job, lead, kind, brief):
     """A lead restarted on the other CLI (a usage-limit fallback) gets its generated brief rewritten for that CLI, so a
     Codex lead never reads that a yes typed in its pane counts. Decided by the brief's own text, not the roster, so a

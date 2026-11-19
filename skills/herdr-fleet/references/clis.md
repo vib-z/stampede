@@ -17,7 +17,7 @@ What `stampede start` passes each CLI, and each one's quirks. Which model to pic
 
 ## Claude (`--kind claude`)
 
-- Models `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5`, `claude-haiku-5-5` (aliases `opus`, `fable`, `sonnet`, `haiku`); effort `low`, `medium`, `high`, `xhigh`, `max`.
+- Models `claude-opus-5-5`, `claude-fable-5-2`, `claude-sonnet-5-5`, `claude-haiku-5-5` (aliases `opus`, `fable`, `sonnet`, `haiku`); effort `low`, `medium`, `high`, `xhigh`, `max`.
 - `-n <name>` sets the session name in `/resume`, the title and peer messaging: `stampede start` uses the agent's name.
 - Keep the whole fleet in auto mode: peer messages between sessions in different modes wait for the owner.
 - One-shot, outside the fleet: `claude -p --model claude-sonnet-5-5 --output-format json "<prompt>"`, for an isolated answer only.
@@ -25,12 +25,12 @@ What `stampede start` passes each CLI, and each one's quirks. Which model to pic
 
 ## Codex (`--kind codex`)
 
-- Models `gpt-6.1-sol` (workhorse), `gpt-6-astra` (frontier), `gpt-6-luna` (fast, effort up to `max`), `gpt-6-sol` (previous). Effort: `-c 'model_reasoning_effort="<level>"'`, `low` to `ultra`.
+- Models `gpt-6.2-sol` (workhorse) and `gpt-6.2-astra` (frontier). Effort: `-c 'model_reasoning_effort="<level>"'`, `low` to `ultra`.
 - A bare `codex` may run with full access and no approvals, by the owner's own config: always start it through `stampede start`.
 - `--approve-for-me` keeps writes inside the cwd's sandbox (`/tmp` too); each other folder needs an `--add-dir` (`stampede start` adds the job folder). Dropping the flag means full access: only on the owner's OK.
 - `--search` turns on web search. Quit with `/quit`, never `/exit`; never `ctrl+c` an empty idle prompt (it quits).
 - Codex can sit in `unknown` after it answers: the report file is the signal, never a state.
-- One-offs from the lead: `codex exec -m gpt-6.1-sol "<prompt>"`, `codex review --base main` (or `--commit <sha>`, `--uncommitted`).
+- One-offs from the lead: `codex exec -m gpt-6.2-sol "<prompt>"`, `codex review --base main` (or `--commit <sha>`, `--uncommitted`).
 - **A Codex lead** runs like a Codex worker, with the network on (Herdr's socket, `git push`, `gh`) and two more writable roots: `<jobs_root>/worktrees` and the repo's git folder, which also lets it write `.git/hooks` and `.git/config`.
   Rarer writes, such as the relay queue behind `stampede ask`, still go through Codex's approval review. Its notify hook forwards its turn ends to the relay and writes no `TURN`.
   It has no file hook: a deliverer types its inbox into its pane ([tui.md](tui.md#what-wakes-you), log `<job>/hooks/deliver.log`), so only the recorded yes counts ([gates.md](gates.md)).

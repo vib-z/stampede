@@ -24,6 +24,7 @@ STAMPEDE = ROOT / 'scripts/stampede'
 BOT_SCRIPTS = ROOT / 'skills/grokbot-herdr/scripts'
 OTHER_SHA = 'b' * 40
 LEAD_MODEL = 'test-lead-model'  # FLEET_LEAD_MODEL, as a front door sets it
+CODEX_LEAD_MODEL = 'gpt-6.2-sol'  # the built-in Codex lead, even when the front door sets a Claude model
 QUESTION, ANSWER, GATE, SUMMARY = 'Keep hello in the repo root?', 'yes, the root', 'Merge PR #3 into main', 'hello written'
 POST = 'PLAN READY: one worker writes hello'
 # a recorder in place of Moshi (FLEET_ASK_CMD): logs each card; answers a question with its first option, and a gate
@@ -246,6 +247,7 @@ class Job:
 
     def opening(self):
         """Only O2's start, for a job with its own --lead."""
+        self.base['FLEET_LEAD_ALLOW'] = f'{LEAD_MODEL},{CODEX_LEAD_MODEL}'
         try:
             self.start()
         except Exception:

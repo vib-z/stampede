@@ -11,7 +11,7 @@ SAMPLE = '''# a user file
 jobs_root = "~/jobs"   # a comment after a value
 lead.kind = 'codex'
 [lead.claude]
-model = "claude-fable-5-1"
+model = "claude-fable-5-2"
 [brief]
 sections = [
   "Goal",  # one
@@ -28,8 +28,8 @@ list = [1, -2, 3e2, "a \\"b\\""]
 '''
 # the table in skills/herdr-fleet/references/agents-and-models.md, Pick for the task: every worker at medium, review on the other vendor
 ROLES = {'default': ('claude', 'claude-opus-5-5', 'medium'), 'build': ('claude', 'claude-opus-5-5', 'medium'),
-         'research': ('claude', 'claude-opus-5-5', 'medium'), 'review': ('codex', 'gpt-6-astra', 'medium'),
-         'design': ('codex', 'gpt-6-astra', 'medium'), 'qa': ('codex', 'gpt-6-astra', 'medium'),
+         'research': ('claude', 'claude-opus-5-5', 'medium'), 'review': ('codex', 'gpt-6.2-astra', 'medium'),
+         'design': ('codex', 'gpt-6.2-astra', 'medium'), 'qa': ('codex', 'gpt-6.2-astra', 'medium'),
          'copy': ('claude', 'claude-opus-5-5', 'medium'), 'test': ('claude', 'claude-sonnet-5-5', 'medium')}
 
 
@@ -51,8 +51,8 @@ class Settings(unittest.TestCase):
         return st.load(repo=self.repo, env=env or {}, home=self.home, **kw)
 
     def test_the_effort_rule_is_a_default_never_a_limit(self):
-        s = self.load()  # the lead at extra high (xhigh on Claude, ultra on Codex), every worker at medium
-        self.assertEqual((s.get('lead.claude.effort'), s.get('lead.codex.effort')), ('xhigh', 'ultra'))
+        s = self.load()  # the lead at extra high (xhigh on both CLIs), every worker at medium
+        self.assertEqual((s.get('lead.claude.effort'), s.get('lead.codex.effort')), ('xhigh', 'xhigh'))
         self.assertEqual({k: v for k, v in s.values.items() if k.endswith('.effort') and k.startswith('roles.')},
                          {f'roles.{role}.effort': 'medium' for role in ROLES})
         self.write('user', '[roles.review]\neffort = "ultra"\n[roles.mine]\nkind = "claude"\neffort = "max"\n')
@@ -66,7 +66,8 @@ class Settings(unittest.TestCase):
         self.assertEqual(s.values, {
             'backend': 'tui', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude', 'lead.forbid': [],
             'lead.claude.model': 'claude-opus-5-5', 'lead.claude.effort': 'xhigh',
-            'lead.codex.model': 'gpt-6-astra', 'lead.codex.effort': 'ultra',
+            'lead.codex.model': 'gpt-6.2-sol', 'lead.codex.effort': 'xhigh',
+            'lead.allow': [], 'workers.forbid': [], 'workers.max_effort': '',
             'ask.command': 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h',
             'brief.sections': ['Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked'],
             **{f'roles.{role}.{field}': value for role, row in ROLES.items() for field, value in zip(('kind', 'model', 'effort'), row)},
@@ -111,27 +112,28 @@ class Settings(unittest.TestCase):
                                        ('FLEET_TRUST_ROOT', 'trust_root', '~/t', '~/t'),
                                        ('STAMPEDE_MAX_HELPERS', 'helpers.max', '3', 3),
                                        ('STAMPEDE_TAB_PANES', 'helpers.tab_panes', '2', 2),
-                                       ('FLEET_LEAD_FORBID', 'lead.forbid', ' gpt-x, claude-y ,', ['gpt-x', 'claude-y'])):
+                                       ('FLEET_LEAD_FORBID', 'lead.forbid', ' gpt-x, claude-y ,', ['gpt-x', 'claude-y']),
+                                       ('FLEET_LEAD_ALLOW', 'lead.allow', ' gpt-x, claude-y ,', ['gpt-x', 'claude-y'])):
             with self.subTest(name=name):
                 s = self.load({name: text})
                 self.assertEqual((s.get(key), s.source(key)), (value, 'env:' + name))
                 self.assertEqual(self.load({name: ''}).source(key), 'default', 'an empty one means unset')
-        self.assertEqual(set(st.ENV), {'FLEET_LEAD_KIND', 'FLEET_LEAD_FORBID', 'FLEET_ASK_CMD', 'FLEET_JOBS_ROOT', 'FLEET_TRUST_ROOT',
+        self.assertEqual(set(st.ENV), {'FLEET_LEAD_KIND', 'FLEET_LEAD_FORBID', 'FLEET_LEAD_ALLOW', 'FLEET_ASK_CMD', 'FLEET_JOBS_ROOT', 'FLEET_TRUST_ROOT',
                                        'STAMPEDE_MAX_HELPERS', 'STAMPEDE_TAB_PANES'})
 
     def test_the_lead_model_and_effort_set_the_pair_of_the_cli_their_model_names(self):
         """The cases of fleet_job.lead_model's own test: a gpt model sets the Codex pair, any other the Claude pair."""
         for env, codex, claude in (
-                ({}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'xhigh')),
-                ({'FLEET_LEAD_MODEL': 'claude-opus-5-5', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'xhigh')),
-                ({'FLEET_LEAD_MODEL': 'opus', 'FLEET_LEAD_EFFORT': 'max'}, ('gpt-6-astra', 'ultra'), ('opus', 'max')),
-                ({'FLEET_LEAD_EFFORT': 'high'}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'high')),
-                ({'FLEET_LEAD_MODEL': 'gpt-6.1-sol', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.1-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh'))):
+                ({}, ('gpt-6.2-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh')),
+                ({'FLEET_LEAD_MODEL': 'claude-opus-5-5', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.2-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh')),
+                ({'FLEET_LEAD_MODEL': 'opus', 'FLEET_LEAD_EFFORT': 'max'}, ('gpt-6.2-sol', 'xhigh'), ('opus', 'max')),
+                ({'FLEET_LEAD_EFFORT': 'high'}, ('gpt-6.2-sol', 'xhigh'), ('claude-opus-5-5', 'high')),
+                ({'FLEET_LEAD_MODEL': 'gpt-6.2-astra', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.2-astra', 'xhigh'), ('claude-opus-5-5', 'xhigh'))):
             with self.subTest(env=env):
                 s = self.load(env)
                 self.assertEqual((s.get('lead.codex.model'), s.get('lead.codex.effort')), codex)
                 self.assertEqual((s.get('lead.claude.model'), s.get('lead.claude.effort')), claude)
-        s = self.load({'FLEET_LEAD_MODEL': 'gpt-6.1-sol', 'FLEET_LEAD_EFFORT': 'xhigh'})
+        s = self.load({'FLEET_LEAD_MODEL': 'gpt-6.2-astra', 'FLEET_LEAD_EFFORT': 'xhigh'})
         self.assertEqual((s.source('lead.codex.model'), s.source('lead.codex.effort'), s.source('lead.claude.effort')),
                          ('env:FLEET_LEAD_MODEL', 'env:FLEET_LEAD_EFFORT', 'default'))
 
@@ -169,11 +171,13 @@ class Settings(unittest.TestCase):
 
     def test_a_user_only_key_in_a_repo_file_is_skipped(self):
         repo = self.write('repo', 'jobs_root = "/x"\ntrust_root = "/"\n[ask]\ncommand = "rm -rf ~"\n[gates]\nmerge = false\n'
-                                  '[helpers]\nmax = 2\n[lead]\nforbid = ["claude-opus-5-5"]\n')
+                                  '[helpers]\nmax = 2\n[lead]\nforbid = ["claude-opus-5-5"]\nallow = ["claude-opus-5-5"]\n'
+                                  '[workers]\nforbid = ["claude-opus-5-5"]\nmax_effort = "none"\n')
         s = self.load()
         self.assertEqual([p.split(':')[1].split()[0] for p in s.problems], ['jobs_root', 'trust_root', 'ask.command', 'gates.merge',
-                                                                           'lead.forbid'])
-        self.assertEqual(s.get('lead.forbid'), [], 'a repo never weakens it, nor sets it')
+                                                                           'lead.forbid', 'lead.allow', 'workers.forbid', 'workers.max_effort'])
+        self.assertEqual((s.get('lead.forbid'), s.get('lead.allow'), s.get('workers.forbid'), s.get('workers.max_effort')),
+                         ([], [], [], ''))
         self.assertTrue(all(p.startswith(f'{repo}: ') and 'never from a repo' in p for p in s.problems))
         self.assertEqual((s.get('jobs_root'), s.get('ask.command'), s.get('helpers.max')),
                          ('~/code/herdr-jobs', st.DEFAULTS['ask.command'], 2))
@@ -238,17 +242,17 @@ class Wired(unittest.TestCase):
         return mock.patch.dict(os.environ, values)
 
     def test_the_lead(self):
-        self.config('[lead]\nkind = "codex"\n[lead.claude]\nmodel = "claude-fable-5-1"\neffort = "high"\n[lead.codex]\neffort = "low"\n')
+        self.config('[lead]\nkind = "codex"\n[lead.claude]\nmodel = "claude-fable-5-2"\neffort = "high"\n[lead.codex]\neffort = "low"\n')
         self.assertEqual(st.current().get('lead.kind'), 'codex')
-        self.assertEqual(agents_.lead_model('claude'), ('claude-fable-5-1', 'high'))
-        self.assertEqual(agents_.lead_model('codex'), ('gpt-6-astra', 'low'))
-        with self.env(FLEET_LEAD_KIND='claude', FLEET_LEAD_MODEL='gpt-6.1-sol', FLEET_LEAD_EFFORT='xhigh'):
+        self.assertEqual(agents_.lead_model('claude'), ('claude-fable-5-2', 'high'))
+        self.assertEqual(agents_.lead_model('codex'), ('gpt-6.2-sol', 'low'))
+        with self.env(FLEET_LEAD_KIND='claude', FLEET_LEAD_MODEL='gpt-6.2-astra', FLEET_LEAD_EFFORT='xhigh'):
             self.assertEqual(st.current().get('lead.kind'), 'claude')
-            self.assertEqual(agents_.lead_model('codex'), ('gpt-6.1-sol', 'xhigh'))
-            self.assertEqual(agents_.lead_model('claude'), ('claude-fable-5-1', 'high'), 'a gpt model leaves the Claude pair')
+            self.assertEqual(agents_.lead_model('codex'), ('gpt-6.2-astra', 'xhigh'))
+            self.assertEqual(agents_.lead_model('claude'), ('claude-fable-5-2', 'high'), 'a gpt model leaves the Claude pair')
         st.SETS[:] = ['lead.codex.effort=medium']
-        self.assertEqual(agents_.lead_model('codex'), ('gpt-6-astra', 'medium'))
-        self.assertEqual(agents_.lead_model('codex', 'gpt-6-luna', 'max'), ('gpt-6-luna', 'max'), 'the start flags win')
+        self.assertEqual(agents_.lead_model('codex'), ('gpt-6.2-sol', 'medium'))
+        self.assertEqual(agents_.lead_model('codex', 'gpt-6.2-astra', 'max'), ('gpt-6.2-astra', 'max'), 'the start flags win')
 
     def test_the_ask_command(self):
         self.config('[ask]\ncommand = "ask-from-file"\n')
@@ -560,7 +564,7 @@ class Example(unittest.TestCase):
 class Readers(unittest.TestCase):
     def test_the_subset_reader(self):
         self.assertEqual(st.loads_subset(SAMPLE), {
-            'jobs_root': '~/jobs', 'lead': {'kind': 'codex', 'claude': {'model': 'claude-fable-5-1'}},
+            'jobs_root': '~/jobs', 'lead': {'kind': 'codex', 'claude': {'model': 'claude-fable-5-2'}},
             'brief': {'sections': ['Goal', 'Why']}, 'helpers': {'max': 6}, 'timeouts': {'wait': 1800},
             'other': {'ratio': 0.5, 'on': True, 'list': [1, -2, 300.0, 'a "b"']}})
         for bad in ('a = ', 'a = "x', 'a = 1 2', '[a', 'a = 1\na = 2', 'a b = 1', 'a = [1 2]', 'a = nope'):

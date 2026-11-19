@@ -176,7 +176,7 @@ These are the steps of the [diagram above](#how-it-flows), the same for every fr
 
 1. **You ask once**, in plain words, in a [front door](#front-doors). It writes your ask to a file, runs `stampede new --file <ask.md>`, tells you the lead's name and steps back.
 2. **One lead plans and goes.** The lead, `lead-<slug>`, starts in auto mode in a `lead` tab.
-   By default it runs on Claude (Opus 5.5 at `xhigh` effort). With `--lead codex` it runs on Codex (GPT-6 Astra at `ultra`, Codex's extra high).
+   By default it runs on Claude (Opus 5.5 at `xhigh` effort). With `--lead codex` it runs on Codex (GPT-6.2 Sol at `xhigh` effort).
    Every worker it starts runs at `medium` effort, whatever its model. Both are defaults you can change per job or per worker: [Configure](CONFIGURE.md#effort-the-default-and-how-to-change-it).
    It writes `plan.md`: the tasks, who does each, questions with a safe default, and the gates. Then it starts work.
 3. **A pane only when it's worth it.** The lead starts a worker for one of these:
@@ -278,7 +278,7 @@ The lead starts as a fork (a copy) of that chat, with `claude --resume <id> --fo
 Put the agreed plan in the ask file too: it stays the source of truth. Guide: [remote/claude-code.md](../remote/claude-code.md#plan-here-then-fork-the-lead).
 
 **Pick the lead.** The lead is Claude unless you ask for Codex. Then the front door adds `--lead codex`, and `FLEET_LEAD_KIND=codex` makes Codex your standing choice.
-A Codex lead runs GPT-6 Astra at `ultra`, with its hooks and `--approve-for-me`. stampede types its brief pointer into its pane at once. `--fork` takes only a Claude lead:
+A Codex lead defaults to GPT-6.2 Sol at `xhigh`, with its hooks and `--approve-for-me`. stampede types its brief pointer into its pane at once. `--fork` takes only a Claude lead:
 
 ```console
 $ stampede new --file ask.md --lead codex

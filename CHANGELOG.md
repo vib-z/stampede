@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- **Every worker runs at medium effort by default.** The roles `research`, `copy`, `review`, `design` and `qa` move to `medium`, like `build`, `test` and `default`; the lead stays at extra high (`xhigh` on Claude, `ultra` on Codex, which has no `xhigh`), on any model. It is a default, not a limit: `new --lead-effort`, `new --set roles.<role>.effort=<e>`, `start --effort` and your config still set any effort. To keep the old efforts, set them in your config ([Configure](docs/CONFIGURE.md#effort-the-default-and-how-to-change-it)).
+- **Optional model and effort checks.** `lead.allow` (also `FLEET_LEAD_ALLOW`, comma-separated) limits new leads and TUI or Core relay lead restarts to the listed models. `lead.forbid` applies at both points and takes priority. `workers.forbid` and `workers.max_effort` check worker starts after role defaults and flags. Set these in your own config, and see [Configure](docs/CONFIGURE.md) for the defaults.
+- **Current Codex defaults.** The lead uses GPT-6.2 Sol at `xhigh`. Review, design and QA use GPT-6.2 Astra at `medium`.
+- **Every worker runs at medium effort by default.** The roles `research`, `copy`, `review`, `design` and `qa` move to `medium`, like `build`, `test` and `default`; the lead defaults to extra high (`xhigh`) on either CLI. Set effort with `new --lead-effort`, `new --set roles.<role>.effort=<e>`, `start --effort` or your config. To keep the old efforts, set them in your config ([Configure](docs/CONFIGURE.md#effort-the-default-and-how-to-change-it)).
 - **A recorded yes is written whole.** A `gate-ok` run while your yes lands sees no yes or the whole one; until now it could fail with a JSON error for a valid approval. A record that does not parse is refused as a malformed yes that names the gate.
 - **After an outage the relay sends a pane's newest state.** That holds even when two of its events were queued within one second; until now the order inside a second followed process numbers, so the bot could be told a pane was blocked after it had finished.
 
