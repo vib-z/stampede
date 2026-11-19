@@ -436,6 +436,7 @@ def parse_and_run(argv):
     p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
     p.add_argument('--fresh', action='store_true', help='each agent it starts begins a new session with its brief')
     p = sub.add_parser('_reopen-check'); p.add_argument('job'); p.add_argument('tabs', nargs='*')
+    p.add_argument('--snapshot-lead', default='')
     for name in JSON:
         json_flag(sub.choices[name])
     sub.add_parser('_deliver').add_argument('job')
@@ -645,9 +646,9 @@ def run(a):
         job = Path(a.job).absolute()
         lead_file = job / 'lead'
         lead = lead_file.read_text().strip() if lead_file.is_file() else ''
-        candidates = ((name, kind, model, effort, name == lead)
-                      for tab in a.tabs for name, kind, model, effort in json.loads(tab))
-        refusal = agents_.reopen_refusal(job, candidates)
+        candidates = [(name, kind, model, effort, bool(saved and saved[0]) or name in (lead, a.snapshot_lead))
+                      for tab in a.tabs for name, kind, model, effort, *saved in json.loads(tab)]
+        refusal = agents_.reopen_refusal(job, candidates, bool(lead or a.snapshot_lead or any(row[-1] for row in candidates)))
         if refusal:
             out_.refuse(refusal)
             return 2

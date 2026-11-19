@@ -30,7 +30,7 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 Model lists match exact model names. A model in `lead.forbid` is refused even when it appears in `lead.allow`. Set these lists to apply your own choices, such as Claude Opus 5.5, Claude Fable 5.2, GPT-6.2 Sol and GPT-6.2 Astra for leads. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The rest follow your live config at every command.
 
-Before a plain or fresh reopen starts anything, Stampede checks the recorded model and effort of each agent it would relaunch against current policy. If either lead list is set, the lead needs a recorded model. Live agents and raw programs are exempt. Older TUI `reopen.sh` files still work as generated. Refresh them with `herdr-reopen-snapshot` to enable this check.
+Before a plain or fresh reopen starts anything, Stampede checks the recorded model and effort of each agent it would relaunch against current policy. If either lead list is set, reopen needs a recorded lead identity and a model for any lead it would restart. Live agents and raw programs are exempt. Older TUI `reopen.sh` files still work as generated. Refresh them with `herdr-reopen-snapshot` to enable this check.
 
 **Problems.** `stampede config show` names each problem and exits 1. Stampede skips unknown keys, values of the wrong type or outside a key's choices, and files that do not parse. `stampede new` refuses to start a job while there is a config problem (exit 2).
 

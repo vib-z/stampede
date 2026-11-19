@@ -367,6 +367,13 @@ def start_core(job, agent, kind, brief, model, effort, reports, yolo_in, cwd, le
 REOPEN_EVERY, REOPEN_DEADLINE = 5, 90  # seconds between a reopen's REOPENED writes, and before it gives up
 
 
+def reopen_proof(job, agent, row, fresh):
+    session = row.get('session')
+    if not fresh and row.get('kind', 'claude') == 'claude' and session:
+        return session_proof(job, agent, session, remember=False)
+    return 'never'
+
+
 def reopen(job, lead_only=False, prompt=False, fresh=False):
     """Start what is missing of a Core job, once each and never a second copy of a live one: for an open job its marker,
     owner tag and follower; its lead, resumed; with no lead_only, each worker that is not live (Claude resumed, Codex
@@ -396,11 +403,11 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
                 planned[agent] = None
                 continue
             row = rows.get(agent, {})
-            kind, session = row.get('kind', 'claude'), row.get('session', '')
-            proof = session_proof(job, agent, session, remember=False) if not fresh and kind == 'claude' and session else 'never'
+            kind = row.get('kind', 'claude')
+            proof = reopen_proof(job, agent, row, fresh)
             planned[agent] = row, proof
             if kind not in handed_.HANDED and proof != 'unknown':
-                yield agent, kind, *agents_.model_effort(shlex.split(row.get('args', ''))), agent == lead
+                yield agent, kind, *agents_.model_effort(kind, shlex.split(row.get('args', ''))), agent == lead
 
     refusal = agents_.reopen_refusal(job, candidates())
     if refusal:
@@ -429,13 +436,19 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
                     print(f'UNKNOWN {agent}: it stopped during reopen; run reopen again')
                     outcomes[agent] = 'unknown'
             else:
-                row, proof = planned[agent] if agent in planned else (job_.agent_rows(job).get(agent, {}), None)
+                row, proof = job_.agent_rows(job).get(agent, {}), None
+                if agent in planned:
+                    proof = reopen_proof(job, agent, row, fresh)
+                    if (row, proof) != planned[agent]:
+                        print(f'SKIPPED {agent} (its record changed during reopen: run reopen again)')
+                        outcomes[agent] = 'changed'
+                        continue
                 outcomes[agent] = reopen_agent(job, agent, row, prompt, agent == lead,
                                                pending if agent == lead and not finished else None, fresh, proof)
     job_.snapshot(job)
     if not [agent for agent, outcome in outcomes.items() if outcome != 'live']:
         print(f'LIVE {key}: no agent to restart')
-    code = 1 if [o for o in outcomes.values() if o in ('failed', 'unknown', 'not ready', 'missing', 'unbriefed')] else 0
+    code = 1 if [o for o in outcomes.values() if o in ('failed', 'unknown', 'not ready', 'missing', 'unbriefed', 'changed')] else 0
     if finished or not pending.exists() or outcomes.get(lead) not in ('started', 'live'):
         return code
     acked = acknowledged(job, lead)  # also on a retry with the lead live: an earlier reopen may have timed out

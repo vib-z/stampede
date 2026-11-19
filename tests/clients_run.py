@@ -418,7 +418,7 @@ class Job:
             self.terminal(self.address(self.worker), status={'state': 'idle'})
 
     def reopen(self):
-        """O8: reopen.sh on the live job; on the TUI the lead first writes the reopen record."""
+        """O8: reopen.sh on the live job; on the TUI the lead first writes the reopen record. Native also checks a policy refusal."""
         if self.backend == 'tui':
             self.run('snapshot', (BOT_SCRIPTS / 'herdr-reopen-snapshot', self.WS, self.job), self.lead_env())
         self.before_reopen = len(self.calls('run')), len(self.herdr_calls())

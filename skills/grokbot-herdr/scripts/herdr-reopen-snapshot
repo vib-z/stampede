@@ -94,11 +94,11 @@ def record(argv):
     print(f'recorded {name} ({kind}) in {job}/agents.tsv')
 
 
-def model_effort(args, default=None):
+def model_effort(kind, args, default=None):
     if str(FLEET.parent) not in sys.path:
         sys.path.insert(0, str(FLEET.parent))
     from stampede.agents import model_effort as recorded
-    model, effort = recorded(shlex.split(args))
+    model, effort = recorded(kind, shlex.split(args))
     return model or default, effort or default
 
 
@@ -162,6 +162,8 @@ def q(s):
 
 
 def reopen_sh(ws, owner, tabs, when, job):
+    lead_file = job / 'lead'
+    lead = lead_file.read_text().strip() if lead_file.is_file() else ''
     names = ' '.join(q(p['agent_row']['name']) for t in tabs for p in t['panes'] if p['agent_row'])
     cwds = ' '.join(q(d) for d in dict.fromkeys(p['cwd'] for t in tabs for p in t['panes']))
     out = [
@@ -224,7 +226,7 @@ def reopen_sh(ws, owner, tabs, when, job):
     for i, t in enumerate(tabs):
         label = t.get('label') or 'main'
         rows = [p['agent_row'] for p in t['panes'] if p['agent_row']]
-        payload = json.dumps([(a['name'], a['kind'], *model_effort(a['args'])) for a in rows])
+        payload = json.dumps([(a['name'], a['kind'], *model_effort(a['kind'], a['args']), a['name'] == lead) for a in rows])
         kept = 'true' if label in labels else (f'jq -e --arg l {q(label)} '
                                                "'.result.tabs[] | select(.label == $l)' <<<\"$OPEN_TABS\" >/dev/null")
         labels.add(label)
@@ -234,7 +236,7 @@ def reopen_sh(ws, owner, tabs, when, job):
             f'else KEEP[{i}]=0; CHECK+=({q(payload)}); fi',
         ]
     out += [
-        '"$F" _reopen-check "$JOB" ${CHECK[@]+"${CHECK[@]}"}',
+        f'"$F" _reopen-check --snapshot-lead {q(lead)} "$JOB" ${{CHECK[@]+"${{CHECK[@]}}"}}',
         '[ -n "$INTO" ] && follow',
         'tab() {   # tab <label> <cwd>: R = the new tab',
         '  if [ -z "$WS" ]; then',
@@ -304,7 +306,7 @@ def reopen_md(ws, owner, tabs, when, job):
     for t in tabs:
         for p in t['panes']:
             a = p['agent_row'] or {}
-            model, effort = model_effort(a['args'], '(CLI default)') if a else ('', '')
+            model, effort = model_effort(a['kind'], a['args'], '(CLI default)') if a else ('', '')
             out.append(f'| {t.get("label") or t["tab_id"]} | {p["pane_id"]} | {p.get("label") or "-"} | `{p["cwd"]}` | '
                        f'{a.get("kind") or "shell"} | {model} | {effort} | {a.get("session") or "-"} | {a.get("brief") or "-"} |')
             if a:
@@ -358,7 +360,7 @@ def snapshot_core(key, job):
            '| agent | role | CLI | model | effort | session | terminal | state | brief |', '|---|---|---|---|---|---|---|---|---|']
     for name, entry in entries.items():
         a = rows.get(name, {})
-        model, effort = model_effort(a['args'], '(CLI default)') if a.get('args') else ('', '')
+        model, effort = model_effort(a['kind'], a['args'], '(CLI default)') if a.get('args') else ('', '')
         out.append(f'| {name} | {entry.get("role", "-")} | {a.get("kind") or "-"} | {model or "-"} | {effort or "-"} | '
                    f'{a.get("session") or "-"} | {entry.get("address") or ("pane " + entry["pane"] if entry.get("pane") else "-")} | '
                    f'{entry.get("state", "-")} | {a.get("brief") or "-"} |')

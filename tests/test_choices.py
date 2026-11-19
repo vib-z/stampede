@@ -600,7 +600,39 @@ class RelayReopenPolicy(Choices):
                     self.assertEqual(out, '')
                     self.assertTrue(err.startswith(f'REFUSED {name}: '), err)
                     self.assertIn(rule, err)
+                    self.assertIn('nothing started. Change the list or limit in your own config', err)
                     self.assertEqual(self.calls('run'), before)
+
+    def test_relay_skips_a_changed_record_and_continues_with_the_next_agent(self):
+        code, out, err = self.new('--core', '--relay')
+        self.assertEqual(code, 0, out + err)
+        for name in ('review-api', 'qa-api'):
+            code, out, err = self.main('start', self.job, name, '--brief', self.brief(self.job, name))
+            self.assertEqual(code, 0, out + err)
+            self.terminal(self.entries(self.job)[name]['address'], state='finished')
+        self.config('[workers]\nforbid = ["gpt-6.2-sol"]\n')
+        before = len(self.calls('run'))
+        original = job_.launching
+
+        @contextlib.contextmanager
+        def changed_record(job, name):
+            with original(job, name):
+                if name == 'review-api':
+                    job_.record(job, name, 'codex', self.brief(job, name), ['-m', 'gpt-6.2-sol'])
+                yield
+
+        with mock.patch.object(job_, 'launching', changed_record):
+            code, out, err = self.main('_reopen', self.job)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn('SKIPPED review-api (its record changed during reopen: run reopen again)', out)
+        self.assertEqual([self.labels(run)['stampede.agent'] for run in self.calls('run')[before:]], ['qa-api'])
+
+    def test_codex_model_flag_takes_precedence_over_config_regardless_of_order(self):
+        config = ('--config', 'model = "gpt-6.2-astra"')
+        model = ('-m', 'gpt-6.2-sol')
+        for args in (config + model, model + config):
+            self.assertEqual(agents_.model_effort('codex', args), ('gpt-6.2-sol', None))
+        self.assertEqual(agents_.model_effort('codex', ('-c', 'model=gpt-6.2-sol', *config)), ('gpt-6.2-astra', None))
 
 
 class WorkerPolicy(Choices):

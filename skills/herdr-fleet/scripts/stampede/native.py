@@ -480,7 +480,7 @@ def drain(job, terminals, checked=None):
     """Start queued helpers, oldest first, while fewer than the cap run in the lead's tree. The caller holds the queue
     lock and has listed the tree once. A request goes only once its start's outcome is known: a live terminal of that
     name is adopted, not started again, and when Core stops answering the drain stops with the request kept.
-    During reopen, only the launches in its checked plan may start.
+    During reopen, only the launches in its checked plan may start. Later drains read live policy for all queued requests.
     (started, failed, running, cap)."""
     key, limit = job_.core_key(job), cap(job)
     count, started, failed = sum(running(t) for _, t, _ in job_tree(key, terminals)), 0, 0

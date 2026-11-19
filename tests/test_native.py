@@ -910,6 +910,29 @@ class Record(NativeCase):
 
 
 class ReopenPolicy(NativeCase):
+    def test_a_restart_left_in_the_queue_checks_live_policy_at_next(self):
+        self.started(max_helpers=1)
+        code, out = self.start('build-waiting', model='claude-sonnet-5-5', effort='medium')
+        self.assertEqual(code, 0, out)
+        self.terminal('t2', state='finished')
+        code, out = self.start('build-blocker', model='claude-opus-5-5', effort='medium')
+        self.assertEqual(code, 0, out)
+        reopened = self.cli('reopen', self.job)
+        self.assertEqual(reopened.returncode, 0, reopened.stdout + reopened.stderr)
+        self.assertIn('QUEUED build-waiting', reopened.stdout)
+        (_, request), = native_.queued(self.job)
+        self.assertTrue(request['place'])
+        config = self.root / 'home/.config/stampede/config.toml'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text('[workers]\nforbid = ["claude-sonnet-5-5"]\n')
+        self.terminal('t3', state='finished')
+        before = self.runs()
+        got = self.cli('next', self.job)
+        self.assertEqual(got.returncode, 1, got.stdout + got.stderr)
+        self.assertIn('FAILED build-waiting (build-waiting may not run on claude-sonnet-5-5 (workers.forbid))', got.stdout)
+        self.assertEqual(self.runs(), before)
+        self.assertEqual(native_.queued(self.job), [])
+
     def test_reopen_refuses_before_starting_any_agent_or_queuing_a_restart(self):
         self.started()
         code, out = self.start('build-api', model='claude-sonnet-5-5', effort='medium')

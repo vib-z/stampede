@@ -86,7 +86,7 @@ def lead_model(kind, model=None, effort=None, job=None):
     return model or settings.get(f'lead.{kind}.model'), effort or settings.get(f'lead.{kind}.effort')
 
 
-def check_lead_model(settings, model):
+def check_lead_model(settings, model, suggest=True):
     """Refuse a forbidden lead model or one outside a configured allow list."""
     allow = settings.get('lead.allow')
     if model in settings.get('lead.forbid'):
@@ -95,7 +95,8 @@ def check_lead_model(settings, model):
         rule = 'lead.allow: ' + ', '.join(allow)
     else:
         return
-    raise ValueError(f'the lead may not run on {model} ({rule}): pick another with --lead-model, or another CLI with --lead')
+    hint = ': pick another with --lead-model, or another CLI with --lead' if suggest else ''
+    raise ValueError(f'the lead may not run on {model} ({rule}){hint}')
 
 
 def check_worker(settings, agent, kind, model, effort):
@@ -112,9 +113,9 @@ def check_worker(settings, agent, kind, model, effort):
         raise ValueError(f'{agent} may not run at {effort} effort (workers.max_effort: {cap})')
 
 
-def model_effort(args):
+def model_effort(kind, args):
     """Model and effort explicitly passed in a recorded start's argv."""
-    model = effort = None
+    model = configured_model = effort = None
     rest = iter(args)
     for arg in rest:
         if arg == '--':
@@ -128,29 +129,36 @@ def model_effort(args):
             model = value
         elif flag in ('--effort', '--reasoning'):
             effort = value
-        elif flag in ('-c', '--config') and value.startswith('model_reasoning_effort='):
-            effort = value.split('=', 1)[1].strip('"\'')
-    return model or None, effort or None
+        elif flag in ('-c', '--config'):
+            key, _, setting = value.partition('=')
+            if key.strip() == 'model_reasoning_effort':
+                effort = setting.strip().strip('"\'')
+            elif kind == 'codex' and key.strip() == 'model':
+                configured_model = setting.strip().strip('"\'')
+    return model or configured_model or None, effort or None  # Codex's dedicated model flag wins over its config
 
 
-def reopen_refusal(job, candidates):
+def reopen_refusal(job, candidates, lead_known=True):
     """The first refusal for the agents a reopen would start, using the owner's current settings."""
     settings = settings_.current(job)
-    if not any(settings.get(key) for key in ('lead.forbid', 'lead.allow', 'workers.forbid', 'workers.max_effort')):
+    lead_rules = [key for key in ('lead.forbid', 'lead.allow') if settings.get(key)]
+    if not lead_rules and not any(settings.get(key) for key in ('workers.forbid', 'workers.max_effort')):
         return
+    fix = 'nothing started. Change the list or limit in your own config (see stampede config show), then reopen again. See docs/TROUBLESHOOT.md.'
+    if not lead_known and lead_rules:
+        return f'REFUSED lead: no lead is recorded ({", ".join(lead_rules)}); {fix}'
     for name, kind, model, effort, lead in candidates:
         if kind == 'program':
             continue
         try:
             if lead:
-                check_lead_model(settings, model)
+                check_lead_model(settings, model, suggest=False)
                 if not model and settings.get('lead.forbid'):
-                    raise ValueError('the lead has no model to check against lead.forbid: name one with --model')
+                    raise ValueError('the lead has no recorded model to check against lead.forbid')
             else:
                 check_worker(settings, name, kind, model, effort)
         except ValueError as error:
-            command = shlex.join(['stampede', 'start', str(job), name])
-            return f'REFUSED {name}: {base_.line(error)}; fix your config or restart it with {command} --model <m>'
+            return f'REFUSED {name}: {base_.line(error)}; {fix}'
 
 
 def lead_brief_for(job, lead, kind, brief):
