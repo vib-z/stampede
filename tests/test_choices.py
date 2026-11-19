@@ -649,6 +649,10 @@ class WorkerPolicy(Choices):
         config_home = self.root / 'custom config'
         with mock.patch.dict(os.environ, {'XDG_CONFIG_HOME': str(config_home)}):
             self.assertIn(f'XDG_CONFIG_HOME={config_home}', hcapi_.launch_env(job))
+        prefix = hcapi_.launch_env(job)  # a core with its own XDG_CONFIG_HOME: the terminal follows the caller, who has none
+        seen = subprocess.run(prefix + ['/usr/bin/printenv', 'XDG_CONFIG_HOME'], capture_output=True, text=True,
+                              env={**os.environ, 'XDG_CONFIG_HOME': str(self.root / 'core config')})
+        self.assertEqual((seen.returncode, seen.stdout), (1, ''))
 
     def test_a_bad_cap_is_a_config_problem(self):
         self.config('[workers]\nmax_effort = "custom"\n')
