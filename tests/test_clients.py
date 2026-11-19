@@ -217,10 +217,12 @@ class Outcomes(unittest.TestCase):
                 pointer = f'You are {Job.LEAD}. Read {job.job / "briefs" / (Job.LEAD + ".md")}'
                 if job.lead_kind == 'claude' and job.on_core:
                     (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
+                    self.assertFalse(any(arg.startswith('XDG_CONFIG_HOME=') for arg in lead))
                     self.assertIn(f'--model {LEAD_MODEL} --effort low', ' '.join(lead))
                     continue
                 if job.on_core:  # a Codex lead in a Core terminal
                     (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
+                    self.assertIn(f'XDG_CONFIG_HOME={job.root / "custom config"}', lead)
                     self.assertTrue(lead[-1].startswith(pointer), 'the brief pointer is the first prompt')
                     lead = ' '.join(lead)
                     self.assertIn('/codex ', lead)

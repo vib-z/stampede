@@ -98,11 +98,16 @@ def check_lead_model(settings, model):
     raise ValueError(f'the lead may not run on {model} ({rule}): pick another with --lead-model, or another CLI with --lead')
 
 
-def check_worker(settings, agent, model, effort):
+def check_worker(settings, agent, kind, model, effort):
     """Check the worker's model and effort after applying its role defaults."""
-    if model in settings.get('workers.forbid'):
+    forbidden = settings.get('workers.forbid')
+    if forbidden and not model:
+        raise ValueError(f'{agent} has no model to check against workers.forbid: name one with --model')
+    if model in forbidden:
         raise ValueError(f'{agent} may not run on {model} (workers.forbid)')
     cap = settings.get('workers.max_effort')
+    if cap and not effort and kind in ('claude', 'codex', 'hermes'):
+        raise ValueError(f'{agent} has no effort to check against workers.max_effort: name one with --effort')
     if cap and effort and effort not in settings_.EFFORTS[:settings_.EFFORTS.index(cap) + 1]:
         raise ValueError(f'{agent} may not run at {effort} effort (workers.max_effort: {cap})')
 

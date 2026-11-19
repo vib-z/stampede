@@ -14,8 +14,8 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     from . import handed as handed_, relay as relay_
     backend = job_.backend(job)
     lead = backend != 'native' and agent == job_.roster(job)[1]  # a restarted lead keeps the lead's hooks
-    if not lead and not program and (model or effort):
-        agents_.check_worker(settings_.current(job), agent, model, effort)
+    if not lead and not program:
+        agents_.check_worker(settings_.current(job), agent, kind, model, effort)
     if backend == 'native':
         return native_.start(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, tab, parent, outlive, program)
     if tab or parent or outlive or program:

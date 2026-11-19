@@ -8,7 +8,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, SCRIPTS, LEAD  # noqa: E402
 from stampede import job as job_, native as native_, owner as owner_, relay as relay_, cli as cli_, settings as settings_, agents as agents_, \
-    doctor as doctor_  # noqa: E402
+    doctor as doctor_, hcapi as hcapi_  # noqa: E402
 
 FLEET = SCRIPTS / 'fleet-job'
 
@@ -594,12 +594,10 @@ class WorkerPolicy(Choices):
                     self.assertIn('build-x ' + message, err)
                     self.assertEqual(self.calls('run'), [])
 
-    def test_native_workers_at_the_cap_without_effort_or_without_a_cap_can_start(self):
+    def test_native_workers_at_the_cap_or_without_a_cap_can_start(self):
         code, _, err = self.new('--core')
         self.assertEqual(code, 0, err)
         for name, config, flags in (('build-at-cap', '[workers]\nmax_effort = "medium"\n', ()),
-                                    ('build-no-effort', '[workers]\nmax_effort = "low"\n',
-                                     ('--kind', 'codex', '--model', 'gpt-6.2-sol')),
                                     ('build-no-cap', '', ('--effort', 'ultra'))):
             with self.subTest(name=name):
                 self.config(config)
@@ -610,6 +608,47 @@ class WorkerPolicy(Choices):
         code, out, err = self.main('start', self.job, 'build-program', '--', 'sleep', '60')
         self.assertEqual(code, 0, out + err)
         self.assertIn('STARTED build-program', out)
+
+    def test_switching_cli_requires_resolved_values_when_a_worker_limit_is_set(self):
+        code, _, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        brief = self.brief(self.job, 'build-x')
+        args = ('start', self.job, 'build-x', '--brief', brief, '--kind', 'codex')
+        self.config('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        code, out, err = self.main(*args)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn('build-x has no model to check against workers.forbid: name one with --model', err)
+        self.config('[workers]\nmax_effort = "medium"\n')
+        code, out, err = self.main(*args)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn('build-x has no effort to check against workers.max_effort: name one with --effort', err)
+        self.config('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        code, out, err = self.main(*args, '--model', 'gpt-6.2-sol')
+        self.assertEqual(code, 0, out + err)
+        self.assertIn('STARTED build-x', out)
+
+    def test_queued_native_helper_uses_the_policy_in_force_when_it_launches(self):
+        code, out, err = self.new('--core', '--max-helpers', '1')
+        self.assertEqual(code, 0, out + err)
+        for name, status in (('build-first', 'STARTED'), ('build-waiting', 'QUEUED')):
+            code, out, err = self.main('start', self.job, name, '--brief', self.brief(self.job, name))
+            self.assertEqual(code, 0, out + err)
+            self.assertIn(f'{status} {name}', out)
+        self.config('[workers]\nforbid = ["claude-opus-5-5"]\n')
+        self.terminal('t2', state='finished')
+        before = self.calls('run')
+        code, out, err = self.main('next', self.job)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn('FAILED build-waiting (build-waiting may not run on claude-opus-5-5 (workers.forbid))', out)
+        self.assertEqual(self.calls('run'), before)
+        self.assertEqual(native_.queued(self.job), [])
+
+    def test_core_launch_uses_the_callers_xdg_config_home_when_set(self):
+        job, _ = self.core_job()
+        self.assertFalse(any(arg.startswith('XDG_CONFIG_HOME=') for arg in hcapi_.launch_env(job)))
+        config_home = self.root / 'custom config'
+        with mock.patch.dict(os.environ, {'XDG_CONFIG_HOME': str(config_home)}):
+            self.assertIn(f'XDG_CONFIG_HOME={config_home}', hcapi_.launch_env(job))
 
     def test_a_bad_cap_is_a_config_problem(self):
         self.config('[workers]\nmax_effort = "custom"\n')

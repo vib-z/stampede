@@ -248,6 +248,8 @@ class Job:
     def opening(self):
         """Only O2's start, for a job with its own --lead."""
         self.base['FLEET_LEAD_ALLOW'] = f'{LEAD_MODEL},{CODEX_LEAD_MODEL}'
+        if self.lead_kind == 'codex':
+            self.base['XDG_CONFIG_HOME'] = str(self.root / 'custom config')
         try:
             self.start()
         except Exception:
@@ -356,7 +358,8 @@ class Job:
             where = ('--pane', f'{self.WS}:p{n}') if self.backend == 'tui' or kind in self.handed else ()
             if kind in self.handed:
                 self.lead('start ' + kind + ' on core', 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief)
-            self.lead('start ' + kind, 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief, *where)
+            cap = ('--set', 'workers.max_effort=medium') if kind == 'cursor' else ()
+            self.lead('start ' + kind, 'start', self.job, 'build-' + kind, '--kind', kind, '--brief', brief, *where, *cap)
 
     def question(self):
         """O4: the lead asks; the client's channel gets it; the client's answer reaches the lead. Then the lead posts."""

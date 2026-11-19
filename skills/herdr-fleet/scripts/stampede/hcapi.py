@@ -220,7 +220,7 @@ def launch_env(job):
     --env: so the caller's PATH and settings, the job's key and the job's own owner, and never the caller's Herdr ids."""
     env = ['/usr/bin/env'] + [part for name in HERDR_IDS for part in ('-u', name)]
     env += ['PATH=' + os.environ.get('PATH', ''), 'STAMPEDE_JOB_KEY=' + job_.core_key(job)]
-    env += [name + '=' + os.environ[name] for name in CONFIG_KEYS if os.environ.get(name)]  # an empty one means unset
+    env += [name + '=' + os.environ[name] for name in (*CONFIG_KEYS, 'XDG_CONFIG_HOME') if os.environ.get(name)]
     owner = job_.job_owner(job)
     return env + (['HERDR_EVENTS_OWNER=' + owner] if owner else [])
 
