@@ -171,6 +171,52 @@ def reopen_refusal(job, candidates, lead_known=True):
             return f'REFUSED {name}: {base_.line(error)}; {fix}'
 
 
+def reopen_skip(node, resume, finished, fresh, rerun):
+    """Why a missing, reachable node would not be relaunched."""
+    if node.get('role') == 'plain':
+        return 'plain'
+    kind = node['kind']
+    if kind == 'program':
+        if node.get('state') == 'finished' and node.get('exit_code') == 0:
+            return 'done'
+        return None if rerun else 'program'
+    if kind == 'codex' and not fresh and (node['role'] != 'lead' or finished):
+        return 'codex'
+    if not resume and finished:
+        return 'finished'
+
+
+def reopen_candidates(order, live, running, resumes, requests, skips, finished):
+    """Walk the recorded parents before their children, assuming eligible launches succeed."""
+    now, later = set(live), set() if finished else set(requests)
+    waiting = {name: (r['parent'], (name, r['kind'], r['model'], r['effort'], False))
+               for name, r in requests.items()} if not finished else {}
+    for node in order:
+        name, parent = node['name'], node.get('parent')
+        if name in now or name in requests or node.get('state') == 'closed' or skips[name]:
+            continue
+        resume = resumes[name]
+        if parent and parent not in now and not (parent in later and not resume):
+            continue
+        candidate = name, node['kind'], node.get('model'), node.get('effort'), node['role'] == 'lead'
+        if node['role'] == 'helper' and not resume:
+            waiting[name] = parent, candidate
+            later.add(name)
+        else:
+            yield candidate
+            now.add(name)
+    now.update(running)
+    while waiting:
+        ready = [name for name, (parent, _) in waiting.items() if name in now or parent in now]
+        if not ready:
+            break
+        for name in ready:
+            _, candidate = waiting.pop(name)
+            if name not in now:
+                yield candidate
+                now.add(name)
+
+
 def lead_brief_for(job, lead, kind, brief):
     """A lead restarted on the other CLI (a usage-limit fallback) gets its generated brief rewritten for that CLI, so a
     Codex lead never reads that a yes typed in its pane counts. Decided by the brief's own text, not the roster, so a

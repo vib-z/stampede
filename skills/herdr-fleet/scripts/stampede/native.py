@@ -771,52 +771,6 @@ def parents_first(nodes):
     return order
 
 
-def reopen_skip(node, resume, finished, fresh, rerun):
-    """Why a missing, reachable node would not be relaunched."""
-    if node.get('role') == 'plain':
-        return 'plain'
-    kind = node['kind']
-    if kind == 'program':
-        if node.get('state') == 'finished' and node.get('exit_code') == 0:
-            return 'done'
-        return None if rerun else 'program'
-    if kind == 'codex' and not fresh and (node['role'] != 'lead' or finished):
-        return 'codex'
-    if not resume and finished:
-        return 'finished'
-
-
-def reopen_candidates(order, live, running, resumes, requests, skips, finished):
-    """Walk the recorded parents before their children, assuming eligible launches succeed."""
-    now, later = set(live), set() if finished else set(requests)
-    waiting = {name: (r['parent'], (name, r['kind'], r['model'], r['effort'], False))
-               for name, r in requests.items()} if not finished else {}
-    for node in order:
-        name, parent = node['name'], node.get('parent')
-        if name in now or name in requests or node.get('state') == 'closed' or skips[name]:
-            continue
-        resume = resumes[name]
-        if parent and parent not in now and not (parent in later and not resume):
-            continue
-        candidate = name, node['kind'], node.get('model'), node.get('effort'), node['role'] == 'lead'
-        if node['role'] == 'helper' and not resume:
-            waiting[name] = parent, candidate
-            later.add(name)
-        else:
-            yield candidate
-            now.add(name)
-    now.update(running)
-    while waiting:
-        ready = [name for name, (parent, _) in waiting.items() if name in now or parent in now]
-        if not ready:
-            break
-        for name in ready:
-            _, candidate = waiting.pop(name)
-            if name not in now:
-                yield candidate
-                now.add(name)
-
-
 def reopen(job, fresh=False, prompt=False, rerun=False):
     """stampede reopen: bring back what is not live, parents first, each child under its parent's new address. It never
     hands out work by itself: a resumed Claude session comes back idle, and whatever would start a brief again goes
@@ -841,8 +795,8 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
             name, session = n['name'], n.get('session') or ''
             resume = n.get('kind') == 'claude' and not fresh and session and agents_.claude_session_file(session)
             resumes[name] = resume
-            skips[name] = reopen_skip(n, resume, finished, fresh, rerun)
-        candidates = list(reopen_candidates(order, live_nodes, running, resumes, requests, skips, finished))
+            skips[name] = agents_.reopen_skip(n, resume, finished, fresh, rerun)
+        candidates = list(agents_.reopen_candidates(order, live_nodes, running, resumes, requests, skips, finished))
         refusal = agents_.reopen_refusal(job, candidates)
         if refusal:
             out_.refuse(refusal)
