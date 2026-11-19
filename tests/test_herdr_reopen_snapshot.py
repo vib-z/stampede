@@ -57,6 +57,7 @@ class ReopenSnapshot(unittest.TestCase):
             f.write_text(body)
             f.chmod(0o755)
         self.env = dict(os.environ, HOME=str(home), FAKE_DIR=str(t), HERDR=str(home / '.local/bin/herdr'))
+        self.env['XDG_CONFIG_HOME'] = str(home / '.config')
         self.repo, self.wt = t / 'repo', t / 'repo/wt api'
         self.wt.mkdir(parents=True)
         self.panes = [pane('wJ:p1', 'wJ:t1', 'lead-demo', str(self.repo), 'claude', 's-lead'),
@@ -102,6 +103,105 @@ class ReopenSnapshot(unittest.TestCase):
         self.state(workspaces=[{'workspace_id': 'wJ', 'label': 'demo-job', 'tokens': {'owner': 'bot-alpha'}}])
         self.run_cmd('wJ', str(self.job))
         self.state(workspaces=[])              # then the owner said yes and the workspace was closed
+
+    def policy(self, text):
+        config = Path(self.env['XDG_CONFIG_HOME']) / 'stampede/config.toml'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(text)
+
+    def test_reopen_refuses_a_lead_or_worker_before_opening_the_workspace(self):
+        self.snapshot_all()
+        (self.job / 'lead').write_text('lead-demo\n')
+        for text, who, rule in (
+                ('[lead]\nallow = ["claude-fable-5-2"]\n', 'lead-demo', 'lead.allow'),
+                ('[workers]\nforbid = ["gpt-6.2-astra"]\n', 'build-api', 'workers.forbid')):
+            self.policy(text)
+            for flags in ((), ('--fresh',)):
+                with self.subTest(who=who, flags=flags):
+                    r, calls = self.reopen(*flags)
+                    self.assertEqual(r.returncode, 2, r.stderr)
+                    self.assertTrue(r.stderr.startswith(f'REFUSED {who}: '), r.stderr)
+                    self.assertIn(rule, r.stderr)
+                    self.assertIn('nothing started. Run stampede config show, change the rule at the source it reports, '
+                                  'then reopen again. See docs/TROUBLESHOOT.md.', r.stderr)
+                    self.assertEqual(r.stderr.count('\n'), 1)
+                    self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[lead]\nallow = ["claude-opus-5-5"]\n')
+        self.env['FLEET_LEAD_ALLOW'] = 'claude-fable-5-2'
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('lead.allow: claude-fable-5-2', r.stderr)
+        self.assertIn('change the rule at the source it reports', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.env.pop('FLEET_LEAD_ALLOW')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('agent start lead-demo', calls)
+
+    def test_reopen_cannot_check_an_unrecorded_lead_model_against_a_forbid_list(self):
+        self.run_cmd('record', str(self.job), 'lead-demo', 'claude', '-', '--')
+        (self.job / 'lead').write_text('lead-demo\n')
+        self.run_cmd('wJ', str(self.job))
+        self.state(workspaces=[])
+        self.policy('[lead]\nforbid = ["claude-opus-5-5"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED lead-demo: the lead has no recorded model to check against lead.forbid', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+
+    def test_tui_reopen_uses_the_saved_lead_or_refuses_when_neither_record_names_it(self):
+        self.job.mkdir()
+        lead = self.job / 'lead'
+        lead.write_text('lead-demo\n')
+        self.snapshot_all()
+        lead.unlink()
+        self.policy('[lead]\nallow = ["claude-fable-5-2"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED lead-demo: the lead may not run on claude-opus-5-5 (lead.allow', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.state(workspaces=[{'workspace_id': 'wJ', 'label': 'demo-job'}])
+        self.run_cmd('wJ', str(self.job))
+        self.state(workspaces=[])
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED lead: no lead is recorded (lead.allow)', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+
+    def test_reopen_checks_a_codex_model_recorded_as_a_config_override(self):
+        self.run_cmd('record', str(self.job), 'build-api', 'codex', '-', '--',
+                     '-cmodel="gpt-6.2-astra" # selected model', '--config', 'model_reasoning_effort="high" # effort')
+        self.run_cmd('wJ', str(self.job))
+        self.state(workspaces=[])
+        self.policy('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED build-api: build-api may not run on gpt-6.2-astra (workers.forbid)', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[workers]\nmax_effort = "medium"\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED build-api: build-api may not run at high effort (workers.max_effort: medium)', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[workers]\nforbid = ["gpt-6.2-sol"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('agent start build-api', calls)
+
+    def test_reopen_checks_the_attached_codex_model_flag_over_config(self):
+        self.run_cmd('record', str(self.job), 'build-api', 'codex', '-', '--',
+                     '-mgpt-6.2-astra', '-c', 'model=gpt-6.2-sol')
+        self.run_cmd('wJ', str(self.job))
+        self.state(workspaces=[])
+        self.policy('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED build-api: build-api may not run on gpt-6.2-astra (workers.forbid)', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[workers]\nforbid = ["gpt-6.2-sol"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('agent start build-api', calls)
 
     def test_only_the_jobs_own_agents_are_kept(self):
         self.panes = self.panes[:2] + [pane('wJ:p9', 'wJ:t3', 'owner-other', str(self.repo), 'claude', 'owner-session'),
@@ -176,6 +276,8 @@ class ReopenSnapshot(unittest.TestCase):
 
     def test_into_adds_only_missing_tabs(self):
         self.snapshot_all()
+        (self.job / 'lead').write_text('lead-demo\n')
+        self.policy('[lead]\nallow = ["claude-fable-5-2"]\n[workers]\nforbid = ["gpt-6.2-astra"]\n')
         self.state(workspaces=[{'workspace_id': 'wP', 'label': 'project'}])
         r, calls = self.reopen('--into', 'wP')
         self.assertEqual(r.returncode, 0, r.stderr)

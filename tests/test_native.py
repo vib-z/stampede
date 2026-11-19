@@ -909,6 +909,60 @@ class Record(NativeCase):
         self.assertIn('FINISHED', self.quiet(owner_.finish, self.job, 'done again')[1])
 
 
+class ReopenPolicy(NativeCase):
+    def test_a_restart_left_in_the_queue_checks_live_policy_at_next(self):
+        self.started(max_helpers=1)
+        code, out = self.start('build-waiting', model='claude-sonnet-5-5', effort='medium')
+        self.assertEqual(code, 0, out)
+        self.terminal('t2', state='finished')
+        code, out = self.start('build-blocker', model='claude-opus-5-5', effort='medium')
+        self.assertEqual(code, 0, out)
+        reopened = self.cli('reopen', self.job)
+        self.assertEqual(reopened.returncode, 0, reopened.stdout + reopened.stderr)
+        self.assertIn('QUEUED build-waiting', reopened.stdout)
+        (_, request), = native_.queued(self.job)
+        self.assertTrue(request['place'])
+        config = self.root / 'home/.config/stampede/config.toml'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text('[workers]\nforbid = ["claude-sonnet-5-5"]\n')
+        self.terminal('t3', state='finished')
+        before = self.runs()
+        got = self.cli('next', self.job)
+        self.assertEqual(got.returncode, 1, got.stdout + got.stderr)
+        self.assertIn('FAILED build-waiting (build-waiting may not run on claude-sonnet-5-5 (workers.forbid))', got.stdout)
+        self.assertEqual(self.runs(), before)
+        self.assertEqual(native_.queued(self.job), [])
+
+    def test_reopen_refuses_before_starting_any_agent_or_queuing_a_restart(self):
+        self.started()
+        code, out = self.start('build-api', model='claude-sonnet-5-5', effort='medium')
+        self.assertEqual(code, 0, out)
+        before = self.runs()
+        config = self.root / 'home/.config/stampede/config.toml'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text('[lead]\nallow = ["claude-fable-5-2"]\n')
+        got = self.cli('reopen', self.job)
+        self.assertEqual(got.returncode, 0, got.stderr)  # live lead is outside the list
+        hcapi_.hc('kill', 't1')
+        for text, who, rule in (
+                ('[lead]\nallow = ["claude-fable-5-2"]\n', LEAD, 'lead.allow'),
+                ('[lead]\nallow = ["claude-opus-5-5"]\n[workers]\nmax_effort = "low"\n', 'build-api', 'workers.max_effort')):
+            config.write_text(text)
+            for flags in ((), ('--fresh',)):
+                with self.subTest(who=who, flags=flags):
+                    got = self.cli('reopen', self.job, *flags)
+                    self.assertEqual(got.returncode, 2, got.stdout + got.stderr)
+                    self.assertEqual(got.stdout, '')
+                    self.assertTrue(got.stderr.startswith(f'REFUSED {who}: '), got.stderr)
+                    self.assertIn(rule, got.stderr)
+                    self.assertEqual(self.runs(), before)
+                    self.assertEqual(native_.queued(self.job), [])
+        config.write_text('[lead]\nallow = ["claude-opus-5-5"]\n[workers]\nmax_effort = "medium"\n')
+        got = self.cli('reopen', self.job, '--fresh')
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertIn('STARTED build-api', got.stdout)
+
+
 class Reopen(NativeCase):
     def setUp(self):
         super().setUp()

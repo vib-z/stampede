@@ -54,7 +54,7 @@ Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=fa
 |---|---|---|
 | `finish <job> <summary>` | | `FINISHED <job>`, after one `done` event (sent once); `NOT CANCELLED <id>: ...` for a question it could not stop; first `gates off: <names>` when the job had gates off, which the done event carries as `gates_off` |
 | `snapshot <job>` (a Core job) | | the record's path, or `FAILED snapshot (<why>)` |
-| `reopen <job>` (a Core job) | `--fresh`, `--prompt`, `--rerun-programs` | per agent: `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` or `FAILED` |
+| `reopen <job>` (a Core job) | `--fresh`, `--prompt`, `--rerun-programs` | per agent: `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` or `FAILED`. On policy refusal, one `REFUSED` line, exit 2, and nothing starts |
 | `close <job> [<agent>]` (a Core job) | | `CLOSED <agent> (<address>)` per agent, deepest first; no agent closes the whole job; `SKIPPED <name> (<address>): ...` for a terminal of another job under it, its branch and the terminals above it, then exit 1 |
 
 ## Settings
@@ -93,6 +93,8 @@ Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what
 
 The full list, each with its fix, is in [TROUBLESHOOT.md](TROUBLESHOOT.md).
 
+Reopen checks the current model and effort policy before starting anything. If policy refuses an agent, it exits 2 and prints one line on stderr. The line reads `REFUSED <agent>: <reason>; nothing started. Run stampede config show, change the rule at the source it reports, then reopen again. See docs/TROUBLESHOOT.md.` This also applies to newly generated TUI scripts and Core relay scripts. See [Configure](CONFIGURE.md) for older TUI scripts.
+
 ## Exit codes
 
 | code | means | from |
@@ -116,7 +118,7 @@ A Core job's commands, one by one (what each does: [CORE-NATIVE.md](CORE-NATIVE.
 | `wait` (`--front-door`) | the items, `BLOCKED <lead>: <kind>`, `LEAD_GONE` (exit 3: `TIMEOUT`) | | |
 | `tell` | `SUBMITTED` | | `FAILED` (nothing typed) |
 | `snapshot` | the record's path | `FAILED snapshot`: Core did not answer | not a native job |
-| `reopen` | only `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` | any `FAILED` restart | not a native job; `--fresh` or `--rerun-programs` on a finished job |
+| `reopen` | only `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` | any `FAILED` restart | policy refusal, wrong backend, or `--fresh` or `--rerun-programs` on a finished job |
 | `close` | every `CLOSED` | any `FAILED`; the rest still closed | from inside the subtree, no such agent, not a native job |
 
 `hook`, `_deliver` and `_wake` exit 0 and do nothing on a Core job; `_reopen` exits 2 there and names `stampede reopen`.

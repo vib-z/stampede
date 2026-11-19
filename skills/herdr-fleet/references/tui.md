@@ -73,7 +73,7 @@ herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
 ## Reopen record
 
 - `herdr-reopen-snapshot <ws> <job>` writes `<job>/REOPEN.md` and `<job>/reopen.sh` from `<job>/agents.tsv`, which every `stampede start` fills. Run it once the launch's agents run, after every later start, and before any close.
-- `bash <job>/reopen.sh` rebuilds the job's tabs and panes and resumes every session: `--fresh` for new sessions, `--prompt` to resend each brief pointer, `--into <ws>` to add the tabs to an open workspace.
+- `bash <job>/reopen.sh` rebuilds the job's tabs and panes and resumes every session: `--fresh` for new sessions, `--prompt` to resend each brief pointer, `--into <ws>` to add the tabs to an open workspace. `REFUSED` means current model or effort policy stopped the reopen before any launch. See [Configure](../../../docs/CONFIGURE.md).
 - It refuses while a workspace with that label is open, or when a pane's cwd is gone (add the worktree back first).
 
 ## Close, on the owner's yes only

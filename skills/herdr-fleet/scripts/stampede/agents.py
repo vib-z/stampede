@@ -86,7 +86,7 @@ def lead_model(kind, model=None, effort=None, job=None):
     return model or settings.get(f'lead.{kind}.model'), effort or settings.get(f'lead.{kind}.effort')
 
 
-def check_lead_model(settings, model):
+def check_lead_model(settings, model, suggest=True):
     """Refuse a forbidden lead model or one outside a configured allow list."""
     allow = settings.get('lead.allow')
     if model in settings.get('lead.forbid'):
@@ -95,7 +95,8 @@ def check_lead_model(settings, model):
         rule = 'lead.allow: ' + ', '.join(allow)
     else:
         return
-    raise ValueError(f'the lead may not run on {model} ({rule}): pick another with --lead-model, or another CLI with --lead')
+    hint = ': pick another with --lead-model, or another CLI with --lead' if suggest else ''
+    raise ValueError(f'the lead may not run on {model} ({rule}){hint}')
 
 
 def check_worker(settings, agent, kind, model, effort):
@@ -110,6 +111,110 @@ def check_worker(settings, agent, kind, model, effort):
         raise ValueError(f'{agent} has no effort to check against workers.max_effort: name one with --effort')
     if cap and effort and effort not in settings_.EFFORTS[:settings_.EFFORTS.index(cap) + 1]:
         raise ValueError(f'{agent} may not run at {effort} effort (workers.max_effort: {cap})')
+
+
+def model_effort(kind, args):
+    """Model and effort explicitly passed in a recorded start's argv."""
+    model = configured_model = effort = None
+    rest = iter(args)
+    for arg in rest:
+        if arg == '--':
+            break
+        flag, eq, value = arg.partition('=')
+        if kind == 'codex' and len(flag) > 2 and flag[:2] in ('-m', '-c'):
+            flag, eq, value = arg[:2], '=', arg[2:]
+        if flag not in ('--model', '-m', '--effort', '--reasoning', '-c', '--config'):
+            continue
+        if not eq:
+            value = next(rest, '')
+        if flag in ('--model', '-m'):
+            model = value
+        elif flag in ('--effort', '--reasoning'):
+            effort = value
+        elif flag in ('-c', '--config'):
+            key, _, setting = value.partition('=')
+            key = key.strip()
+            if key != 'model_reasoning_effort' and (kind != 'codex' or key != 'model'):
+                continue
+            setting = setting.strip()
+            try:
+                parsed = settings_.parse('v = ' + setting)['v']
+            except ValueError:
+                parsed = setting.strip('"\'')  # the Codex CLI also accepts bare strings
+            if key == 'model':
+                configured_model = parsed if isinstance(parsed, str) else None
+            else:
+                effort = parsed if isinstance(parsed, str) else None
+    return model or configured_model or None, effort or None  # Codex's dedicated model flag wins over its config
+
+
+def reopen_refusal(job, candidates, lead_known=True):
+    """The first refusal for the agents a reopen would start, using the owner's current settings."""
+    settings = settings_.current(job)
+    lead_rules = [key for key in ('lead.forbid', 'lead.allow') if settings.get(key)]
+    if not lead_rules and not any(settings.get(key) for key in ('workers.forbid', 'workers.max_effort')):
+        return
+    fix = 'nothing started. Run stampede config show, change the rule at the source it reports, then reopen again. See docs/TROUBLESHOOT.md.'
+    if not lead_known and lead_rules:
+        return f'REFUSED lead: no lead is recorded ({", ".join(lead_rules)}); {fix}'
+    for name, kind, model, effort, lead in candidates:
+        if kind == 'program':
+            continue
+        try:
+            if lead:
+                check_lead_model(settings, model, suggest=False)
+                if not model and settings.get('lead.forbid'):
+                    raise ValueError('the lead has no recorded model to check against lead.forbid')
+            else:
+                check_worker(settings, name, kind, model, effort)
+        except ValueError as error:
+            return f'REFUSED {name}: {base_.line(error)}; {fix}'
+
+
+def reopen_skip(node, resume, finished, fresh, rerun):
+    """Why a missing, reachable node would not be relaunched."""
+    if node.get('role') == 'plain':
+        return 'plain'
+    kind = node['kind']
+    if kind == 'program':
+        if node.get('state') == 'finished' and node.get('exit_code') == 0:
+            return 'done'
+        return None if rerun else 'program'
+    if kind == 'codex' and not fresh and (node['role'] != 'lead' or finished):
+        return 'codex'
+    if not resume and finished:
+        return 'finished'
+
+
+def reopen_candidates(order, live, running, resumes, requests, skips, finished):
+    """Walk the recorded parents before their children, assuming eligible launches succeed."""
+    now, later = set(live), set() if finished else set(requests)
+    waiting = {name: (r['parent'], (name, r['kind'], r['model'], r['effort'], False))
+               for name, r in requests.items()} if not finished else {}
+    for node in order:
+        name, parent = node['name'], node.get('parent')
+        if name in now or name in requests or node.get('state') == 'closed' or skips[name]:
+            continue
+        resume = resumes[name]
+        if parent and parent not in now and not (parent in later and not resume):
+            continue
+        candidate = name, node['kind'], node.get('model'), node.get('effort'), node['role'] == 'lead'
+        if node['role'] == 'helper' and not resume:
+            waiting[name] = parent, candidate
+            later.add(name)
+        else:
+            yield candidate
+            now.add(name)
+    now.update(running)
+    while waiting:
+        ready = [name for name, (parent, _) in waiting.items() if name in now or parent in now]
+        if not ready:
+            break
+        for name in ready:
+            _, candidate = waiting.pop(name)
+            if name not in now:
+                yield candidate
+                now.add(name)
 
 
 def lead_brief_for(job, lead, kind, brief):

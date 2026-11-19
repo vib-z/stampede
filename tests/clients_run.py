@@ -418,7 +418,7 @@ class Job:
             self.terminal(self.address(self.worker), status={'state': 'idle'})
 
     def reopen(self):
-        """O8: reopen.sh on the live job; on the TUI the lead first writes the reopen record."""
+        """O8: reopen.sh on the live job; on the TUI the lead first writes the reopen record. Native also checks a policy refusal."""
         if self.backend == 'tui':
             self.run('snapshot', (BOT_SCRIPTS / 'herdr-reopen-snapshot', self.WS, self.job), self.lead_env())
         self.before_reopen = len(self.calls('run')), len(self.herdr_calls())
@@ -427,6 +427,19 @@ class Job:
             for agent in ('build-claude', 'build-codex', 'watch-ci'):
                 self.terminal(self.address(agent), state='finished', reason='killed', status=None, signal=1)
             self.after_end = len(self.calls('run'))
+            path = self.root / 'policy/stampede/config.toml'
+            path.parent.mkdir(parents=True)
+            path.write_text('[workers]\nforbid = ["claude-opus-5-5"]\n')
+            xdg = self.base.get('XDG_CONFIG_HOME')
+            self.base['XDG_CONFIG_HOME'] = str(path.parent.parent)
+            try:
+                self.front('reopen refused', 'bash', self.job / 'reopen.sh')
+            finally:
+                if xdg is None:
+                    self.base.pop('XDG_CONFIG_HOME')
+                else:
+                    self.base['XDG_CONFIG_HOME'] = xdg
+            self.after_refusal = len(self.calls('run'))
             self.front('reopen ended', 'bash', self.job / 'reopen.sh')
 
     def no_poll(self):

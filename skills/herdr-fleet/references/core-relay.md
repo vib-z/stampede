@@ -134,9 +134,11 @@ hc run --bg --no-parent --no-notify --name wait-ci-<pr> --label stampede.job=<ke
 - `--lead`: only the follower and the lead, when either is gone and the workers still run.
 - `--fresh`: each agent it starts begins a new session with its recorded flags and its brief; nothing is resumed. The same locks and acknowledgements hold.
 - Before it starts anything it checks the folder of every agent it may start; a missing one is named with its agents (`cwd gone: ...`), exit 2, and nothing starts.
+- `REFUSED` means current model or effort policy stopped the reopen before any launch, including the follower. See [Configure](../../../docs/CONFIGURE.md).
 - A kept terminal that is now a shell counts as not running: its agent is started again in a new terminal, and the shell is left alone.
 - A restarted lead must take a `REOPENED` line through its own wake hook (a Codex lead: its deliverer) in both inbox files (written every 5 s for 90 s). Exit 3 names a file it missed, with the line to write once the lead is up. Exit 2: another caller is starting one of them. Until both files are acknowledged, `reopen-pending` stays and every later reopen asks again, even with the lead live.
 - A Claude agent resumes its recorded session only when that session ran: a confirmed start, a terminal of it in `hc ls --all`, or Claude's own session file. A session shown to have run stays so; a later attempt that fails to launch does not change that. One that never ran (a failed start, or no terminal of it while Core still keeps a finished one, 24 h) starts fresh with that session id and its brief. Anything else is `UNKNOWN <agent>: cannot tell whether its session ... ever ran`, with what to check; that agent is not restarted and reopen exits 1.
+- If an agent's record or session proof changes after preflight, reopen prints `SKIPPED` for that agent, continues, and exits 1 unless the lead also times out acknowledging its reopen (exit 3). Run reopen again to check the new record.
 - Each restarted agent is reported as `start` reports it (`STARTED`, `BLOCKED`, `NOT READY` with its recovery line, `FAILED`), and reopen goes on to the next. A follower that ends at once is `FAILED relay-<12 hex>`. Any restart that is not `STARTED` makes reopen exit 1.
 - A finished job resumes its agents for inspection only: no follower, no marker.
 

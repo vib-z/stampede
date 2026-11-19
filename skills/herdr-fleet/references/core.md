@@ -71,6 +71,7 @@ Run it as a plain child of your terminal, never in your own turn: `hc run --bg -
 
 - `stampede snapshot <job>` rewrites `tree.json`, `REOPEN.md` and `reopen.sh`; `new`, every start, `reopen`, `close` and `finish` write them too.
 - After a crash or a reboot, `stampede reopen <job>` (or `bash <job>/reopen.sh`) brings back what is not live, parents first. It never hands out work: a resumed Claude helper comes back idle (`--prompt` gives it its parent's new address), and anything that would start work again goes through the queue.
+- `REFUSED` means current model or effort policy stopped the reopen before any launch. See [Configure](../../../docs/CONFIGURE.md).
 - A Codex helper is skipped without `--fresh`. You come back first, with one line saying you were reopened; a shell Core left in your old place is not you.
 - A finished job reopens for reading only: `--fresh` and `--rerun-programs` are refused, and `start` and `next` start no helper.
 - `stampede close <job> <agent>` ends that subtree, leaves first, politely when idle, else by kill; a helper closed by name stays closed at a reopen. `stampede close <job>` ends the whole job, you last: only on the owner's yes. Never from inside the subtree.
