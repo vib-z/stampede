@@ -122,11 +122,18 @@ class ReopenSnapshot(unittest.TestCase):
                     self.assertEqual(r.returncode, 2, r.stderr)
                     self.assertTrue(r.stderr.startswith(f'REFUSED {who}: '), r.stderr)
                     self.assertIn(rule, r.stderr)
-                    self.assertIn('nothing started. Change the list or limit in your own config (see stampede config show), '
+                    self.assertIn('nothing started. Run stampede config show, change the rule at the source it reports, '
                                   'then reopen again. See docs/TROUBLESHOOT.md.', r.stderr)
                     self.assertEqual(r.stderr.count('\n'), 1)
                     self.assertNotRegex(calls, r'workspace create|tab create|agent start')
         self.policy('[lead]\nallow = ["claude-opus-5-5"]\n')
+        self.env['FLEET_LEAD_ALLOW'] = 'claude-fable-5-2'
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('lead.allow: claude-fable-5-2', r.stderr)
+        self.assertIn('change the rule at the source it reports', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.env.pop('FLEET_LEAD_ALLOW')
         r, calls = self.reopen()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('agent start lead-demo', calls)
@@ -162,7 +169,28 @@ class ReopenSnapshot(unittest.TestCase):
         self.assertNotRegex(calls, r'workspace create|tab create|agent start')
 
     def test_reopen_checks_a_codex_model_recorded_as_a_config_override(self):
-        self.run_cmd('record', str(self.job), 'build-api', 'codex', '-', '--', '-c', 'model="gpt-6.2-astra"')
+        self.run_cmd('record', str(self.job), 'build-api', 'codex', '-', '--',
+                     '-cmodel="gpt-6.2-astra" # selected model', '--config', 'model_reasoning_effort="high" # effort')
+        self.run_cmd('wJ', str(self.job))
+        self.state(workspaces=[])
+        self.policy('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED build-api: build-api may not run on gpt-6.2-astra (workers.forbid)', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[workers]\nmax_effort = "medium"\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED build-api: build-api may not run at high effort (workers.max_effort: medium)', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[workers]\nforbid = ["gpt-6.2-sol"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('agent start build-api', calls)
+
+    def test_reopen_checks_the_attached_codex_model_flag_over_config(self):
+        self.run_cmd('record', str(self.job), 'build-api', 'codex', '-', '--',
+                     '-mgpt-6.2-astra', '-c', 'model=gpt-6.2-sol')
         self.run_cmd('wJ', str(self.job))
         self.state(workspaces=[])
         self.policy('[workers]\nforbid = ["gpt-6.2-astra"]\n')

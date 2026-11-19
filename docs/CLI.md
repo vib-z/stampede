@@ -93,7 +93,7 @@ Every refusal is one line on stderr, `stampede <command>: <what is wrong>: <what
 
 The full list, each with its fix, is in [TROUBLESHOOT.md](TROUBLESHOOT.md).
 
-Reopen checks the current model and effort policy before starting anything. If policy refuses an agent, it exits 2 and prints one line on stderr. The line reads `REFUSED <agent>: <reason>; nothing started. Change the list or limit in your own config (see stampede config show), then reopen again. See docs/TROUBLESHOOT.md.` This also applies to newly generated TUI scripts and Core relay scripts. See [Configure](CONFIGURE.md) for older TUI scripts.
+Reopen checks the current model and effort policy before starting anything. If policy refuses an agent, it exits 2 and prints one line on stderr. The line reads `REFUSED <agent>: <reason>; nothing started. Run stampede config show, change the rule at the source it reports, then reopen again. See docs/TROUBLESHOOT.md.` This also applies to newly generated TUI scripts and Core relay scripts. See [Configure](CONFIGURE.md) for older TUI scripts.
 
 ## Exit codes
 

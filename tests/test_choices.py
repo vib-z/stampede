@@ -600,7 +600,7 @@ class RelayReopenPolicy(Choices):
                     self.assertEqual(out, '')
                     self.assertTrue(err.startswith(f'REFUSED {name}: '), err)
                     self.assertIn(rule, err)
-                    self.assertIn('nothing started. Change the list or limit in your own config', err)
+                    self.assertIn('nothing started. Run stampede config show, change the rule at the source it reports', err)
                     self.assertEqual(self.calls('run'), before)
 
     def test_relay_skips_a_changed_record_and_continues_with_the_next_agent(self):
@@ -633,6 +633,13 @@ class RelayReopenPolicy(Choices):
         for args in (config + model, model + config):
             self.assertEqual(agents_.model_effort('codex', args), ('gpt-6.2-sol', None))
         self.assertEqual(agents_.model_effort('codex', ('-c', 'model=gpt-6.2-sol', *config)), ('gpt-6.2-astra', None))
+        self.assertEqual(agents_.model_effort('codex', ('-m=gpt-6.2-sol', *config)), ('gpt-6.2-sol', None))
+
+    def test_codex_config_values_parse_with_the_subset_reader_too(self):
+        with mock.patch.object(settings_, 'tomllib', None):
+            args = ('-cmodel="gpt-6.2-sol" # model', '--config', 'model_reasoning_effort = "medium" # effort')
+            self.assertEqual(agents_.model_effort('codex', args), ('gpt-6.2-sol', 'medium'))
+            self.assertEqual(agents_.model_effort('codex', ('-cmodel=gpt-6.2-sol',)), ('gpt-6.2-sol', None))
 
 
 class WorkerPolicy(Choices):

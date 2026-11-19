@@ -121,6 +121,8 @@ def model_effort(kind, args):
         if arg == '--':
             break
         flag, eq, value = arg.partition('=')
+        if kind == 'codex' and len(flag) > 2 and flag[:2] in ('-m', '-c'):
+            flag, eq, value = arg[:2], '=', arg[2:]
         if flag not in ('--model', '-m', '--effort', '--reasoning', '-c', '--config'):
             continue
         if not eq:
@@ -131,10 +133,18 @@ def model_effort(kind, args):
             effort = value
         elif flag in ('-c', '--config'):
             key, _, setting = value.partition('=')
-            if key.strip() == 'model_reasoning_effort':
-                effort = setting.strip().strip('"\'')
-            elif kind == 'codex' and key.strip() == 'model':
-                configured_model = setting.strip().strip('"\'')
+            key = key.strip()
+            if key != 'model_reasoning_effort' and (kind != 'codex' or key != 'model'):
+                continue
+            setting = setting.strip()
+            try:
+                parsed = settings_.parse('v = ' + setting)['v']
+            except ValueError:
+                parsed = setting.strip('"\'')  # the Codex CLI also accepts bare strings
+            if key == 'model':
+                configured_model = parsed if isinstance(parsed, str) else None
+            else:
+                effort = parsed if isinstance(parsed, str) else None
     return model or configured_model or None, effort or None  # Codex's dedicated model flag wins over its config
 
 
@@ -144,7 +154,7 @@ def reopen_refusal(job, candidates, lead_known=True):
     lead_rules = [key for key in ('lead.forbid', 'lead.allow') if settings.get(key)]
     if not lead_rules and not any(settings.get(key) for key in ('workers.forbid', 'workers.max_effort')):
         return
-    fix = 'nothing started. Change the list or limit in your own config (see stampede config show), then reopen again. See docs/TROUBLESHOOT.md.'
+    fix = 'nothing started. Run stampede config show, change the rule at the source it reports, then reopen again. See docs/TROUBLESHOOT.md.'
     if not lead_known and lead_rules:
         return f'REFUSED lead: no lead is recorded ({", ".join(lead_rules)}); {fix}'
     for name, kind, model, effort, lead in candidates:
