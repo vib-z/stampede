@@ -12,18 +12,22 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
     """Start one agent and record it: in an existing pane at its shell prompt, then send its brief pointer (TUI); or in a
     Herdr Core terminal with its brief pointer as the first prompt (a Core job). A native job: core_native.start."""
     from . import handed as handed_, relay as relay_
-    if job_.backend(job) == 'native':
+    backend = job_.backend(job)
+    lead = backend != 'native' and agent == job_.roster(job)[1]  # a restarted lead keeps the lead's hooks
+    if not lead and not program:
+        agents_.check_worker(settings_.current(job), agent, kind, model, effort)
+    if backend == 'native':
         return native_.start(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, tab, parent, outlive, program)
     if tab or parent or outlive or program:
         raise ValueError('--tab, --parent, --outlive-parent and a program after -- are for a native job (new --core)')
     owner_.require_approval(job)
     if not base_.NAME.fullmatch(agent):
         raise ValueError('agent names are <role>-<scope>, lowercase')
-    lead = agent == job_.roster(job)[1]  # a restarted lead keeps the lead's hooks
     if lead and kind not in agents_.LEAD:
         raise ValueError('the lead runs on claude or codex')
     if lead:  # a restarted lead keeps the lead model and effort of its CLI unless told otherwise
         model, effort = agents_.lead_model(kind, model, effort, job)
+        agents_.check_lead_model(settings_.current(job), model)
     if not lead:
         if not Path(brief).is_file():
             raise ValueError(f'brief {brief} does not exist')
@@ -31,7 +35,7 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
         if missing:
             raise ValueError(f'brief {brief} is missing: {", ".join(missing)}; '
                              'fill them in on skills/herdr-fleet/references/brief.md and start again')
-    if job_.backend(job) == 'core':
+    if backend == 'core':
         if pane:
             return handed_.start_handed(job, agent, kind, pane, brief, model, effort, reports, yolo_in, cwd, lead)
         if lead and kind == 'codex':
@@ -76,7 +80,7 @@ def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yo
 def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core=False, cwd=None, front=False, kind=None, app=False,
         relay=False, space=None, max_helpers=None, lead_model=None, lead_effort=None, no_gate=()):
     """Front door: make the job, start its lead with its hooks, print the lead's name.
-    kind: the lead's CLI, claude (on claude-opus-5-5) or codex (on gpt-6-astra); with none, FLEET_LEAD_KIND, else claude.
+    kind: the lead's CLI, claude (on claude-opus-5-5) or codex (on gpt-6.2-sol); with none, FLEET_LEAD_KIND, else claude.
     A fork of a Claude chat takes a Claude lead only.
     The job folder is <jobs root>/jobs/<date>-<owner or local>-<slug>; the repo stays the agents' cwd, recorded in `workdir`.
     pane: an existing empty pane for the lead (a fresh workspace's root pane), whose tab becomes `lead`; else a new tab.
@@ -106,9 +110,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         kind = check(settings.get('lead.kind'), settings)
         if lead_model or lead_effort:
             settings = settings_.for_new(repo, {**flags, f'lead.{kind}.model': lead_model, f'lead.{kind}.effort': lead_effort})
-        model = settings.get(f'lead.{kind}.model')
-        if model in settings.get('lead.forbid'):
-            raise ValueError(f'the lead may not run on {model} (lead.forbid): pick another with --lead-model, or another CLI with --lead')
+        agents_.check_lead_model(settings, settings.get(f'lead.{kind}.model'))
         return settings, kind
     if core:
         settings, kind = resolve(repo_of(cwd))
@@ -205,13 +207,13 @@ USING.md in the stampede checkout has the whole flow.'''
 EXAMPLES = {
     'new': '''examples:
   stampede new --file ask.md
-  stampede new --file ask.md --lead-model claude-fable-5-1 --lead-effort max
+  stampede new --file ask.md --lead-model claude-fable-5-2 --lead-effort xhigh
   stampede new --core --file ask.md --cwd ~/code/app --lead codex
   stampede new --core --file ask.md --cwd ~/code/app --front-door     # a chat outside Herdr runs it, on Herdr Core''',
     'start': '''examples:
   stampede start <job> build-api --brief <job>/briefs/build-api.md --pane w1:p3     # the role build: its kind, model, effort
   stampede start <job> review-api --brief <job>/briefs/review-api.md     # a Core job: the role review
-  stampede start <job> build-api --kind codex --brief <job>/briefs/build-api.md --model gpt-6-astra
+  stampede start <job> build-api --kind codex --brief <job>/briefs/build-api.md --model gpt-6.2-sol --effort medium
   stampede start <job> lint-web -- npm run lint     # a native job: any program''',
     'tell': '''examples:
   stampede tell <job> lead "the owner says: ship it"
@@ -311,11 +313,10 @@ def parse_and_run(argv):
     p.add_argument('--fork', metavar='SESSION_ID', help='start the lead as a fork of this Claude session (the chat that planned the job)')
     p.add_argument('--front-door', action='store_true', help='a chat outside Herdr stays the owner\'s only contact: the lead posts to <job>/outbox '
                    'and the chat reads it with stampede wait (with --core: a native job only, not --relay)')
-    p.add_argument('--lead', choices=sorted(agents_.LEAD), help='the lead\'s CLI: claude (claude-opus-5-5) or codex (gpt-6-astra); default '
+    p.add_argument('--lead', choices=sorted(agents_.LEAD), help='the lead\'s CLI: claude (claude-opus-5-5) or codex (gpt-6.2-sol); default '
                    '$FLEET_LEAD_KIND, else claude. --fork takes claude only')
     p.add_argument('--lead-model', help='the lead\'s model (the setting lead.<its CLI>.model)')
-    p.add_argument('--lead-effort', help='the lead\'s reasoning effort (the setting lead.<its CLI>.effort; default xhigh '
-                   'on Claude, ultra on Codex)')
+    p.add_argument('--lead-effort', help='the lead\'s reasoning effort (the setting lead.<its CLI>.effort; default xhigh on either CLI)')
     p.add_argument('--app-space', action='store_true', help='with --core --relay: label the lead and workers for the Herdr app '
                    '(herdr.space, herdr.tab), so it shows the job in a space; a native job always carries them')
     p.add_argument('--relay', action='store_true', help='with --core: the earlier Core job (a follower, inbox files, hooks), which hands '

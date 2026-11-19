@@ -94,8 +94,8 @@ class ReopenSnapshot(unittest.TestCase):
         self.run_cmd('record', str(self.job), 'lead-demo', 'claude', str(self.job / 'lead.md'), '--',
                      '--model', 'claude-opus-5-5', '--effort', 'xhigh', '--permission-mode', 'auto', '-n', 'lead-demo')
         self.run_cmd('record', str(self.job), 'build-api', 'codex', str(self.job / 'build-api.md'), '--',
-                     '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort="ultra"', '--approve-for-me')
-        self.run_cmd('record', str(self.job), 'review-api', 'claude', '-', '--', '--model', 'claude-fable-5-1', '--effort', 'max')
+                     '-m', 'gpt-6.2-astra', '-c', 'model_reasoning_effort="ultra"', '--approve-for-me')
+        self.run_cmd('record', str(self.job), 'review-api', 'claude', '-', '--', '--model', 'claude-fable-5-2', '--effort', 'max')
         self.run_cmd('wJ', str(self.job))
         self.panes[3].update(agent=None)       # review-api exits before the refresh that precedes a close
         self.panes[3].pop('agent_session')
@@ -131,9 +131,9 @@ class ReopenSnapshot(unittest.TestCase):
     def test_record_md_and_script(self):
         self.snapshot_all()
         md = (self.job / 'REOPEN.md').read_text()
-        for s in ('`demo-job`', 'owner tag `bot-alpha`', f'| build | wJ:p2 | build-api | `{self.wt}` | codex | gpt-6-astra | ultra | s-api |',
-                  f'| review | wJ:p4 | review-api | `{self.repo}` | claude | claude-fable-5-1 | max | s-rev | - |', f'| build | wJ:p3 | notes | `{self.repo}` | shell |',
-                  "herdr agent start build-api --kind codex --pane <build-api> --timeout 90000 -- resume s-api -m gpt-6-astra -c 'model_reasoning_effort=\"ultra\"' --approve-for-me"):
+        for s in ('`demo-job`', 'owner tag `bot-alpha`', f'| build | wJ:p2 | build-api | `{self.wt}` | codex | gpt-6.2-astra | ultra | s-api |',
+                  f'| review | wJ:p4 | review-api | `{self.repo}` | claude | claude-fable-5-2 | max | s-rev | - |', f'| build | wJ:p3 | notes | `{self.repo}` | shell |',
+                  "herdr agent start build-api --kind codex --pane <build-api> --timeout 90000 -- resume s-api -m gpt-6.2-astra -c 'model_reasoning_effort=\"ultra\"' --approve-for-me"):
             self.assertIn(s, md)
         self.assertNotRegex(md + (self.job / 'reopen.sh').read_text(), '[\u2013\u2014]')
         self.assertTrue(os.access(self.job / 'reopen.sh', os.X_OK))
@@ -154,8 +154,8 @@ class ReopenSnapshot(unittest.TestCase):
         self.assertIn(f'tab create --workspace w9 --cwd {self.repo} --label review --no-focus', c)
         starts = [l for l in c if l.startswith('agent start')]
         self.assertEqual(len(starts), 3)          # the shell pane gets no agent
-        self.assertTrue(any(l.endswith('-- resume s-api -m gpt-6-astra -c model_reasoning_effort="ultra" --approve-for-me') for l in starts), starts)
-        self.assertTrue(any(l.endswith('-- --resume s-rev --model claude-fable-5-1 --effort max') for l in starts), starts)
+        self.assertTrue(any(l.endswith('-- resume s-api -m gpt-6.2-astra -c model_reasoning_effort="ultra" --approve-for-me') for l in starts), starts)
+        self.assertTrue(any(l.endswith('-- --resume s-rev --model claude-fable-5-2 --effort max') for l in starts), starts)
         self.assertFalse(any(l.startswith('herdr-send') for l in c))
 
     def test_fresh_and_prompt(self):

@@ -48,7 +48,7 @@ T=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$WT/alerts-api" --
 TAB=$(echo "$T" | jq -r .result.tab.tab_id); PA=$(echo "$T" | jq -r .result.root_pane.pane_id)
 PU=$(herdr pane split --pane "$PA" --direction right --cwd "$WT/alerts-ui" --no-focus | jq -r .result.pane.pane_id)   # after checking 80 columns each
 stampede start "$B" build-api --pane "$PA" --brief "$B/briefs/build-api.md" --report reports/build-api.md
-stampede start "$B" build-ui --kind codex --model gpt-6.1-sol --effort medium --pane "$PU" --brief "$B/briefs/build-ui.md" --report reports/build-ui.md
+stampede start "$B" build-ui --kind codex --model gpt-6.2-sol --effort medium --pane "$PU" --brief "$B/briefs/build-ui.md" --report reports/build-ui.md
 herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"   # again after Codex's first turn, which reports its session id
 ```
 

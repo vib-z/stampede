@@ -538,6 +538,8 @@ def launch(job, key, request, parent, terminals, existing=None):
     argv = request['program']
     try:
         if kind != 'program':
+            if not existing and 'place' not in request:  # reopen requests carry their recorded place
+                agents_.check_worker(settings_.current(job), name, kind, request['model'], request['effort'])
             prompt = first_prompt(name, labels(parent).get('stampede.agent'), parent['address'], request['brief'], report)
             argv = ([agents_.cli(kind)] + agent_args(job, name, kind, request['model'], request['effort'], yolo=request['yolo'])
                     + (['--session-id', session] if session else []) + [prompt])

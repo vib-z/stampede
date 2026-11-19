@@ -208,7 +208,7 @@ def unknown(job, error):
 
 CONFIG_KEYS = ('FLEET_LEAD_KIND', 'FLEET_LEAD_MODEL', 'FLEET_LEAD_EFFORT', 'FLEET_ASK_CMD', 'FLEET_TRUST_ROOT', 'FLEET_JOBS_ROOT', 'FLEET_WATCH_INTERVAL',
                'FLEET_WATCH_PASSES', 'FLEET_WATCH_NOTIFY', 'HERDR_EVENTS_MACHINE', 'HERDR_EVENTS_HOME', 'HERDR_EVENTS_ROUTES_DIR',
-               'HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_DIR', 'HERDR_EVENTS_STALE_MINUTES', 'FLEET_LEAD_FORBID',
+               'HERDR_EVENTS_FLUSH_LOG', 'HERDR_EVENTS_DIR', 'HERDR_EVENTS_STALE_MINUTES', 'FLEET_LEAD_FORBID', 'FLEET_LEAD_ALLOW',
                'HERDR_EVENTS_FALLBACK_ROUTE', 'HERDR_EVENTS_LAUNCHD', 'HERDR_DOCTOR_EXTRA', 'HC', 'HC_SESSION', 'HC_SOCKET',
                'STAMPEDE_NO_UPDATE_CHECK', 'STAMPEDE_APP_SPACE', 'STAMPEDE_MAX_HELPERS', 'STAMPEDE_TAB_PANES',
                'STAMPEDE_UPDATE_URL')  # every key in config.example; a test keeps them equal
@@ -218,9 +218,9 @@ HERDR_IDS = ('HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_WORKSPACE_ID',
 def launch_env(job):
     """The front of every Core launch. A Core terminal gets the core's environment, not the caller's, and hc run has no
     --env: so the caller's PATH and settings, the job's key and the job's own owner, and never the caller's Herdr ids."""
-    env = ['/usr/bin/env'] + [part for name in HERDR_IDS for part in ('-u', name)]
+    env = ['/usr/bin/env'] + [part for name in (*HERDR_IDS, 'XDG_CONFIG_HOME') for part in ('-u', name)]  # the caller's config, not the core's
     env += ['PATH=' + os.environ.get('PATH', ''), 'STAMPEDE_JOB_KEY=' + job_.core_key(job)]
-    env += [name + '=' + os.environ[name] for name in CONFIG_KEYS if os.environ.get(name)]  # an empty one means unset
+    env += [name + '=' + os.environ[name] for name in (*CONFIG_KEYS, 'XDG_CONFIG_HOME') if os.environ.get(name)]
     owner = job_.job_owner(job)
     return env + (['HERDR_EVENTS_OWNER=' + owner] if owner else [])
 

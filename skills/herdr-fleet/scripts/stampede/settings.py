@@ -11,11 +11,12 @@ except ImportError:  # Python 3.9 and 3.10
     tomllib = None
 
 DEFAULTS_FILE = Path(__file__).resolve().parent / 'defaults.toml'
-ENV = {'FLEET_LEAD_KIND': 'lead.kind', 'FLEET_LEAD_FORBID': 'lead.forbid', 'FLEET_ASK_CMD': 'ask.command', 'FLEET_JOBS_ROOT': 'jobs_root',
+ENV = {'FLEET_LEAD_KIND': 'lead.kind', 'FLEET_LEAD_FORBID': 'lead.forbid', 'FLEET_LEAD_ALLOW': 'lead.allow',
+       'FLEET_ASK_CMD': 'ask.command', 'FLEET_JOBS_ROOT': 'jobs_root',
        'FLEET_TRUST_ROOT': 'trust_root', 'STAMPEDE_MAX_HELPERS': 'helpers.max', 'STAMPEDE_TAB_PANES': 'helpers.tab_panes'}
 # FLEET_LEAD_MODEL and FLEET_LEAD_EFFORT set the pair of the CLI the model belongs to: see lead_env.
-USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.', 'lead.forbid', 'backend')  # run a command, lower a safety rule or
-# pick Herdr Core: the user's own choice, never from a repo
+USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.', 'lead.forbid', 'lead.allow',
+             'workers.forbid', 'workers.max_effort', 'backend')
 ENV_ONLY = (  # read by other programs too, so they stay environment variables: (name, default, what it does)
     ('FLEET_WATCH_INTERVAL', '30', 'seconds between passes of fleet-watch.sh'),
     ('FLEET_WATCH_PASSES', '0', 'fleet-watch.sh stops after this many passes; 0 runs until stopped'),
@@ -37,8 +38,10 @@ ENV_ONLY = (  # read by other programs too, so they stay environment variables: 
     ('STAMPEDE_UPDATE_URL', 'https://api.github.com/repos/vib-z/stampede/releases/latest', 'where it reads the latest release'))
 KEY = re.compile(r'[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*')
 ROLE = re.compile(r'roles\.[a-z0-9_]+\.(kind|model|effort)')  # a role of the user's own is a setting too: strings only
+EFFORTS = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')
 CHOICES = {'backend': ('auto', 'tui', 'core'), 'helpers.layout': ('grid', 'columns', 'rows'), 'review.step': ('end', 'each', 'none'),
            'lead.kind': ('claude', 'codex'), 'merge.method': ('squash', 'merge', 'rebase'),
+           'workers.max_effort': (*EFFORTS, ''),
            'roles.kind': ('claude', 'codex', 'cursor', 'hermes', 'kimi')}  # roles.kind: every roles.<role>.kind
 
 
@@ -314,7 +317,8 @@ def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):
         elif key in DEFAULTS and not fits(value, DEFAULTS[key]):
             problems.append(f'{where}: {key} must be {kind(DEFAULTS[key])}, not {value!r}; skipped')
         elif value not in (choices(key) or (value,)):
-            problems.append(f'{where}: {key} must be one of {", ".join(choices(key))}, not {value!r}; skipped')
+            allowed = ', '.join(option or '""' for option in choices(key))
+            problems.append(f'{where}: {key} must be one of {allowed}, not {value!r}; skipped')
         else:
             values[key], sources[key] = value, source
 

@@ -11,7 +11,7 @@ stampede reads each setting from these layers; the last one that sets it wins:
 1. the defaults, in [defaults.toml](../skills/herdr-fleet/scripts/stampede/defaults.toml), the list of every key;
 2. yours: `~/.config/stampede/config.toml` (`$XDG_CONFIG_HOME/stampede/config.toml` when that is set);
 3. the project's: `.stampede.toml` at the root of the repo (your project's folder), which it can commit (save in its history);
-4. the environment: the variable names stampede has always read;
+4. the environment variables in the key table below. Core launches also pass along `XDG_CONFIG_HOME` when set, so commands in those terminals read the same config;
 5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, the format of these files, and a bare word is a string (text)).
 
 [config.example](../config.example) holds every key with its default. Copy it to `~/.config/stampede/config.toml` and keep only what you change:
@@ -26,21 +26,21 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 **What a job remembers.** `stampede new` saves what it resolved, with the layer of each value, in `<job>/settings.json`, and every later command of that job reads it there. Anything not set then follows your current config. A later command's own `--set` still wins for that command, and `<job>/max-helpers` for its job.
 
-**User-only settings.** `jobs_root`, `trust_root`, `ask.command`, `lead.forbid` and every `gates.` key run a command, widen what is trusted or lower a rule. `backend` is your own choice. stampede reads these only from your file, the environment or a flag. In a repo's `.stampede.toml` each is skipped, with a problem line. They are never saved in `settings.json`, which the job's agents can write.
+**User-only settings.** `jobs_root`, `trust_root`, `ask.command`, `lead.allow`, `lead.forbid`, `workers.forbid`, `workers.max_effort`, `backend` and every `gates.` key are yours to set. stampede reads these only from your file, the environment or a flag. In a repo's `.stampede.toml` each is skipped, with a problem line. They are never saved in `settings.json`, which the job's agents can write.
 
-`lead.forbid` matches exact model names. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The rest follow your live config at every command.
+Model lists match exact model names. A model in `lead.forbid` is refused even when it appears in `lead.allow`. Set these lists to apply your own choices, such as Claude Opus 5.5, Claude Fable 5.2, GPT-6.2 Sol and GPT-6.2 Astra for leads. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The rest follow your live config at every command.
 
-**Problems.** `stampede config show` names, one line each, what stampede skips: an unknown key, a value of the wrong type or not one of the key's choices, a file that does not parse. `stampede new` refuses to start a job while there is one (exit 2); no other command fails on them.
+**Problems.** `stampede config show` names each problem and exits 1. Stampede skips unknown keys, values of the wrong type or outside a key's choices, and files that do not parse. `stampede new` refuses to start a job while there is a config problem (exit 2).
 
 ## Effort: the default, and how to change it
 
 Effort is how hard an agent thinks before it acts. By default:
 
-- **The lead** runs at extra high: `xhigh` on Claude, `ultra` on Codex (Codex has no `xhigh`; `ultra` is its extra high).
+- **The lead** runs at extra high (`xhigh`) on either CLI.
 - **Every worker** runs at `medium`: build, research, review, design, qa, copy, test, and any other role, which takes `roles.default`.
 - **On any model.** Picking another model keeps the effort. Only an effort you set changes it.
 
-It is a default, not a limit: stampede passes any effort you name to the CLI, and refuses none. Each CLI's levels are in [clis.md](../skills/herdr-fleet/references/clis.md).
+A worker cap is optional. Set `workers.max_effort` to check the worker effort after role defaults and flags. With a cap set, an effort above it or outside the listed levels is refused. If no effort resolves for Claude, Codex or Hermes, give `--effort`. Cursor and Kimi can start with no resolved effort because stampede passes no effort flag to them. Each CLI's levels are in [clis.md](../skills/herdr-fleet/references/clis.md).
 
 | to change | do this |
 |---|---|
@@ -61,10 +61,13 @@ On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in.
 | `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | every job folder, on every backend, is `<root>/jobs/<date>-<owner or local>-<slug>`, never in a repo (user only) |
 | `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | a Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
 | `lead.kind` | `claude` | `FLEET_LEAD_KIND` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
-| `lead.forbid` | `[]` | `FLEET_LEAD_FORBID` (comma-separated) | models that may not lead a job. Before it makes anything, `stampede new` refuses a lead whose model is on the list, from `--lead-model`, a setting or the default, in one line naming the model and `lead.forbid` (user only). Workers are not checked |
+| `lead.forbid` | `[]` | `FLEET_LEAD_FORBID` (comma-separated) | exact models that may not lead a job. `stampede new` refuses one before it makes anything. Restarting a TUI or Core relay lead with `stampede start` checks the list too (user only) |
+| `lead.allow` | `[]` | `FLEET_LEAD_ALLOW` (comma-separated) | when set, the only exact models that may lead. The model lists are checked at `new` and `start`, after model choices are applied (user only). A reopen replays each agent's recorded model and effort |
 | `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
-| `lead.codex.model`, `lead.codex.effort` | GPT-6 Astra (its id is in config.example), `ultra` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
-| `roles.<role>.kind`, `.model`, `.effort` | every role at `medium`: `build`, `research`, `copy`, `default`: Claude Opus 5.5; `test`: Claude Sonnet 5.5; `review`, `qa`, `design`: Codex GPT-6 Astra (the ids are in config.example) | | what `stampede start <job> <role>-<scope>` gives a helper that names no `--kind`, `--model` or `--effort`. The role is the name up to its first `-`; any other role takes `roles.default`. A role's model and effort go only with its own kind, so `--kind codex` on a Claude role leaves the model to Codex. Add a role of your own as `[roles.<name>]`. Not for a program after `--` |
+| `lead.codex.model`, `lead.codex.effort` | GPT-6.2 Sol (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
+| `workers.forbid` | `[]` | | exact models workers may not use. Checked by `stampede start` on every backend after role defaults and flags. With a non-empty list, give `--model` if no model resolves (user only) |
+| `workers.max_effort` | `""` | | highest worker effort allowed. Levels rise from `none` through `minimal`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`. Empty leaves the effort open (user only). Programs run after `--` skip both worker checks. Queued native workers are checked again against live policy before their first launch |
+| `roles.<role>.kind`, `.model`, `.effort` | every role at `medium`: `build`, `research`, `copy`, `default`: Claude Opus 5.5; `test`: Claude Sonnet 5.5; `review`, `qa`, `design`: Codex GPT-6.2 Astra (the ids are in config.example) | | what `stampede start <job> <role>-<scope>` gives a helper that names no `--kind`, `--model` or `--effort`. The role is the name up to its first `-`; any other role takes `roles.default`. A role's model and effort go only with its own kind, so `--kind codex` on a Claude role leaves the model to Codex. Add a role of your own as `[roles.<name>]`. Not for a program after `--` |
 | `review.step` | `end` | | the review step the lead's brief asks for, with its reviewer from `roles.review`: `end` (one pass at the end, by another model than the builder's), `each` (one per pull request or step) or `none` (no review step: the brief says you switched it off). Nothing enforces it |
 | `ask.command` | `moshi-hook ask --require-remote --source herdr-fleet --timeout 24h` | `FLEET_ASK_CMD` | what `stampede ask` runs, for a question or a gate, in a job started here (a bot's job asks its bot). The options and the question are added at the end (user only) |
 | `brief.sections` | the seven headings of the [hand-off template](../skills/herdr-fleet/references/brief.md) | | the sections every worker's brief must fill |

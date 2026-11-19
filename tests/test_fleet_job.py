@@ -212,7 +212,7 @@ class Start(unittest.TestCase):
 
     def test_codex_gets_approve_for_me_notify_and_the_job_dir(self):
         job = job_with([('lead-demo', 'claude')])
-        args = agents_.cli_args(job, 'build-ui', 'codex', 'gpt-6.1-sol', 'xhigh', [])
+        args = agents_.cli_args(job, 'build-ui', 'codex', 'gpt-6.2-sol', 'xhigh', [])
         self.assertIn('--approve-for-me', args)
         self.assertIn('--add-dir', args)
         self.assertTrue(any(a.startswith('notify=') for a in args))
@@ -405,8 +405,8 @@ class Fixes(unittest.TestCase):
     def test_new_starts_the_lead_on_the_table_model(self):
         _, _, log = self.run_new('idle')
         self.assertIn('--model claude-opus-5-5 --effort xhigh', log)
-        _, _, log = self.run_new('idle', {'FLEET_LEAD_MODEL': 'claude-fable-5-1', 'FLEET_LEAD_EFFORT': 'max'})
-        self.assertIn('--model claude-fable-5-1 --effort max', log)
+        _, _, log = self.run_new('idle', {'FLEET_LEAD_MODEL': 'claude-fable-5-2', 'FLEET_LEAD_EFFORT': 'max'})
+        self.assertIn('--model claude-fable-5-2 --effort max', log)
 
     def test_new_forks_the_planning_chat_into_the_lead_but_not_into_the_reopen_record(self):
         sid = '0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37'
@@ -1447,14 +1447,14 @@ class LeadChoice(unittest.TestCase):
                 self.assertIn('agent start lead-fix-login-bug --kind ' + cli + ' ', log)
                 self.assertEqual(job_.lead_kind(job), cli)
 
-    def test_lead_codex_starts_hooked_on_astra_and_its_pointer_is_typed_now(self):
+    def test_lead_codex_starts_hooked_on_sol_and_its_pointer_is_typed_now(self):
         out, job, log = self.new(kind='codex')
         brief = job / 'briefs/lead-fix-login-bug.md'
         self.assertIn(f'agent start lead-fix-login-bug --kind codex --pane w9:p2 --timeout 90000 -- --approve-for-me --add-dir {job} '
                       '-c notify=', log)
         self.assertIn('"hook", "--agent", "lead-fix-login-bug", "codex-notify"', log)
         self.assertIn('-c sandbox_workspace_write.network_access=true', log)
-        self.assertIn('-m gpt-6-astra -c model_reasoning_effort="ultra"', log)
+        self.assertIn('-m gpt-6.2-sol -c model_reasoning_effort="xhigh"', log)
         self.assertEqual(job_.roster(job), ({'lead-fix-login-bug': 'codex'}, 'lead-fix-login-bug'))
         self.assertEqual(self.sent.read_text(), f'lead-fix-login-bug You are lead-fix-login-bug. Read {brief} and do everything it says.\n')
         self.assertFalse((job / 'inbox/lead-fix-login-bug.md').exists())   # typed now, never left for a deliverer
@@ -1528,8 +1528,8 @@ class LeadChoice(unittest.TestCase):
         (self.job / 'workdir').write_text(str(repo) + '\n')
         root = Path(tempfile.mkdtemp())
         with mock.patch.dict(os.environ, {'FLEET_JOBS_ROOT': str(root)}):
-            lead = agents_.cli_args(self.job, 'lead-demo', 'codex', 'gpt-6-astra', 'ultra', [], lead=True)
-            worker = agents_.cli_args(self.job, 'build-ui', 'codex', 'gpt-6-astra', 'ultra', [])
+            lead = agents_.cli_args(self.job, 'lead-demo', 'codex', 'gpt-6.2-astra', 'ultra', [], lead=True)
+            worker = agents_.cli_args(self.job, 'build-ui', 'codex', 'gpt-6.2-astra', 'ultra', [])
         dirs = [lead[i + 1] for i, a in enumerate(lead) if a == '--add-dir']
         self.assertEqual(dirs, [str(self.job.absolute()), str(root.absolute() / 'worktrees'), str(repo / '.git')])
         self.assertIn('sandbox_workspace_write.network_access=true', lead)
@@ -1540,15 +1540,15 @@ class LeadChoice(unittest.TestCase):
     def test_the_lead_model_and_effort_reach_only_the_cli_their_model_names(self):
         from unittest import mock
         for env, codex, claude in (
-                ({}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'xhigh')),
-                ({'FLEET_LEAD_MODEL': 'claude-opus-5-5', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'xhigh')),
-                ({'FLEET_LEAD_MODEL': 'opus', 'FLEET_LEAD_EFFORT': 'max'}, ('gpt-6-astra', 'ultra'), ('opus', 'max')),
-                ({'FLEET_LEAD_EFFORT': 'high'}, ('gpt-6-astra', 'ultra'), ('claude-opus-5-5', 'high')),
-                ({'FLEET_LEAD_MODEL': 'gpt-6.1-sol', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.1-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh'))):
+                ({}, ('gpt-6.2-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh')),
+                ({'FLEET_LEAD_MODEL': 'claude-opus-5-5', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.2-sol', 'xhigh'), ('claude-opus-5-5', 'xhigh')),
+                ({'FLEET_LEAD_MODEL': 'opus', 'FLEET_LEAD_EFFORT': 'max'}, ('gpt-6.2-sol', 'xhigh'), ('opus', 'max')),
+                ({'FLEET_LEAD_EFFORT': 'high'}, ('gpt-6.2-sol', 'xhigh'), ('claude-opus-5-5', 'high')),
+                ({'FLEET_LEAD_MODEL': 'gpt-6.2-astra', 'FLEET_LEAD_EFFORT': 'xhigh'}, ('gpt-6.2-astra', 'xhigh'), ('claude-opus-5-5', 'xhigh'))):
             with self.subTest(env=env), mock.patch.dict(os.environ, {'FLEET_LEAD_MODEL': '', 'FLEET_LEAD_EFFORT': '', **env}):
                 self.assertEqual(agents_.lead_model('codex'), codex)
                 self.assertEqual(agents_.lead_model('claude'), claude)
-                self.assertEqual(agents_.lead_model('codex', 'gpt-6-luna', 'low'), ('gpt-6-luna', 'low'))
+                self.assertEqual(agents_.lead_model('codex', 'gpt-6.2-astra', 'low'), ('gpt-6.2-astra', 'low'))
 
     def test_a_restarted_lead_keeps_the_lead_model_of_its_cli_and_gets_a_brief_for_it(self):
         import contextlib, io
@@ -1557,7 +1557,7 @@ class LeadChoice(unittest.TestCase):
         brief = job / 'briefs/lead-demo.md'
         brief.parent.mkdir()
         brief.write_text(agents_.lead_brief(job.absolute(), 'lead-demo', '', False, None))
-        for kind, want in (('codex', '-m gpt-6-astra -c model_reasoning_effort="ultra"'), ('claude', '--model claude-opus-5-5 --effort xhigh')):
+        for kind, want in (('codex', '-m gpt-6.2-sol -c model_reasoning_effort="xhigh"'), ('claude', '--model claude-opus-5-5 --effort xhigh')):
             herdr, log = fake_herdr(job.parent)
             with self.subTest(kind=kind), mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': tempfile.mkdtemp(),
                                                                        'FLEET_LEAD_MODEL': '', 'FLEET_LEAD_EFFORT': ''}), \

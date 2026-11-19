@@ -8,7 +8,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_core import CoreCase, SCRIPTS, LEAD  # noqa: E402
 from stampede import job as job_, native as native_, owner as owner_, relay as relay_, cli as cli_, settings as settings_, agents as agents_, \
-    doctor as doctor_  # noqa: E402
+    doctor as doctor_, hcapi as hcapi_  # noqa: E402
 
 FLEET = SCRIPTS / 'fleet-job'
 
@@ -369,7 +369,7 @@ class Roles(Choices):
 
     def test_review_is_codex(self):
         argv, _ = self.start('review-api')
-        self.assertIn('-m gpt-6-astra -c model_reasoning_effort="medium"', argv)  # every worker at medium, the reviewer too
+        self.assertIn('-m gpt-6.2-astra -c model_reasoning_effort="medium"', argv)  # every worker at medium, the reviewer too
 
     def test_a_jobs_role_effort_and_one_workers_own(self):
         code, out, err = self.new('--core', '--set', 'roles.research.effort=high')  # per job: saved in its settings.json
@@ -387,9 +387,9 @@ class Roles(Choices):
         self.assertIn('--model claude-sonnet-5-5 --effort low', argv)
 
     def test_a_config_role_and_a_flag(self):
-        self.config('[roles.build]\nkind = "codex"\nmodel = "gpt-6.1-sol"\neffort = "medium"\n')
+        self.config('[roles.build]\nkind = "codex"\nmodel = "gpt-6.2-sol"\neffort = "medium"\n')
         argv, _ = self.start('build-api', '--effort', 'high')
-        self.assertIn('-m gpt-6.1-sol -c model_reasoning_effort="high"', argv, 'the flag wins')
+        self.assertIn('-m gpt-6.2-sol -c model_reasoning_effort="high"', argv, 'the flag wins')
 
     def test_a_kind_flag_drops_the_roles_model_of_another_cli(self):
         argv, _ = self.start('build-api', '--kind', 'codex')
@@ -434,7 +434,7 @@ class RoleValues(unittest.TestCase):
     """cli.role_values: each of kind, model and effort by itself, the flag, else the role's, else roles.default's; a
     table's model and effort only with that table's kind (its own, else roles.default.kind)."""
     DEFAULT = {'roles.default.kind': 'claude', 'roles.default.model': 'claude-opus-5-5', 'roles.default.effort': 'medium'}
-    ROLES = {'all': {'kind': 'codex', 'model': 'gpt-6.1-sol', 'effort': 'high'}, 'model': {'model': 'claude-sonnet-5-5'},
+    ROLES = {'all': {'kind': 'codex', 'model': 'gpt-6.2-sol', 'effort': 'high'}, 'model': {'model': 'claude-sonnet-5-5'},
              'effort': {'effort': 'low'}, 'kind': {'kind': 'codex'}, 'none': {}}
 
     def resolve(self, role, kind):
@@ -445,7 +445,7 @@ class RoleValues(unittest.TestCase):
     def test_the_table(self):
         D = ('claude-opus-5-5', 'medium')
         want = {  # role -> {--kind: (kind, model, effort)}; None is no --kind
-            'all': {None: ('codex', 'gpt-6.1-sol', 'high'), 'codex': ('codex', 'gpt-6.1-sol', 'high'), 'claude': ('claude', *D)},
+            'all': {None: ('codex', 'gpt-6.2-sol', 'high'), 'codex': ('codex', 'gpt-6.2-sol', 'high'), 'claude': ('claude', *D)},
             'model': {None: ('claude', 'claude-sonnet-5-5', 'medium'), 'claude': ('claude', 'claude-sonnet-5-5', 'medium'),
                       'codex': ('codex', None, None)},
             'effort': {None: ('claude', 'claude-opus-5-5', 'low'), 'claude': ('claude', 'claude-opus-5-5', 'low'),
@@ -459,33 +459,33 @@ class RoleValues(unittest.TestCase):
                     self.assertEqual(self.resolve(role, kind), expected)
 
     def test_a_flag_always_wins(self):
-        values = {**self.DEFAULT, 'roles.all.kind': 'codex', 'roles.all.model': 'gpt-6.1-sol'}
-        self.assertEqual(cli_.role_values(values, 'all', None, 'gpt-6-astra', 'max'), ('codex', 'gpt-6-astra', 'max'))
+        values = {**self.DEFAULT, 'roles.all.kind': 'codex', 'roles.all.model': 'gpt-6.2-sol'}
+        self.assertEqual(cli_.role_values(values, 'all', None, 'gpt-6.2-astra', 'max'), ('codex', 'gpt-6.2-astra', 'max'))
 
 
 class Lead(Choices):
     def test_lead_model_and_effort_flags_set_the_lead_cli_pair(self):
-        code, out, err = self.new('--core', '--lead-model', 'claude-fable-5-1', '--lead-effort', 'max')
+        code, out, err = self.new('--core', '--lead-model', 'claude-fable-5-2', '--lead-effort', 'max')
         self.assertEqual(code, 0, err)
-        self.assertIn('--model claude-fable-5-1 --effort max', ' '.join(self.lead_run()))
+        self.assertIn('--model claude-fable-5-2 --effort max', ' '.join(self.lead_run()))
         saved = json.loads((self.job / 'settings.json').read_text())
-        self.assertEqual((saved['values']['lead.claude.model'], saved['sources']['lead.claude.model']), ('claude-fable-5-1', 'flag'))
-        self.assertEqual(saved['values']['lead.codex.model'], 'gpt-6-astra', 'the other CLI keeps its own')
+        self.assertEqual((saved['values']['lead.claude.model'], saved['sources']['lead.claude.model']), ('claude-fable-5-2', 'flag'))
+        self.assertEqual(saved['values']['lead.codex.model'], 'gpt-6.2-sol', 'the other CLI keeps its own')
 
     def test_a_codex_lead_takes_them_too(self):
         code, out, err = self.new('--core', '--lead', 'codex', '--lead-effort', 'high')
         self.assertEqual(code, 0, err)
-        self.assertIn('-m gpt-6-astra -c model_reasoning_effort="high"', ' '.join(self.lead_run()))
+        self.assertIn('-m gpt-6.2-sol -c model_reasoning_effort="high"', ' '.join(self.lead_run()))
 
 
     def test_a_forbidden_lead_model_is_refused_before_anything_is_made(self):
         root = job_.jobs_root() / 'jobs'
-        cases = (('the default', '', {}, ()), ('--lead-model', '', {}, ('--lead-model', 'claude-fable-5-1')),
-                 ('the user file', '[lead.claude]\nmodel = "claude-fable-5-1"\n', {}, ()),
-                 ('the environment', '', {'FLEET_LEAD_MODEL': 'claude-fable-5-1'}, ()),
+        cases = (('the default', '', {}, ()), ('--lead-model', '', {}, ('--lead-model', 'claude-fable-5-2')),
+                 ('the user file', '[lead.claude]\nmodel = "claude-fable-5-2"\n', {}, ()),
+                 ('the environment', '', {'FLEET_LEAD_MODEL': 'claude-fable-5-2'}, ()),
                  ('a codex lead', '', {}, ('--lead', 'codex')))
         for how, user, env, flags in cases:
-            model = 'gpt-6-astra' if 'codex' in flags else 'claude-opus-5-5' if how == 'the default' else 'claude-fable-5-1'
+            model = 'gpt-6.2-sol' if 'codex' in flags else 'claude-opus-5-5' if how == 'the default' else 'claude-fable-5-2'
             for forbid in (f'[lead]\nforbid = ["{model}"]\n', None):
                 with self.subTest(how=how, forbid=forbid):
                     self.config(user + (forbid or ''))
@@ -495,18 +495,173 @@ class Lead(Choices):
                     self.assertIn(f'the lead may not run on {model} (lead.forbid)', err)
                     self.assertFalse(root.exists() and list(root.iterdir()))
                     self.assertEqual(self.calls('run'), [])
-        self.config('[lead]\nforbid = ["claude-fable-5-1"]\n')                  # another model leads, and a worker is not checked
+        self.config('[lead]\nforbid = ["claude-fable-5-2"]\n')                  # another model leads, and a worker is not checked
         code, out, err = self.new('--core')
         self.assertEqual(code, 0, err)
         self.assertNotIn('lead.forbid', json.loads((self.job / 'settings.json').read_text())['values'])
-        code, out, err = self.main('start', self.job, 'build-x', '--model', 'claude-fable-5-1', '--brief', self.brief(self.job, 'build-x'))
+        code, out, err = self.main('start', self.job, 'build-x', '--model', 'claude-fable-5-2', '--brief', self.brief(self.job, 'build-x'))
         self.assertEqual(code, 0, out + err)
+
+    def test_a_lead_model_off_lead_allow_is_refused_before_anything_is_made(self):
+        root = job_.jobs_root() / 'jobs'
+        allow = '[lead]\nallow = ["claude-opus-5-5", "gpt-6.2-sol"]\n'
+        for how, user, env, flags in (('--lead-model', '', {}, ('--lead-model', 'claude-sonnet-5-5')),
+                                      ('the environment', '', {'FLEET_LEAD_MODEL': 'claude-sonnet-5-5'}, ())):
+            with self.subTest(how=how):
+                self.config(allow + user)
+                code, out, err = self.new('--core', *flags, env=env)
+                self.assertEqual(code, 2, out + err)
+                self.assertIn('the lead may not run on claude-sonnet-5-5 (lead.allow', err)
+                self.assertFalse(root.exists() and list(root.iterdir()))
+                self.assertEqual(self.calls('run'), [])
+        self.config(allow)                                                       # a model on the list leads
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('lead.allow', json.loads((self.job / 'settings.json').read_text())['values'])
 
     def test_a_repo_never_sets_lead_forbid(self):
         (self.repo / '.stampede.toml').write_text('[lead]\nforbid = ["claude-opus-5-5"]\n')
         settings = settings_.load(repo=self.repo, env={})
         self.assertEqual(settings.get('lead.forbid'), [])
         self.assertIn('lead.forbid is taken only from your own', ' '.join(settings.problems))
+
+    def test_lead_allow_checks_the_file_layers_set_and_other_cli_default(self):
+        allow = '[lead]\nallow = ["claude-opus-5-5"]\n'
+        sonnet = '[lead.claude]\nmodel = "claude-sonnet-5-5"\n'
+        root = job_.jobs_root() / 'jobs'
+        for user, repo, flags, model in (
+                (sonnet, '', (), 'claude-sonnet-5-5'),
+                ('[lead.codex]\nmodel = "gpt-6.2-astra"\n', '', ('--lead', 'codex'), 'gpt-6.2-astra'),
+                ('', sonnet, (), 'claude-sonnet-5-5'),
+                ('', '', ('--set', 'lead.claude.model=claude-sonnet-5-5'), 'claude-sonnet-5-5'),
+                ('', '', ('--lead', 'codex'), 'gpt-6.2-sol')):
+            with self.subTest(user=user, repo=repo, flags=flags):
+                self.config(allow + user)
+                (self.repo / '.stampede.toml').write_text(repo)
+                code, out, err = self.new('--core', *flags)
+                self.assertEqual(code, 2, out + err)
+                self.assertIn(f'the lead may not run on {model} (lead.allow: claude-opus-5-5)', err)
+                self.assertFalse(root.exists() and list(root.iterdir()))
+                self.assertEqual(self.calls('run'), [])
+
+    def test_lead_allow_from_the_environment_and_forbid_wins(self):
+        env = {'FLEET_LEAD_ALLOW': ' claude-fable-5-2 , gpt-6.2-astra, '}
+        code, _, err = self.new('--core', env=env)
+        self.assertEqual(code, 2, err)
+        self.assertIn('(lead.allow: claude-fable-5-2, gpt-6.2-astra)', err)
+        self.config('[lead]\nforbid = ["claude-fable-5-2"]\n')
+        flags = ('--core', '--lead-model', 'claude-fable-5-2')
+        code, _, err = self.new(*flags, env=env)
+        self.assertEqual(code, 2, err)
+        self.assertIn('the lead may not run on claude-fable-5-2 (lead.forbid)', err)
+        self.assertEqual(self.calls('run'), [])
+        self.config('')
+        code, _, err = self.new(*flags, env=env)
+        self.assertEqual(code, 0, err)
+        self.assertIn('--model claude-fable-5-2 --effort xhigh', ' '.join(self.lead_run()))
+
+    def test_restarted_leads_check_live_allow_and_forbid_on_tui_and_core(self):
+        job, _ = self.core_job()
+        brief = job / 'briefs/lead-demo.md'
+        for backend in ('tui', 'core'):
+            (job / 'backend').write_text(backend + '\n')
+            for rule, config in (('lead.allow: claude-opus-5-5', 'allow = ["claude-opus-5-5"]\n'),
+                                 ('lead.forbid', 'forbid = ["claude-fable-5-2"]\n')):
+                with self.subTest(backend=backend, rule=rule):
+                    self.config('[lead]\n' + config)
+                    pane = ('--pane', 'w1:p1') if backend == 'tui' else ()
+                    code, out, err = self.main('start', job, 'lead-demo', '--kind', 'claude', '--model', 'claude-fable-5-2',
+                                               '--brief', brief, *pane)
+                    self.assertEqual(code, 2, out + err)
+                    self.assertIn(f'the lead may not run on claude-fable-5-2 ({rule})', err)
+                    self.assertEqual(self.calls('run'), [])
+
+
+class WorkerPolicy(Choices):
+    def test_start_checks_worker_role_defaults_and_flags_on_every_backend(self):
+        job, _ = self.core_job()
+        self.config('[workers]\nforbid = ["claude-opus-5-5"]\nmax_effort = "medium"\n')
+        brief = self.brief(job, 'build-x')
+        for backend, pane in (('tui', ('--pane', 'w1:p1')), ('core', ()), ('core', ('--pane', 'w1:p1')), ('native', ())):
+            (job / 'backend').write_text(backend + '\n')
+            for flags, message in (
+                    ((), 'may not run on claude-opus-5-5 (workers.forbid)'),
+                    (('--model', 'claude-sonnet-5-5', '--effort', 'high'), 'may not run at high effort (workers.max_effort: medium)'),
+                    (('--model', 'claude-sonnet-5-5', '--effort', 'custom'), 'may not run at custom effort (workers.max_effort: medium)')):
+                with self.subTest(backend=backend, pane=pane, flags=flags):
+                    code, out, err = self.main('start', job, 'build-x', '--brief', brief, *pane, *flags)
+                    self.assertEqual(code, 2, out + err)
+                    self.assertIn('build-x ' + message, err)
+                    self.assertEqual(self.calls('run'), [])
+
+    def test_native_workers_at_the_cap_or_without_a_cap_can_start(self):
+        code, _, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        for name, config, flags in (('build-at-cap', '[workers]\nmax_effort = "medium"\n', ()),
+                                    ('build-no-cap', '', ('--effort', 'ultra'))):
+            with self.subTest(name=name):
+                self.config(config)
+                code, out, err = self.main('start', self.job, name, '--brief', self.brief(self.job, name), *flags)
+                self.assertEqual(code, 0, out + err)
+                self.assertIn(f'STARTED {name}', out)
+        self.config('[workers]\nforbid = ["claude-opus-5-5"]\nmax_effort = "none"\n')
+        code, out, err = self.main('start', self.job, 'build-program', '--', 'sleep', '60')
+        self.assertEqual(code, 0, out + err)
+        self.assertIn('STARTED build-program', out)
+
+    def test_switching_cli_requires_resolved_values_when_a_worker_limit_is_set(self):
+        code, _, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        brief = self.brief(self.job, 'build-x')
+        args = ('start', self.job, 'build-x', '--brief', brief, '--kind', 'codex')
+        self.config('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        code, out, err = self.main(*args)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn('build-x has no model to check against workers.forbid: name one with --model', err)
+        self.config('[workers]\nmax_effort = "medium"\n')
+        code, out, err = self.main(*args)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn('build-x has no effort to check against workers.max_effort: name one with --effort', err)
+        self.config('[workers]\nforbid = ["gpt-6.2-astra"]\n')
+        code, out, err = self.main(*args, '--model', 'gpt-6.2-sol')
+        self.assertEqual(code, 0, out + err)
+        self.assertIn('STARTED build-x', out)
+
+    def test_queued_native_helper_uses_the_policy_in_force_when_it_launches(self):
+        code, out, err = self.new('--core', '--max-helpers', '1')
+        self.assertEqual(code, 0, out + err)
+        for name, status in (('build-first', 'STARTED'), ('build-waiting', 'QUEUED')):
+            code, out, err = self.main('start', self.job, name, '--brief', self.brief(self.job, name))
+            self.assertEqual(code, 0, out + err)
+            self.assertIn(f'{status} {name}', out)
+        self.config('[workers]\nforbid = ["claude-opus-5-5"]\n')
+        self.terminal('t2', state='finished')
+        before = self.calls('run')
+        code, out, err = self.main('next', self.job)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn('FAILED build-waiting (build-waiting may not run on claude-opus-5-5 (workers.forbid))', out)
+        self.assertEqual(self.calls('run'), before)
+        self.assertEqual(native_.queued(self.job), [])
+
+    def test_core_launch_uses_the_callers_xdg_config_home_when_set(self):
+        job, _ = self.core_job()
+        self.assertFalse(any(arg.startswith('XDG_CONFIG_HOME=') for arg in hcapi_.launch_env(job)))
+        config_home = self.root / 'custom config'
+        with mock.patch.dict(os.environ, {'XDG_CONFIG_HOME': str(config_home)}):
+            self.assertIn(f'XDG_CONFIG_HOME={config_home}', hcapi_.launch_env(job))
+        prefix = hcapi_.launch_env(job)  # a core with its own XDG_CONFIG_HOME: the terminal follows the caller, who has none
+        seen = subprocess.run(prefix + ['/usr/bin/printenv', 'XDG_CONFIG_HOME'], capture_output=True, text=True,
+                              env={**os.environ, 'XDG_CONFIG_HOME': str(self.root / 'core config')})
+        self.assertEqual((seen.returncode, seen.stdout), (1, ''))
+
+    def test_a_bad_cap_is_a_config_problem(self):
+        self.config('[workers]\nmax_effort = "custom"\n')
+        code, out, _ = self.main('config', 'show')
+        self.assertEqual(code, 1)
+        self.assertIn('workers.max_effort must be one of none, minimal, low, medium, high, xhigh, max, ultra, ""', out)
+        code, _, err = self.new('--core')
+        self.assertEqual(code, 2, err)
+        self.assertIn('workers.max_effort must be one of', err)
 
 
 class Layout(Choices):
@@ -542,13 +697,13 @@ class Review(Choices):
     def test_end_is_the_default_with_the_reviewer_of_roles_review(self):
         for brief in self.briefs():
             self.assertIn('Review: one review pass at the end of what ships or reaches the owner, by another model than the '
-                          "builder's: start review-<scope>, which gets codex gpt-6-astra medium.", brief.read_text())
+                          "builder's: start review-<scope>, which gets codex gpt-6.2-astra medium.", brief.read_text())
 
     def test_each_and_none(self):
-        self.config('[review]\nstep = "each"\n[roles.review]\nkind = "claude"\nmodel = "claude-fable-5-1"\neffort = "max"\n')
+        self.config('[review]\nstep = "each"\n[roles.review]\nkind = "claude"\nmodel = "claude-fable-5-2"\neffort = "max"\n')
         for brief in self.briefs():
             self.assertIn('one review pass for each pull request or step', brief.read_text())
-            self.assertIn('claude claude-fable-5-1 max', brief.read_text())
+            self.assertIn('claude claude-fable-5-2 max', brief.read_text())
 
     def test_none_from_set(self):
         settings_.SETS[:] = ['review.step=none']
@@ -559,7 +714,7 @@ class Review(Choices):
 class Shown(Choices):
     def test_config_show_lists_every_new_key(self):
         result = subprocess.run([str(FLEET), 'config', 'show'], capture_output=True, text=True, cwd=self.root)
-        for line in ('backend = "tui"  (default)', 'roles.build.kind = "claude"  (default)', 'roles.review.model = "gpt-6-astra"  (default)',
+        for line in ('backend = "tui"  (default)', 'roles.build.kind = "claude"  (default)', 'roles.review.model = "gpt-6.2-astra"  (default)',
                      'helpers.layout = "grid"  (default)', 'review.step = "end"  (default)'):
             self.assertIn(line, result.stdout)
 

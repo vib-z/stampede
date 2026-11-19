@@ -25,7 +25,7 @@ class HerdrTrust(unittest.TestCase):
         self.claude.chmod(0o600)
         self.codex = self.home / '.codex/config.toml'
         self.codex.parent.mkdir()
-        self.codex.write_text('model = "gpt-6.1-sol"\n[mcp_servers.x]\nurl = "u"')   # no final newline
+        self.codex.write_text('model = "gpt-6.2-sol"\n[mcp_servers.x]\nurl = "u"')   # no final newline
 
     def tearDown(self):
         self.tmp.cleanup()
