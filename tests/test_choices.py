@@ -502,6 +502,23 @@ class Lead(Choices):
         code, out, err = self.main('start', self.job, 'build-x', '--model', 'claude-fable-5-1', '--brief', self.brief(self.job, 'build-x'))
         self.assertEqual(code, 0, out + err)
 
+    def test_a_lead_model_off_lead_allow_is_refused_before_anything_is_made(self):
+        root = job_.jobs_root() / 'jobs'
+        allow = '[lead]\nallow = ["claude-opus-5-5", "gpt-6.2-sol"]\n'
+        for how, user, env, flags in (('--lead-model', '', {}, ('--lead-model', 'claude-sonnet-5-5')),
+                                      ('the environment', '', {'FLEET_LEAD_MODEL': 'claude-sonnet-5-5'}, ())):
+            with self.subTest(how=how):
+                self.config(allow + user)
+                code, out, err = self.new('--core', *flags, env=env)
+                self.assertEqual(code, 2, out + err)
+                self.assertIn('the lead may not run on claude-sonnet-5-5 (lead.allow', err)
+                self.assertFalse(root.exists() and list(root.iterdir()))
+                self.assertEqual(self.calls('run'), [])
+        self.config(allow)                                                       # a model on the list leads
+        code, out, err = self.new('--core')
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('lead.allow', json.loads((self.job / 'settings.json').read_text())['values'])
+
     def test_a_repo_never_sets_lead_forbid(self):
         (self.repo / '.stampede.toml').write_text('[lead]\nforbid = ["claude-opus-5-5"]\n')
         settings = settings_.load(repo=self.repo, env={})
