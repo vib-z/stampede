@@ -31,6 +31,7 @@ from pathlib import Path
 HERDR = os.environ.get('HERDR', 'herdr')
 COLS = ('name', 'kind', 'session', 'brief', 'args')   # agents.tsv, tab separated; args is shell-quoted
 HERE = Path(__file__).resolve().parent  # the helpers beside this script
+FLEET = HERE.parents[1] / 'herdr-fleet/scripts/fleet-job'
 RESUME = {'claude': '--resume', 'hermes': '--resume', 'codex': 'resume', 'kimi': '-S'}   # agents-and-models.md
 TOL = 2   # cells of slack between neighbouring pane rects (borders)
 
@@ -93,18 +94,12 @@ def record(argv):
     print(f'recorded {name} ({kind}) in {job}/agents.tsv')
 
 
-def model_effort(kind, args):
-    a = shlex.split(args)
-    model = effort = ''
-    for i, x in enumerate(a):
-        nxt = a[i + 1] if i + 1 < len(a) else ''
-        if x in ('--model', '-m'):
-            model = nxt
-        elif x in ('--effort', '--reasoning'):  # Hermes calls its effort --reasoning
-            effort = nxt
-        elif x in ('-c', '--config') and nxt.startswith('model_reasoning_effort='):
-            effort = nxt.split('=', 1)[1].strip('"\'')
-    return model or '(CLI default)', effort or '(CLI default)'
+def model_effort(args, default=None):
+    if str(FLEET.parent) not in sys.path:
+        sys.path.insert(0, str(FLEET.parent))
+    from stampede.agents import model_effort as recorded
+    model, effort = recorded(shlex.split(args))
+    return model or default, effort or default
 
 
 def split_from(pane, made):
@@ -221,11 +216,27 @@ def reopen_sh(ws, owner, tabs, when, job):
         '  [ -d "$d" ] || { echo "refused: cwd $d is gone (a removed worktree? git worktree add it back first)" >&2; gone=1; }',
         'done',
         '[ "$gone" = 0 ] || exit 3',
+        'OPEN_TABS=""; KEEP=(); CHECK=()',
+        'if [ -n "$INTO" ]; then OPEN_TABS=$("$H" tab list --workspace "$INTO"); fi',
+        f'F={q(FLEET)}; [ -x "$F" ] || F=stampede',
+    ]
+    labels = set()
+    for i, t in enumerate(tabs):
+        label = t.get('label') or 'main'
+        rows = [p['agent_row'] for p in t['panes'] if p['agent_row']]
+        payload = json.dumps([(a['name'], a['kind'], *model_effort(a['args'])) for a in rows])
+        kept = 'true' if label in labels else (f'jq -e --arg l {q(label)} '
+                                               "'.result.tabs[] | select(.label == $l)' <<<\"$OPEN_TABS\" >/dev/null")
+        labels.add(label)
+        out += [
+            f'if [ -n "$INTO" ] && {kept}; then',
+            f'  KEEP[{i}]=1',
+            f'else KEEP[{i}]=0; CHECK+=({q(payload)}); fi',
+        ]
+    out += [
+        '"$F" _reopen-check "$JOB" ${CHECK[@]+"${CHECK[@]}"}',
         '[ -n "$INTO" ] && follow',
-        'tab() {   # tab <label> <cwd>: R = the new tab; returns 1 when --into already has a tab with that label',
-        '  if [ -n "$INTO" ] && "$H" tab list --workspace "$WS" | jq -e --arg l "$1" \'.result.tabs[] | select(.label == $l)\' >/dev/null; then',
-        '    echo "kept tab $1: already open in $WS, so its agents are not started (if they do not run there, close $WS and run reopen.sh without --into)"; return 1',
-        '  fi',
+        'tab() {   # tab <label> <cwd>: R = the new tab',
         '  if [ -z "$WS" ]; then',
         '    R=$("$H" workspace create --cwd "$2" --label "$LABEL" --no-focus)',
         '    WS=$(jq -r .result.workspace.workspace_id <<<"$R")',
@@ -252,11 +263,15 @@ def reopen_sh(ws, owner, tabs, when, job):
         '}',
     ]
     k = 0
-    for t in tabs:
+    for i, t in enumerate(tabs):
         first = t['panes'][0]
         k += 1
         first['var'], made = f'P{k}', [first]
-        out.append(f'if tab {q(t.get("label") or "main")} {q(first["cwd"])}; then')
+        label = q(t.get('label') or 'main')
+        out += [f'if [ "${{KEEP[{i}]}}" = 1 ]; then',
+                f'  printf "kept tab %s: already open in %s, so its agents are not started (if they do not run there, '
+                f'close %s and run reopen.sh without --into)\\n" {label} "$WS" "$WS"',
+                f'elif tab {label} {q(first["cwd"])}; then']
         out.append(f'  P{k}=$(jq -r .result.root_pane.pane_id <<<"$R")')
         for p in t['panes'][1:]:
             src, way = split_from(p, made)
@@ -289,7 +304,7 @@ def reopen_md(ws, owner, tabs, when, job):
     for t in tabs:
         for p in t['panes']:
             a = p['agent_row'] or {}
-            model, effort = model_effort(a['kind'], a['args']) if a else ('', '')
+            model, effort = model_effort(a['args'], '(CLI default)') if a else ('', '')
             out.append(f'| {t.get("label") or t["tab_id"]} | {p["pane_id"]} | {p.get("label") or "-"} | `{p["cwd"]}` | '
                        f'{a.get("kind") or "shell"} | {model} | {effort} | {a.get("session") or "-"} | {a.get("brief") or "-"} |')
             if a:
@@ -316,7 +331,7 @@ def snapshot_core(key, job):
     entries = json.loads((job / 'core.json').read_text()) if (job / 'core.json').is_file() else {}
     core = json.loads((job / 'endpoint').read_text()) if (job / 'endpoint').is_file() else {}
     on = f'HC_SESSION={core.get("session") or "(default)"}' + (f', HC_SOCKET={core["socket"]}' if core.get('socket') else '')
-    fleet = Path(__file__).resolve().parents[2] / 'herdr-fleet/scripts/fleet-job'
+    fleet = FLEET
     when = datetime.now().strftime('%Y-%m-%d %H:%M')
     sh = job / 'reopen.sh'
     sh.write_text('\n'.join([
@@ -343,7 +358,7 @@ def snapshot_core(key, job):
            '| agent | role | CLI | model | effort | session | terminal | state | brief |', '|---|---|---|---|---|---|---|---|---|']
     for name, entry in entries.items():
         a = rows.get(name, {})
-        model, effort = model_effort(a['kind'], a['args']) if a.get('args') else ('', '')
+        model, effort = model_effort(a['args'], '(CLI default)') if a.get('args') else ('', '')
         out.append(f'| {name} | {entry.get("role", "-")} | {a.get("kind") or "-"} | {model or "-"} | {effort or "-"} | '
                    f'{a.get("session") or "-"} | {entry.get("address") or ("pane " + entry["pane"] if entry.get("pane") else "-")} | '
                    f'{entry.get("state", "-")} | {a.get("brief") or "-"} |')

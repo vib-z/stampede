@@ -423,6 +423,8 @@ class Outcomes(unittest.TestCase):
                                  sorted([Job.LEAD, 'build-claude', 'build-codex', 'watch-ci']))
                 self.assertTrue(all(row.startswith('LIVE ') for row in out.strip().splitlines()), out)
                 self.assertEqual(job.after_end, runs, 'nothing started')
+                self.refused(job, 'reopen refused', 'REFUSED build-claude:', 'workers.forbid')
+                self.assertEqual(job.after_refusal, job.after_end, 'policy refusal started nothing')
                 out = self.ok(job, 'reopen ended')  # the helpers ended: no work handed out by the reopen itself
                 self.assertIn(f'LIVE {Job.LEAD} (', out)
                 self.assertRegex(out, r'(?m)^STARTED build-claude \(t\d+\) under ' + re.escape(Job.LEAD) + '$')

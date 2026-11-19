@@ -193,7 +193,7 @@ def point_owed(job, lead, limit=None):
 CORE_KEEPS = 86400  # seconds Herdr Core keeps a finished terminal's record (RETAIN_MS)
 
 
-def session_proof(job, agent, session):
+def session_proof(job, agent, session, remember=True):
     """Whether this Claude session of the agent ever ran. A recorded 'ran' or 'never' stands; an unknown launch is placed
     by a terminal of it in hc ls --all, or Claude's session file ('ran'), or, while Core still keeps a finished record
     (24 h), by finding neither ('never'). Anything else stays 'unknown': the caller refuses rather than guess."""
@@ -201,7 +201,8 @@ def session_proof(job, agent, session):
     if launch and launch.get('proof') == 'ran':
         return 'ran'
     if agents_.claude_session_file(session):  # every source of evidence before never
-        handed_.prove(job, agent, session, 'ran')
+        if remember:
+            handed_.prove(job, agent, session, 'ran')
         return 'ran'
     try:
         found = hcapi_.hc('ls', '--all', '--label', 'stampede.job=' + job_.core_key(job), '--label', 'stampede.agent=' + agent,
@@ -216,7 +217,8 @@ def session_proof(job, agent, session):
         proof = 'never'
     else:
         return 'unknown'
-    handed_.prove(job, agent, session, proof)
+    if remember:
+        handed_.prove(job, agent, session, proof)
     return proof
 
 
@@ -382,6 +384,28 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
     gone = [f'{folder} ({", ".join(agents)})' for folder, agents in folders.items() if not Path(folder).is_dir()]
     if gone:
         raise ValueError('cwd gone: ' + '; '.join(gone) + ': git worktree add each back first; nothing was started')
+    planned, handed = {}, set()
+
+    def candidates():
+        rows, entries = job_.agent_rows(job), job_.core_entries(job)
+        for agent in selected:
+            if entries.get(agent, {}).get('backend') == 'tui':  # reopen only reports these panes
+                handed.add(agent)
+                continue
+            if handed_.live_terminal(job, agent, adopt=False):
+                planned[agent] = None
+                continue
+            row = rows.get(agent, {})
+            kind, session = row.get('kind', 'claude'), row.get('session', '')
+            proof = session_proof(job, agent, session, remember=False) if not fresh and kind == 'claude' and session else 'never'
+            planned[agent] = row, proof
+            if kind not in handed_.HANDED and proof != 'unknown':
+                yield agent, kind, *agents_.model_effort(shlex.split(row.get('args', ''))), agent == lead
+
+    refusal = agents_.reopen_refusal(job, candidates())
+    if refusal:
+        out_.refuse(refusal)
+        return 2
     if not finished:
         job_.mark_job(key, job)
         if job_.job_owner(job):
@@ -395,9 +419,19 @@ def reopen(job, lead_only=False, prompt=False, fresh=False):
         with job_.launching(job, agent):  # the lock first, then its entry and row: a start that ran meanwhile is seen
             if job_.core_entries(job).get(agent, {}).get('backend') == 'tui':  # handed: never started on Core
                 outcomes[agent] = handed_.reopen_handed(job, agent)
+            elif agent in handed:
+                print(f'UNKNOWN {agent}: its backend changed during reopen; run reopen again')
+                outcomes[agent] = 'unknown'
+            elif agent in planned and planned[agent] is None:
+                if handed_.live_terminal(job, agent):
+                    outcomes[agent] = 'live'
+                else:
+                    print(f'UNKNOWN {agent}: it stopped during reopen; run reopen again')
+                    outcomes[agent] = 'unknown'
             else:
-                outcomes[agent] = reopen_agent(job, agent, job_.agent_rows(job).get(agent, {}), prompt, agent == lead,
-                                               pending if agent == lead and not finished else None, fresh)
+                row, proof = planned[agent] if agent in planned else (job_.agent_rows(job).get(agent, {}), None)
+                outcomes[agent] = reopen_agent(job, agent, row, prompt, agent == lead,
+                                               pending if agent == lead and not finished else None, fresh, proof)
     job_.snapshot(job)
     if not [agent for agent, outcome in outcomes.items() if outcome != 'live']:
         print(f'LIVE {key}: no agent to restart')
@@ -429,7 +463,7 @@ def reopen_run(job, agent, role, program, cwd, plain=False, session=None, brief=
     return 'started'
 
 
-def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
+def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False, proof=None):
     """Restart one agent unless a live terminal of the job runs it: 'live', 'started', 'failed' or 'unknown'. The caller
     holds its launch lock. pending: written before the lead starts, so even an interrupted reopen leaves its
     acknowledgement owed."""
@@ -450,7 +484,10 @@ def reopen_agent(job, agent, row, prompt, lead, pending=None, fresh=False):
             pending.write_text(datetime.now().strftime('%Y-%m-%d %H:%M') + '\n')
         return reopen_run(job, agent, 'lead' if lead else 'worker', program, cwd, session=session if kind == 'claude' else None,
                           brief=row.get('brief'))
-    proof = session_proof(job, agent, session) if kind == 'claude' and session else 'never'
+    if proof is None:
+        proof = session_proof(job, agent, session) if kind == 'claude' and session else 'never'
+    elif kind == 'claude' and session and proof != 'unknown':
+        handed_.prove(job, agent, session, proof)
     if kind == 'claude' and proof == 'unknown':
         print(f'UNKNOWN {agent}: cannot tell whether its session {session} ever ran (no terminal of it in hc ls --all '
               f'--label stampede.job={job_.core_key(job)} --label stampede.agent={agent}, no Claude session file): check '

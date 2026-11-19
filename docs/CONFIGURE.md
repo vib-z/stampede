@@ -30,6 +30,8 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 
 Model lists match exact model names. A model in `lead.forbid` is refused even when it appears in `lead.allow`. Set these lists to apply your own choices, such as Claude Opus 5.5, Claude Fable 5.2, GPT-6.2 Sol and GPT-6.2 Astra for leads. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The rest follow your live config at every command.
 
+Before a plain or fresh reopen starts anything, Stampede checks the recorded model and effort of each agent it would relaunch against current policy. If either lead list is set, the lead needs a recorded model. Live agents and raw programs are exempt. Older TUI `reopen.sh` files still work as generated. Refresh them with `herdr-reopen-snapshot` to enable this check.
+
 **Problems.** `stampede config show` names each problem and exits 1. Stampede skips unknown keys, values of the wrong type or outside a key's choices, and files that do not parse. `stampede new` refuses to start a job while there is a config problem (exit 2).
 
 ## Effort: the default, and how to change it
@@ -62,7 +64,7 @@ On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in.
 | `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | a Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
 | `lead.kind` | `claude` | `FLEET_LEAD_KIND` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
 | `lead.forbid` | `[]` | `FLEET_LEAD_FORBID` (comma-separated) | exact models that may not lead a job. `stampede new` refuses one before it makes anything. Restarting a TUI or Core relay lead with `stampede start` checks the list too (user only) |
-| `lead.allow` | `[]` | `FLEET_LEAD_ALLOW` (comma-separated) | when set, the only exact models that may lead. The model lists are checked at `new` and `start`, after model choices are applied (user only). A reopen replays each agent's recorded model and effort |
+| `lead.allow` | `[]` | `FLEET_LEAD_ALLOW` (comma-separated) | when set, the only exact models that may lead. checked at `new`, on a lead restart with `start`, and before a reopen relaunches the lead (user only) |
 | `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
 | `lead.codex.model`, `lead.codex.effort` | GPT-6.2 Sol (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
 | `workers.forbid` | `[]` | | exact models workers may not use. Checked by `stampede start` on every backend after role defaults and flags. With a non-empty list, give `--model` if no model resolves (user only) |

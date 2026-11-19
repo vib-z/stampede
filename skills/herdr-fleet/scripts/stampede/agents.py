@@ -112,6 +112,47 @@ def check_worker(settings, agent, kind, model, effort):
         raise ValueError(f'{agent} may not run at {effort} effort (workers.max_effort: {cap})')
 
 
+def model_effort(args):
+    """Model and effort explicitly passed in a recorded start's argv."""
+    model = effort = None
+    rest = iter(args)
+    for arg in rest:
+        if arg == '--':
+            break
+        flag, eq, value = arg.partition('=')
+        if flag not in ('--model', '-m', '--effort', '--reasoning', '-c', '--config'):
+            continue
+        if not eq:
+            value = next(rest, '')
+        if flag in ('--model', '-m'):
+            model = value
+        elif flag in ('--effort', '--reasoning'):
+            effort = value
+        elif flag in ('-c', '--config') and value.startswith('model_reasoning_effort='):
+            effort = value.split('=', 1)[1].strip('"\'')
+    return model or None, effort or None
+
+
+def reopen_refusal(job, candidates):
+    """The first refusal for the agents a reopen would start, using the owner's current settings."""
+    settings = settings_.current(job)
+    if not any(settings.get(key) for key in ('lead.forbid', 'lead.allow', 'workers.forbid', 'workers.max_effort')):
+        return
+    for name, kind, model, effort, lead in candidates:
+        if kind == 'program':
+            continue
+        try:
+            if lead:
+                check_lead_model(settings, model)
+                if not model and settings.get('lead.forbid'):
+                    raise ValueError('the lead has no model to check against lead.forbid: name one with --model')
+            else:
+                check_worker(settings, name, kind, model, effort)
+        except ValueError as error:
+            command = shlex.join(['stampede', 'start', str(job), name])
+            return f'REFUSED {name}: {base_.line(error)}; fix your config or restart it with {command} --model <m>'
+
+
 def lead_brief_for(job, lead, kind, brief):
     """A lead restarted on the other CLI (a usage-limit fallback) gets its generated brief rewritten for that CLI, so a
     Codex lead never reads that a yes typed in its pane counts. Decided by the brief's own text, not the roster, so a

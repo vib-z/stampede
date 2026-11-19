@@ -20,13 +20,12 @@
 - **Posts to a bot:** in a job a bot started, `stampede post` also sends that bot a `post` event; tested with the unit tests and the cross-client suite, not yet with a live bot.
 - **The evals:** the fixture cases run in CI on macOS and Linux; the live runners and the before and after runs: [tests/evals/README.md](../tests/evals/README.md).
 - **The command:** layered config with `stampede config show` and `stampede config set backend`, `--help` for every command, `stampede doctor` and `stampede check`, and `--json` on every command an agent runs (tested on all three backends, on Python 3.9 too, and on a real scratch core).
-- **Model policy:** `lead.allow` and `lead.forbid` check new leads and TUI or Core relay lead restarts. `stampede start` applies optional worker model and effort limits across backends. Queued native workers use the policy in force at launch. Local tests use fake Herdr and Core. Live checks remain open.
+- **Model policy:** `lead.allow` and `lead.forbid` check new leads and TUI or Core relay lead restarts. `stampede start` applies optional worker model and effort limits across backends. Queued native workers use the policy in force at launch. On the TUI and both Core paths, reopen checks agents it would relaunch before any restart. Local tests use fake Herdr and Core. Live checks remain open.
 - **Models:** Codex leads default to GPT-6.2 Sol. The review, design and QA roles default to GPT-6.2 Astra.
 - **Effort:** by default the lead at extra high (`xhigh` on either CLI) and every worker at `medium`, on any model, changed per job, per role or per worker. Tested with the unit suite (the settings, and the start of each role); not yet checked in a live job.
 - **The site** is live at https://vib-z.github.io/stampede/ and mirrored on Vercel at https://stampede-xi.vercel.app/.
 
 **Next:**
-- Planned: check the lead and worker lists when a job reopens on every backend.
 - On Herdr Core: Cursor, Hermes and Kimi as first-class kinds in a Core job (today they run as programs), then removing the `--core --relay` path.
 - On Linux: the systemd user timers on a real user manager, x86_64 live (CI covers it with fakes and a Core smoke run), a signed-in Claude and Codex, Moshi paired, and a bot over SSH.
 - A Herdr server restart: `reopen.sh` into the workspace Herdr restores, starting the agents in its plain shells, instead of asking to close it first.

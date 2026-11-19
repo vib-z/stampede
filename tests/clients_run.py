@@ -427,6 +427,19 @@ class Job:
             for agent in ('build-claude', 'build-codex', 'watch-ci'):
                 self.terminal(self.address(agent), state='finished', reason='killed', status=None, signal=1)
             self.after_end = len(self.calls('run'))
+            path = self.root / 'policy/stampede/config.toml'
+            path.parent.mkdir(parents=True)
+            path.write_text('[workers]\nforbid = ["claude-opus-5-5"]\n')
+            xdg = self.base.get('XDG_CONFIG_HOME')
+            self.base['XDG_CONFIG_HOME'] = str(path.parent.parent)
+            try:
+                self.front('reopen refused', 'bash', self.job / 'reopen.sh')
+            finally:
+                if xdg is None:
+                    self.base.pop('XDG_CONFIG_HOME')
+                else:
+                    self.base['XDG_CONFIG_HOME'] = xdg
+            self.after_refusal = len(self.calls('run'))
             self.front('reopen ended', 'bash', self.job / 'reopen.sh')
 
     def no_poll(self):

@@ -476,10 +476,11 @@ def enqueue(queue, request):
     return path
 
 
-def drain(job, terminals):
+def drain(job, terminals, checked=None):
     """Start queued helpers, oldest first, while fewer than the cap run in the lead's tree. The caller holds the queue
     lock and has listed the tree once. A request goes only once its start's outcome is known: a live terminal of that
     name is adopted, not started again, and when Core stops answering the drain stops with the request kept.
+    During reopen, only the launches in its checked plan may start.
     (started, failed, running, cap)."""
     key, limit = job_.core_key(job), cap(job)
     count, started, failed = sum(running(t) for _, t, _ in job_tree(key, terminals)), 0, 0
@@ -500,7 +501,9 @@ def drain(job, terminals):
             os.replace(path, path.parent / 'dropped' / path.name)
             out_.emit('DROPPED', f'DROPPED {name}: its parent {request["parent"]} is gone', agent=name, parent=request['parent'])
             continue
-        shown = launch(job, key, request, parent, terminals)
+        if checked is not None and name not in checked:
+            continue  # it was live or unreachable at reopen preflight; a later next can check it
+        shown = launch(job, key, request, parent, terminals, checked=checked is not None)
         if shown == 'unknown':
             failed += 1
             break
@@ -524,7 +527,7 @@ def adopt(job, request, terminal, argv):
               agent=name, address=terminal['address'], parent=request['parent'])
 
 
-def launch(job, key, request, parent, terminals, existing=None):
+def launch(job, key, request, parent, terminals, existing=None, checked=False):
     """One queued helper as a Core child of its parent's terminal now, or existing (a live terminal of its name, an
     earlier start whose answer was lost) adopted: the record Core would list for it, None when it failed, or 'unknown'
     when Core stopped answering before its outcome was known."""
@@ -538,7 +541,7 @@ def launch(job, key, request, parent, terminals, existing=None):
     argv = request['program']
     try:
         if kind != 'program':
-            if not existing and 'place' not in request:  # reopen requests carry their recorded place
+            if not existing and not checked:
                 agents_.check_worker(settings_.current(job), name, kind, request['model'], request['effort'])
             prompt = first_prompt(name, labels(parent).get('stampede.agent'), parent['address'], request['brief'], report)
             argv = ([agents_.cli(kind)] + agent_args(job, name, kind, request['model'], request['effort'], yolo=request['yolo'])
@@ -768,6 +771,52 @@ def parents_first(nodes):
     return order
 
 
+def reopen_skip(node, resume, finished, fresh, rerun):
+    """Why a missing, reachable node would not be relaunched."""
+    if node.get('role') == 'plain':
+        return 'plain'
+    kind = node['kind']
+    if kind == 'program':
+        if node.get('state') == 'finished' and node.get('exit_code') == 0:
+            return 'done'
+        return None if rerun else 'program'
+    if kind == 'codex' and not fresh and (node['role'] != 'lead' or finished):
+        return 'codex'
+    if not resume and finished:
+        return 'finished'
+
+
+def reopen_candidates(order, live, running, resumes, requests, skips, finished):
+    """Walk the recorded parents before their children, assuming eligible launches succeed."""
+    now, later = set(live), set() if finished else set(requests)
+    waiting = {name: (r['parent'], (name, r['kind'], r['model'], r['effort'], False))
+               for name, r in requests.items()} if not finished else {}
+    for node in order:
+        name, parent = node['name'], node.get('parent')
+        if name in now or name in requests or node.get('state') == 'closed' or skips[name]:
+            continue
+        resume = resumes[name]
+        if parent and parent not in now and not (parent in later and not resume):
+            continue
+        candidate = name, node['kind'], node.get('model'), node.get('effort'), node['role'] == 'lead'
+        if node['role'] == 'helper' and not resume:
+            waiting[name] = parent, candidate
+            later.add(name)
+        else:
+            yield candidate
+            now.add(name)
+    now.update(running)
+    while waiting:
+        ready = [name for name, (parent, _) in waiting.items() if name in now or parent in now]
+        if not ready:
+            break
+        for name in ready:
+            _, candidate = waiting.pop(name)
+            if name not in now:
+                yield candidate
+                now.add(name)
+
+
 def reopen(job, fresh=False, prompt=False, rerun=False):
     """stampede reopen: bring back what is not live, parents first, each child under its parent's new address. It never
     hands out work by itself: a resumed Claude session comes back idle, and whatever would start a brief again goes
@@ -781,20 +830,36 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
     key, lead, space, failed, told = job_.core_key(job), read(job, 'lead'), read(job, 'space'), False, []
     with locked(job) as queue:
         terminals = listing(job)
+        nodes = json.loads((job / 'tree.json').read_text())['nodes']
+        order = parents_first(nodes)
+        requests = {r['name']: r for _, r in queued(job)}
+        running = {labels(t).get('stampede.agent'): t for t in reversed(live(key, terminals))}
+        live_nodes = {n['name']: running[n['name']] for n in order if n.get('role') != 'plain' and n['name'] in running}
+        resumes = {}
+        skips = {}
+        for n in order:
+            name, session = n['name'], n.get('session') or ''
+            resume = n.get('kind') == 'claude' and not fresh and session and agents_.claude_session_file(session)
+            resumes[name] = resume
+            skips[name] = reopen_skip(n, resume, finished, fresh, rerun)
+        candidates = list(reopen_candidates(order, live_nodes, running, resumes, requests, skips, finished))
+        refusal = agents_.reopen_refusal(job, candidates)
+        if refusal:
+            out_.refuse(refusal)
+            return 2
         if not finished:  # an unfinished job is open again; a finished one is reopened for reading only
             job_.mark_job(key, job)
             owner = job_.job_owner(job)
             if owner:
                 job_.tag_owner(job, key, owner)
         (job / 'closed').unlink(missing_ok=True)
-        now, nodes = {}, json.loads((job / 'tree.json').read_text())['nodes']
-        waiting = {r['name'] for _, r in queued(job)}
+        now, waiting = {}, set(requests)
         later = set() if finished else set(waiting)  # what the drain after the walk starts, or leaves waiting
         for name in sorted(waiting) if finished else ():  # a finished job starts nothing: its queue stays, inert
             out_.emit('SKIPPED', f'SKIPPED {name} (the job is finished: its queued start stays in the queue)', agent=name, reason='finished')
-        for node in parents_first(nodes):
+        for node in order:
             name, parent, kind = node['name'], node.get('parent'), node.get('kind')
-            running_now = agent(key, terminals, name) if node.get('role') != 'plain' else None
+            running_now = live_nodes.get(name)
             if running_now:
                 now[name] = running_now
                 out_.emit('LIVE', f'LIVE {name} ({running_now["address"]})', agent=name, address=running_now['address'])
@@ -805,28 +870,28 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
             if name in waiting:
                 continue
             session = node.get('session') or ''
-            resume = kind == 'claude' and not fresh and session and agents_.claude_session_file(session)
+            resume = resumes[name]
             if parent and parent not in now and not (parent in later and not resume):
                 out_.emit('SKIPPED', f'SKIPPED {name}: its parent {parent} is not running',
                           agent=name, parent=parent, reason='parent not running')
                 continue
-            if node.get('role') == 'plain':
+            skip = skips[name]
+            if skip == 'plain':
                 out_.emit('SKIPPED', f'SKIPPED {name} (a plain child: run it again if still needed: {shlex.join(node.get("argv") or [])})',
                           agent=name, reason='plain')
                 continue
-            if kind == 'program':
-                if node.get('state') == 'finished' and node.get('exit_code') == 0:
-                    out_.emit('DONE', f'DONE {name} (exited 0)', agent=name, reason='exited 0')
-                    continue
-                if not rerun:
-                    out_.emit('SKIPPED', f'SKIPPED {name} (a program: --rerun-programs runs it again)', agent=name, reason='program')
-                    continue
-            elif kind == 'codex' and not fresh and (node['role'] != 'lead' or finished):
+            if skip == 'done':
+                out_.emit('DONE', f'DONE {name} (exited 0)', agent=name, reason='exited 0')
+                continue
+            if skip == 'program':
+                out_.emit('SKIPPED', f'SKIPPED {name} (a program: --rerun-programs runs it again)', agent=name, reason='program')
+                continue
+            if skip == 'codex':
                 out_.emit('SKIPPED', f'SKIPPED {name} (codex keeps no session to resume: --fresh starts it again with its brief)'
                           if not finished else f'SKIPPED {name} (the job is finished, and codex keeps no session to resume)',
                           agent=name, reason='codex')
                 continue
-            elif not resume and finished:
+            if skip == 'finished':
                 out_.emit('SKIPPED', f'SKIPPED {name} (the job is finished, and its Claude session never ran: a first prompt would start '
                           'its work again)', agent=name, reason='finished')
                 continue
@@ -870,7 +935,7 @@ def reopen(job, fresh=False, prompt=False, rerun=False):
                 told.append((name, shown['address'], f'[stampede] You were reopened. Your parent is {parent} at {under}: read '
                                                      f'{node["brief"]} again and carry on.'))
         if later:
-            _, fails, count, limit = drain(job, listing(job))
+            _, fails, count, limit = drain(job, listing(job), {candidate[0] for candidate in candidates})
             failed = failed or bool(fails)
             for _, request in queued(job):
                 if request['name'] in later:

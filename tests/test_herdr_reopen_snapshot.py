@@ -57,6 +57,7 @@ class ReopenSnapshot(unittest.TestCase):
             f.write_text(body)
             f.chmod(0o755)
         self.env = dict(os.environ, HOME=str(home), FAKE_DIR=str(t), HERDR=str(home / '.local/bin/herdr'))
+        self.env['XDG_CONFIG_HOME'] = str(home / '.config')
         self.repo, self.wt = t / 'repo', t / 'repo/wt api'
         self.wt.mkdir(parents=True)
         self.panes = [pane('wJ:p1', 'wJ:t1', 'lead-demo', str(self.repo), 'claude', 's-lead'),
@@ -102,6 +103,43 @@ class ReopenSnapshot(unittest.TestCase):
         self.state(workspaces=[{'workspace_id': 'wJ', 'label': 'demo-job', 'tokens': {'owner': 'bot-alpha'}}])
         self.run_cmd('wJ', str(self.job))
         self.state(workspaces=[])              # then the owner said yes and the workspace was closed
+
+    def policy(self, text):
+        config = Path(self.env['XDG_CONFIG_HOME']) / 'stampede/config.toml'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(text)
+
+    def test_reopen_refuses_a_lead_or_worker_before_opening_the_workspace(self):
+        self.snapshot_all()
+        (self.job / 'lead').write_text('lead-demo\n')
+        for text, who, rule in (
+                ('[lead]\nallow = ["claude-fable-5-2"]\n', 'lead-demo', 'lead.allow'),
+                ('[workers]\nforbid = ["gpt-6.2-astra"]\n', 'build-api', 'workers.forbid')):
+            self.policy(text)
+            for flags in ((), ('--fresh',)):
+                with self.subTest(who=who, flags=flags):
+                    r, calls = self.reopen(*flags)
+                    self.assertEqual(r.returncode, 2, r.stderr)
+                    self.assertTrue(r.stderr.startswith(f'REFUSED {who}: '), r.stderr)
+                    self.assertIn(rule, r.stderr)
+                    self.assertIn(f'restart it with stampede start {self.job} {who} --model <m>', r.stderr)
+                    self.assertEqual(r.stderr.count('\n'), 1)
+                    self.assertNotRegex(calls, r'workspace create|tab create|agent start')
+        self.policy('[lead]\nallow = ["claude-opus-5-5"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('agent start lead-demo', calls)
+
+    def test_reopen_cannot_check_an_unrecorded_lead_model_against_a_forbid_list(self):
+        self.run_cmd('record', str(self.job), 'lead-demo', 'claude', '-', '--')
+        (self.job / 'lead').write_text('lead-demo\n')
+        self.run_cmd('wJ', str(self.job))
+        self.state(workspaces=[])
+        self.policy('[lead]\nforbid = ["claude-opus-5-5"]\n')
+        r, calls = self.reopen()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('REFUSED lead-demo: the lead has no model to check against lead.forbid', r.stderr)
+        self.assertNotRegex(calls, r'workspace create|tab create|agent start')
 
     def test_only_the_jobs_own_agents_are_kept(self):
         self.panes = self.panes[:2] + [pane('wJ:p9', 'wJ:t3', 'owner-other', str(self.repo), 'claude', 'owner-session'),
@@ -176,6 +214,8 @@ class ReopenSnapshot(unittest.TestCase):
 
     def test_into_adds_only_missing_tabs(self):
         self.snapshot_all()
+        (self.job / 'lead').write_text('lead-demo\n')
+        self.policy('[lead]\nallow = ["claude-fable-5-2"]\n[workers]\nforbid = ["gpt-6.2-astra"]\n')
         self.state(workspaces=[{'workspace_id': 'wP', 'label': 'project'}])
         r, calls = self.reopen('--into', 'wP')
         self.assertEqual(r.returncode, 0, r.stderr)

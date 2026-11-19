@@ -5,7 +5,7 @@ from pathlib import Path
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, tui as tui_, out as out_
 
 
-def live_terminal(job, agent):
+def live_terminal(job, agent, adopt=True):
     """This job's live terminal for the agent: its bound address, else one the job's and the agent's labels name,
     which is adopted (bound). None when no live terminal runs it; a shell Core put in a lost agent's place is not one."""
     key = job_.core_key(job)
@@ -30,10 +30,11 @@ def live_terminal(job, agent):
             shown = {}
         if hcapi_.shelled(shown):
             continue
-        job_.bind(job, agent, {'state': 'live', 'address': found['address'], 'name': found.get('name') or agent})
-        session = (shown.get('labels') or {}).get('stampede.session')
-        if session:
-            prove(job, agent, session, 'ran')
+        if adopt:
+            job_.bind(job, agent, {'state': 'live', 'address': found['address'], 'name': found.get('name') or agent})
+            session = (shown.get('labels') or {}).get('stampede.session')
+            if session:
+                prove(job, agent, session, 'ran')
         return found
     return None
 

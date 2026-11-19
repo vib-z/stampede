@@ -577,6 +577,32 @@ class Lead(Choices):
                     self.assertEqual(self.calls('run'), [])
 
 
+class RelayReopenPolicy(Choices):
+    def test_relay_reopen_preflights_lead_and_worker_before_the_follower_starts(self):
+        code, out, err = self.new('--core', '--relay')
+        self.assertEqual(code, 0, out + err)
+        code, out, err = self.main('start', self.job, 'review-api', '--brief', self.brief(self.job, 'review-api'))
+        self.assertEqual(code, 0, out + err)
+        before = self.calls('run')
+        self.config('[lead]\nforbid = ["claude-opus-5-5"]\n')
+        code, out, err = self.main('_reopen', self.job)
+        self.assertEqual(code, 0, out + err)  # the disallowed lead is still live
+        for address in self.state()['terminals']:
+            self.terminal(address, state='finished')
+        for text, name, rule in (
+                ('[lead]\nforbid = ["claude-opus-5-5"]\n', LEAD, 'lead.forbid'),
+                ('[lead]\nallow = ["claude-opus-5-5"]\n[workers]\nforbid = ["gpt-6.2-astra"]\n', 'review-api', 'workers.forbid')):
+            self.config(text)
+            for flags in ((), ('--fresh',)):
+                with self.subTest(name=name, flags=flags):
+                    code, out, err = self.main('_reopen', self.job, *flags)
+                    self.assertEqual(code, 2, out + err)
+                    self.assertEqual(out, '')
+                    self.assertTrue(err.startswith(f'REFUSED {name}: '), err)
+                    self.assertIn(rule, err)
+                    self.assertEqual(self.calls('run'), before)
+
+
 class WorkerPolicy(Choices):
     def test_start_checks_worker_role_defaults_and_flags_on_every_backend(self):
         job, _ = self.core_job()

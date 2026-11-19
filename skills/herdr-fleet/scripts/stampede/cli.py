@@ -435,6 +435,7 @@ def parse_and_run(argv):
     p.add_argument('--lead', action='store_true', help='only the follower and the lead')
     p.add_argument('--prompt', action='store_true', help='a restarted Codex worker gets its brief pointer again')
     p.add_argument('--fresh', action='store_true', help='each agent it starts begins a new session with its brief')
+    p = sub.add_parser('_reopen-check'); p.add_argument('job'); p.add_argument('tabs', nargs='*')
     for name in JSON:
         json_flag(sub.choices[name])
     sub.add_parser('_deliver').add_argument('job')
@@ -462,7 +463,7 @@ def parse_and_run(argv):
             ask = Path(a.file).expanduser()
             if not ask.is_file():
                 raise ValueError(f'the ask file {a.file} does not exist: write what the job is for in it, then run new again')
-        elif a.cmd != 'hook' and getattr(a, 'job', None) is not None:
+        elif a.cmd not in ('hook', '_reopen-check') and getattr(a, 'job', None) is not None:
             require_job(a.job)
     except ValueError as error:
         out_.refuse('stampede ' + a.cmd + ': ' + base_.line(error))
@@ -640,6 +641,17 @@ def run(a):
         return owner_.finish(a.job, ' '.join(a.summary))
     if a.cmd == '_reopen':
         return relay_.reopen(a.job, a.lead, a.prompt, a.fresh)
+    if a.cmd == '_reopen-check':
+        job = Path(a.job).absolute()
+        lead_file = job / 'lead'
+        lead = lead_file.read_text().strip() if lead_file.is_file() else ''
+        candidates = ((name, kind, model, effort, name == lead)
+                      for tab in a.tabs for name, kind, model, effort in json.loads(tab))
+        refusal = agents_.reopen_refusal(job, candidates)
+        if refusal:
+            out_.refuse(refusal)
+            return 2
+        return 0
     if a.cmd == '_deliver':
         return tui_.deliver(a.job)
     if a.cmd == '_wake':

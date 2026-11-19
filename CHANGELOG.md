@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Reopen checks current model and effort rules.** On the TUI and both Core paths, a plain or fresh reopen checks the agents it would relaunch before starting anything. A refusal names the agent and rule and exits 2. Refresh older TUI scripts to enable the check ([Configure](docs/CONFIGURE.md)).
+
 - **Optional model and effort checks.** `lead.allow` (also `FLEET_LEAD_ALLOW`, comma-separated) limits new leads and TUI or Core relay lead restarts to the listed models. `lead.forbid` applies at both points and takes priority. `workers.forbid` and `workers.max_effort` check worker starts after role defaults and flags. Set these in your own config, and see [Configure](docs/CONFIGURE.md) for the defaults.
 - **Current Codex defaults.** The lead uses GPT-6.2 Sol at `xhigh`. Review, design and QA use GPT-6.2 Astra at `medium`.
 - **Every worker runs at medium effort by default.** The roles `research`, `copy`, `review`, `design` and `qa` move to `medium`, like `build`, `test` and `default`; the lead defaults to extra high (`xhigh`) on either CLI. Set effort with `new --lead-effort`, `new --set roles.<role>.effort=<e>`, `start --effort` or your config. To keep the old efforts, set them in your config ([Configure](docs/CONFIGURE.md#effort-the-default-and-how-to-change-it)).
