@@ -6,10 +6,11 @@ How to pick the agent, model and effort for each lane. The flags and quirks of e
 
 - `stampede start <job> <role>-<scope>` takes its kind, model and effort from the setting `roles.<role>` (the role is the name up to its first `-`), else `roles.default`. A flag given wins. A role's model and effort go only with its own kind.
 - `stampede config show` prints the current choice for every role and the layer that set it; `--set roles.build.effort=high` changes one for a command.
-- **Effort, by default:** the lead at `xhigh` on either CLI and every worker at `medium`.
+- **Effort, by default:** the lead at `xhigh` on either CLI and every worker at `medium`. Per job `new --lead-effort <e>` or `new --set roles.<role>.effort=<e>`, per worker `start --effort <e>` ([Configure](../../../docs/CONFIGURE.md#effort-the-default-and-how-to-change-it)).
 - The roles: `build` (implementation against the spec), `research` (with the browser), `review` and `qa` (another vendor than build), `design` (direction and design review), `copy` (docs and copy), `test` (tests and quick mechanical edits), `default` (any other).
 - **The lead:** `stampede new --lead claude|codex` (the setting `lead.kind`), `--lead-model` and `--lead-effort` (the settings `lead.<its CLI>.model` and `.effort`).
 - `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set them as a pair, only for the CLI the model belongs to: a `gpt-...` model sets a Codex lead, any other a Claude lead. A restarted lead keeps its CLI and model. `--fork` takes a Claude lead.
+- The owner can override any choice, the effort or the review shape per job.
 - The owner can enforce the lead list with `lead.allow` and cap workers with `workers.forbid` and `workers.max_effort` ([Configure](../../../docs/CONFIGURE.md)).
 
 ## Thinker and doer
@@ -35,7 +36,7 @@ Every worker here runs at `medium`, the default; only the lead row names an effo
 | Independent review, QA | Codex `gpt-6.2-astra` | Claude `claude-opus-5-5` if the builder used Codex |
 | Research with the browser | Claude `claude-opus-5-5` (BrowserOS Neo, MCP tools) | Codex `gpt-6.2-sol` with `--search` (no Neo) |
 | Design direction, design review | Codex `gpt-6.2-astra` | Claude `claude-opus-5-5` |
-| Images, layered HTML images | Codex `gpt-6.2-sol` | Claude `claude-opus-5-5` |
+| Images, layered HTML images | Codex; Grok only sparingly, for videos and the odd photo | none: wait or ask |
 | Docs and copy | Claude `claude-opus-5-5` | Codex `gpt-6.2-sol` |
 | Quick mechanical edits | Claude `claude-sonnet-5-5` or Codex `gpt-6.2-sol` | the other of those two |
 
