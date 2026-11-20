@@ -597,18 +597,25 @@ class CodexLeadOnCore(CoreCase):
         base_.append(job / 'inbox.log', 'TURN build-api')
         self.shape(core_env={'HC_DRAFT_MS': '9000'}, draft_wait=9)   # the same, in small: a 9 s hold, sends stopped after 6
         real = hcapi_.hc
+        send_seconds = []
 
         def hc(*args, **kw):
+            if args[0] == 'send':
+                started = time.monotonic()
+                try:
+                    return real(*args, **kw)
+                finally:
+                    send_seconds.append(time.monotonic() - started)
             answer = real(*args, **kw)
             if args[0] == 'read':   # the owner starts typing right after the look at the prompt, and leaves it
                 self.terminal('t1', person={'draft': 'unfinished owner instruction ', 'then': 'stay'})
             return answer
-        started = time.monotonic()
         with mock.patch.object(hcapi_, 'hc', hc), mock.patch.object(hcapi_, 'SEND_MARGIN', 3), mock.patch.object(hcapi_, 'SEND_FLOOR', 0.5):
             self.assertEqual(hcapi_.typing_guard(), ('', 9.0))
             code, out = self.deliver(job, wait=12)
         self.assertEqual(code, 7, out)
-        self.assertLess(time.monotonic() - started, 8.5, 'stopped before the 9 s hold ran out')
+        self.assertEqual(len(send_seconds), 1)
+        self.assertLess(send_seconds[0], 8.5, 'the send stopped before the 9 s hold ran out')
         self.assertIn('no answer in 6 s', out)
         self.assertEqual(self.state()['terminals']['t1']['sent'], [])
 

@@ -188,6 +188,9 @@ class Job:
     def lead(self, step, *argv):
         return self.run(step, (STAMPEDE, *argv), self.lead_env())
 
+    def install(self):
+        return self.front('install', 'bash', ROOT / 'install.sh', '--no-skills', '--no-supervise')
+
     # what the job left
     @property
     def key(self):

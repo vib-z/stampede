@@ -243,5 +243,9 @@ WantedBy=timers.target' && n=$((n+1))
 linux_timers
 echo "Next, once per repo: herdr-trust <repo dir>   (pre-trusts it for Claude and Codex, so agents start without a dialog)"
 echo "New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core"
+if [ "$DRY" = 0 ] && ! [ "$HOME/.local/bin/stampede" -ef "$ROOT/scripts/stampede" ]; then
+  echo "install.sh: $HOME/.local/bin/stampede kept its existing path; check stampede --version and the skip lines above"
+  printf 'Preview a backup and replacement: bash %q --dry-run --replace\n' "$ROOT/install.sh"
+fi
 [ -z "$UNITS" ] || echo "timer unit files written: $UNITS. They are stampede's own and a rollback leaves them"
 if [ "$JOURNAL" = 1 ] && [ -s "$BACKUP/journal" ]; then echo "rollback: bash $(printf %q "$BACKUP/rollback.sh")"; fi

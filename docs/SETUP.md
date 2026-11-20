@@ -52,12 +52,13 @@ stampede config set backend core     # optional: Herdr Core by default (the defa
 - Your PATH (the list of folders your terminal looks in for commands) must hold `~/.local/bin`. If a bot will run stampede over SSH, set it for non-interactive SSH shells too.
 - On Linux it starts the event relay's two timers, the watchdog and the flusher. When `--replace` saves an older timer file of stampede's first, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
 - It never installs Herdr or an agent CLI. Start each agent CLI once by hand to sign in.
-- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run prints its rollback line after it.
+- It ends with `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. If the command path was kept, a hint follows. A `--replace` run prints its rollback line last.
 
 **Running it again** is safe.
 - A link already in place prints `ok`.
 - Run from a checkout Herdr manages (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install moves to this checkout and prints `relinked`. A clone relinks nothing.
 - Anything else at that path prints `skip ... left as is (--replace backs it up and links)`: your own copy of a skill or helper is never replaced.
+- If `~/.local/bin/stampede` still points elsewhere or is your own file, the final hint names that path and asks you to check `stampede --version`. It prints a command to preview a backup and replacement. The installer checks the path without running the kept command.
 
 **Take over an older install with `--replace`.**
 - Each thing in the way moves into one backup folder for the run: a copy of a command, a link into another checkout, or a real skill folder. The folder is `${XDG_STATE_HOME:-~/.local/state}/stampede/backup-<date>-<time>/`, with a `-2` style suffix when that name is taken. Each keeps its path under your home there.

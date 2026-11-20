@@ -67,6 +67,7 @@ class Install(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn('linked', again.stdout)
         self.assertIn(f'ok {bin_dir / "stampede"}', again.stdout)
+        self.assertNotIn('kept its existing path', result.stdout + again.stdout)
 
     def test_links_follow_a_new_managed_checkout_and_no_other(self):
         plugins = self.home / '.config/herdr/plugins/github-installations'
@@ -107,6 +108,35 @@ class Install(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(os.readlink(stampede), str(plugin))
         self.assertIn(f'skip {stampede}', result.stdout)
+        self.assertIn(f'install.sh: {stampede} kept its existing path', result.stdout)
+
+    def test_a_kept_command_gets_a_hint_without_running_it(self):
+        stampede = self.home / '.local/bin/stampede'
+        stampede.parent.mkdir(parents=True)
+        ran = self.home / 'command-was-run'
+        old = self.home / 'old-stampede'
+        old.write_text('#!/bin/bash\ntouch "' + str(ran) + '"\n')
+        old.chmod(0o755)
+        for kind in ('file', 'link', 'dangling'):
+            with self.subTest(kind=kind):
+                stampede.unlink(missing_ok=True)
+                if kind == 'file':
+                    shutil.copy(old, stampede)
+                else:
+                    stampede.symlink_to(old if kind == 'link' else self.home / 'gone')
+                original = os.readlink(stampede) if stampede.is_symlink() else stampede.read_bytes()
+                result = self.run_install('--no-supervise')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'install.sh: {stampede} kept its existing path', result.stdout)
+                hint = result.stdout.splitlines()[-1]
+                self.assertTrue(hint.startswith('Preview a backup and replacement: bash '), hint)
+                preview = subprocess.run(['bash', '-c', hint.split(': ', 1)[1]], env=self.env,
+                                         capture_output=True, text=True, timeout=30)
+                self.assertEqual(preview.returncode, 0, preview.stderr)
+                self.assertIn(f'would replace {stampede}', preview.stdout)
+                self.assertNotIn('kept its existing path', preview.stdout)
+                self.assertEqual(os.readlink(stampede) if stampede.is_symlink() else stampede.read_bytes(), original)
+                self.assertFalse(ran.exists())
 
     def uninstall_recipe(self, intro):
         """The bash block after the paragraph that starts with intro, in docs/SETUP.md's Uninstall section."""
