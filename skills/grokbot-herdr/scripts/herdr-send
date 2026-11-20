@@ -16,9 +16,10 @@ case "$STATUS" in
   *focused) echo "FAILED $P focused: the owner is in that pane; retry later"; exit 1;;
   blocked) echo "FAILED $P (blocked at a dialog; read the screen)"; exit 1;;
   idle|done)
-    # Empty-prompt markers: Codex placeholder and footer, Claude hint, a bare prompt line.
+    # Empty-prompt markers: Codex placeholder and footer hints (a narrow pane cuts both to '← for agents'), Claude hint,
+    # a bare prompt line. Keep in step with EMPTY_PROMPT in skills/herdr-fleet/scripts/stampede/handed.py.
     if ! "$H" agent read "$P" --source visible --lines 8 2>/dev/null \
-        | grep -qiE 'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›) *$'; then
+        | grep -qiE 'Ask Codex to do anything|for shortcuts|← for agents|To get started|describe a task|Try "|^ *(>|❯|›|») *$'; then
       "$H" agent send-keys "$P" ctrl+c >/dev/null 2>&1; sleep 1
     fi;;
 esac

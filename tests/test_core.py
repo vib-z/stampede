@@ -1471,7 +1471,9 @@ class ReviewDraft(CoreCase):
 
     def test_an_empty_prompt_or_an_unreadable_screen_is_sent(self):
         for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts',
-                       '  \u2190 for agents \u00b7 ? for shortcuts'):  # Codex 0.167.1's footer row
+                       '  \u2190 for agents \u00b7 ? for shortcuts',  # Codex 0.167.1's footer row
+                       '\u00bb Ask Codex to do anyth\n\n  GPT-6-Astra ultra \u00b7 ~\u2026\n'
+                       '  \u2190 for agents \u26a0 2 \u00b7 f2', '\u00bb \n'):  # Codex 0.170.0, 24 columns, 20 Nov 2026
             self.terminal('t1', screen=screen, sent=[])
             self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []), screen)
         self.shape(read_error={'t1': 'unavailable'})

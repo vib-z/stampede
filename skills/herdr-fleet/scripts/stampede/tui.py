@@ -93,16 +93,28 @@ def screen_of(agent):
         raise ValueError(f'herdr agent read did not answer in {DELIVER_CALL} s') from None
 
 
+CODEX_FOOTER = re.compile(r' *← for agents|.*\? for shortcuts')  # the hints Codex hides behind a draft
+
+
 def composer_empty(screen):
-    """True when a Codex screen's prompt holds no draft: below its last prompt line (», ›, ❯ or >) Codex's last row is
-    a footer holding '? for shortcuts', which it hides while anything is typed. The row began with it on 3 Nov 2026 and
-    reads '← for agents · ? for shortcuts' on Codex 0.167.1 (both checked live, the second on 11 Nov 2026), so the
-    row need only contain it. Only the last row counts: a draft's own lines sit above Codex's status rows, so a draft
-    that holds the phrase is still a draft. Text in the prompt line is never read, since a placeholder and a real
-    draft look alike; any other screen is a draft."""
-    rows = [row for row in screen.splitlines() if row.strip()][-8:]
+    """True when a Codex screen's prompt holds no draft. Below its last prompt line (», ›, ❯ or >) an empty Codex
+    composer has one blank row, then its status rows, then a footer of hints as the last row; while anything is typed
+    Codex hides the hints and keeps only a warnings count ('⚠ 2 warnings · f2 to view') on that row. The footer began
+    with '? for shortcuts' on 3 Nov 2026 and reads '← for agents · ? for shortcuts' on Codex 0.167.1 (11 Nov 2026).
+    Codex 0.170.0, checked live on Linux in Herdr 0.9.5 panes 24 to 131 columns wide on 20 Nov 2026, cuts that row
+    to fit its warnings: '← for agents · ? for short', '← for agents   ⚠ 2 warnings · f2 to view',
+    '← for agents ⚠ 2 · f2', or '← for agents' alone. So the last row must start with '← for agents' or hold
+    '? for shortcuts', and the row under the prompt line must be blank (Codex's startup sparkles, braille dots, count
+    as blank): a draft's own lines sit there and above Codex's status rows, so a draft that quotes the footer is still
+    a draft. Text in the prompt line is never read, since a placeholder and a real draft look alike; any other screen
+    is a draft. Live tests: tests/fixtures/codex-0.170."""
+    rows = [re.sub(r'[\u2800-\u28ff]', ' ', row).rstrip() for row in screen.splitlines()]
+    while rows and not rows[-1]:
+        rows.pop()
     prompts = [i for i, row in enumerate(rows) if re.match(r' *[»›❯>]( |$)', row)]
-    return bool(prompts) and prompts[-1] < len(rows) - 1 and '? for shortcuts' in rows[-1]
+    if not prompts or prompts[-1] >= len(rows) - 2 or len([row for row in rows[prompts[-1]:] if row]) > 8:
+        return False
+    return not rows[prompts[-1] + 1] and bool(CODEX_FOOTER.match(rows[-1]))
 
 
 def ready(agent):

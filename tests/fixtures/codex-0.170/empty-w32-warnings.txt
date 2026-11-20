@@ -1,0 +1,30 @@
+│ https://github.com/openai/
+codex/releases/latest │
+╰────────────────────────────
+─────────────────────╯
+
+
+  >_ OpenAI Codex (v0.170.0)
+     ~/projects/stampede
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-6.2-Sol default · ~/
+  projects/stampede
+  ← for agents      ⚠ 3 · f2

@@ -1766,6 +1766,28 @@ class Deliver(unittest.TestCase):
         with mock.patch.object(herdrapi_, 'herdr', side_effect=herdrapi_.HerdrError('gone', 'agent_not_found')):
             self.assertFalse(REAL_READY('lead-demo'))
 
+    def test_codex_170_screens_read_live(self):  # Herdr 0.9.5 panes 24 to 131 columns wide, 20 Nov 2026
+        screens = sorted(CODEX_170.glob('*.txt'))
+        self.assertGreaterEqual(len(screens), 20)
+        for path in screens:
+            with self.subTest(screen=path.name):
+                self.assertEqual(tui_.composer_empty(path.read_text()), path.name.startswith('empty-'))
+
+    def test_codex_170_footer_must_be_the_last_row_below_a_blank_row_under_the_prompt(self):
+        empty = (CODEX_170 / 'empty-w57-warnings.txt').read_text()
+        footer = '  ← for agents                 ⚠ 2 warnings · f2 to view'
+        self.assertTrue(tui_.composer_empty(empty.replace('» Ask', '»\u2801Ask')))        # a sparkle on the prompt row
+        self.assertTrue(tui_.composer_empty('» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for agents\n'))
+        for screen in (empty + '  something below the footer\n',
+                       footer + '\n' + (CODEX_170 / 'draft-w57-warnings.txt').read_text(),     # a footer above the prompt
+                       '» a draft\n  ← for agents\n',                                          # the draft's own line, last
+                       '» a draft\n  second line\n\n  GPT-6-Astra ultra\n' + footer + '\n',  # no blank under the prompt
+                       '» \n' + footer + '\n',                                                # no blank row at all
+                       '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for age\n',  # an unknown footer
+                       '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ⚠ 2 · f2\n'):
+            with self.subTest(screen=screen[-80:]):
+                self.assertFalse(tui_.composer_empty(screen))
+
     def test_a_stalled_herdr_or_herdr_send_never_holds_the_lock(self):
         from unittest import mock
         folder = Path(tempfile.mkdtemp())
@@ -1804,6 +1826,10 @@ class Deliver(unittest.TestCase):
 
 
 REAL_READY, REAL_SEND = tui_.ready, tui_.herdr_send  # Deliver's setUp mocks both
+
+# Codex 0.170.0's screens as Herdr read them live on 20 Nov 2026: empty-* is an empty prompt, draft-* a typed draft;
+# w<N> is the width Codex drew at, -warnings has the warnings count on the footer row.
+CODEX_170 = Path(__file__).resolve().parent / 'fixtures/codex-0.170'
 
 # Codex 0.167.1's screen as Herdr read it live on 11 Nov 2026 (path shortened): its footer row starts with an arrow,
 # and a draft hides that whole row.
