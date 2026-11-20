@@ -1,0 +1,21 @@
+│
+│ update.
+│
+│
+│
+│ See full release notes:
+│
+│ https://github.com/openai/codex/releases/
+latest │
+╰───────────────────────────────────────────
+──────╯
+
+
+  >_ OpenAI Codex (v0.170.0)
+     ~/projects/stampede
+
+
+» Ask Codex to do anything
+
+  GPT-6-Astra ultra · ~/projects/stampede
+  ← for agents    ⚠ 2 warnings · f2 to view

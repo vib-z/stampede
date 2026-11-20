@@ -1471,12 +1471,27 @@ class ReviewDraft(CoreCase):
 
     def test_an_empty_prompt_or_an_unreadable_screen_is_sent(self):
         for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts',
-                       '  \u2190 for agents \u00b7 ? for shortcuts'):  # Codex 0.167.1's footer row
+                       '  \u2190 for agents \u00b7 ? for shortcuts',  # Codex 0.167.1's footer row
+                       '\u00bb Ask Codex to do anyth\n\n  GPT-6-Astra ultra \u00b7 ~\u2026\n'
+                       '  \u2190 for agents \u26a0 2 \u00b7 f2'):  # Codex 0.170.0, 24 columns, 20 Nov 2026
             self.terminal('t1', screen=screen, sent=[])
             self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []), screen)
         self.shape(read_error={'t1': 'unavailable'})
         self.terminal('t1', sent=[])
         self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []))
+
+    def test_a_draft_ending_in_codex_170s_narrow_footer_is_refused(self):  # review R2, live screens of 20 Nov 2026
+        fixtures = Path(__file__).resolve().parent / 'fixtures/codex-0.170'
+        for name in ('draft-w24-ends-in-footer.txt', 'draft-w24-tall-ends-in-footer.txt',
+                     'draft-w24-scrolled-ends-in-footer.txt', 'draft-w24-first-line-blank.txt'):
+            self.terminal('t1', draft='zzz', screen=(fixtures / name).read_text(), sent=[])
+            self.assertEqual(self.told()[1:], (2, [], []), name)
+        self.terminal('t1', draft='zzz', screen='\u00bb line one   \u2191\n  > quoted text\n  continuation\n  \u2190 for agents', sent=[])
+        self.assertEqual(self.told()[1:], (2, [], []))   # review R4: a quoted '>' line is no prompt line
+        for screen in ((fixtures / 'empty-w24.txt').read_text(),
+                       '\u2022 \u2191\n\n\u00bb Ask Codex to do anyth\n\n  GPT-6-Astra ultra \u00b7 ~\u2026\n  \u2190 for agents'):  # review R3
+            self.terminal('t1', draft='', screen=screen, sent=[])
+            self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []), screen)
 
     def test_a_marker_in_scrollback_does_not_hide_a_draft(self):  # live: hc read --lines 8 gave the whole screen
         scrollback = '  ? for shortcuts\nTry "fix the tests"\n\n' + '\n\n'.join(f'line {n}' for n in range(8))

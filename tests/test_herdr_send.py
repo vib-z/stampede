@@ -59,6 +59,28 @@ class HerdrSend(unittest.TestCase):
         self.assertEqual(out, 'SUBMITTED build-a')
         self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'))
 
+    def test_codex_170_narrow_footer_reads_as_empty_and_its_draft_as_typed(self):  # live, 24 columns, 20 Nov 2026
+        fixtures = Path(__file__).resolve().parent / 'fixtures/codex-0.170'
+        for name in ('empty-w24.txt', 'empty-w24-warnings.txt'):  # placeholder cut to 'Ask Codex to do anyth'
+            out, calls = self.send('idle', (fixtures / name).read_text())
+            self.assertEqual(out, 'SUBMITTED build-a', name)
+            self.assertNotIn('ctrl+c', calls, name)
+        out, calls = self.send('idle', (fixtures / 'draft-w24-warnings.txt').read_text())
+        self.assertEqual(out, 'SUBMITTED build-a')
+        self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'))
+        for name in ('draft-w24-ends-in-footer.txt', 'draft-w24-tall-ends-in-footer.txt',  # review R2: a quoted footer
+                     'draft-w24-scrolled-ends-in-footer.txt', 'draft-w24-first-line-blank.txt'):
+            screen = '\n'.join((fixtures / name).read_text().splitlines()[-8:])  # herdr-send reads 8 lines
+            out, calls = self.send('idle', screen)
+            self.assertEqual(out, 'SUBMITTED build-a', name)
+            self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'), name)
+        out, calls = self.send('idle', '• ↑\n\n» Ask Codex to do anyth\n\n  GPT-6-Astra ultra · ~…\n  ← for agents')
+        self.assertEqual(out, 'SUBMITTED build-a')    # review R3: an arrow in a reply above the prompt is no scroll arrow
+        self.assertNotIn('ctrl+c', calls)
+        quoted = '» line one             ↑\n  > quoted text\n  continuation\n  ← for agents'  # review R4
+        out, calls = self.send('idle', quoted)
+        self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'))
+
     def test_bare_claude_prompt_gets_no_ctrl_c(self):
         out, calls = self.send('done', '──────\n❯ \n──────')
         self.assertEqual(out, 'SUBMITTED build-a')

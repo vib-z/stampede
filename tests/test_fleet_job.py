@@ -1,5 +1,5 @@
 """fleet-job: messages, background questions, approval and hooks, all with fakes."""
-import fcntl, json, os, shlex, stat, subprocess, sys, tempfile, time, unittest
+import fcntl, json, os, re, shlex, stat, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1766,6 +1766,60 @@ class Deliver(unittest.TestCase):
         with mock.patch.object(herdrapi_, 'herdr', side_effect=herdrapi_.HerdrError('gone', 'agent_not_found')):
             self.assertFalse(REAL_READY('lead-demo'))
 
+    def test_codex_170_screens_read_live(self):  # Herdr 0.9.5 panes 24 to 131 columns wide, 20 Nov 2026
+        screens = sorted(CODEX_170.glob('*.txt')) + sorted(CODEX_170.glob('*.ansi'))
+        self.assertGreaterEqual(len(screens), 30)
+        for path in screens:
+            with self.subTest(screen=path.name):
+                self.assertEqual(tui_.composer_empty(path.read_text()), path.name.startswith('empty-'))
+
+    def test_codex_170_footer_must_be_the_last_row_below_a_blank_row_under_the_prompt(self):
+        empty = (CODEX_170 / 'empty-w57-warnings.txt').read_text()
+        footer = '  ← for agents                 ⚠ 2 warnings · f2 to view'
+        self.assertTrue(tui_.composer_empty(empty.replace('» Ask', '»\u2801Ask')))        # a sparkle on the prompt row
+        self.assertTrue(tui_.composer_empty('» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for agents\n'))
+        self.assertTrue(tui_.composer_empty('• ↑\n\n» Ask Codex to do anyth\n\n  GPT-6-Astra ultra · ~…\n  ← for agents'))  # R3
+        tall = (CODEX_170 / 'draft-w24-tall-ends-in-footer.txt').read_text()
+        for screen in (empty + '  something below the footer\n',
+                       footer + '\n' + (CODEX_170 / 'draft-w57-warnings.txt').read_text(),     # a footer above the prompt
+                       '» a draft\n  ← for agents\n',                                          # the draft's own line, last
+                       '» a draft\n  second line\n\n  GPT-6-Astra ultra\n' + footer + '\n',  # no blank under the prompt
+                       '» \n' + footer + '\n',                                                # no blank row at all
+                       '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for age\n',  # an unknown footer
+                       '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ⚠ 2 · f2\n',
+                       '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for agents   ↓\n',  # a draft's line
+                       tall.replace('  ← for agents', '', 1),   # review R1: a scrolled draft, blank line, quoted footer
+                       '» line one   ↑\n  > quoted\n\n  GPT-6-Astra ultra\n  ← for agents\n'):  # R4: a quoted '>' line
+            with self.subTest(screen=screen[-80:]):
+                self.assertFalse(tui_.composer_empty(screen))
+
+    def test_codex_170_styled_screen_needs_the_dim_placeholder(self):  # review R1: typed text is never dim
+        empty = (CODEX_170 / 'empty-w44-warnings.ansi').read_text()
+        self.assertTrue(tui_.composer_empty(empty))
+        self.assertIn('\x1b[2m', empty)
+        undimmed = empty.replace('\x1b[2m', '\x1b[22m')
+        self.assertFalse(tui_.composer_empty(undimmed))            # the same text, typed: a draft
+        self.assertTrue(tui_.composer_empty(re.sub(r'\x1b\[[0-9;]*m', '', undimmed)))  # plain text cannot tell them apart
+        arrows = empty.replace('Ask Codex to do anything', 'Ask Codex to do anything \x1b[2m\u2191', 1)
+        self.assertFalse(tui_.composer_empty(arrows))              # a scrolled composer: its arrow is dim too
+        self.assertEqual(tui_.cells('\x1b[1m\x1b[38;2;2;2;2ma\x1b[2mb\x1b[0mc\x1b[48;5;2md\x1b[2;38;5;2me\x1b[22mf\r'),
+                         [('a', False), ('b', True), ('c', False), ('d', False), ('e', True), ('f', False)])
+
+    def test_screen_of_reads_styles_and_falls_back_to_text(self):
+        from unittest import mock
+        folder = Path(tempfile.mkdtemp())
+        fake = folder / 'herdr'
+        fake.write_text('#!/bin/bash\necho "$*" >> "$(dirname "$0")/calls"\n'
+                        'case "$*" in *--format*) [ -f "$(dirname "$0")/plain" ] && exit 2; echo styled;; *) echo plain;; esac\n')
+        fake.chmod(0o755)
+        with mock.patch.dict(os.environ, {'HERDR': str(fake)}):
+            self.assertEqual(tui_.screen_of('lead-demo'), 'styled\n')
+            (folder / 'plain').touch()                              # a Herdr without --format
+            self.assertEqual(tui_.screen_of('lead-demo'), 'plain\n')
+        self.assertEqual((folder / 'calls').read_text().splitlines(),
+                         ['agent read lead-demo --source visible --lines 30 --format ansi'] * 2
+                         + ['agent read lead-demo --source visible --lines 30'])
+
     def test_a_stalled_herdr_or_herdr_send_never_holds_the_lock(self):
         from unittest import mock
         folder = Path(tempfile.mkdtemp())
@@ -1804,6 +1858,10 @@ class Deliver(unittest.TestCase):
 
 
 REAL_READY, REAL_SEND = tui_.ready, tui_.herdr_send  # Deliver's setUp mocks both
+
+# Codex 0.170.0's screens as Herdr read them live on 20 Nov 2026 (.txt as text, .ansi with --format ansi): empty-* is an
+# empty prompt, draft-* a typed draft; w<N> is the width Codex drew at, -warnings has the warnings count on the footer row.
+CODEX_170 = Path(__file__).resolve().parent / 'fixtures/codex-0.170'
 
 # Codex 0.167.1's screen as Herdr read it live on 11 Nov 2026 (path shortened): its footer row starts with an arrow,
 # and a draft hides that whole row.
