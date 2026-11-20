@@ -408,17 +408,21 @@ EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get starte
                           re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt
 # Codex 0.170 in a narrow pane cuts its placeholder to 'Ask Codex to do anyth' and its footer to '← for agents ⚠ 2 · f2'
 # (live, 20 Nov 2026). That footer marks an empty prompt only as the last row, right under a status row, with no scroll
-# arrow on the screen: a draft can quote it, and a tall draft hides the status rows.
+# arrow from the last prompt line down: a draft can quote it, and a tall draft hides the status rows and scrolls.
 NARROW_FOOTER = re.compile(r' *← for agents( ·( \?( for( [a-z]*)?)?)?)?( +⚠ .*)?')
+PROMPT_LINE = re.compile(r' *[»›❯>]( |$)')
 
 
 def narrow_footer(screen):
-    """True when a screen ends in Codex's footer cut to fit a narrow pane, as herdr-send's narrow_footer reads it."""
+    """True when a screen ends in Codex's footer cut to fit a narrow pane, as herdr-send's awk reads it. Arrows count only
+    from the last prompt line down (the whole screen when none shows), so one in a reply above it changes nothing."""
     rows = [row.rstrip() for row in screen.splitlines()]
     while rows and not rows[-1]:
         rows.pop()
+    prompts = [i for i, row in enumerate(rows) if PROMPT_LINE.match(row)]
+    composer = rows[prompts[-1]:] if prompts else rows
     return (len(rows) > 1 and bool(rows[-2]) and bool(NARROW_FOOTER.fullmatch(rows[-1]))
-            and not any(arrow in row for row in rows[-8:] for arrow in '↑↓'))
+            and not any(arrow in row for row in composer for arrow in '↑↓'))
 
 
 def typed(screen, empty=EMPTY_PROMPT):

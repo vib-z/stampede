@@ -1778,6 +1778,7 @@ class Deliver(unittest.TestCase):
         footer = '  ← for agents                 ⚠ 2 warnings · f2 to view'
         self.assertTrue(tui_.composer_empty(empty.replace('» Ask', '»\u2801Ask')))        # a sparkle on the prompt row
         self.assertTrue(tui_.composer_empty('» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for agents\n'))
+        self.assertTrue(tui_.composer_empty('• ↑\n\n» Ask Codex to do anyth\n\n  GPT-6-Astra ultra · ~…\n  ← for agents'))  # R3
         tall = (CODEX_170 / 'draft-w24-tall-ends-in-footer.txt').read_text()
         for screen in (empty + '  something below the footer\n',
                        footer + '\n' + (CODEX_170 / 'draft-w57-warnings.txt').read_text(),     # a footer above the prompt
