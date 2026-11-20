@@ -32,6 +32,8 @@ Automated: the command-contract checks listed under [What the automated suite as
 | `other-bot` | any other bot with a computer of its own | over SSH | the bot, by `HERDR_EVENTS_OWNER` | O1 to O9 pass; TUI O9 partial ([F2](#doing-worse)) | not run live (same path as `grokbot`) | not run live (same path as `grokbot`) | not run |
 | `remote-computer` | Herdr, the CLIs and stampede on one remote box | inside Herdr | local | O1 to O8 pass | not run live (same path as `herdr-chat`) | not run live (same path as `herdr-chat`) | not run |
 
+Every client also runs the installer in its own environment against a temporary home with an existing command. The check keeps that command, names the replacement preview and never runs it. This is a local check, including a process named `sshd` for a bot, not a live SSH install.
+
 The Core typed-approval notice is checked in the generated lead brief for every client; the automated suite also sends `yes`, `approve` and `go ahead` through the lead inbox and checks that none records approval. The notice itself has not been checked with a live agent.
 
 O9 is for bots only: a local client hears from its own pane, the lead's card or the phone.
@@ -41,6 +43,8 @@ A Codex lead (`--lead codex`) is covered by the automated suite (O2, every clien
 ## What differs between clients
 
 In code, the clients differ in their environment and flags, not in the commands they run. The lead's side is the same for all of them.
+
+The installer gives the same kept-command hint inside Herdr, outside it and over SSH. Its version check and preview are described in [Setup](SETUP.md#install).
 
 | | inside Herdr | outside Herdr | over SSH (a bot) |
 |---|---|---|---|
@@ -105,7 +109,7 @@ How it runs: [tests/clients_run.py](../tests/clients_run.py) plays one job per c
 
 One small job per client and backend, on one Mac, by a maintainer. The `stampede` and helper commands in steps 4 and 5 are the ones the automated suite runs against the fakes; the scratch repo, trust and commit steps, and all the agents do, run only here.
 
-1. **Scratch repo:** `git init` a folder under `FLEET_TRUST_ROOT`, commit a README, run `herdr-trust <repo>`.
+1. **Scratch repo:** `git init` a folder under `FLEET_TRUST_ROOT`, commit a README, run `herdr-trust <repo>`. In the client's own terminal or SSH shell, run `stampede --version` and check the executable path against the checkout being tested. If the installer kept an existing command, use its printed preview before deciding whether to replace it ([Setup](SETUP.md#install)).
 2. **No phone cards:** set `FLEET_ASK_CMD` to a recorder that logs the question and prints the first option, or `yes` for a gate. On Core the front door's environment carries it to the lead; on the TUI export it in the job's root pane before `stampede new` ([F5](#found-by-the-live-runs)). With the phone instead, O4, O5 and O7 wait on the owner's tap: record them as PARTIAL. For a cheaper test lead, set `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` in the front door's environment; `stampede new` reads them itself.
 3. **The ask:** one worker writes `hello-<client>-<backend>.txt`; the lead asks one question with two options, asks a gate for committing the file at `HEAD`, commits only after `gate-ok` prints `APPROVED`, then runs `stampede finish` once.
 4. **Start, from the client** (`--name xc-<client>-<backend>`):

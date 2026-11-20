@@ -18,7 +18,7 @@ PATH is the list of folders your terminal searches for commands. More: [Setup pr
 |---|---|
 | `stampede needs Python 3.9 or later (this is <version>)` | put a newer `python3` first on PATH: stampede runs the first one there |
 | `PROBLEM not on PATH: ...` from `stampede doctor` | run this checkout's `install.sh`, and put `~/.local/bin` first on PATH |
-| `PROBLEM on PATH from another checkout: ...` from `stampede doctor`, or `skip ...: something else is there; left as is` from `install.sh` | an older copy, or a link into another checkout, is in the way. Run this checkout's `install.sh --replace`: it backs each one up first and prints its `rollback.sh` ([Install](SETUP.md#install)). Put `~/.local/bin` first on PATH |
+| `PROBLEM on PATH from another checkout: ...` from `stampede doctor`, `skip ...: something else is there; left as is`, or `stampede kept its existing path` from `install.sh` | an older copy, or a link into another checkout, is in the way. Run the installer's printed preview command to see the targets first. This checkout's `install.sh --replace` backs each one up and prints its `rollback.sh` ([Install](SETUP.md#install)). Put `~/.local/bin` first on PATH |
 | `PROBLEM` from `stampede doctor` or `herdr-doctor` | the line names the broken part and its fix. When a gap is only a `warn`: [Health check](SETUP.md#health-check) |
 | `PROBLEM herdr <version> is older than 0.9.4` or `herdr --version printed no version` | update Herdr, then restart its server yourself |
 | `PROBLEM herdr server not running` (a `warn` while Herdr Core is usable) | start Herdr (run `herdr` in a terminal), then run `herdr-doctor` again |

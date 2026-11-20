@@ -96,6 +96,26 @@ class ClientsInSync(unittest.TestCase):
                 self.assertIn(kind, REFUSED.get(backend, {}), f'{backend} does not take {kind}: REFUSED needs the reason start gives')
 
 
+class InstallPreflight(unittest.TestCase):
+    def test_each_client_keeps_an_existing_command_and_names_the_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            check_process_tree(root)
+            for name, row in CLIENTS.items():
+                with self.subTest(client=name):
+                    job = Job(name, row, 'tui', root, WORKERS, HANDED)
+                    command, ran = job.bin / 'stampede', job.home / 'command-was-run'
+                    original = '#!/bin/bash\ntouch "' + str(ran) + '"\n'
+                    command.write_text(original)
+                    command.chmod(0o755)
+                    code, out, err = job.install()
+                    self.assertEqual(code, 0, out + err)
+                    self.assertIn(f'install.sh: {command} kept its existing path', out)
+                    self.assertIn('--dry-run --replace', out)
+                    self.assertEqual(command.read_text(), original)
+                    self.assertFalse(ran.exists())
+
+
 class Outcomes(unittest.TestCase):
     """Every client, on every backend it claims, passes the command contract of O1 to O9 (O9 for bots) against the fakes.
     No agent runs: the agents' own work (plan.md, the worker's file, the commit) is for the live runs (docs/CLIENTS.md)."""
