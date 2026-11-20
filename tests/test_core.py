@@ -1486,6 +1486,8 @@ class ReviewDraft(CoreCase):
                      'draft-w24-scrolled-ends-in-footer.txt', 'draft-w24-first-line-blank.txt'):
             self.terminal('t1', draft='zzz', screen=(fixtures / name).read_text(), sent=[])
             self.assertEqual(self.told()[1:], (2, [], []), name)
+        self.terminal('t1', draft='zzz', screen='\u00bb line one   \u2191\n  > quoted text\n  continuation\n  \u2190 for agents', sent=[])
+        self.assertEqual(self.told()[1:], (2, [], []))   # review R4: a quoted '>' line is no prompt line
         for screen in ((fixtures / 'empty-w24.txt').read_text(),
                        '\u2022 \u2191\n\n\u00bb Ask Codex to do anyth\n\n  GPT-6-Astra ultra \u00b7 ~\u2026\n  \u2190 for agents'):  # review R3
             self.terminal('t1', draft='', screen=screen, sent=[])

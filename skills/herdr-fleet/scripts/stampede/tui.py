@@ -123,8 +123,8 @@ def cells(row):
 
 
 def composer_empty(screen):
-    """True when a Codex screen's prompt holds no draft. An empty Codex composer is its prompt line (», ›, ❯ or >)
-    holding a dim placeholder, one blank row, its status rows, and a footer of hints as the last row. While anything is
+    """True when a Codex screen's prompt holds no draft. An empty Codex composer is its prompt line (», ›, ❯ or > in
+    column 0) holding a dim placeholder, one blank row, its status rows, and a footer of hints as the last row. While anything is
     typed Codex hides the hints and keeps only a warnings count ('⚠ 2 warnings · f2 to view') on that row, and a
     composer taller than the pane scrolls, with ↑ and ↓ at its right edge. The footer began with '? for shortcuts'
     on 3 Nov 2026 and reads '← for agents · ? for shortcuts' on Codex 0.167.1 (11 Nov 2026). Codex 0.170.0, checked
@@ -139,7 +139,7 @@ def composer_empty(screen):
     rows = [''.join(char for char, _ in line).rstrip() for line in lines]
     while rows and not rows[-1]:
         rows.pop()
-    prompts = [i for i, row in enumerate(rows) if re.match(r' *[»›❯>]( |$)', row)]
+    prompts = [i for i, row in enumerate(rows) if re.match(r'[»›❯>]( |$)', row)]  # column 0: a draft's lines are indented
     if not prompts or prompts[-1] >= len(rows) - 2 or len([row for row in rows[prompts[-1]:] if row]) > 8:
         return False
     prompt = rows[prompts[-1]]

@@ -77,6 +77,9 @@ class HerdrSend(unittest.TestCase):
         out, calls = self.send('idle', '• ↑\n\n» Ask Codex to do anyth\n\n  GPT-6-Astra ultra · ~…\n  ← for agents')
         self.assertEqual(out, 'SUBMITTED build-a')    # review R3: an arrow in a reply above the prompt is no scroll arrow
         self.assertNotIn('ctrl+c', calls)
+        quoted = '» line one             ↑\n  > quoted text\n  continuation\n  ← for agents'  # review R4
+        out, calls = self.send('idle', quoted)
+        self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'))
 
     def test_bare_claude_prompt_gets_no_ctrl_c(self):
         out, calls = self.send('done', '──────\n❯ \n──────')

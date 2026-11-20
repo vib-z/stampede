@@ -1788,7 +1788,8 @@ class Deliver(unittest.TestCase):
                        '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for age\n',  # an unknown footer
                        '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ⚠ 2 · f2\n',
                        '» Ask Codex to do anything\n\n  GPT-6-Astra ultra\n  ← for agents   ↓\n',  # a draft's line
-                       tall.replace('  ← for agents', '', 1)):  # review R1: a scrolled draft, blank line, quoted footer
+                       tall.replace('  ← for agents', '', 1),   # review R1: a scrolled draft, blank line, quoted footer
+                       '» line one   ↑\n  > quoted\n\n  GPT-6-Astra ultra\n  ← for agents\n'):  # R4: a quoted '>' line
             with self.subTest(screen=screen[-80:]):
                 self.assertFalse(tui_.composer_empty(screen))
 

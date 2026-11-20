@@ -410,7 +410,7 @@ EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get starte
 # (live, 20 Nov 2026). That footer marks an empty prompt only as the last row, right under a status row, with no scroll
 # arrow from the last prompt line down: a draft can quote it, and a tall draft hides the status rows and scrolls.
 NARROW_FOOTER = re.compile(r' *← for agents( ·( \?( for( [a-z]*)?)?)?)?( +⚠ .*)?')
-PROMPT_LINE = re.compile(r' *[»›❯>]( |$)')
+PROMPT_LINE = re.compile(r'[»›❯>]( |$)')  # Codex's prompt line, in column 0: a draft's own lines are indented
 
 
 def narrow_footer(screen):
