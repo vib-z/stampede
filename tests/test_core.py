@@ -1473,11 +1473,20 @@ class ReviewDraft(CoreCase):
         for screen in ('\u203a Ask Codex to do anything', '\u203a \n', '  ? for shortcuts',
                        '  \u2190 for agents \u00b7 ? for shortcuts',  # Codex 0.167.1's footer row
                        '\u00bb Ask Codex to do anyth\n\n  GPT-6-Astra ultra \u00b7 ~\u2026\n'
-                       '  \u2190 for agents \u26a0 2 \u00b7 f2', '\u00bb \n'):  # Codex 0.170.0, 24 columns, 20 Nov 2026
+                       '  \u2190 for agents \u26a0 2 \u00b7 f2'):  # Codex 0.170.0, 24 columns, 20 Nov 2026
             self.terminal('t1', screen=screen, sent=[])
             self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []), screen)
         self.shape(read_error={'t1': 'unavailable'})
         self.terminal('t1', sent=[])
+        self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []))
+
+    def test_a_draft_ending_in_codex_170s_narrow_footer_is_refused(self):  # review R2, live screens of 20 Nov 2026
+        fixtures = Path(__file__).resolve().parent / 'fixtures/codex-0.170'
+        for name in ('draft-w24-ends-in-footer.txt', 'draft-w24-tall-ends-in-footer.txt',
+                     'draft-w24-scrolled-ends-in-footer.txt', 'draft-w24-first-line-blank.txt'):
+            self.terminal('t1', draft='zzz', screen=(fixtures / name).read_text(), sent=[])
+            self.assertEqual(self.told()[1:], (2, [], []), name)
+        self.terminal('t1', draft='', screen=(fixtures / 'empty-w24.txt').read_text(), sent=[])
         self.assertEqual(self.told()[1:], (0, ['Fix the nit'], []))
 
     def test_a_marker_in_scrollback_does_not_hide_a_draft(self):  # live: hc read --lines 8 gave the whole screen

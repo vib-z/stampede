@@ -85,36 +85,70 @@ def deliver(job):
 
 
 def screen_of(agent):
-    """The agent's visible screen; a ValueError when Herdr does not answer in DELIVER_CALL seconds."""
+    """The agent's visible screen with its text styles (ANSI), or as plain text from a Herdr that cannot give styles;
+    a ValueError when Herdr does not answer in DELIVER_CALL seconds."""
+    read = [os.environ.get('HERDR', 'herdr'), 'agent', 'read', agent, '--source', 'visible', '--lines', '30']
     try:
-        return subprocess.run([os.environ.get('HERDR', 'herdr'), 'agent', 'read', agent, '--source', 'visible', '--lines', '30'],
-                              capture_output=True, text=True, timeout=DELIVER_CALL).stdout
+        styled = subprocess.run(read + ['--format', 'ansi'], capture_output=True, text=True, timeout=DELIVER_CALL)
+        if styled.returncode == 0:
+            return styled.stdout
+        return subprocess.run(read, capture_output=True, text=True, timeout=DELIVER_CALL).stdout
     except subprocess.TimeoutExpired:
         raise ValueError(f'herdr agent read did not answer in {DELIVER_CALL} s') from None
 
 
-CODEX_FOOTER = re.compile(r' *← for agents|.*\? for shortcuts')  # the hints Codex hides behind a draft
+ESCAPE = re.compile(r'\x1b(?:\[([0-9;:?]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)')  # CSI, OSC, or a two-byte escape
+# Codex's footer of hints, whole or cut to fit a narrow pane, with or without its warnings count: the row it hides
+# behind a draft, keeping only the count.
+CODEX_FOOTER = re.compile(r' *(← for agents( ·( \?( for( [a-z]*)?)?)?)?|\? for shortcuts)( +⚠ .*)?')
+SPARKLE = re.compile('[' + chr(0x2800) + '-' + chr(0x28ff) + ']')  # Codex's startup sparkles, braille dots: not text
+
+
+def cells(row):
+    """[(character, dim)] for one row of a screen read with --format ansi: each printed character, and whether it was
+    drawn dim (SGR 2). A row of plain text gives every character as not dim."""
+    out, dim, at = [], False, 0
+    for found in ESCAPE.finditer(row):
+        out += [(char, dim) for char in row[at:found.start()] if char != '\r']
+        at = found.end()
+        if found.group(2) == 'm' and '?' not in found.group(1):
+            codes, i = [int(code) if code else 0 for code in found.group(1).replace(':', ';').split(';')], 0
+            while i < len(codes):
+                if codes[i] in (38, 48, 58):  # a colour, then 5;n or 2;r;g;b
+                    i += 3 if codes[i + 1:i + 2] == [5] else 5
+                    continue
+                dim = True if codes[i] == 2 else False if codes[i] in (0, 22) else dim
+                i += 1
+    return out + [(char, dim) for char in row[at:] if char != '\r']
 
 
 def composer_empty(screen):
-    """True when a Codex screen's prompt holds no draft. Below its last prompt line (», ›, ❯ or >) an empty Codex
-    composer has one blank row, then its status rows, then a footer of hints as the last row; while anything is typed
-    Codex hides the hints and keeps only a warnings count ('⚠ 2 warnings · f2 to view') on that row. The footer began
-    with '? for shortcuts' on 3 Nov 2026 and reads '← for agents · ? for shortcuts' on Codex 0.167.1 (11 Nov 2026).
-    Codex 0.170.0, checked live on Linux in Herdr 0.9.5 panes 24 to 131 columns wide on 20 Nov 2026, cuts that row
-    to fit its warnings: '← for agents · ? for short', '← for agents   ⚠ 2 warnings · f2 to view',
-    '← for agents ⚠ 2 · f2', or '← for agents' alone. So the last row must start with '← for agents' or hold
-    '? for shortcuts', and the row under the prompt line must be blank (Codex's startup sparkles, braille dots, count
-    as blank): a draft's own lines sit there and above Codex's status rows, so a draft that quotes the footer is still
-    a draft. Text in the prompt line is never read, since a placeholder and a real draft look alike; any other screen
-    is a draft. Live tests: tests/fixtures/codex-0.170."""
-    rows = [re.sub(r'[\u2800-\u28ff]', ' ', row).rstrip() for row in screen.splitlines()]
+    """True when a Codex screen's prompt holds no draft. An empty Codex composer is its prompt line (», ›, ❯ or >)
+    holding a dim placeholder, one blank row, its status rows, and a footer of hints as the last row. While anything is
+    typed Codex hides the hints and keeps only a warnings count ('⚠ 2 warnings · f2 to view') on that row, and a
+    composer taller than the pane scrolls, with ↑ and ↓ at its right edge. The footer began with '? for shortcuts'
+    on 3 Nov 2026 and reads '← for agents · ? for shortcuts' on Codex 0.167.1 (11 Nov 2026). Codex 0.170.0, checked
+    live on Linux in Herdr 0.9.5 panes 24 to 131 columns wide on 20 Nov 2026, cuts it to fit a narrow pane:
+    '← for agents · ? for short', '← for agents   ⚠ 2 warnings · f2 to view', '← for agents ⚠ 2 · f2', or
+    '← for agents' alone. So the last row must be such a footer and nothing else, the row under the prompt line must
+    be blank (a draft's next line sits there), and the prompt line must hold no scroll arrow. In a screen read with
+    its styles (screen_of), the prompt line must also hold Codex's dim placeholder: typed text is never dim, so a
+    draft that quotes the footer in a pane too short for the status rows is still a draft. Any other screen is a
+    draft. Live tests: tests/fixtures/codex-0.170."""
+    lines = [[(SPARKLE.sub(' ', char), dim) for char, dim in cells(row)] for row in screen.splitlines()]
+    rows = [''.join(char for char, _ in line).rstrip() for line in lines]
     while rows and not rows[-1]:
         rows.pop()
     prompts = [i for i, row in enumerate(rows) if re.match(r' *[»›❯>]( |$)', row)]
     if not prompts or prompts[-1] >= len(rows) - 2 or len([row for row in rows[prompts[-1]:] if row]) > 8:
         return False
-    return not rows[prompts[-1] + 1] and bool(CODEX_FOOTER.match(rows[-1]))
+    prompt = rows[prompts[-1]]
+    if rows[prompts[-1] + 1] or '↑' in prompt or '↓' in prompt or not CODEX_FOOTER.fullmatch(rows[-1]):
+        return False
+    if '\x1b[' not in screen:  # plain text: a placeholder and a draft look alike
+        return True
+    shown = [(char, dim) for char, dim in lines[prompts[-1]][len(prompt) - len(prompt.lstrip()) + 1:] if char.strip()]
+    return bool(shown) and all(dim for _, dim in shown) and any(char.isalpha() for char, _ in shown)
 
 
 def ready(agent):

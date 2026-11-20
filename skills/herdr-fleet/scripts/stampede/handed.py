@@ -404,14 +404,27 @@ def reopen_handed(job, agent):
     return 'missing'
 
 
-EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|← for agents|To get started|describe a task|Try "|^ *(>|❯|›|») *$',
-                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt; Codex 0.170 in a narrow
-# pane cuts its placeholder and footer to '» Ask Codex to do anyth' and '← for agents' (live, 20 Nov 2026)
+EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›) *$',
+                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt
+# Codex 0.170 in a narrow pane cuts its placeholder to 'Ask Codex to do anyth' and its footer to '← for agents ⚠ 2 · f2'
+# (live, 20 Nov 2026). That footer marks an empty prompt only as the last row, right under a status row, with no scroll
+# arrow on the screen: a draft can quote it, and a tall draft hides the status rows.
+NARROW_FOOTER = re.compile(r' *← for agents( ·( \?( for( [a-z]*)?)?)?)?( +⚠ .*)?')
+
+
+def narrow_footer(screen):
+    """True when a screen ends in Codex's footer cut to fit a narrow pane, as herdr-send's narrow_footer reads it."""
+    rows = [row.rstrip() for row in screen.splitlines()]
+    while rows and not rows[-1]:
+        rows.pop()
+    return (len(rows) > 1 and bool(rows[-2]) and bool(NARROW_FOOTER.fullmatch(rows[-1]))
+            and not any(arrow in row for row in rows[-8:] for arrow in '↑↓'))
 
 
 def typed(screen, empty=EMPTY_PROMPT):
-    """True when a screen's last 8 non-empty lines show no empty-prompt marker: text already typed in the prompt."""
-    return not empty.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:]))
+    """True when a screen's last 8 non-empty lines show no empty-prompt marker, and it does not end in Codex's narrow
+    footer: text already typed in the prompt."""
+    return not empty.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:])) and not narrow_footer(screen)
 
 
 # A handed agent's empty prompt: Cursor's placeholder too (Herdr 0.9.5, 30 Oct 2026), wrapped over lines in a narrow

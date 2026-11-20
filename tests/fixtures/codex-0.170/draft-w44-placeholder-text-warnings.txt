@@ -1,0 +1,21 @@
+  >_ OpenAI Codex (v0.170.0)
+     ~/projects/stampede
+
+
+› [fleet-job inbox for live-codex170, not
+  typed by the owner] live-codex170.md:
+  live check of the deliverer: reply with
+  just the word delivered, and run no
+  tools.
+
+
+• delivered
+
+  Worked for 6s • 13:43
+
+
+» Ask Codex to do anything
+
+  GPT-6-Astra ultra · ~/projects/stampede ·
+  Reply delivered
+                  ⚠ 2 warnings · f2 to view

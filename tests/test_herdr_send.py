@@ -68,8 +68,12 @@ class HerdrSend(unittest.TestCase):
         out, calls = self.send('idle', (fixtures / 'draft-w24-warnings.txt').read_text())
         self.assertEqual(out, 'SUBMITTED build-a')
         self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'))
-        out, calls = self.send('done', '» \n\n  GPT-6-Astra ultra')   # a bare prompt in approve-for-me mode
-        self.assertNotIn('ctrl+c', calls)
+        for name in ('draft-w24-ends-in-footer.txt', 'draft-w24-tall-ends-in-footer.txt',  # review R2: a quoted footer
+                     'draft-w24-scrolled-ends-in-footer.txt', 'draft-w24-first-line-blank.txt'):
+            screen = '\n'.join((fixtures / name).read_text().splitlines()[-8:])  # herdr-send reads 8 lines
+            out, calls = self.send('idle', screen)
+            self.assertEqual(out, 'SUBMITTED build-a', name)
+            self.assertLess(calls.index('agent send-keys build-a ctrl+c'), calls.index('agent prompt build-a'), name)
 
     def test_bare_claude_prompt_gets_no_ctrl_c(self):
         out, calls = self.send('done', '──────\n❯ \n──────')
