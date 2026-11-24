@@ -52,9 +52,9 @@ Then run the [health check](#health-check) and do the [one-time settings](#unatt
 - It links the four skills into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists. A skill is a set of instructions an agent reads. The four are `skills/stampede` (the front door, the part you talk to), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan`.
 - It links `scripts/stampede` (also as `fleet-job`, its first name) and every `skills/grokbot-herdr/scripts/herdr-*` helper into `~/.local/bin`.
 - Your PATH (the list of folders your terminal looks in for commands) must hold `~/.local/bin`. If a bot will run stampede over SSH, set it for non-interactive SSH shells too.
-- On Linux it starts the event relay's two timers, the watchdog and the flusher. When `--replace` first saves an older timer file of stampede's, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
+- On Linux, when the machine supports it, it sets up the event relay's schedule for its watchdog and flusher: two systemd timers, or one loop. When `--replace` first saves an older timer file of stampede's, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
 - It never installs Herdr or an agent CLI. Start each agent CLI once by hand to sign in.
-- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run prints its rollback line after it.
+- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run that changed something prints its rollback line after it.
 
 **Running it again** is safe.
 - A link already in place prints `ok`.
@@ -65,14 +65,14 @@ Then run the [health check](#health-check) and do the [one-time settings](#unatt
 - Each thing in the way moves into one backup folder for the run: a copy of a command, a link into another checkout, or a real skill folder. The folder is `${XDG_STATE_HOME:-~/.local/state}/stampede/backup-<date>-<time>/`, with a `-2` style suffix when that name is taken. Each thing keeps its path under your home there.
 - This checkout is linked in its place: `replaced <path> -> <target> (the old one is in <backup>)`.
 - Before each change (a move, a new link or a new folder), it writes the change to the folder's `journal`. If it cannot write a change there, it does not make it.
-- The last line is the command that undoes the run, ready to paste: `rollback: bash <backup>/rollback.sh`.
+- When the run changed something, its last line is the command that undoes it, ready to paste: `rollback: bash <backup>/rollback.sh`.
 - If a move, link, folder or journal write fails, the run stops at once with exit 1. Once it has journaled a change, it also prints the rollback line on stderr (the error output).
 - If every link (and, on Linux, every timer unit) is already right, the run makes no backup folder. New links are journaled too, so they can be undone.
 - Nothing is ever deleted. Remove a backup folder yourself once you are sure.
 
 **The rollback** undoes the run's links and folders. It reads the journal newest first, and checks each step against what is there now.
 - It removes a link the run made (`unlinked`), moves an original back when its path is free (`restored`), and removes a folder the run made when it is empty. It skips a step that never happened.
-- When every step is undone, it ends `rolled back: every link and folder that run made is undone`.
+- On success it ends `rolled back: every link and folder that run made is undone`. It keeps stampede's own timer unit files, and says so.
 - Some things it cannot undo: a path that changed since, a folder it made that is now a file or a link, or a link or a move the file system refuses. It names each one in a `left <path>: ...` line, with where the original is. It carries on with the rest, ends `rollback incomplete: each left line says what is where`, and exits 1.
 
 **Installer flags.** Exit 0 means done, 1 a failed link or move, 2 a usage error.

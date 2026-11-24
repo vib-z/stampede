@@ -87,7 +87,7 @@ STARTED review-health (t3) under lead-add-health
 $ stampede start $J lint -- npm run lint
 STARTED lint (t4) under lead-add-health
 ```
-**The cap.** At most 12 helpers work at once in one lead's tree, at any depth (the setting [helpers.max](CONFIGURE.md#every-key-with-its-default)).
+**The cap.** By default at most 12 helpers work at once in one lead's tree, at any depth (the setting [helpers.max](CONFIGURE.md#every-key-with-its-default)).
 This job's cap is 3, so a fourth start waits in the queue. The lead runs `stampede next` when a child's note says it is done:
 
 ```console
