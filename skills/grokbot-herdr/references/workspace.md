@@ -48,6 +48,10 @@ herdr workspace close <workspace id>           # the whole workspace, so no stra
 
 A Core job closes with `stampede close <job dir>`, on the same yes. Never close a project workspace.
 
+The one exception is the owner's own setting `finish.auto_close` ([Configure](../../../docs/CONFIGURE.md#every-key-with-its-default)): then the done event carries `auto_close` `pending`, and a later `closed` event (closed; reopen with the `reopen.sh` it names) or `kept` event (why it stayed open) is what you tell the owner.
+
+A `blocked` event with `kind` `undelivered` means the lead's inbox lines went untyped for 4 hours: read its pane once and tell the owner.
+
 ## Herdr's own docs
 
 Herdr on the machine is `~/.local/bin/herdr`; run `herdr --version` there first. Re-read the [CLI reference](https://herdr.dev/docs/cli-reference/) and [agent automation](https://herdr.dev/docs/agent-automation/), and `herdr <cmd> --help` on the machine, after an upgrade or when a command fails. Where they differ, the installed binary wins.

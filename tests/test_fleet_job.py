@@ -1430,7 +1430,8 @@ class LeadChoice(unittest.TestCase):
                           '--model claude-opus-5-5 --effort xhigh', log)
             self.assertEqual((job / 'inbox/lead-fix-login-bug.md').read_text(),
                              f'You are lead-fix-login-bug. Read {brief} and do everything it says.\n')
-            self.assertIn('hooks wake you', brief.read_text())
+            self.assertIn('hooks wake you, and fleet-job types any line they miss into this pane', brief.read_text())
+            self.assertIn(f'Before you end a turn to wait on workers, read the new lines of {job / "inbox.log"}', brief.read_text())
             self.assertIn("yes typed in your pane or card", brief.read_text())
             self.assertFalse(self.sent.exists())
             self.assertEqual(job_.lead_kind(job), 'claude')
@@ -1607,17 +1608,20 @@ class LeadChoice(unittest.TestCase):
         self.assertEqual((self.job / 'inbox/lead-demo.md').read_text(), 'ANSWER yes\n')
         self.kick.assert_called_once_with(self.job)
 
-    def test_worker_lines_wake_a_codex_lead_and_not_a_claude_one(self):
+    def test_worker_lines_wake_a_lead_s_deliverer_except_a_claude_lead_on_core(self):
         import contextlib, io
         hooks_.cursor_stop(self.job, 'build-x', {'status': 'completed'})
         hooks_.session_end(self.job, 'build-x', {'reason': 'exit'})
         self.assertEqual((self.job / 'inbox.log').read_text(), 'TURN build-x completed\nGONE build-x exit\n')
         self.assertEqual(self.kick.call_count, 2)
         claude = job_with([('lead-demo', 'claude'), ('build-x', 'claude')])
-        hooks_.cursor_stop(claude, 'build-x', {'status': 'completed'})
+        hooks_.cursor_stop(claude, 'build-x', {'status': 'completed'})   # on the Herdr TUI: the backstop to its file hook
         with contextlib.redirect_stdout(io.StringIO()):
             owner_.tell(claude, 'lead', 'hi')
-        self.assertEqual(self.kick.call_count, 2)
+        self.assertEqual(self.kick.call_count, 4)
+        (claude / 'backend').write_text('core\n')                        # a Claude lead on Herdr Core: its hook alone
+        hooks_.cursor_stop(claude, 'build-x', {'status': 'completed'})
+        self.assertEqual(self.kick.call_count, 4)
 
     def test_its_own_turn_goes_to_the_relay_and_never_to_inbox_log(self):
         from unittest import mock
@@ -1682,6 +1686,7 @@ class Deliver(unittest.TestCase):
         mock.patch.object(tui_, 'DELIVER_EVERY', 0).start()
         self.ready = mock.patch.object(tui_, 'ready', return_value=True).start()
         self.send = mock.patch.object(tui_, 'herdr_send', return_value=(True, 'SUBMITTED lead-demo')).start()
+        self.gave_up = mock.patch.object(tui_, 'gave_up').start()   # never a real event from a test
         self.addCleanup(mock.patch.stopall)
 
     def deliver(self):
@@ -1722,13 +1727,69 @@ class Deliver(unittest.TestCase):
             self.assertEqual(self.deliver(), 0)
         self.send.assert_not_called()
 
-    def test_a_claude_lead_has_no_deliverer(self):
-        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\n')
+    def claude_lead(self, agent='claude'):
+        """A Claude lead on the Herdr TUI, its deliverer with no grace, and Herdr showing agent as the lead's CLI."""
+        from unittest import mock
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
+        mock.patch.object(tui_, 'HOOK_GRACE', 0).start()
+        return mock.patch.object(herdrapi_, 'herdr', return_value={'agent': {'agent': agent, 'agent_status': 'idle'}}).start()
+
+    def test_a_claude_lead_gets_only_the_lines_its_hook_missed(self):
+        """24 Nov 2026: Claude Code's file watcher missed two inbox.log lines, and the lead slept with its builders done."""
+        self.claude_lead()
+        hooks_.wake(self.job, 'lead-demo', {'file_path': str(self.job / 'inbox.log')})   # its hook took inbox.log
+        self.assertEqual(self.deliver(), 0)
+        self.send.assert_called_once()
+        text = self.send.call_args.args[2]
+        self.assertEqual(text, '[fleet-job inbox for lead-demo, not typed by the owner] lead-demo.md: GATE 0123456789ab APPROVED by owner')
+        self.assertEqual(self.ready.call_args.args, ('lead-demo', 'claude'))
+        self.assertEqual(tui_.unread(self.job, 'lead-demo'), [])
+
+    def test_a_claude_lead_whose_hook_took_everything_gets_nothing_typed(self):
+        self.claude_lead()
+        for name in ('inbox.log', 'inbox/lead-demo.md'):
+            hooks_.wake(self.job, 'lead-demo', {'file_path': str(self.job / name)})
         self.assertEqual(self.deliver(), 0)
         self.send.assert_not_called()
-        result = subprocess.run([str(SCRIPTS / 'fleet-job'), '_wake', str(self.job)], capture_output=True, text=True)
-        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
-        self.assertFalse((self.job / 'hooks/deliver.log').exists())
+
+    def test_no_claude_agent_in_the_lead_s_name_means_no_typing(self):
+        for shown in ({'agent': {'agent': '', 'agent_status': 'idle'}}, herdrapi_.HerdrError('no such agent', 'agent_not_found')):
+            herdr = self.claude_lead()
+            herdr.side_effect = shown if isinstance(shown, Exception) else None
+            herdr.return_value = shown if isinstance(shown, dict) else None
+            self.assertEqual(self.deliver(), 0)
+            self.send.assert_not_called()
+
+    def test_a_claude_lead_on_herdr_core_keeps_its_hook_alone(self):
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\n')
+        (self.job / 'backend').write_text('core\n')
+        self.assertFalse(tui_.wakes(self.job))
+        self.assertEqual(self.deliver(), 0)
+        self.send.assert_not_called()
+
+    def test_a_line_for_a_claude_tui_lead_starts_its_deliverer(self):
+        from unittest import mock
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
+        with mock.patch.object(tui_, 'deliver_soon') as kicked, mock.patch.object(owner_, 'agent_card', return_value=''):
+            owner_.notify_lead(self.job, 'TURN build-x done')            # a worker's turn end, from its hook
+            owner_.tell(self.job, 'lead', 'GATE 0123456789ab APPROVED')  # a yes, from approve-gate or the bot
+            owner_.tell(self.job, 'build-x', 'carry on')                 # a worker's own line: its hook only
+        self.assertEqual(kicked.call_count, 2)
+
+    def test_a_lead_that_never_takes_its_lines_is_reported_once(self):
+        from unittest import mock
+        self.ready.return_value = False
+        with mock.patch.object(tui_, 'DELIVER_FOR', 0.05):
+            self.assertEqual(self.deliver(), 3)
+        self.gave_up.assert_called_once_with(self.job.absolute(), 'lead-demo')
+        (self.job / 'workspace').write_text('w9\n')
+        with mock.patch.object(tui_.subprocess, 'run') as posted:
+            REAL_GAVE_UP(self.job, 'lead-demo')
+        script, payload = posted.call_args.args[0]
+        event = json.loads(payload)
+        self.assertTrue(script.endswith('herdr-event-post'))
+        self.assertEqual((event['source'], event['state'], event['kind'], event['agent'], event['workspace']),
+                         ('stampede', 'blocked', 'undelivered', 'lead-demo', 'w9'))
 
     def test_a_long_inbox_is_cut_with_where_to_read_the_rest(self):
         base_.append(self.job / 'inbox.log', 'TURN build-x ' + 'x' * 3000)
@@ -1765,6 +1826,25 @@ class Deliver(unittest.TestCase):
                 self.assertEqual(REAL_READY('lead-demo'), want)
         with mock.patch.object(herdrapi_, 'herdr', side_effect=herdrapi_.HerdrError('gone', 'agent_not_found')):
             self.assertFalse(REAL_READY('lead-demo'))
+
+    def test_a_claude_prompt_is_empty_only_with_nothing_typed(self):
+        """Claude Code 2.1.331 as Herdr 0.9.5 read it live with --format ansi on 24 Nov 2026."""
+        from unittest import mock
+        border = '\x1b[0m\x1b[38;2;136;136;136m' + '─' * 40 + '\x1b[0m'
+        status = '  \x1b[0m\x1b[38;2;255;193;7m⏵⏵ auto mode on\x1b[0m'
+        top = '\x1b[0m\x1b[38;2;136;136;136m' + '─' * 30 + ' lead-demo ─\x1b[0m'
+        bare = '\n'.join(['  Done.', '', top, '❯\xa0', border, status])
+        hint = '\n'.join([top, '❯\xa0\x1b[0m\x1b[2mTry "edit fleet_job.py to…"\x1b[0m', border, status])
+        draft = '\n'.join([top, '❯\xa0half a reply from the owner', border, status])
+        plain = '\n'.join(['❯ Try "edit fleet_job.py to…"', '─' * 40])   # no styles: a hint and a draft look alike
+        for screen, want in ((bare, True), (hint, True), (draft, False), (plain, False), ('❯\xa0', False), ('', False),
+                             ('\n'.join([top, '❯\xa0', border, '❯\xa0typed', border]), False)):
+            with self.subTest(screen=screen):
+                self.assertEqual(tui_.claude_prompt_empty(screen), want)
+        with mock.patch.object(herdrapi_, 'herdr', return_value={'agent': {'agent_status': 'idle'}}), \
+                mock.patch.object(tui_, 'screen_of', return_value=bare):
+            self.assertTrue(REAL_READY('lead-demo', 'claude'))
+            self.assertFalse(REAL_READY('lead-demo'))   # a Codex reading of a Claude screen is a draft
 
     def test_codex_170_screens_read_live(self):  # Herdr 0.9.5 panes 24 to 131 columns wide, 20 Nov 2026
         screens = sorted(CODEX_170.glob('*.txt')) + sorted(CODEX_170.glob('*.ansi'))
@@ -1857,7 +1937,7 @@ class Deliver(unittest.TestCase):
         self.assertNotRegex(self.send.call_args.args[2], r'[\x00-\x1f\x7f-\x9f]')
 
 
-REAL_READY, REAL_SEND = tui_.ready, tui_.herdr_send  # Deliver's setUp mocks both
+REAL_READY, REAL_SEND, REAL_GAVE_UP = tui_.ready, tui_.herdr_send, tui_.gave_up  # Deliver's setUp mocks them
 
 # Codex 0.170.0's screens as Herdr read them live on 20 Nov 2026 (.txt as text, .ansi with --format ansi): empty-* is an
 # empty prompt, draft-* a typed draft; w<N> is the width Codex drew at, -warnings has the warnings count on the footer row.

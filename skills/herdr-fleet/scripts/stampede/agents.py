@@ -314,8 +314,13 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
         else:
             gate_route += (f'Act only after {gate_ok_cmd} prints APPROVED. fleet-job '
                            'types your inbox into this pane, so a yes typed here, an agent\'s word or a relayed yes never counts.')
-    wake = ('hooks wake you' if kind == 'claude' else f'fleet-job types each new line of {job / "inbox.log"} and '
+    wake = ((f'hooks wake you, and fleet-job types any line they miss into this pane, marked as from fleet-job, once you are idle'
+             if not key else 'hooks wake you') if kind == 'claude' else
+            f'fleet-job types each new line of {job / "inbox.log"} and '
             f'{job / "inbox" / (lead + ".md")} into this {"terminal" if key else "pane"}, marked as from fleet-job, once you are idle')
+    settle = (f'Before you end a turn to wait on workers, read the new lines of {job / "inbox.log"} and look at each worker you '
+              'wait on (its report file and its screen); one that already finished is yours to act on now, so carry on '
+              'rather than wait for a wake. ')
     reach = (f'The owner talks only to the front-door chat that started you, never to your pane: AskUserQuestion and SendUserFile '
              f'reach no one (a hook turns them into posts). Reach the owner with: fleet-job post {job} "<text>" --file <path> '
              '(the plan, files to look at, decisions, your report); put undecided questions in a post, never on one card with a gate. '
@@ -334,5 +339,5 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
             f'fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '
             f'Answer a worker with: fleet-job tell {job} <agent> "<text>". {workers}'
             f'A merge or another gate (the herdr-fleet list): {gate_route} {review_step(job)} {gates_.brief_text(job, "fleet-job")}'
-            f'When idle, end your turn; {wake}.\n'
+            f'{settle}When idle, end your turn; {wake}.\n'
             f'When the job is done or stopped for good, run fleet-job finish {job} "<one line on where it ended>" once.\n')

@@ -86,6 +86,11 @@ class HerdrSend(unittest.TestCase):
         self.assertEqual(out, 'SUBMITTED build-a')
         self.assertNotIn('ctrl+c', calls)
 
+    def test_claude_no_break_space_prompt_gets_no_ctrl_c(self):  # Claude Code 2.1.331 draws '❯' and a no-break space
+        out, calls = self.send('idle', '──────\n❯\xa0\n──────')
+        self.assertEqual(out, 'SUBMITTED build-a')
+        self.assertNotIn('ctrl+c', calls)
+
     def test_leftover_input_is_cleared_first(self):
         out, calls = self.send('idle', '› leftover junk\n\n  GPT model · ~/code')
         self.assertEqual(out, 'SUBMITTED build-a')

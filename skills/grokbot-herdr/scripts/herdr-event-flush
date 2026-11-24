@@ -25,7 +25,7 @@ tell_lead(){
   text="UNDELIVERED $(jq -r '"\(.payload.state) \(if .payload.state == "post" then "outbox \(.payload.outbox)" else (.payload.gate // .payload.ask) end) for \(.payload.owner)"' "$1") $2"
   if [ "$(cat "$job/backend" 2>/dev/null)" = native ]; then fleet-job tell "$job" lead "$text" >/dev/null 2>&1 || true; return 0; fi
   printf '%s\n' "$text" >>"$job/inbox.log"
-  fleet-job _wake "$job" >/dev/null 2>&1 || true   # a Codex lead has no file hook: fleet-job types the line once it is idle
+  fleet-job _wake "$job" >/dev/null 2>&1 || true   # fleet-job types the line once the lead is idle (a Claude lead's file hook may take it first)
 }
 shopt -s nullglob
 files=("$Q"/*.json); [ ${#files[@]} -eq 0 ] && exit 0

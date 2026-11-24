@@ -3,7 +3,7 @@ import contextlib, fcntl, hashlib, json, os, shlex, shutil, signal, stat, subpro
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, herdrapi as herdrapi_, tui as tui_, settings as settings_, out as out_
+from . import autoclose as autoclose_, base as base_, job as job_, herdrapi as herdrapi_, tui as tui_, settings as settings_, out as out_
 
 ASK_CMD = None  # a test's stand-in for the setting ask.command
 
@@ -36,6 +36,8 @@ def tell(job, name, text):
             tui_.deliver_soon(job)
             where = 'terminal' if job_.backend(job) == 'core' else 'pane'
             return out_.emit('DELIVERED', f'DELIVERED {name} (inbox file; typed into its {where} once it is idle)', agent=name)
+        if name == lead:  # the backstop to a Claude lead's file hook, as for its inbox.log
+            tui_.wake_lead(job)
         # a pending card holds the turn: the inbox is read only once the card is answered (a Core agent has no pane to read)
         if job_.backend(job) != 'core' and agent_card(name):
             out_.emit('BLOCKED_ON_CARD', f'BLOCKED_ON_CARD {name}: queued in its inbox, but it waits at a question card and reads '
@@ -52,14 +54,14 @@ def tell(job, name, text):
 
 
 def notify_lead(job, text, kept=None):
-    """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed. On a native
-    job Core types it: 0, or 2 when it was not typed (kept names the file that holds it, in the FAILED line)."""
+    """One line for the lead in inbox.log, where a Claude lead's file hook sees it; a Codex lead gets it typed, and so
+    does a Claude lead on the Herdr TUI whose hook missed it (tui.deliver). On a native job Core types it: 0, or 2 when
+    it was not typed (kept names the file that holds it, in the FAILED line)."""
     from . import native as native_
     if job_.backend(job) == 'native':
         return native_.notify_lead(job, text, kept)
     base_.append(Path(job) / 'inbox.log', text)
-    if job_.lead_kind(job) == 'codex':
-        tui_.deliver_soon(job)
+    tui_.wake_lead(job)
 
 
 def ask_now(job, question, options, command=None, gate=None, ident=None):
@@ -378,8 +380,11 @@ def finish(job, summary):
     if not summary:
         raise ValueError('finish needs one line on where the job ended')
     stamp = job / 'finished'
+    closing = ''
     if not stamp.is_file():
-        fields = {'state': 'done', 'summary': summary, **({'gates_off': gone} if gone else {})}
+        closing = autoclose_.enabled(job)  # the setting finish.auto_close: only on the first finish, so one closer runs
+        fields = {'state': 'done', 'summary': summary, **({'gates_off': gone} if gone else {}),
+                  **({'auto_close': 'pending'} if closing else {})}
         workspace = (job / 'workspace').read_text().strip() if (job / 'workspace').is_file() else ''
         if workspace:
             fields['workspace'] = workspace
@@ -401,6 +406,9 @@ def finish(job, summary):
     handed_.unmark_handed(job)
     if gone:
         print('gates off: ' + ', '.join(gone))
+    if closing:
+        autoclose_.start(job)
+        print(f'AUTO-CLOSE {closing}: closes once every agent is idle and nothing is left to lose or answer; see {job / "close.log"}')
     out_.emit('FINISHED', 'FINISHED ' + str(job), gates_off=gone)
     if job_.backend(job) == 'native':
         with contextlib.suppress(Exception):  # the record is a copy: a refresh that fails never fails finish

@@ -16,7 +16,7 @@ ENV = {'FLEET_LEAD_KIND': 'lead.kind', 'FLEET_LEAD_FORBID': 'lead.forbid', 'FLEE
        'FLEET_TRUST_ROOT': 'trust_root', 'STAMPEDE_MAX_HELPERS': 'helpers.max', 'STAMPEDE_TAB_PANES': 'helpers.tab_panes'}
 # FLEET_LEAD_MODEL and FLEET_LEAD_EFFORT set the pair of the CLI the model belongs to: see lead_env.
 USER_ONLY = ('ask.command', 'jobs_root', 'trust_root', 'gates.', 'lead.forbid', 'lead.allow',
-             'workers.forbid', 'workers.max_effort', 'backend')
+             'workers.forbid', 'workers.max_effort', 'backend', 'finish.')
 ENV_ONLY = (  # read by other programs too, so they stay environment variables: (name, default, what it does)
     ('FLEET_WATCH_INTERVAL', '30', 'seconds between passes of fleet-watch.sh'),
     ('FLEET_WATCH_PASSES', '0', 'fleet-watch.sh stops after this many passes; 0 runs until stopped'),

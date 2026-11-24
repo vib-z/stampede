@@ -74,7 +74,7 @@ class Settings(unittest.TestCase):
             'review.step': 'end', 'helpers.max': 12, 'helpers.layout': 'grid', 'helpers.tab_panes': 4,
             'timeouts.wait': 3600, 'timeouts.hc_call': 60, 'timeouts.leave': 15, 'timeouts.hold_settle': 5,
             **{'gates.' + g: True for g in ('merge', 'push_default_branch', 'deploy', 'publish', 'send', 'spend', 'close')},
-            'merge.method': 'squash'})
+            'merge.method': 'squash', 'finish.auto_close': False, 'finish.close_after': 600})
         self.assertEqual(set(s.sources.values()), {'default'})
         self.assertEqual(s.problems, [])
         self.assertEqual(s.files, {'user': {'path': str(self.home / '.config/stampede/config.toml'), 'exists': False},
