@@ -34,21 +34,37 @@ def type_pointer(job, agent, who, brief, pointer):
 
 
 def deliver_soon(job):
-    """Wake a Codex lead: a detached deliverer types its unread inbox lines into its pane once it is idle, then exits."""
+    """Wake the lead: a detached deliverer types its unread inbox lines into its pane once it is idle, then exits. For a
+    Claude lead on the Herdr TUI it is the backstop to its file hook (see deliver)."""
     job = Path(job).absolute()
     (job / 'hooks').mkdir(exist_ok=True)
-    with (job / 'hooks' / 'deliver.log').open('a') as out:
-        subprocess.Popen([sys.executable, '-I', str(base_.SCRIPTS / 'fleet_job.py'), '_deliver', str(job)],
-                         stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
+    base_.detach([sys.executable, '-I', base_.SCRIPTS / 'fleet_job.py', '_deliver', job], job / 'hooks' / 'deliver.log')
 
 
 DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 1500  # seconds between looks, seconds one deliverer waits, characters per prompt
 DELIVER_CALL, DELIVER_SEND = 15, 120  # seconds a Herdr look and a herdr-send may take before the deliverer stops waiting
+HOOK_GRACE = 30  # seconds a Claude lead's own file hook has to take a line before the deliverer types it
+
+
+def wakes(job):
+    """True when a deliverer serves this job's lead: a Codex lead (it has no file hook), and a Claude lead on the Herdr
+    TUI, whose file hook can miss a change (Claude Code's file watcher dropped two in one live job on 24 Nov 2026)."""
+    kind = job_.lead_kind(job)
+    return kind == 'codex' or (kind == 'claude' and job_.backend(job) == 'tui')
+
+
+def wake_lead(job):
+    """After a line for the lead is written: start a deliverer when one serves it."""
+    if wakes(job):
+        deliver_soon(job)
 
 
 def deliver(job):
     """Type a Codex lead's unread inbox lines (inbox/<lead>.md and inbox.log) into its pane while it is idle or done
     and not focused, until none is unread (a Herdr Core job: deliver_core, after typing_unsafe says it may type at all).
+    A Claude lead on the Herdr TUI: its file hook reads the lines and moves the same offsets, so the deliverer first
+    gives it HOOK_GRACE seconds and then types only what the hook did not take, once the lead is idle with an empty prompt;
+    it exits at once when Herdr shows no Claude agent in the lead's name.
     One deliverer at a time: another one exits at once, and the one running looks
     again after letting go of its lock, so a line written meanwhile is never stranded. A read offset moves only after
     herdr-send says SUBMITTED. Exit 3 when the lead stayed busy, focused, drafting or gone for DELIVER_FOR seconds; exit 4
@@ -57,11 +73,22 @@ def deliver(job):
     from . import relay as relay_
     job = Path(job).absolute()
     lead = job_.roster(job)[1]
-    if job_.lead_kind(job) != 'codex':
+    kind = job_.lead_kind(job)
+    if not wakes(job):
         return 0
     if job_.backend(job) == 'core':
         hcapi_.target(job)
         return relay_.deliver_core(job, lead)
+    if kind == 'claude':  # only a live Claude agent in the lead's name: anything else is not this deliverer's to type into
+        try:
+            if herdrapi_.herdr('agent', 'get', lead, timeout=DELIVER_CALL).get('agent', {}).get('agent') != 'claude':
+                return 0
+        except herdrapi_.HerdrError:
+            return 0
+        except ValueError as error:
+            print(f'{datetime.now():%Y-%m-%d %H:%M} CANNOT REACH HERDR ({base_.line(error)}): left for the next deliverer')
+            return 4
+        time.sleep(HOOK_GRACE)  # the hook usually takes the line within a second; the deliverer is for one it missed
     deadline = time.monotonic() + DELIVER_FOR
     while True:
         with (job / 'hooks' / '.deliver.lock').open('a') as lock:
@@ -72,9 +99,10 @@ def deliver(job):
             while unread(job, lead):
                 if time.monotonic() > deadline:
                     print(f'{datetime.now():%Y-%m-%d %H:%M} GAVE UP after {DELIVER_FOR}s: {lead} stayed busy, focused, drafting or gone')
+                    gave_up(job, lead)
                     return 3
                 try:
-                    if ready(lead) and type_unread(job, lead):
+                    if ready(lead, kind) and type_unread(job, lead):
                         continue
                 except ValueError as error:  # the next kick from outside the sandbox delivers the line
                     print(f'{datetime.now():%Y-%m-%d %H:%M} CANNOT REACH HERDR ({base_.line(error)}): left for the next deliverer')
@@ -82,6 +110,21 @@ def deliver(job):
                 time.sleep(DELIVER_EVERY)
         if not unread(job, lead):
             return 0
+
+
+def gave_up(job, lead):
+    """Tell whoever started the job, once, that the lead's lines stayed unread: a blocked event through the relay (a job
+    marker never holds it back), so the bot or the owner can look. A relay that fails is only logged here."""
+    workspace = (Path(job) / 'workspace').read_text().strip() if (Path(job) / 'workspace').is_file() else ''
+    event = {'source': 'stampede', 'state': 'blocked', 'kind': 'undelivered', 'job': str(Path(job).absolute()), 'agent': lead,
+             'msg': f'{lead} has unread inbox lines that could not be typed for {DELIVER_FOR // 60} minutes: it stayed busy, '
+                    f'focused, drafting or gone. Read its pane, then stampede tell {Path(job).absolute()} lead "<text>".',
+             **({'workspace': workspace} if base_.WS_ID.fullmatch(workspace) else {})}
+    try:
+        subprocess.run([str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-event-post'), json.dumps(event)],
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=DELIVER_CALL)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f'{datetime.now():%Y-%m-%d %H:%M} NOT POSTED: {base_.line(error)}')
 
 
 def screen_of(agent):
@@ -151,7 +194,21 @@ def composer_empty(screen):
     return bool(shown) and all(dim for _, dim in shown) and any(char.isalpha() for char, _ in shown)
 
 
-def ready(agent):
+def claude_prompt_empty(screen):
+    """True when a Claude screen's prompt holds no draft: its last prompt line (❯ in column 0) shows nothing after the
+    marker but Claude's dim placeholder, if anything, and the next row is the box's lower border. Any other screen is a
+    draft. Read live from Claude Code 2.1.331 in a Herdr 0.9.5 pane on 24 Nov 2026: '❯' and a no-break space, or that
+    and a dim 'Try "..."'."""
+    lines = [cells(row) for row in screen.splitlines()]
+    rows = [''.join(char for char, _ in line).rstrip() for line in lines]
+    prompts = [i for i, row in enumerate(rows) if row.startswith('❯')]
+    if not prompts or prompts[-1] + 1 >= len(rows) or not rows[prompts[-1] + 1].lstrip().startswith('─'):
+        return False
+    shown = [(char, dim) for char, dim in lines[prompts[-1]][1:] if char.strip()]
+    return not shown or ('\x1b[' in screen and all(dim for _, dim in shown))
+
+
+def ready(agent, kind='codex'):
     """True when Herdr shows the agent idle or done, nobody focused on its pane and nothing typed in its prompt (herdr-send
     would clear a draft the owner left there). A ValueError when Herdr does not answer in DELIVER_CALL seconds; False when
     it has no such agent."""
@@ -159,7 +216,8 @@ def ready(agent):
         shown = herdrapi_.herdr('agent', 'get', agent, timeout=DELIVER_CALL).get('agent', {})
     except herdrapi_.HerdrError:
         return False
-    return shown.get('agent_status') in ('idle', 'done') and not shown.get('focused') and composer_empty(screen_of(agent))
+    empty = claude_prompt_empty if kind == 'claude' else composer_empty
+    return shown.get('agent_status') in ('idle', 'done') and not shown.get('focused') and empty(screen_of(agent))
 
 
 def unread(job, agent):

@@ -94,8 +94,9 @@ case "$kind" in
 esac
 # A Codex turn outside Herdr has no pane: its thread and turn are what tell two of them apart.
 [ "$esource" = codex-desktop ] && key="$key|$(jq -r '"\(.thread_id//"")|\(.turn_id//"")"' <<<"$payload")"
-# Each finish is its own event. Two jobs can end within the same 120 s.
-if [ "$esource" = stampede ] && [ "$state" = done ]; then
+# Each finish is its own event. Two jobs can end within the same 120 s; so can their workspaces close (closed, kept),
+# and their leads' inbox lines stay unread (blocked).
+if [ "$esource" = stampede ] && case "$state" in done|closed|kept|blocked) true;; *) false;; esac; then
   key="$key|$(jq -r '.job // empty' <<<"$payload")|$(jq -r '.summary // empty' <<<"$payload")"
 fi
 # A Herdr Core job's follower names each episode (event_id): two episodes are two events, the same one is one.

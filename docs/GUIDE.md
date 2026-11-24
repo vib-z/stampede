@@ -188,12 +188,12 @@ These are the steps of the [diagram above](#how-it-flows), the same for every fr
    Each worker gets its own Herdr pane.
 4. **Hooks, not polling.** When a worker reports, ends a turn, asks a question or exits, a line lands in `<job>/inbox.log`.
    The lines are `REPORT`, `TURN`, `QUESTION` and `GONE`, and `UNDELIVERED` for a question, gate or post its bot has not heard.
-   Claude's file hook then wakes the lead. A Codex lead has no file hook, so stampede types the lines into its pane ([Pick the lead](#use-one-job-start-to-finish)).
+   Claude's file hook then wakes the lead, and stampede types any line it missed. A Codex lead has no file hook, so stampede types the lines into its pane ([Pick the lead](#use-one-job-start-to-finish)).
 5. **Review only what ships**, on another model, in at most two rounds.
 6. **Questions and gates go back to whoever started the job.** A bot gets a `question` or `gate` event. It asks you in chat, passes your answer back, and records a gate's yes with `approve-gate`.
    A job you started locally asks on your phone through Moshi. Which yes counts where: [Safety](SAFETY.md).
    The lead keeps working while it waits, and an agent's own say-so never counts.
-7. **The lead reports back once.** When the job is done, or stopped for good, the lead runs `stampede finish <job> "<summary>"`. That is the one done event a bot outside Herdr gets for the job.
+7. **The lead reports back once.** When the job is done, or stopped for good, the lead runs `stampede finish <job> "<summary>"`. That is the one done event a bot outside Herdr gets for the job. With `finish.auto_close` on, the job's own workspace then closes by itself when nothing is left to lose or answer ([Configure](CONFIGURE.md#every-key-with-its-default)).
    While the job is open, plain turn ends stay on the machine. These still go out: blocked, permission prompts, StopFailure, a stale or dead pane, questions, gates and the lead's posts (`stampede post`).
    Then the lead asks whether to close.
 8. **Workers exit when their work is merged** or accepted. Nothing closes without your yes, and `reopen.sh` brings a closed job back.
@@ -291,6 +291,8 @@ stampede new: --fork forks a Claude chat, so it takes a Claude lead: drop --lead
 
 A Codex lead has no file hook. A short-lived deliverer types its new inbox lines into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`,
 once the pane is idle, unfocused and has nothing typed in its prompt. On Herdr Core, Core delivers them.
+A Claude lead on the Herdr TUI has the same deliverer as a backstop: Claude Code's file watcher can miss a change, so after 30 seconds the deliverer types any line the hook did not take, once the lead is idle with an empty prompt.
+If a lead's lines stay unread for 4 hours, the deliverer sends one `blocked` event (`kind` `undelivered`).
 Since this text is typed in, a Codex lead acts on a gate only after `stampede gate-ok` prints `APPROVED`.
 
 The lead reads `ask.md`, writes `plan.md` and goes on at once. Here it writes `briefs/review-hello.md` on the [hand-off template](../skills/herdr-fleet/references/brief.md), then starts one reviewer on another model:

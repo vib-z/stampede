@@ -52,7 +52,7 @@ Every `new` also takes `--no-gate <name>` (repeatable, as `--set gates.<name>=fa
 
 | command | flags | prints |
 |---|---|---|
-| `finish <job> <summary>` | | `FINISHED <job>`, after one `done` event (sent once); `NOT CANCELLED <id>: ...` for a question it could not stop; first `gates off: <names>` when the job had gates off, which the done event carries as `gates_off` |
+| `finish <job> <summary>` | | `FINISHED <job>`, after one `done` event (sent once); `NOT CANCELLED <id>: ...` for a question it could not stop; first `gates off: <names>` when the job had gates off, which the done event carries as `gates_off`; with `finish.auto_close` on, `AUTO-CLOSE <ws>: ...` before it, and the done event carries `auto_close` `pending` |
 | `snapshot <job>` (a Core job) | | the record's path, or `FAILED snapshot (<why>)` |
 | `reopen <job>` (a Core job) | `--fresh`, `--prompt`, `--rerun-programs` | per agent: `LIVE`, `STARTED`, `QUEUED`, `SKIPPED`, `DONE`, `NOT TOLD` or `FAILED`. On policy refusal, one `REFUSED` line, exit 2, and nothing starts |
 | `close <job> [<agent>]` (a Core job) | | `CLOSED <agent> (<address>)` per agent, deepest first; no agent closes the whole job; `SKIPPED <name> (<address>): ...` for a terminal of another job under it, its branch and the terminals above it, then exit 1 |

@@ -14,7 +14,7 @@ When an agent finishes a turn, gets stuck or needs an answer, one short JSON mes
 | claude | Stop, StopFailure, Notification | `herdr-event-claude-hook`, a Claude Code hook |
 | codex | agent-turn-complete | `herdr-event-codex-notify`, the Codex `notify` command |
 | herdr-watchdog | stale, dead | `herdr-event-watchdog` ([watchdogs.md](watchdogs.md)) |
-| stampede | question, gate, post, done | `stampede ask`, `stampede ask --gate`, `stampede post`, `stampede finish` |
+| stampede | question, gate, post, done, blocked, closed, kept | `stampede ask`, `stampede ask --gate`, `stampede post`, `stampede finish`; `blocked` (`kind` `undelivered`) when a lead's inbox lines stayed untyped for 4 hours; `closed` or `kept` from `finish.auto_close` |
 | hc | blocked, error, stale, dead, and more | a Core job's watchers ([events-core.md](events-core.md)) |
 
 ```bash
@@ -46,7 +46,7 @@ herdr-event-flush                                    # send what is queued, olde
   - Ask the owner in chat with the action, PR and commit. Never type a yes into a pane.
 - **A post:** `job`, `agent`, `lead_pane`, `text`, `outbox` (its number), `item` (`<job>/outbox/NNN.md`) and `files` (the copies under `outbox/NNN/`, on the machine): the lead's plan, files to look at, a decision or its report. Show the owner the text and send the files; there is nothing to answer.
   - A post held for a route with no URL goes out by itself once the route has one: the lead's `UNDELIVERED ... held` line says not to post it again. After 24 h in `dead/`, the second line says to post again.
-- **Done:** `source` stampede, `state` done, and `summary`, the lead's one line. A second `finish` sends nothing.
+- **Done:** `source` stampede, `state` done, and `summary`, the lead's one line. A second `finish` sends nothing. With `finish.auto_close` on it also has `auto_close` `pending`, and later one `closed` (the workspace closed; `summary` names `reopen.sh`) or `kept` (`summary` says why it stayed open), with `workspace` and `owner`.
 
 ## How often
 - In a workspace with no open job, one message per turn end: the same pane and state inside 120 seconds is sent once.

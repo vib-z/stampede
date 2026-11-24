@@ -83,8 +83,10 @@ On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in.
 | `gates.merge` | `true` | | `stampede merge` needs a gate approved at the reviewed commit; `false` merges a passing review without one, logged (user only) |
 | `gates.push_default_branch` | `true` | | the `pre-push` hook (git's check before a push) stops a job's agent pushing to the default branch without a gate; `false` lets it, logged (user only) |
 | `gates.deploy`, `gates.publish`, `gates.send`, `gates.spend` | `true` | | the lead asks before a deploy, publishing, sending or any spend; `false` tells it that one needs no yes (user only) |
-| `gates.close` | `true` | | the lead asks before closing a helper's terminals; a whole job never closes from inside it (user only) |
+| `gates.close` | `true` | | the lead asks before closing a helper's terminals; a whole job never closes from inside it, except by `finish.auto_close` (user only) |
 | `merge.method` | `squash` | | how `stampede merge` merges: `squash`, `merge` or `rebase` |
+| `finish.auto_close` | `false` | | `true`: after `stampede finish`, a Herdr TUI job's own workspace closes by itself once every agent is idle and `finish.close_after` has passed. It stays open, with the reason in `<job>/close.log` and a `kept` event, when any pane is not one of the job's agents, an agent is working or blocked, a git folder its panes use has uncommitted or untracked files, a gate waits on you, another job is open there, or the reopen record fails. Otherwise it writes the reopen record, clears the owner tag, closes the workspace and sends a `closed` event. Herdr Core jobs are left alone (user only) |
+| `finish.close_after` | `600` | | seconds the workspace stays open after every agent went idle, so a bot or you can read the lead's last screen (user only) |
 
 ## Environment only, with defaults
 

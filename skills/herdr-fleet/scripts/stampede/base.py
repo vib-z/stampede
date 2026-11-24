@@ -37,3 +37,12 @@ class Retry(ValueError):
 
 
 MIN_PYTHON = (3, 9)  # the oldest Python the unit suite passes on (CI runs it); fleet_job.py refuses an older one
+
+
+def detach(argv, log):
+    """Start argv in the background, in a session of its own, its output appended to log, and return at once. A short
+    shell starts it and exits, so nothing here waits on it or holds its process."""
+    import subprocess
+    with Path(log).open('a') as out:
+        subprocess.run(['/bin/sh', '-c', '"$@" &', 'sh', *map(str, argv)], stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                       start_new_session=True)

@@ -4,6 +4,7 @@
 
 **Works and tested.** Every command in the README and the pages under `docs/` was run against a scratch job with the fakes, or against `--help`.
 - **A job on the Herdr TUI:** the job folder, the lead's start with its hooks, Claude, Codex and Cursor workers, complete worker briefs, plan approval, background questions and cancel, gates that go back to whoever started the job, quieter events while a job is open, a lead forked from the planning chat, a Codex lead, a front door outside Herdr, and reopen.
+  - A Claude lead on the TUI also gets the deliverer as a backstop to its file hook, and `finish.auto_close` closes a finished job's own workspace: tested with fakes, not yet run live.
   - Tested with fakes. Live on macOS (21 Oct 2026): a hooked Claude lead woken by its inbox file, a Codex reviewer's turn through Codex's notify hook, a Cursor worker under auto-review, and a question on the owner's phone that did not block the lead and was cancelled cleanly. A Codex lead on Codex 0.167.1 was checked live on Linux in a Herdr 0.9.5 pane, and on Codex 0.170.0 in panes 24 to 131 columns wide (20 Nov 2026), its deliverer included; no whole job has run live with a real Codex lead yet.
   - The lead's reply to a typed gate approval on Core has not been checked with a live agent.
 - **A Core job, run the way Core works:** the tree, the cap and queue, the layout labels, `tell`, `snapshot`, `reopen`, `close`, the watchdog sweep and the native front door.

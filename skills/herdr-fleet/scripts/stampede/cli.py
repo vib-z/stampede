@@ -3,7 +3,7 @@ backend: new and start."""
 import json, os, shlex, subprocess, sys
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
+from . import autoclose as autoclose_, base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
     doctor as doctor_, check as check_, settings as settings_, gates as gates_, out as out_
 
 
@@ -441,6 +441,7 @@ def parse_and_run(argv):
         json_flag(sub.choices[name])
     sub.add_parser('_deliver').add_argument('job')
     sub.add_parser('_wake').add_argument('job')
+    sub.add_parser('_autoclose').add_argument('job')
     p = sub.add_parser('_ask'); p.add_argument('job'); p.add_argument('--command'); p.add_argument('--option', action='append', default=[])
     p.add_argument('--gate')
     p.add_argument('--ident', help='this question\'s id: names its waiter, so cancel signals only that process')
@@ -655,8 +656,10 @@ def run(a):
         return 0
     if a.cmd == '_deliver':
         return tui_.deliver(a.job)
+    if a.cmd == '_autoclose':
+        return autoclose_.run(a.job)
     if a.cmd == '_wake':
-        return tui_.deliver_soon(a.job) if job_.lead_kind(a.job) == 'codex' else 0
+        return tui_.wake_lead(a.job) or 0
     if a.cmd == '_ask':
         return owner_.ask_now(a.job, ' '.join(a.question), a.option, a.command, a.gate, a.ident)
     raw = a.payload if a.payload is not None else sys.stdin.read()
