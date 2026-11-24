@@ -20,7 +20,7 @@ The one list, and what never counts as a yes: [gates.md](../skills/herdr-fleet/r
 ## Who asks you
 
 `stampede new` writes down which bot started the job, in `<job>/owner`. It takes the name from `HERDR_EVENTS_OWNER`, else from the workspace's owner tag.
-The lead asks each gate with `stampede ask <job> --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>"`. A gate for anything but those two kinds has no kind.
+The lead asks each gate with `stampede ask <job> --gate [--kind merge|push_default_branch] --sha <commit> [--pr <n>] "<the exact action>"`. The code itself checks those two kinds. A gate for anything else needs no kind (`stampede ask --help` lists every kind it takes).
 
 Who asks you depends on how the job started:
 
@@ -82,7 +82,7 @@ Two rules have no switch: never close what the job did not create, and merge onl
 ## Always true
 
 - **Auto mode by default, never no-checks mode.** Claude `--permission-mode auto`, Codex `--approve-for-me`, Cursor `--auto-review`, Hermes its default (a dangerous command asks), Kimi `-y` (a risky action asks).
-  `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode, but only when its pane's shell sits in its own linked git worktree (a second working copy of the repo). Never the lead.
+  `stampede start --yolo-in <worktree>` runs a worker in its CLI's no-checks mode, but only when the worker works in its own linked git worktree (a second working copy of the repo). On the Herdr TUI its pane's shell must sit there; on Herdr Core it must be a Claude or Codex helper whose `--cwd` is that worktree. Never the lead.
 - **Plan approval** (only when you asked to see the plan) lets the lead work inside the job's own folder and branch. It is not a gate, and covers no merge or spend.
-- **Nothing closes by itself,** unless you switch on `finish.auto_close` ([Configure](CONFIGURE.md#every-key-with-its-default)). The last step is always the question whether to close. No answer is a no.
+- **Nothing closes by itself,** unless you switch on `finish.auto_close`, which closes a finished Herdr TUI job's own workspace ([Configure](CONFIGURE.md#every-key-with-its-default)). Otherwise the last step is always the question whether to close, and no answer is a no.
 - **Never touched:** panes, tabs and workspaces the lead did not create; the pane you have focused; credentials and `.env` files.

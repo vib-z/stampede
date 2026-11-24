@@ -36,7 +36,7 @@ PATH is the list of folders your terminal searches for commands. More: [Setup pr
 
 ## Starting and running a job
 
-When `new` refuses, it makes nothing, so fix what it names and run it again.
+A refusal from `new`'s checks makes nothing: fix what the line names, then run `new` again. A `BLOCKED`, `NOT READY` or `UNKNOWN` line means the job already exists: do what the line says, and never start a second lead.
 
 | what you see | fix |
 |---|---|

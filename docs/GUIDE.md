@@ -109,7 +109,7 @@ The full install, with everything you need: [Install](SETUP.md#install). A whole
 
 **Agents.** The lead runs on Claude Code, or on Codex if you pick it, on the Herdr TUI or on Herdr Core ([Pick the lead](#use-one-job-start-to-finish)).
 Workers run on Claude Code, Codex or Cursor. `stampede start --kind claude|codex|cursor` starts each one with its own hooks and auto mode.
-A [Herdr Core](CORE.md) job can run any other CLI as a plain program. The earlier `--core --relay` path hands Hermes and Kimi workers to Herdr TUI panes.
+A [Herdr Core](CORE.md) job can run any other CLI as a plain program. The earlier `--core --relay` path hands Cursor, Hermes and Kimi workers to Herdr TUI panes.
 
 <table>
   <tr>
@@ -189,7 +189,7 @@ These are the steps of the [diagram above](#how-it-flows). They are the same for
 1. **You ask once,** in plain words, in a [front door](#front-doors). It writes your ask to a file and runs `stampede new --file <ask.md>`. Then it tells you the lead's name and steps back.
 2. **One lead plans, then goes.** The lead, named `lead-<slug>`, starts in auto mode in a tab named `lead`.
    - By default it runs on Claude (Opus 5.5) at extra high effort (`xhigh`). With `--lead codex` it runs on Codex (GPT-6.2 Sol), also at `xhigh`.
-   - Every worker it starts runs at `medium` effort, whatever its model.
+   - Every worker it starts runs at `medium` effort, whatever its model. A CLI that takes no effort setting, such as Cursor, gets none.
    - You can change both, for one job, one worker or every job: [Configure](CONFIGURE.md#effort-the-default-and-how-to-change-it).
    - It writes `plan.md`: the tasks, who does each, questions with a safe default, and the gates. Then it starts work.
 3. **A worker only when it pays.** The lead starts a worker for one of these, each in its own Herdr pane:
@@ -207,9 +207,8 @@ These are the steps of the [diagram above](#how-it-flows). They are the same for
    - The lead keeps working while it waits. An agent's own say-so never counts. Which yes counts where: [Safety](SAFETY.md).
 7. **The lead reports back once.** When the job is done, or stopped for good, the lead runs `stampede finish <job> "<summary>"`. That is the one done event a bot outside Herdr gets for the job.
    - While the job is open, plain turn ends stay on the computer. These still go out: blocked, permission prompts, StopFailure, a stale or dead pane, questions, gates and the lead's posts (`stampede post`).
-   - With `finish.auto_close` on, the job's own workspace then closes by itself when nothing is left to lose or answer ([Configure](CONFIGURE.md#every-key-with-its-default)).
-   - Then the lead asks whether to close.
-8. **Workers exit once their work is merged** or accepted. Nothing closes without your yes, and `reopen.sh` brings a closed job back.
+   - By default, the lead then asks whether to close. With `finish.auto_close` on, a Herdr TUI job's own workspace closes by itself once nothing is left to lose or answer ([Configure](CONFIGURE.md#every-key-with-its-default)).
+8. **Workers exit once their work is merged** or accepted. By default nothing closes without your yes, and `reopen.sh` brings a closed job back.
 
 **The lead keeps the state; a worker gets a brief.** The lead holds your ask, the plan, the decisions and the judgement. A worker gets only its brief, so the brief must carry everything it needs.
 A brief has seven sections: Goal, Why, Inputs, Constraints, Done when, Report back and If blocked, as in the [hand-off template](../skills/herdr-fleet/references/brief.md).
@@ -219,7 +218,7 @@ Pick a strong planner for the lead, and a fast, capable model for the workers. B
 **What lives where.** Your Mac, always on, runs Herdr, the lead and the workers. A bot such as Grok Bot runs on its own computer and reaches the Mac over SSH and Tailscale.
 Or everything runs on one remote computer. Either way, the lead and its workers share one machine. Workers on a second machine are [planned](STATUS.md).
 
-**On Herdr Core** the steps stay the same, but Core holds the tree of agents. The lead is a root terminal, and each helper is its child, at any depth. At most 12 work at once.
+**On Herdr Core** the steps stay the same, but Core holds the tree of agents. The lead is a root terminal, and each helper is its child, or the child of another helper, at any depth. By default at most 12 helpers work at once (the setting `helpers.max`); more starts wait in a queue.
 Core's notes about the children, and messages sent with `hc send`, wake the lead. Hooks and inbox files are not used. Questions, gates, posts and finish reach you as above.
 If the lead is blocked, failed, dead or stalled, the machine's watchdog tells you within about 5 minutes ([Herdr Core](CORE.md)).
 

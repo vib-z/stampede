@@ -69,7 +69,7 @@ The full install, other ways to install, and updating: [docs/SETUP.md](docs/SETU
    The last line it prints names the lead and the job's folder.
 6. A new tab named `lead` appears in Herdr, with the lead agent in it. Click it to watch. The lead writes a plan, then starts work. Each extra agent it brings in gets a pane of its own.
 7. If the lead needs you, a question appears in its tab. Pick or type your answer there. With [Moshi](remote/moshi.md), a phone app, set up, its questions reach your phone too.
-8. At the end, the lead writes a short report in its tab. Then it asks whether to close the job. Nothing closes until you say yes.
+8. At the end, the lead writes a short report in its tab. Then it asks whether to close the job. By default, nothing closes until you say yes.
 
 The same job, command by command: [the guide](docs/GUIDE.md#use-one-job-start-to-finish). If something goes wrong: [docs/TROUBLESHOOT.md](docs/TROUBLESHOOT.md).
 

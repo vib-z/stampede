@@ -29,14 +29,14 @@ stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 **What a job remembers.** `stampede new` saves the settings it worked out, with the layer of each value, in `<job>/settings.json`. Every later command of that job reads them there.
 Anything not saved then follows your current config. A later command's own `--set` still wins for that command, and `<job>/max-helpers` for its job.
 
-**User-only settings.** `jobs_root`, `trust_root`, `ask.command`, `lead.allow`, `lead.forbid`, `workers.forbid`, `workers.max_effort`, `backend` and every `gates.` key are yours alone to set.
+**User-only settings.** `jobs_root`, `trust_root`, `ask.command`, `lead.allow`, `lead.forbid`, `workers.forbid`, `workers.max_effort`, `backend`, every `gates.` key and every `finish.` key are yours alone to set.
 stampede reads these only from your file, the environment or a flag. It skips each one in a repo's `.stampede.toml`, with a problem line. It never saves them in `settings.json`, because the job's agents can write that file.
 
 **Model lists.** The lists match exact model names. stampede refuses a model in `lead.forbid` even when it is also in `lead.allow`. Use these lists for your own choices, for example to let only Claude Opus 5.5, Claude Fable 5.2, GPT-6.2 Sol and GPT-6.2 Astra lead.
 A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The lists and the other user-only settings follow your live config at every command.
 
-**Reopen checks them too.** Before a reopen (plain or `--fresh`) starts anything, stampede checks the recorded model and effort of each agent it would start again against your current lists.
-If either lead list is set, reopen needs a recorded lead, with its model, before it restarts that lead. It does not check agents still running, or plain programs.
+**Reopen checks the rules too.** Before a reopen (plain or `--fresh`) starts anything, stampede checks the recorded model and effort of each agent it would start again against your current `lead.allow`, `lead.forbid`, `workers.forbid` and `workers.max_effort`.
+If either lead list is set, reopen refuses when the job has no recorded lead, and checks the recorded model of a lead it would restart. It does not check agents still running, or plain programs.
 An older TUI `reopen.sh` still works as it was written, without this check. Run `herdr-reopen-snapshot` to write a new one that checks.
 
 **Problems.** `stampede config show` names each problem and exits 1. stampede skips unknown keys, values of the wrong type or outside a key's choices, and files that do not parse. `stampede new` refuses to start a job while there is a config problem (exit 2).

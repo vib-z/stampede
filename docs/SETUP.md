@@ -46,7 +46,7 @@ herdr-trust ~/code/my-app            # once per repo, before agents start there
 stampede config set backend core     # optional: Herdr Core by default (the default is the Herdr TUI)
 ```
 
-For most installs these lines are all you need. Read on when the installer skips something, or to see what it changes.
+Then run the [health check](#health-check) and do the [one-time settings](#unattended-agents). Read on here when the installer skips something, or to see what it changes.
 
 **What the installer does.** It makes links (pointers to files), so the files stay in this checkout (your copy of the stampede repo).
 - It links the four skills into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists. A skill is a set of instructions an agent reads. The four are `skills/stampede` (the front door, the part you talk to), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan`.
@@ -58,7 +58,7 @@ For most installs these lines are all you need. Read on when the installer skips
 
 **Running it again** is safe.
 - A link already in place prints `ok`.
-- You may run it from a checkout Herdr manages (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`). Then a link to the same file in another `<N>-<M>/checkout` of that same install moves to this checkout, and prints `relinked`. A clone relinks nothing.
+- When you run it without `--replace` from a checkout Herdr manages (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install moves to this checkout, and prints `relinked`. With `--replace`, it backs that link up and replaces it instead. A clone relinks nothing.
 - Anything else at that path prints `skip ... left as is (--replace backs it up and links)`. Your own copy of a skill or helper is never replaced.
 
 **Take over an older install with `--replace`.**
@@ -66,14 +66,14 @@ For most installs these lines are all you need. Read on when the installer skips
 - This checkout is linked in its place: `replaced <path> -> <target> (the old one is in <backup>)`.
 - Before each change (a move, a new link or a new folder), it writes the change to the folder's `journal`. If it cannot write a change there, it does not make it.
 - The last line is the command that undoes the run, ready to paste: `rollback: bash <backup>/rollback.sh`.
-- If a move, link, folder or journal write fails, the run stops at once, with exit 1 and the rollback line on stderr (the error output).
+- If a move, link, folder or journal write fails, the run stops at once with exit 1. Once it has journaled a change, it also prints the rollback line on stderr (the error output).
 - If every link (and, on Linux, every timer unit) is already right, the run makes no backup folder. New links are journaled too, so they can be undone.
 - Nothing is ever deleted. Remove a backup folder yourself once you are sure.
 
 **The rollback** undoes the run's links and folders. It reads the journal newest first, and checks each step against what is there now.
 - It removes a link the run made (`unlinked`), moves an original back when its path is free (`restored`), and removes a folder the run made when it is empty. It skips a step that never happened.
-- It ends `rolled back: every link and folder that run made is undone`.
-- Some things it cannot undo: a path that changed since, a folder it made that is now a file or a link, or a link or a move the file system refuses. It names each one in a `left <path>: ...` line, with where the original is. It carries on with the rest and exits 1.
+- When every step is undone, it ends `rolled back: every link and folder that run made is undone`.
+- Some things it cannot undo: a path that changed since, a folder it made that is now a file or a link, or a link or a move the file system refuses. It names each one in a `left <path>: ...` line, with where the original is. It carries on with the rest, ends `rollback incomplete: each left line says what is where`, and exits 1.
 
 **Installer flags.** Exit 0 means done, 1 a failed link or move, 2 a usage error.
 
@@ -214,7 +214,7 @@ While a stampede job is open, ordinary turn ends in that workspace stay on your 
 ## Herdr Core
 
 [Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) is an optional second place to run a job, without the Herdr TUI ([CORE.md](CORE.md)).
-A job runs on it only when you ask: with `stampede new --core`, or with `backend = "core"` in your config, which `stampede config set backend core` writes. The default is `tui`.
+A job runs on it only when you ask: with `stampede new --core`, with `backend = "core"` in your config (`stampede config set backend core` writes it), or with `backend = "auto"` for a job started outside a Herdr pane ([CORE.md](CORE.md#when-a-job-runs-on-herdr-core)). The default is `tui`.
 
 1. Install it with its own installer: `curl -fsSL https://releases.herdr.dev/core/install.sh | sh`. It puts `hc` and `herdr-core` in `~/.local/bin`. On macOS, from Herdr Core 0.1.18, they are links into its own app bundle (`~/.local/share/herdr-core/current`). macOS asks once to let Herdr Core reach your local network, and once for the microphone.
 2. Start its core yourself (`hc server start`).

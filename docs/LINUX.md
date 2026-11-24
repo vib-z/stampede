@@ -36,11 +36,11 @@ Moshi's `moshi-hook` has Linux builds too (Homebrew on Linux, or the tarball its
 ## The event timers
 
 The relay's timers run its two helpers on a schedule. When `systemctl --user` answers, `install.sh` enables two systemd user timers: `herdr-event-watchdog.timer` (every 5 minutes) and `herdr-events-flush.timer` (every 2 minutes).
-Otherwise it starts one `herdr-event-supervise` loop held with `flock`. `herdr-doctor --relay` checks whichever this machine uses.
+Otherwise, when `flock` is installed, it starts one `herdr-event-supervise` loop held with `flock`. With neither, it skips the timers and says so. `herdr-doctor --relay` checks whichever this machine uses.
 
 - systemd runs user timers only while your user manager runs. On a machine nobody logs in to, run `loginctl enable-linger $USER` once.
 - The flock loop does not survive a reboot: run `install.sh` again after one.
-- `--no-supervise` skips both. The installer also skips them when `HOME` is not the login home, so a throwaway home never touches a real user manager.
+- `--no-supervise` skips both. The installer also skips them when `HOME` is not the login home, so a throwaway home does not touch a real user manager. `--supervise` starts them anyway.
 - The four unit files in `~/.config/systemd/user/` carry a `# stampede-unit` line.
   - An install without `--replace` rewrites every unit file in which the text `stampede-unit` appears anywhere. With `--replace`, a unit that is already right is left untouched (`ok <unit>`).
   - To keep your own version of one, make sure the text `stampede-unit` appears nowhere in the file, comments included. The installer then leaves it alone (`skip ... left as is`) and does not enable the timers.

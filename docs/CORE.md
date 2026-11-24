@@ -23,7 +23,7 @@ A job runs on the Herdr TUI (Herdr's window, with tabs and panes) by default. It
 - with `--core` on `stampede new`, for one job;
 - with the setting `backend`, which is `tui` by default. `core` makes Core your standing choice. `auto`, if you set it, runs a job on the TUI inside a Herdr pane and on Core anywhere else, and says so on the first line.
 
-`--pane` or `--workspace` always means the TUI. With the default setting, `new` refuses outside a Herdr pane when it has no `--core`, `--pane` or `--workspace`, and makes nothing.
+`--pane` and `--workspace` are Herdr TUI flags: they pick the TUI, and `--core` refuses them. With the default setting, `new` refuses outside a Herdr pane when it has no `--core`, `--pane` or `--workspace`, and makes nothing.
 
 ## The parts of a Core job
 
@@ -130,7 +130,7 @@ A message from an agent arrives in a terminal as `<hc from="t7 name">...</hc>`. 
 A CI wait (waiting for the online tests of a PR) or a build is a plain child of the lead, started with a bare `hc run`: `hc run --bg --name wait-ci-<pr> -- gh pr checks <pr> --watch`.
 It is in the tree by its parent link alone, carries no stampede label and never counts against the cap. When it exits, Core's note tells the lead.
 
-**Close.** Only your recorded yes counts for a gate ([Safety](SAFETY.md)). When the job is done, the lead runs `stampede finish $J "<summary>"`, and closes the job on your yes.
+**Close.** Only your recorded yes counts for a gate ([Safety](SAFETY.md)). When the job is done, the lead runs `stampede finish $J "<summary>"` and asks whether to close. A whole job never closes from one of its own terminals, so on your yes you, or the front door, run `stampede close $J` from outside the job.
 Here the owner closes the job before it is finished, so it can be reopened to work again:
 
 ```console
