@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.5 (24 Nov 2026)
+
+A Claude lead hears inbox lines even when its file hook misses them, a finished job's workspace can close by itself, and herdr-send no longer sends ctrl+c to an empty Claude prompt.
+
 - **A Claude lead hears a worker even when its file hook misses the line (Herdr TUI).** A Claude lead is woken by Claude Code's file watcher on its inbox files. On 24 Nov 2026 that watcher missed three changes in two live jobs: a lead never read its brief pointer, and another slept with its builders and reviewer done until someone looked. Nothing else delivered those lines, and a job's marker keeps plain turn ends from the bot by design. Every line for a Claude lead on the Herdr TUI now also starts the deliverer a Codex lead uses. It gives the hook 30 seconds, then types only the lines the hook did not take, once the lead is idle, unfocused and its prompt is empty (a Claude prompt is read with its text styles, so a typed draft is never cleared). A deliverer that cannot type for 4 hours now sends one `blocked` event with `kind` `undelivered`, for any lead. The lead's brief also says to read `inbox.log` and look at each worker it waits on before it ends a turn to wait. Herdr Core jobs are unchanged. Finding F18 in [docs/CLIENTS.md](docs/CLIENTS.md).
 - **A finished job's workspace can close by itself.** `finish.auto_close` (off by default, your own config only) closes a Herdr TUI job's own workspace after `stampede finish`, once every agent is idle and `finish.close_after` seconds (600) have passed, and only when every pane is one of the job's agents, every git folder they use is clean, no gate waits on you, no other job is open there and the reopen record is written. It then clears the owner tag and closes the workspace. `<job>/close.log` says what it did, and the bot gets one `closed` or `kept` event ([Configure](docs/CONFIGURE.md#every-key-with-its-default)).
 - **`herdr-send` no longer sends ctrl+c to an empty Claude prompt.** Claude Code 2.1.331 draws its empty prompt as `❯` and a no-break space, which `herdr-send` took for leftover input, so it pressed ctrl+c before it typed. It now reads that prompt as empty.
