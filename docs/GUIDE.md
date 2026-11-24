@@ -109,7 +109,7 @@ The full install, with everything you need: [Install](SETUP.md#install). A whole
 
 **Agents.** The lead runs on Claude Code, or on Codex if you pick it, on the Herdr TUI or on Herdr Core ([Pick the lead](#use-one-job-start-to-finish)).
 Workers run on Claude Code, Codex or Cursor. `stampede start --kind claude|codex|cursor` starts each one with its own hooks and auto mode.
-A [Herdr Core](CORE.md) job can run any other CLI as a plain program. The earlier `--core --relay` path hands Cursor, Hermes and Kimi workers to Herdr TUI panes.
+A [Herdr Core](CORE.md) job (`--core`, without `--relay`) can run any other CLI as a plain program. The earlier `--core --relay` path hands Cursor, Hermes and Kimi workers to Herdr TUI panes.
 
 <table>
   <tr>
@@ -167,7 +167,7 @@ A [Herdr Core](CORE.md) job can run any other CLI as a plain program. The earlie
 </table>
 
 Herdr itself knows many more agent CLIs: its `herdr agent start --help` lists 24, from Gemini and Kimi to OpenCode and Copilot.
-That is Herdr's support, not stampede's yet. `stampede start --kind` takes `claude`, `codex` and `cursor` on the Herdr TUI, and `hermes` and `kimi` only as handed workers of a `--core --relay` job. A Herdr Core job runs any other CLI as a program after `--`. Starting workers on the others as kinds is [planned](STATUS.md).
+That is Herdr's support, not stampede's yet. `stampede start --kind` takes `claude`, `codex` and `cursor` on the Herdr TUI, and `hermes` and `kimi` only as handed workers of a `--core --relay` job. A native Herdr Core job (without `--relay`) runs any other CLI as a program after `--`. Starting workers on the others as kinds is [planned](STATUS.md).
 The logos belong to their owners and imply no endorsement ([sources](images/logos/SOURCES.md)).
 
 ### Works well with
@@ -189,7 +189,7 @@ These are the steps of the [diagram above](#how-it-flows). They are the same for
 1. **You ask once,** in plain words, in a [front door](#front-doors). It writes your ask to a file and runs `stampede new --file <ask.md>`. Then it tells you the lead's name and steps back.
 2. **One lead plans, then goes.** The lead, named `lead-<slug>`, starts in auto mode in a tab named `lead`.
    - By default it runs on Claude (Opus 5.5) at extra high effort (`xhigh`). With `--lead codex` it runs on Codex (GPT-6.2 Sol), also at `xhigh`.
-   - Every worker's role defaults to `medium` effort, whatever its model. A worker started on another CLI than its role's gets that CLI's own default unless you give `--effort`, and Cursor takes no effort setting.
+   - Every worker's role defaults to `medium` effort, whatever its model. A worker moved to another CLI with `--kind` may get another effort, and Cursor takes no effort setting.
    - You can change both, for one job, one worker or every job: [Configure](CONFIGURE.md#effort-the-default-and-how-to-change-it).
    - It writes `plan.md`: the tasks, who does each, questions with a safe default, and the gates. Then it starts work.
 3. **A worker only when it pays.** The lead starts a worker for one of these, each in its own Herdr pane:

@@ -54,7 +54,7 @@ Then run the [health check](#health-check) and do the [one-time settings](#unatt
 - Your PATH (the list of folders your terminal looks in for commands) must hold `~/.local/bin`. If a bot will run stampede over SSH, set it for non-interactive SSH shells too.
 - On Linux, when the machine supports it, it sets up the event relay's schedule for its watchdog and flusher: two systemd timers, or one loop. When `--replace` first saves an older timer file of stampede's, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
 - It never installs Herdr or an agent CLI. Start each agent CLI once by hand to sign in.
-- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run that changed something prints its rollback line after it.
+- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run that recorded changes in its journal prints its rollback line after it.
 
 **Running it again** is safe.
 - A link already in place prints `ok`.
@@ -65,7 +65,7 @@ Then run the [health check](#health-check) and do the [one-time settings](#unatt
 - Each thing in the way moves into one backup folder for the run: a copy of a command, a link into another checkout, or a real skill folder. The folder is `${XDG_STATE_HOME:-~/.local/state}/stampede/backup-<date>-<time>/`, with a `-2` style suffix when that name is taken. Each thing keeps its path under your home there.
 - This checkout is linked in its place: `replaced <path> -> <target> (the old one is in <backup>)`.
 - Before each change (a move, a new link or a new folder), it writes the change to the folder's `journal`. If it cannot write a change there, it does not make it.
-- When the run changed something, its last line is the command that undoes it, ready to paste: `rollback: bash <backup>/rollback.sh`.
+- When the run recorded changes in its journal, its last line is the command that undoes its link and folder changes, ready to paste: `rollback: bash <backup>/rollback.sh`.
 - If a move, link, folder or journal write fails, the run stops at once with exit 1. Once it has journaled a change, it also prints the rollback line on stderr (the error output).
 - If every link (and, on Linux, every timer unit) is already right, the run makes no backup folder. New links are journaled too, so they can be undone.
 - Nothing is ever deleted. Remove a backup folder yourself once you are sure.
