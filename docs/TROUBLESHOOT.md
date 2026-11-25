@@ -1,6 +1,6 @@
 # Troubleshoot
 
-Find your message, then follow its fix.
+Find the message you see in the left column, then do what the right column says. A word in `<angle brackets>`, or `...`, stands for a part of the message that changes.
 
 - [Install, update and the health check](#install-update-and-the-health-check)
 - [Starting and running a job](#starting-and-running-a-job)
@@ -16,10 +16,10 @@ PATH is the list of folders your terminal searches for commands. More: [Setup pr
 
 | what you see | fix |
 |---|---|
-| `stampede needs Python 3.9 or later (this is <version>)` | put a newer `python3` first on PATH: stampede runs the first one there |
+| `stampede needs Python 3.9 or later (this is <version>)` | put a newer `python3` first on PATH: stampede runs the first one it finds there |
 | `PROBLEM not on PATH: ...` from `stampede doctor` | run this checkout's `install.sh`, and put `~/.local/bin` first on PATH |
 | `PROBLEM on PATH from another checkout: ...` from `stampede doctor`, or `skip ...: something else is there; left as is` from `install.sh` | an older copy, or a link into another checkout, is in the way. Run this checkout's `install.sh --replace`: it backs each one up first and prints its `rollback.sh` ([Install](SETUP.md#install)). Put `~/.local/bin` first on PATH |
-| `PROBLEM` from `stampede doctor` or `herdr-doctor` | the line names the broken part and its fix. When a gap is only a `warn`: [Health check](SETUP.md#health-check) |
+| `PROBLEM` from `stampede doctor` or `herdr-doctor` | the line names the broken part and its fix. Why some gaps are only a `warn`: [Health check](SETUP.md#health-check) |
 | `PROBLEM herdr <version> is older than 0.9.4` or `herdr --version printed no version` | update Herdr, then restart its server yourself |
 | `PROBLEM herdr server not running` (a `warn` while Herdr Core is usable) | start Herdr (run `herdr` in a terminal), then run `herdr-doctor` again |
 | `PROBLEM Herdr Core not running` from `herdr-doctor --core` | start the core yourself (`hc server start`), then check again. The doctor and stampede never start one |
@@ -36,7 +36,7 @@ PATH is the list of folders your terminal searches for commands. More: [Setup pr
 
 ## Starting and running a job
 
-A refused `new` makes nothing.
+A refusal from `new`'s checks makes nothing: fix what the line names, then run `new` again. A `BLOCKED`, `NOT READY` or `UNKNOWN` line means the job already exists: do what the line says, and never start a second lead.
 
 | what you see | fix |
 |---|---|
@@ -52,7 +52,7 @@ A refused `new` makes nothing.
 | `stampede start: <agent> is already running in pane <pane>`, `... not as the launch this job recorded`, or `pane <pane> is handed to <agent> of <job>` | tell that agent instead, or pick another pane. For a replacement the job did not start, read it with `herdr agent get <pane>`, then end it or use another name |
 | `stampede start: pane ...'s shell is in ..., not ...` | `--yolo-in` needs the pane's shell in that worktree: use auto mode, or `cd` the pane first |
 | `stampede tell: agent <name> is not in this job (it has: ...)` | use one of the names it lists, or `lead` |
-| `BLOCKED_ON_CARD <agent>` from `stampede tell` or `stampede wait` | the agent waits at a question card in its pane and reads nothing else, so your message is queued: answer the card there. In a `--front-door` job the lead's own cards become posts, so this is rare |
+| `BLOCKED_ON_CARD <agent>` from `stampede tell` or `stampede wait` | the agent waits at a question card in its pane and reads nothing else, so your message waits in line: answer the card there. In a `--front-door` job the lead's own cards become posts, so this is rare |
 | `BLOCKED <agent>: clear the startup dialog` | read the screen (`herdr agent read <agent> --source visible --lines 30`), clear the dialog, then send the printed `stampede tell` line |
 | `BLOCKED <lead>: <kind>` from `stampede wait` on a Core job | the lead waits at a dialog (a permission, a trust prompt). Show the owner the screen `wait` printed, clear it only as they say (`hc keys <address> <keys>`), then run `wait` again |
 | the lead's pane shows Claude's sign-in or first-run screen, though `stampede new` printed `DELIVERED` | sign in to Claude Code once in a plain terminal (`claude`) before your first ask. Then finish the screen in the lead's pane and send `stampede tell <job> lead "Read <job>/briefs/<lead>.md"` |
@@ -122,8 +122,10 @@ A gate is a step that needs your yes ([Safety](SAFETY.md)).
 - Startup dialogs: [unattended-setup.md](../skills/herdr-fleet/references/unattended-setup.md).
 
 ## FAQ
-- *Do I need stampede for this?* Only for a big job: hours long, more than one agent family, anything that leaves your computer (merge, push, send, spend, publish, deploy), or work that must survive a restart. A small job runs as one agent session with its built-in subagents. It still runs inside Herdr, in a single tagged pane of its own, so its finish arrives as an event. That also answers "why not subagents": for small jobs, use them. The rule: [Size the job first](../skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
-- *Why two names?* `stampede` is the public name of `fleet-job`, its first name. Both run the same command.
+- *Do I need stampede for this?* Only for a big job. A job is big when it is hours long, uses more than one agent family, does anything that leaves your computer (merge, push, send, spend, publish, deploy), or must survive a restart.
+  A small job runs as one agent session with its built-in subagents (helpers the agent starts inside itself). It still runs inside Herdr, in a single tagged pane of its own, so its finish arrives as an event.
+  That also answers "why not subagents": for small jobs, use them. The rule: [Size the job first](../skills/herdr-fleet/SKILL.md#size-the-job-first-small-or-big).
+- *Why two names?* `stampede` is the public name of `fleet-job`, its first name. Both names run the same command.
 - *Can Codex or Cursor lead?* Codex can, on the Herdr TUI and on Herdr Core: `stampede new --lead codex` ([Pick the lead](GUIDE.md#use-one-job-start-to-finish)). Cursor not yet ([roadmap](STATUS.md)).
 - *Can workers run on Gemini, Kimi or the other agents Herdr knows?* In a Core job, any CLI runs as a program (`stampede start <job> <name> -- <cli> ...`). In a `--core --relay` job, Hermes and Kimi are handed to Herdr TUI panes. As first-class kinds, not yet ([roadmap](STATUS.md)).
 - *Can a job run without the Herdr TUI?* Yes, on Herdr Core ([Herdr Core](CORE.md)).

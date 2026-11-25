@@ -1,18 +1,20 @@
 # Configure
 
-This page lists every setting, its default and where to change it. You need to set none.
+This page lists every setting, its default and where to change it.
+A setting changes how stampede behaves. Each one has a default, the value it takes when you set nothing, so you need to set none.
 
 - [Effort: the default, and how to change it](#effort-the-default-and-how-to-change-it)
 - [Every key, with its default](#every-key-with-its-default)
 - [Environment only, with defaults](#environment-only-with-defaults)
 
-stampede reads each setting from these layers; the last one that sets it wins:
+stampede reads each setting from these layers, in this order. When two layers set the same key, the later one wins:
 
 1. the defaults, in [defaults.toml](../skills/herdr-fleet/scripts/stampede/defaults.toml), the list of every key;
 2. yours: `~/.config/stampede/config.toml` (`$XDG_CONFIG_HOME/stampede/config.toml` when that is set);
-3. the project's: `.stampede.toml` at the root of the repo (your project's folder), which it can commit (save in its history);
-4. the environment variables in the key table below. Core launches also pass along `XDG_CONFIG_HOME` when set, so commands in those terminals read the same config;
-5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value` (repeatable, on `new` and `start`; the value is read as TOML, the format of these files, and a bare word is a string (text)).
+3. the project's: `.stampede.toml` at the root of the repo (your project's folder), which the project can commit (save in its history);
+4. the environment variables in the key table below. Core launches also pass along `XDG_CONFIG_HOME` when it is set, so commands in those terminals read the same config;
+5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value`.
+   `--set` works on `new` and `start`, and you can give it more than once. Its value is read as TOML, the format of these files, and a bare word is read as text.
 
 [config.example](../config.example) holds every key with its default. Copy it to `~/.config/stampede/config.toml` and keep only what you change:
 
@@ -24,15 +26,20 @@ stampede config show --job <job>         # what that job saved at new
 stampede new --file ask.md --set helpers.max=6 --set lead.kind=codex
 ```
 
-**What a job remembers.** `stampede new` saves what it resolved, with the layer of each value, in `<job>/settings.json`, and every later command of that job reads it there. Anything not set then follows your current config. A later command's own `--set` still wins for that command, and `<job>/max-helpers` for its job.
+**What a job remembers.** `stampede new` saves the settings it worked out, with the layer of each value, in `<job>/settings.json`. Every later command of that job reads them there.
+Anything not saved then follows your current config. A later command's own `--set` still wins for that command, and `<job>/max-helpers` for its job.
 
-**User-only settings.** `jobs_root`, `trust_root`, `ask.command`, `lead.allow`, `lead.forbid`, `workers.forbid`, `workers.max_effort`, `backend` and every `gates.` key are yours to set. stampede reads these only from your file, the environment or a flag. In a repo's `.stampede.toml` each is skipped, with a problem line. They are never saved in `settings.json`, which the job's agents can write.
+**User-only settings.** `jobs_root`, `trust_root`, `ask.command`, `lead.allow`, `lead.forbid`, `workers.forbid`, `workers.max_effort`, `backend`, every `gates.` key and every `finish.` key are yours alone to set.
+stampede reads these only from your file, the environment or a flag. It skips each one in a repo's `.stampede.toml`, with a problem line. It never saves them in `settings.json`, because the job's agents can write that file.
 
-Model lists match exact model names. A model in `lead.forbid` is refused even when it appears in `lead.allow`. Set these lists to apply your own choices, such as Claude Opus 5.5, Claude Fable 5.2, GPT-6.2 Sol and GPT-6.2 Astra for leads. A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The rest follow your live config at every command.
+**Model lists.** The lists match exact model names. stampede refuses a model in `lead.forbid` even when it is also in `lead.allow`. Use these lists for your own choices, for example to let only Claude Opus 5.5, Claude Fable 5.2, GPT-6.2 Sol and GPT-6.2 Astra lead.
+A job's gates are fixed at `stampede new`, in the owner-side record ([Safety](SAFETY.md)). The lists and the other user-only settings follow your live config at every command.
 
-Before a plain or fresh reopen starts anything, Stampede checks the recorded model and effort of each agent it would relaunch against current policy. If either lead list is set, reopen needs a recorded lead identity and a model for any lead it would restart. Live agents and raw programs are exempt. Older TUI `reopen.sh` files still work as generated. Refresh them with `herdr-reopen-snapshot` to enable this check.
+**Reopen checks the rules too.** Before a reopen (plain or `--fresh`) starts anything, stampede checks the recorded model and effort of each agent it would start again against your current `lead.allow`, `lead.forbid`, `workers.forbid` and `workers.max_effort`.
+If either lead list is set, reopen refuses when the job has no recorded lead, and checks the recorded model of a lead it would restart. It does not check agents still running, or plain programs.
+An older TUI `reopen.sh` still works as it was written, without this check. Run `herdr-reopen-snapshot` to write a new one that checks.
 
-**Problems.** `stampede config show` names each problem and exits 1. Stampede skips unknown keys, values of the wrong type or outside a key's choices, and files that do not parse. `stampede new` refuses to start a job while there is a config problem (exit 2).
+**Problems.** `stampede config show` names each problem and exits 1. stampede skips unknown keys, values of the wrong type or outside a key's choices, and files that do not parse. `stampede new` refuses to start a job while there is a config problem (exit 2).
 
 ## Effort: the default, and how to change it
 
@@ -42,7 +49,10 @@ Effort is how hard an agent thinks before it acts. By default:
 - **Every worker** runs at `medium`: build, research, review, design, qa, copy, test, and any other role, which takes `roles.default`.
 - **On any model.** Picking another model keeps the effort. Only an effort you set changes it.
 
-A worker cap is optional. Set `workers.max_effort` to check the worker effort after role defaults and flags. With a cap set, an effort above it or outside the listed levels is refused. If no effort resolves for Claude, Codex or Hermes, give `--effort`. Cursor and Kimi can start with no resolved effort because stampede passes no effort flag to them. Each CLI's levels are in [clis.md](../skills/herdr-fleet/references/clis.md).
+You can change both, for one job, one worker or every job: see the table below.
+
+**A cap on worker effort** is optional. Set `workers.max_effort`, and stampede checks each worker's effort after role defaults and flags. It refuses an effort above the cap, or outside the listed levels.
+With a cap set, if no effort is found for Claude, Codex or Hermes, give `--effort`. Cursor and Kimi can start without one, because stampede passes them no effort flag. Each CLI's levels are in [clis.md](../skills/herdr-fleet/references/clis.md).
 
 | to change | do this |
 |---|---|
@@ -53,18 +63,19 @@ A worker cap is optional. Set `workers.max_effort` to check the worker effort af
 | one worker | `stampede start <job> build-api --brief <file> --effort high` |
 | one worker on another model or CLI | `stampede start <job> build-ui --brief <file> --kind codex --model <model> --effort high` |
 
-On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in. A role's effort goes only with its own CLI. With `--kind codex` on a Claude role, give `--effort` too, or Codex uses its own default.
+On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in.
+A role's effort goes only with its own CLI. With `--kind codex` on a Claude role, give `--effort` too, or Codex uses its own default.
 
 ## Every key, with its default
 
 | key | default | environment | what it does |
 |---|---|---|---|
 | `backend` | `tui` | | where `stampede new` runs a job given no `--core`, `--pane` or `--workspace`: `tui` (the Herdr TUI; outside a Herdr pane `new` refuses), `core` (Herdr Core), or `auto` if you ask for it (the TUI inside a Herdr pane, Core anywhere else). `stampede config set backend <tui\|core\|auto>` writes it to your file (user only) |
-| `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | every job folder, on every backend, is `<root>/jobs/<date>-<owner or local>-<slug>`, never in a repo (user only) |
-| `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | a Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
+| `jobs_root` | `~/code/herdr-jobs` | `FLEET_JOBS_ROOT` | where job folders go: every job folder, on every backend, is `<root>/jobs/<date>-<owner or local>-<slug>`, never in a repo (user only) |
+| `trust_root` | `~/code` | `FLEET_TRUST_ROOT` | the folder your trusted repos sit in. A Core job's repo must sit under it (user only). `herdr-trust` and `herdr-doctor` read only `FLEET_TRUST_ROOT`: if you move the root, export that too |
 | `lead.kind` | `claude` | `FLEET_LEAD_KIND` | the lead's CLI when `stampede new` has no `--lead`: `claude` or `codex`, on the Herdr TUI and on Herdr Core. `--fork` takes `claude` only |
 | `lead.forbid` | `[]` | `FLEET_LEAD_FORBID` (comma-separated) | exact models that may not lead a job. `stampede new` refuses one before it makes anything. Restarting a TUI or Core relay lead with `stampede start` checks the list too (user only) |
-| `lead.allow` | `[]` | `FLEET_LEAD_ALLOW` (comma-separated) | when set, the only exact models that may lead. checked at `new`, on a lead restart with `start`, and before a reopen relaunches the lead (user only) |
+| `lead.allow` | `[]` | `FLEET_LEAD_ALLOW` (comma-separated) | when set, the only exact models that may lead. Checked at `new`, on a lead restart with `start`, and before a reopen starts the lead again (user only) |
 | `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
 | `lead.codex.model`, `lead.codex.effort` | GPT-6.2 Sol (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
 | `workers.forbid` | `[]` | | exact models workers may not use. Checked by `stampede start` on every backend after role defaults and flags. With a non-empty list, give `--model` if no model resolves (user only) |
@@ -90,7 +101,9 @@ On the Herdr TUI, `start` also needs `--pane <id>`, the pane the worker runs in.
 
 ## Environment only, with defaults
 
-Other programs read these, so they stay in the environment. Export them in your shell profile, or in the shell file `~/.config/stampede/config` (`$XDG_CONFIG_HOME/stampede/config` when that is set), sourced from your profile. The relay scripts read that file themselves, so the hooks and the timers see it with no line in your profile.
+Other programs read these, so they stay environment variables (named values your shell passes to every program it starts).
+Export them in your shell profile, or in the shell file `~/.config/stampede/config` (`$XDG_CONFIG_HOME/stampede/config` when that is set), sourced from your profile.
+The relay scripts read that file themselves, so the hooks and the timers see it with no line in your profile.
 - They read only its plain lines, `NAME=value` or `export NAME=value`: the value bare or quoted, with `$HOME` or a leading `~/` at most. They run nothing in it, so a value worked out by a command belongs in your shell profile. `herdr-doctor --relay` names the lines they skip.
 - A file over 4 KB or 100 lines is not read, and `herdr-doctor --relay` says so.
 - A value the environment already holds wins over the file. The Herdr plugin event is the exception: it sources the file as shell, and there the file's value wins.

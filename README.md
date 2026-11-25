@@ -16,7 +16,7 @@
 
 You give stampede one big task, written in your own words.
 One AI agent (a program that writes and runs code for you), called the lead, plans the work and does it.
-It works on your computer inside [Herdr](https://herdr.dev), an app that shows each agent in its own pane (a part of the Herdr window), so you can watch.
+It works on your computer inside [Herdr](https://herdr.dev), an app that shows each agent in its own pane (a box in the Herdr window), so you can watch.
 The lead brings in more agents only when that helps.
 It comes back to you only with real questions, and to ask before anything risky.
 
@@ -29,8 +29,8 @@ It comes back to you only with real questions, and to ask before anything risky.
 - git, jq and curl, three small tools for the terminal.
 - Optional: [Codex](https://developers.openai.com/codex/cli), to work beside the lead or to [lead a job](docs/GUIDE.md#use-one-job-start-to-finish) with `--lead codex`.
 
-Also optional: a [bot on your phone](docs/GUIDE.md#front-doors) that starts jobs and asks you questions, and [Herdr Core](docs/CORE.md).
-The tested versions: [docs/SETUP.md](docs/SETUP.md#what-you-need).
+Also optional: a [bot on your phone](docs/GUIDE.md#front-doors) that starts jobs and asks you questions, and [Herdr Core](docs/CORE.md), a second way to run jobs.
+The versions we tested: [docs/SETUP.md](docs/SETUP.md#what-you-need).
 
 ## Install
 
@@ -45,14 +45,14 @@ stampede doctor
 ```
 
 The first line copies stampede to your computer, and `install.sh` sets up its commands.
-The `export` line lets your terminal find them. Add it to your shell profile (a settings file your terminal reads when it opens: `~/.zshrc` on a Mac, `~/.bashrc` on Linux) so it stays.
+The `export` line lets your terminal find them. To keep it, add it to your shell profile, a settings file your terminal reads when it opens: `~/.zshrc` on a Mac, `~/.bashrc` on Linux.
 Run `stampede doctor` while Herdr is open. Each line says `ok`, or names a problem and how to fix it.
 The full install, other ways to install, and updating: [docs/SETUP.md](docs/SETUP.md).
 
 ## Your first job
 
 1. Once per computer, do the [one-time settings](docs/SETUP.md#unattended-agents). They let the lead start more agents in Herdr without stopping to ask you at each step.
-2. Your project must be a folder inside `~/code` that uses git (a tool that keeps the history of your files). Once per project, run `herdr-trust ~/code/my-app` (use your project's folder).
+2. Your project must be a folder inside `~/code` that uses git, a tool that keeps the history of your files. Once per project, run `herdr-trust ~/code/my-app` with its folder.
 3. Write what you want in a file outside the project, such as `~/ask.md`:
 
    ```text
@@ -68,19 +68,19 @@ The full install, other ways to install, and updating: [docs/SETUP.md](docs/SETU
 
    The last line it prints names the lead and the job's folder.
 6. A new tab named `lead` appears in Herdr, with the lead agent in it. Click it to watch. The lead writes a plan, then starts work. Each extra agent it brings in gets a pane of its own.
-7. If the lead needs you, it asks in its tab: a question appears there, and you pick or type your answer. With [Moshi](remote/moshi.md) set up, its questions reach your phone too.
-8. At the end, the lead writes a short report in its tab. Then it asks whether to close the job, and nothing closes until you say yes.
+7. If the lead needs you, a question appears in its tab. Pick or type your answer there. With [Moshi](remote/moshi.md), a phone app, set up, its questions reach your phone too.
+8. At the end, the lead writes a short report in its tab. Then it asks whether to close the job. By default, nothing closes until you say yes.
 
 The same job, command by command: [the guide](docs/GUIDE.md#use-one-job-start-to-finish). If something goes wrong: [docs/TROUBLESHOOT.md](docs/TROUBLESHOOT.md).
 
 ## How it keeps you safe
 
-- You give your yes before each of these: a merge (adding the work to your project's main code), a push to the main branch,
+- You give your yes before each of these: a merge (adding the work to your project's main code), a push (an upload) straight to the main branch,
   a deploy (putting it live), publishing, sending messages, spending money, and closing tabs or panes.
 - A merge takes only the exact version of the code that a reviewer passed.
 - Agents never close anything the job did not start.
-- By default, agents do small steps without asking you each time, with their agent program's own checks still on.
-- Agents may save their work on a side branch (a separate copy of your code) and open a draft pull request (a proposed change, not yet accepted) without asking.
+- By default, agents do small steps without asking you each time. Their agent program's own safety checks stay on.
+- Without asking, agents may save their work on a side branch (a separate copy of your code) and open a draft pull request (a proposed change, not yet accepted).
 
 Every rule, and who records your yes: [docs/SAFETY.md](docs/SAFETY.md).
 
@@ -88,9 +88,9 @@ Every rule, and who records your yes: [docs/SAFETY.md](docs/SAFETY.md).
 
 - [The guide](docs/GUIDE.md): how a job flows, what stampede works with, one job command by command, and every way to start one.
 - [Setup](docs/SETUP.md): the full install, updating, the one-time settings and uninstalling.
-- [Herdr Core](docs/CORE.md): how to run a job on Herdr Core, a second way to run jobs without Herdr's tabs and panes.
+- [Herdr Core](docs/CORE.md): how to run a job on Herdr Core, a second way to run jobs, without Herdr's tabs and panes. Jobs use it only when you ask.
 - [Safety](docs/SAFETY.md): every step that needs your yes, and what the code holds.
-- [Configure](docs/CONFIGURE.md): every setting and its default, such as effort (how hard an agent thinks): extra high for the lead, medium for the others.
+- [Configure](docs/CONFIGURE.md): every setting and its default, such as effort (how hard an agent thinks): extra high for the lead, medium for the others, and how to change both.
 - [Troubleshoot](docs/TROUBLESHOOT.md): each message you may see, its fix, and the FAQ.
 - [Reference](docs/REFERENCE.md): every command and script with its exit codes, how the code is laid out, every doc, and the credits.
 - [Status and roadmap](docs/STATUS.md): what works, how it was tested, and what comes next.

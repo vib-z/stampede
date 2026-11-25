@@ -16,7 +16,7 @@ This page installs stampede, keeps it up to date and removes it. The short versi
 
 ## What you need
 
-A Mac or a Linux computer with these tools, tested on macOS 27.2 and Ubuntu 24.04 arm64, 8 to 13 Nov 2026. Linux in detail: [LINUX.md](LINUX.md).
+A Mac or a Linux computer with these tools. We tested on macOS 27.2 and Ubuntu 24.04 arm64, 8 to 13 Nov 2026. Linux in detail: [LINUX.md](LINUX.md).
 
 | tool | version tested | needed for |
 |---|---|---|
@@ -46,29 +46,34 @@ herdr-trust ~/code/my-app            # once per repo, before agents start there
 stampede config set backend core     # optional: Herdr Core by default (the default is the Herdr TUI)
 ```
 
-**What the installer does.** It makes links (pointers to files), so the files stay in this checkout.
+Then run the [health check](#health-check) and do the [one-time settings](#unattended-agents). Read on here when the installer skips something, or to see what it changes.
+
+**What the installer does.** It makes links (pointers to files), so the files stay in this checkout (your copy of the stampede repo).
 - It links the four skills into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists. A skill is a set of instructions an agent reads. The four are `skills/stampede` (the front door, the part you talk to), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan`.
 - It links `scripts/stampede` (also as `fleet-job`, its first name) and every `skills/grokbot-herdr/scripts/herdr-*` helper into `~/.local/bin`.
 - Your PATH (the list of folders your terminal looks in for commands) must hold `~/.local/bin`. If a bot will run stampede over SSH, set it for non-interactive SSH shells too.
-- On Linux it starts the event relay's two timers, the watchdog and the flusher. When `--replace` saves an older timer file of stampede's first, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
+- On Linux, when the machine supports it, it sets up the event relay's schedule for its watchdog and flusher: two systemd timers, or one loop. When `--replace` first saves an older timer file of stampede's, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
 - It never installs Herdr or an agent CLI. Start each agent CLI once by hand to sign in.
-- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run prints its rollback line after it.
+- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run that recorded changes in its journal prints its rollback line after it.
 
 **Running it again** is safe.
 - A link already in place prints `ok`.
-- Run from a checkout Herdr manages (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install moves to this checkout and prints `relinked`. A clone relinks nothing.
-- Anything else at that path prints `skip ... left as is (--replace backs it up and links)`: your own copy of a skill or helper is never replaced.
+- When you run it without `--replace` from a checkout Herdr manages (`<plugins>/github-installations/stampede-<id>/<N>-<M>/checkout`), a link to the same file in another `<N>-<M>/checkout` of that same install moves to this checkout, and prints `relinked`. With `--replace`, it backs that link up and replaces it instead. A clone relinks nothing.
+- Anything else at that path prints `skip ... left as is (--replace backs it up and links)`. Your own copy of a skill or helper is never replaced.
 
 **Take over an older install with `--replace`.**
-- Each thing in the way moves into one backup folder for the run: a copy of a command, a link into another checkout, or a real skill folder. The folder is `${XDG_STATE_HOME:-~/.local/state}/stampede/backup-<date>-<time>/`, with a `-2` style suffix when that name is taken. Each keeps its path under your home there.
+- Each thing in the way moves into one backup folder for the run: a copy of a command, a link into another checkout, or a real skill folder. The folder is `${XDG_STATE_HOME:-~/.local/state}/stampede/backup-<date>-<time>/`, with a `-2` style suffix when that name is taken. Each thing keeps its path under your home there.
 - This checkout is linked in its place: `replaced <path> -> <target> (the old one is in <backup>)`.
-- Before each change (a move, a new link or a new folder), it writes the change to the folder's `journal`. A change it cannot write there is not made.
-- The last line is the command that undoes the run, ready to paste: `rollback: bash <backup>/rollback.sh`.
-- A move, link, folder or journal write that fails stops the run at once, with exit 1 and the rollback line on stderr (the error output).
-- A run in which every link (and, on Linux, every timer unit) is already right makes no backup folder. New links are journaled too, so they can be undone.
+- Before each change (a move, a new link or a new folder), it writes the change to the folder's `journal`. If it cannot write a change there, it does not make it.
+- When the run recorded changes in its journal, its last line is the command that undoes its link and folder changes, ready to paste: `rollback: bash <backup>/rollback.sh`.
+- If a move, link, folder or journal write fails, the run stops at once with exit 1. Once it has journaled a change, it also prints the rollback line on stderr (the error output).
+- If every link (and, on Linux, every timer unit) is already right, the run makes no backup folder. New links are journaled too, so they can be undone.
 - Nothing is ever deleted. Remove a backup folder yourself once you are sure.
 
-**The rollback** undoes the run's links and folders. It reads the journal newest first, and checks each step against what is there now. It removes a link the run made (`unlinked`), moves an original back when its path is free (`restored`), removes a folder the run made when it is empty, and skips a step that never happened. It ends `rolled back: every link and folder that run made is undone`. What it cannot undo (a path that changed since, a folder it made that is now a file or a link, a link or a move the file system refuses) it names in a `left <path>: ...` line, with where the original is. It carries on with the rest and exits 1.
+**The rollback** undoes the run's links and folders. It reads the journal newest first, and checks each step against what is there now.
+- It removes a link the run made (`unlinked`), moves an original back when its path is free (`restored`), and removes a folder the run made when it is empty. It skips a step that never happened.
+- On success it ends `rolled back: every link and folder that run made is undone`. It keeps stampede's own timer unit files, and says so.
+- Some things it cannot undo: a path that changed since, a folder it made that is now a file or a link, or a link or a move the file system refuses. It names each one in a `left <path>: ...` line, with where the original is. It carries on with the rest, ends `rollback incomplete: each left line says what is where`, and exits 1.
 
 **Installer flags.** Exit 0 means done, 1 a failed link or move, 2 a usage error.
 
@@ -93,7 +98,8 @@ herdr-trust ~/code/my-app            # once per repo, before agents start there
 
 Herdr does not show the installer's output, and `herdr plugin log list` stays empty. So `stampede doctor` is how you see it worked. Do not install over a locally linked plugin: unlink it first.
 
-**The event hook on a clone.** A hook is a script a program runs when something happens. In your checkout, `herdr plugin link .` adds the event hook only: Herdr then runs `scripts/herdr-plugin-event` each time an agent's status changes. A clone needs it only for the event relay to a remote bot. Check it with `herdr plugin list`. With no route set up, events are logged on your computer and not sent.
+**The event hook on a clone.** A hook is a script a program runs when something happens. In your checkout, `herdr plugin link .` adds the event hook only. Herdr then runs `scripts/herdr-plugin-event` each time an agent's status changes.
+A clone needs it only for the event relay to a remote bot. Check it with `herdr plugin list`. With no route set up, stampede logs the events on your computer and sends nothing.
 
 Then open your repo in Herdr, start Claude in a pane, and ask: *"With stampede: ..."*. The [walkthrough](GUIDE.md#use-one-job-start-to-finish) shows a whole job.
 
@@ -106,7 +112,8 @@ stampede never updates anything by itself. You update this way:
 | a clone and `./install.sh` | `stampede update` |
 | `herdr plugin install vib-z/stampede` | `herdr plugin update stampede` (add `--yes` from a bot, a script or SSH) |
 
-**The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release. That is one request without a token, given 3 s in all (DNS, connect and the reply). The answer is kept for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out, they print one line:
+**The daily check.** At most once a day, `stampede --version`, `stampede update --check` and `herdr-doctor` ask GitHub for the latest release.
+That is one request without a token, given 3 s in all (DNS, connect and the reply). The answer is kept for 24 h in `${XDG_CACHE_HOME:-~/.cache}/stampede/`. When a newer release is out, they print one line:
 
 ```text
 $ stampede --version
@@ -126,7 +133,9 @@ stampede 0.2.5 is out, this is 0.2.4: run stampede update
 - Your links keep pointing at the same checkout.
 - A locally linked plugin updates the same way, with `stampede update` in its checkout. `herdr plugin update` cannot update it.
 
-**A plugin install.** Herdr keeps the version you asked for, so a pinned tag stays pinned. `herdr plugin install vib-z/stampede --yes` drops the pin. Each install or update gets a new checkout folder, and Herdr deletes the old one the next time its server starts ([Herdr CLI reference](https://herdr.dev/docs/cli-reference/#plugins)). The installer it runs moves each stampede link from the older checkout of that same install into the new one (`relinked`), so no link points at nothing. It leaves any other link alone.
+**A plugin install.** Herdr keeps the version you asked for, so a pinned tag stays pinned. `herdr plugin install vib-z/stampede --yes` drops the pin.
+Each install or update gets a new checkout folder, and Herdr deletes the old one the next time its server starts ([Herdr CLI reference](https://herdr.dev/docs/cli-reference/#plugins)).
+The installer it runs moves each stampede link from the older checkout of that same install into the new one (`relinked`), so no link points at nothing. It leaves any other link alone.
 
 If the links still point at an old checkout, run the current checkout's installer. You see this as `not in the plugin checkout` from `herdr-doctor`, or `stampede: command not found` after a Herdr restart:
 
@@ -149,9 +158,12 @@ Keep anything of yours from `~/stampede-0.1.0`, then delete it. From then on, us
 
 Run `stampede doctor` after you install, while the Herdr server is running.
 
-`stampede doctor` checks Python, this checkout (its `VERSION`, and that every module imports), and that `stampede`, `fleet-job` and the `herdr-*` helpers on your PATH point into this checkout. Then it passes on the lines of `herdr-doctor`. You can run `herdr-doctor` alone too; `stampede doctor` passes `--core` and `--tui` on to it.
+`stampede doctor` checks Python, this checkout (its `VERSION`, and that every module imports), and that `stampede`, `fleet-job` and the `herdr-*` helpers on your PATH point into this checkout.
+Then it passes on the lines of `herdr-doctor`. You can run `herdr-doctor` alone too; `stampede doctor` passes `--core` and `--tui` on to it.
 
-`herdr-doctor` checks each backend that is installed. A backend is where a job runs: the Herdr TUI (Herdr's window, with tabs and panes), and Herdr Core when `hc` is on PATH. One usable backend is enough, and the last backend line names it. While one is usable, the other's gaps are only `warn` lines. `--tui` or `--core` checks only that one, and each gap there is a `PROBLEM`; a bot runs that before a job on that backend. It also checks:
+`herdr-doctor` checks each backend that is installed. A backend is where a job runs: the Herdr TUI (Herdr's window, with tabs and panes), and Herdr Core when `hc` is on PATH.
+One usable backend is enough, and the last backend line names it. While one is usable, the other's gaps are only `warn` lines.
+`--tui` or `--core` checks only that one, and each gap there is a `PROBLEM`; a bot runs that before a job on that backend. It also checks:
 - `herdr`, `jq`, `git` and `python3`, and the Herdr client and server versions;
 - `stampede --version` against the checkout's `VERSION`;
 - all four skill links, for each agent home folder that exists;
@@ -160,7 +172,9 @@ Run `stampede doctor` after you install, while the Herdr server is running.
 
 Without the relay, a missing event plugin is only a warning. So is a missing `FLEET_TRUST_ROOT` folder: `warn no ~/code (FLEET_TRUST_ROOT): create it or set the key before herdr-trust`.
 
-**The relay checks.** The [event relay](#the-event-relay-for-a-remote-bot) is optional for a lead inside Herdr. Its checks run when a routes folder, either relay launchd plist, a Claude relay hook or a Codex relay notify line exists, or whenever you pass `--relay`. The doctor respects the routes key `HERDR_EVENTS_ROUTES_DIR`. Helper scripts, an enabled plugin or the Linux timers `install.sh` starts do not by themselves mark the relay installed.
+**The relay checks.** The [event relay](#the-event-relay-for-a-remote-bot) is optional for a lead inside Herdr.
+- Its checks run when any of these exists: a routes folder, either relay launchd plist, a Claude relay hook or a Codex relay notify line. They also run whenever you pass `--relay`.
+- The doctor respects the routes key `HERDR_EVENTS_ROUTES_DIR`. Helper scripts, an enabled plugin or the Linux timers `install.sh` starts do not by themselves mark the relay installed.
 - With no relay set up, one line says `ok event relay not installed (optional): herdr-doctor --relay checks it`.
 - Remote bots always run `herdr-doctor --relay`, even before relay setup. So missing hooks, helpers, timers, plugin or routes stay a `PROBLEM` for them.
 
@@ -189,7 +203,8 @@ Every setting has a default, so you need to set nothing. Every setting, its defa
 
 ## The event relay, for a remote bot
 
-The event relay sends a job's events from your computer to a bot outside Herdr. The bot then hears when a job finishes or an agent is stuck, without asking. While a stampede job is open, ordinary turn ends in that workspace stay on your computer; `stampede finish` sends the done event ([remote/events.md](../remote/events.md)). Set it up in this order:
+The event relay sends a job's events from your computer to a bot outside Herdr. The bot then hears when a job finishes or an agent is stuck, without asking.
+While a stampede job is open, ordinary turn ends in that workspace stay on your computer; `stampede finish` sends the done event ([remote/events.md](../remote/events.md)). Set it up in this order:
 1. The Herdr plugin (above).
 2. A route file per bot, and the tag on each workspace: [remote/events.md](../remote/events.md).
 3. The Claude Code and Codex hooks that send turn ends: [remote/events.md, Hooks](../remote/events.md#hooks).
@@ -198,7 +213,8 @@ The event relay sends a job's events from your computer to a bot outside Herdr. 
 
 ## Herdr Core
 
-[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) is an optional second place to run a job, without the Herdr TUI ([CORE.md](CORE.md)). A job runs on it only when you ask: with `stampede new --core`, or with `backend = "core"` in your config, which `stampede config set backend core` writes. The default is `tui`.
+[Herdr Core](https://herdr.dev/core/) (`hc` 0.1.13 or later) is an optional second place to run a job, without the Herdr TUI ([CORE.md](CORE.md)).
+A job runs on it only when you ask: with `stampede new --core`, with `backend = "core"` in your config (`stampede config set backend core` writes it), or with `backend = "auto"` for a job started outside a Herdr pane ([CORE.md](CORE.md#when-a-job-runs-on-herdr-core)). The default is `tui`.
 
 1. Install it with its own installer: `curl -fsSL https://releases.herdr.dev/core/install.sh | sh`. It puts `hc` and `herdr-core` in `~/.local/bin`. On macOS, from Herdr Core 0.1.18, they are links into its own app bundle (`~/.local/share/herdr-core/current`). macOS asks once to let Herdr Core reach your local network, and once for the microphone.
 2. Start its core yourself (`hc server start`).
@@ -213,7 +229,9 @@ The doctor's checks on Herdr Core:
 - It warns about terminals opened before the core's current bundle was installed (macOS), and a core started from inside an agent or a pane (`hc server restart --fresh` fixes it from Herdr Core 0.1.20 on). Each fix: [Troubleshoot, Install](TROUBLESHOOT.md#install-update-and-the-health-check).
 - The doctor never starts, stops or restarts a core.
 
-**Its settings.** `HC`, `HC_SESSION` and `HC_SOCKET` are environment-only: export them with the others ([Configure](CONFIGURE.md#environment-only-with-defaults)). A Core job does not pass on one left empty (such as config.example's `HC_SOCKET=`), and Herdr Core reads an empty `HC_SOCKET` as unset too. A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events-core.md](../remote/events-core.md)).
+**Its settings.** `HC`, `HC_SESSION` and `HC_SOCKET` are environment-only: export them with the others ([Configure](CONFIGURE.md#environment-only-with-defaults)).
+A Core job does not pass on one left empty (such as config.example's `HC_SOCKET=`), and Herdr Core reads an empty `HC_SOCKET` as unset too.
+A bot that starts a Core job and tags it uses the job's key (`hc-<12 hex>`) in place of a workspace id ([remote/events-core.md](../remote/events-core.md)).
 
 ## Uninstall
 
@@ -244,7 +262,10 @@ Already uninstalled? Then `herdr plugin list` no longer names the checkout.
 
 Never match links by a pattern such as `stampede-*`: another plugin or a backup can share it. Never remove a real folder or another checkout's links. Herdr deletes the old checkout (about 31 MB) the next time its server starts.
 
-If you set up the relay, remove it too. Its timers: on macOS unload its two launchd jobs; on Linux disable the systemd user timers or stop the flock loop. Remove only its hook and notify entries, and do that before you remove its helper links. Their labels and commands: [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks). Uninstalling the plugin alone does not remove timers, hooks or route files.
+If you set up the relay, remove it too.
+- Its timers: on macOS, unload its two launchd jobs; on Linux, disable the systemd user timers or stop the flock loop.
+- Remove only its hook and notify entries, and do that before you remove its helper links. Their labels and commands: [watchdogs](../remote/watchdogs.md) and [hooks](../remote/events.md#hooks).
+- Uninstalling the plugin alone does not remove timers, hooks or route files.
 
 These stay until you remove them yourself: the job folders (`~/code/herdr-jobs/`, or `FLEET_JOBS_ROOT`; older Core jobs in `<repo>/.herdr-<slug>/`), `~/.config/stampede/` and `~/.config/herdr-events/`. So does the daily update check's one-line cache: `rm -rf ~/.cache/stampede` (or `$XDG_CACHE_HOME/stampede` when that is set).
 

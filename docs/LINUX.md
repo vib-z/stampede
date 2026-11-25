@@ -1,6 +1,8 @@
 # stampede on Linux
 
-stampede runs on Linux as on macOS: the same command, the same skills, both backends (the Herdr TUI and Herdr Core), with the event relay's timers run by systemd or one flock-guarded loop instead of launchd. This page says what was verified, how, and what was not.
+stampede runs on Linux as on macOS: the same command, the same skills and both backends (the Herdr TUI and Herdr Core).
+One thing differs: the event relay's timers run under systemd, or in one loop guarded by `flock`, instead of launchd (the macOS service manager).
+This page says how to install on Linux, what we verified and how, and what we did not.
 
 ## What was verified
 
@@ -13,7 +15,9 @@ stampede runs on Linux as on macOS: the same command, the same skills, both back
 | the same | the fixture evals, through the real `stampede` command against the fakes | [run.py](../tests/evals/run.py), 58 cases | before the fixes 40 pass, 16 fail, 1 blocked, 1 gap; after 56 pass, 0 fail, 1 blocked, 1 gap | 9 Nov 2026 |
 | GitHub's `ubuntu-latest`, x86_64 | the unit suite, the relay samples, `install.sh`, Herdr 0.9.5 with `herdr-doctor`, the Herdr Core 0.1.20 smoke run, the fixture evals | [CI](../.github/workflows/ci.yml), every push and pull request | see the latest run | |
 
-"Real" here means the real Ubuntu, Herdr server, panes, agent detection, plugin events, Herdr Core, moshi-hook binary, `install.sh`, relay scripts and `stampede` commands. The agents and the bot are stand-ins: small programs that look to Herdr and Herdr Core exactly like Claude or Codex at their prompt (their screen, their status, their hook calls), and a webhook on 127.0.0.1. A pass proves that Herdr, Herdr Core and stampede work together on Linux; it does not prove a signed-in Claude or Codex does. The run records, with every command, expected and actual, are in [tests/evals/runs](../tests/evals/runs).
+"Real" here means the real Ubuntu, Herdr server, panes, agent detection, plugin events, Herdr Core, moshi-hook binary, `install.sh`, relay scripts and `stampede` commands.
+The agents and the bot are stand-ins: small programs that look to Herdr and Herdr Core exactly like Claude or Codex at their prompt (their screen, their status, their hook calls), and a webhook on 127.0.0.1.
+A pass proves that Herdr, Herdr Core and stampede work together on Linux. It does not prove that a signed-in Claude or Codex does. The run records, with every command, expected and actual, are in [tests/evals/runs](../tests/evals/runs).
 
 ## Install on Linux
 
@@ -26,16 +30,21 @@ export PATH="$HOME/.local/bin:$PATH"  # Ubuntu adds ~/.local/bin at login only i
 herdr-doctor                          # checks the Herdr TUI and Herdr Core, whichever is installed; --tui or --core for one
 ```
 
-Herdr and Herdr Core publish Linux builds for x86_64 and arm64: [Herdr](https://herdr.dev/docs/install/) (or the release binary from GitHub) and [Herdr Core](https://herdr.dev/core/) (`curl -fsSL https://releases.herdr.dev/core/install.sh | sh`). Moshi's `moshi-hook` has Linux builds too (Homebrew on Linux, or the tarball its formula names).
+Herdr and Herdr Core publish Linux builds for x86_64 and arm64: [Herdr](https://herdr.dev/docs/install/) (or the release binary from GitHub) and [Herdr Core](https://herdr.dev/core/) (`curl -fsSL https://releases.herdr.dev/core/install.sh | sh`).
+Moshi's `moshi-hook` has Linux builds too (Homebrew on Linux, or the tarball its formula names).
 
 ## The event timers
 
-`install.sh` enables two systemd user timers, `herdr-event-watchdog.timer` (every 5 minutes) and `herdr-events-flush.timer` (every 2 minutes), when `systemctl --user` answers. Otherwise it starts one `herdr-event-supervise` loop held with `flock`. `herdr-doctor --relay` checks whichever this machine uses.
+The relay's timers run its two helpers on a schedule. When `systemctl --user` answers, `install.sh` enables two systemd user timers: `herdr-event-watchdog.timer` (every 5 minutes) and `herdr-events-flush.timer` (every 2 minutes).
+Otherwise, when `flock` is installed, it starts one `herdr-event-supervise` loop held with `flock`. With neither, it skips the timers and says so. `herdr-doctor --relay` checks whichever this machine uses.
 
-- systemd runs user timers only while your user manager runs: on a machine nobody logs in to, run `loginctl enable-linger $USER` once.
+- systemd runs user timers only while your user manager runs. On a machine nobody logs in to, run `loginctl enable-linger $USER` once.
 - The flock loop does not survive a reboot: run `install.sh` again after one.
-- `--no-supervise` skips both; a `HOME` that is not the login home is skipped, so a throwaway home never touches a real user manager.
-- The four unit files in `~/.config/systemd/user/` carry a `# stampede-unit` line. An install without `--replace` rewrites every unit file in which the text `stampede-unit` appears anywhere; with `--replace` a unit that is already right is left untouched (`ok <unit>`). To keep your own version of one, make sure the text `stampede-unit` appears nowhere in the file, comments included: the installer then leaves it alone (`skip ... left as is`) and does not enable the timers. Under `install.sh --replace` an older marked unit that differs is first saved in that run's backup folder (`replaced ...`); a rollback leaves the unit files, and says so ([SETUP, Install](SETUP.md#install)).
+- `--no-supervise` skips both. The installer also skips them when `HOME` is not the login home, so a throwaway home does not touch a real user manager. `--supervise` starts them anyway.
+- The four unit files in `~/.config/systemd/user/` carry a `# stampede-unit` line.
+  - An install without `--replace` rewrites every unit file in which the text `stampede-unit` appears anywhere. With `--replace`, a unit that is already right is left untouched (`ok <unit>`).
+  - To keep your own version of one, make sure the text `stampede-unit` appears nowhere in the file, comments included. The installer then leaves it alone (`skip ... left as is`) and does not enable the timers.
+  - Under `install.sh --replace`, an older marked unit that differs is first saved in that run's backup folder (`replaced ...`). A rollback leaves the unit files, and says so ([SETUP, Install](SETUP.md#install)).
 
 ## What differs from macOS
 
