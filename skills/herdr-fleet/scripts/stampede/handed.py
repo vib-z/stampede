@@ -4,7 +4,6 @@ from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, tui as tui_, out as out_
 from . import send as send_
-from .send import EMPTY_PROMPT, typed  # herdr-send's markers of an empty prompt
 
 
 def live_terminal(job, agent, adopt=True):
@@ -346,7 +345,7 @@ def prompt_handed(job, name, text):
                                 capture_output=True, text=True, timeout=60)
     except (subprocess.TimeoutExpired, OSError):
         screen = None
-    if screen is None or screen.returncode or typed(screen.stdout, EMPTY_HANDED):
+    if screen is None or screen.returncode or send_.typed(screen.stdout, EMPTY_HANDED):
         return (f'text may be typed in its prompt, or its empty prompt is not one stampede knows: read it with herdr agent '
                 f'read {pane} --source visible --lines 8, clear it there only when it is idle, then tell again')
     submitted, said = send_.submit(pane, text, keys=False)  # herdr-send's own check of the submit, with no key
@@ -408,4 +407,4 @@ def reopen_handed(job, agent):
 # A handed agent's empty prompt: Cursor's placeholder too (Herdr 0.9.5, 30 Oct 2026), wrapped over lines in a narrow
 # pane, with nothing after it. Hermes shows a rotating placeholder after its prompt and Kimi is unchecked, so a prompt to
 # either fails closed until their markers are known.
-EMPTY_HANDED = re.compile(EMPTY_PROMPT.pattern + r'|Plan,\s+search,\s+build\s+anything[ \t]*$', re.IGNORECASE | re.MULTILINE)
+EMPTY_HANDED = re.compile(send_.EMPTY_PROMPT.pattern + r'|Plan,\s+search,\s+build\s+anything[ \t]*$', re.IGNORECASE | re.MULTILINE)

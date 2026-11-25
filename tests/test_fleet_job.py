@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_, settings as settings_
+from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_, settings as settings_, send as send_
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quiet import setUpModule, tearDownModule  # noqa: E402,F401: commands run in-process print status lines
 
@@ -1988,7 +1988,7 @@ class Deliver(unittest.TestCase):
         self.assertTrue(tui_.composer_empty(re.sub(r'\x1b\[[0-9;]*m', '', undimmed)))  # plain text cannot tell them apart
         arrows = empty.replace('Ask Codex to do anything', 'Ask Codex to do anything \x1b[2m\u2191', 1)
         self.assertFalse(tui_.composer_empty(arrows))              # a scrolled composer: its arrow is dim too
-        self.assertEqual(tui_.cells('\x1b[1m\x1b[38;2;2;2;2ma\x1b[2mb\x1b[0mc\x1b[48;5;2md\x1b[2;38;5;2me\x1b[22mf\r'),
+        self.assertEqual(send_.cells('\x1b[1m\x1b[38;2;2;2;2ma\x1b[2mb\x1b[0mc\x1b[48;5;2md\x1b[2;38;5;2me\x1b[22mf\r'),
                          [('a', False), ('b', True), ('c', False), ('d', False), ('e', True), ('f', False)])
 
     def test_screen_of_reads_styles_and_falls_back_to_text(self):

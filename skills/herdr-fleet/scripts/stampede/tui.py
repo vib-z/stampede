@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, out as out_, send as send_
-from .send import cells, plain  # a screen read with its styles
 
 HERDR_SEND = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'
 
@@ -161,7 +160,7 @@ def composer_empty(screen):
     its styles (screen_of), the prompt line must also hold Codex's dim placeholder: typed text is never dim, so a
     draft that quotes the footer in a pane too short for the status rows is still a draft. Any other screen is a
     draft. Live tests: tests/fixtures/codex-0.170."""
-    lines = [[(SPARKLE.sub(' ', char), dim) for char, dim in cells(row)] for row in screen.splitlines()]
+    lines = [[(SPARKLE.sub(' ', char), dim) for char, dim in send_.cells(row)] for row in screen.splitlines()]
     rows = [''.join(char for char, _ in line).rstrip() for line in lines]
     while rows and not rows[-1]:
         rows.pop()
@@ -182,7 +181,7 @@ def claude_prompt_empty(screen):
     marker but Claude's dim placeholder, if anything, and the next row is the box's lower border. Any other screen is a
     draft. Read live from Claude Code 2.1.331 in a Herdr 0.9.5 pane on 24 Nov 2026: '❯' and a no-break space, or that
     and a dim 'Try "..."'."""
-    lines = [cells(row) for row in screen.splitlines()]
+    lines = [send_.cells(row) for row in screen.splitlines()]
     rows = [''.join(char for char, _ in line).rstrip() for line in lines]
     prompts = [i for i, row in enumerate(rows) if row.startswith('❯')]
     if not prompts or prompts[-1] + 1 >= len(rows) or not rows[prompts[-1] + 1].lstrip().startswith('─'):
