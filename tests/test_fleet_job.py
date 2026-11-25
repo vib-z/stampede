@@ -1811,9 +1811,8 @@ class Deliver(unittest.TestCase):
     def test_the_deliverer_notes_what_it_types_as_its_own(self):
         self.deliver()
         text = self.send.call_args.args[2]
-        texts, lone, marker = tui_.pending(self.job, 'lead-demo')
-        self.assertEqual((texts, lone, marker), ([text], False, None))  # its last send, confirmed: a lone paste is not ours
-        self.assertEqual(self.ready.call_args.kwargs, {'ours': ([text], False, tui_.mark('lead-demo'))})  # before any record
+        self.assertEqual(tui_.pending(self.job, 'lead-demo'), ([text], None))   # its last text, and nothing unread now
+        self.assertEqual(self.ready.call_args.kwargs, {'ours': ([text], tui_.mark('lead-demo'))})  # before any record
 
     def test_a_prompt_holding_only_our_own_text_is_deliverable(self):
         """25 Nov 2026: a copy of the deliverer's own line sat in a Claude lead's prompt for 4 hours, read as a draft."""
@@ -1823,15 +1822,15 @@ class Deliver(unittest.TestCase):
         def box(shown):
             rows = [shown[i:i + 46] for i in range(0, len(shown), 46)]
             return '\n'.join([top, '❯\xa0' + rows[0]] + ['  ' + row for row in rows[1:]] + [border, '  ⏵⏵ auto mode on'])
-        record = ([ours], True, None)
+        record, legacy = ([ours], None), ([], tui_.mark('lead-demo'))
+        tall = box(ours * 3).split('\n')[4:]              # a box taller than its pane: its prompt line is off the top
         for screen, pending, want in ((box(ours), record, True), (box(ours[:60]), record, True),
-                                      (box('[Pasted text #1]'), record, True),
-                                      (box('[Pasted text #1]'), ([ours], False, None), False),   # may be the owner's
-                                      (box(ours + ' and my own words'), record, False),           # the owner added to it
+                                      ('\n'.join(tall), ([ours * 3], None), True),
+                                      (box('[Pasted text #1]'), record, False),             # ours never shows as one
+                                      (box(ours + ' and my own words'), record, False),      # the owner added to it
                                       (box('my own half-written reply'), record, False),
-                                      (box(ours), ([], False, tui_.mark('lead-demo')), True),      # left by stampede 0.2.5
-                                      (box('[fleet-job inbox for build-x, not typed by the owner] hi'),
-                                       ([], False, tui_.mark('lead-demo')), False)):
+                                      (box(ours), legacy, True),                              # left by stampede 0.2.5
+                                      (box('[fleet-job inbox for build-x, not typed by the owner] hi'), legacy, False)):
             with self.subTest(screen=screen, pending=pending), mock.patch.object(
                     herdrapi_, 'herdr', return_value={'agent': {'agent_status': 'done'}}), \
                     mock.patch.object(tui_, 'screen_of', return_value=screen):
@@ -1839,31 +1838,11 @@ class Deliver(unittest.TestCase):
         with mock.patch.object(herdrapi_, 'herdr', return_value={'agent': {'agent_status': 'done', 'focused': True}}), \
                 mock.patch.object(tui_, 'screen_of', return_value=box(ours)):
             self.assertFalse(REAL_READY('lead-demo', 'claude', ours=record))  # never while the owner is in the pane
-        old = {'texts': [ours], 'at': time.time() - tui_.LONE_FOR - 1}
-        (self.job / 'hooks/typed-lead-demo.json').write_text(json.dumps(old))
-        self.assertFalse(tui_.pending(self.job, 'lead-demo')[1])
         (self.job / 'hooks/typed-lead-demo.json').write_text('{"texts": ["half a rec')   # a write cut short
-        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, tui_.mark('lead-demo')))
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1], tui_.mark('lead-demo'))
         tui_.remember(self.job, 'lead-demo', ours)                                      # and the next send mends it
-        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (True, None))         # not confirmed yet
-        tui_.remember(self.job, 'lead-demo', ours, False)
-        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (True, None))         # FAILED
-        tui_.remember(self.job, 'lead-demo', ours, True)
-        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, None))        # SUBMITTED: a paste now is the owner's
-        tui_.remember(self.job, 'lead-demo', ours, False, typed=False)
-        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, None))        # refused before typing: not ours either
-
-    def test_a_send_refused_before_typing_is_noted_as_typing_nothing(self):
-        """Recheck R1: the owner came into the pane between the deliverer's look and herdr-send's."""
-        self.send.side_effect = [(False, 'FAILED lead-demo focused: the owner is in that pane; retry later'),
-                                 (False, 'FAILED lead-demo (the text stayed in its prompt through 3 Enter; cleared it with ctrl+c, so it can be sent again)')]
-        from unittest import mock
-        with mock.patch.object(tui_, 'DELIVER_FOR', 0):
-            tui_.type_unread(self.job, 'lead-demo')
-            self.assertIs(tui_.typed_record(self.job, 'lead-demo')['typed'], False)
-            tui_.type_unread(self.job, 'lead-demo')
-            self.assertIs(tui_.typed_record(self.job, 'lead-demo')['typed'], True)
-        self.assertTrue(tui_.pending(self.job, 'lead-demo')[1])
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1], None)
+        self.assertIn(ours, tui_.pending(self.job, 'lead-demo')[0])
 
     def test_a_claude_lead_s_stuck_copy_is_cleared_and_typed_once(self):
         """End to end with the real herdr-send and a fake Herdr: the prompt holds the deliverer's own earlier text; it is
@@ -1901,7 +1880,7 @@ class Deliver(unittest.TestCase):
         base_.append(self.job / 'inbox.log', 'TURN build-x ' + 'x' * 3000)
         self.deliver()
         text = self.send.call_args.args[2]
-        self.assertLessEqual(len(text), tui_.DELIVER_MAX + 200)
+        self.assertLessEqual(len(text), tui_.DELIVER_MAX)   # under the length Claude Code 2.1.332 shows as [Pasted text #1]
         self.assertIn('(cut: read the rest at the end of ' + str(self.job / 'inbox' / 'lead-demo.md'), text)
 
     def test_ready_means_idle_or_done_unfocused_and_no_draft(self):

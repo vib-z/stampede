@@ -361,14 +361,19 @@ class Verify(unittest.TestCase):
         self.assertIn('focused', line)
         self.assertEqual(self.keys(), [])
 
+    def test_a_tall_text_whose_prompt_line_scrolled_off_is_still_ours(self):
+        """Live, 25 Nov 2026: a 787-character draft in a 21-row pane shows no prompt line; it is not 'gone'."""
+        long = self.TEXT + ' | ' + ' | '.join(f'TURN worker-{i} done {i}' for i in range(25))
+        ok, line = self.run_send(text=long, prompt_error={'lead-demo': 'agent_prompt_stalled'}, on_prompt={'lead-demo': {
+            'screen': '\n'.join(claude_box(long).split('\n')[6:])}}, on_key={'lead-demo': {'enter': {
+                'agent': {'agent_status': 'working'}, 'screen': EMPTY_CLAUDE}}})
+        self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo (pressed Enter again: the first was dropped)'))
+        self.assertEqual(self.keys(), ['enter'])
+
     def test_a_refused_prompt_is_failed_with_nothing_pressed(self):
         ok, line = self.run_send(prompt_error={'lead-demo': 'agent_blocked'})
         self.assertEqual((ok, line), (False, 'FAILED lead-demo (blocked at a dialog; read the screen)'))
         self.assertEqual(self.keys(), [])
-        self.assertTrue(send_.refused(line))                    # the deliverer knows nothing was typed
-        self.assertTrue(send_.refused('FAILED lead-demo focused: the owner is in that pane; retry later'))
-        self.assertFalse(send_.refused('FAILED lead-demo focused: the owner came into that pane before it was confirmed; '
-                                       'its prompt may still hold the text'))
 
 
 class Box(unittest.TestCase):
@@ -382,6 +387,11 @@ class Box(unittest.TestCase):
             with self.subTest(screen=screen):
                 self.assertEqual(send_.holds(screen, [text]), want)
         self.assertFalse(send_.holds(claude_box('[Pasted text #1]'), [text], lone=False))
+        tall = claude_box(text * 3).split('\n')[5:]   # live, a 787-character draft in a 21-row pane: no prompt line shows
+        self.assertEqual((send_.shape('\n'.join(tall))[1], send_.holds('\n'.join(tall), [text * 3])), (True, True))
+        self.assertFalse(send_.holds('\n'.join(tall), [text]))                         # a run of another text is not it
+        codex = '  output above\n' + '─' * 40 + '\n› ' + text + '\n\n  gpt model'   # a rule in Codex's history is no box border
+        self.assertEqual(send_.shape(codex), (text, False))
         dim = '❯\xa0\x1b[2m' + text[:40] + '\x1b[0m\n────'           # Claude's dim hint is no typed text
         self.assertEqual((send_.box(dim), send_.holds(dim, [text])), ('', False))
         self.assertTrue(send_.holds(dim.replace('\x1b[2m', ''), [text]))

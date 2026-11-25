@@ -69,36 +69,51 @@ def typed(screen, empty=EMPTY_PROMPT):
     return not empty.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:])) and not narrow_footer(screen)
 
 
-def box(screen):
-    """The text typed in a screen's prompt box: what follows the marker on the last prompt line, and the rows under it up
-    to the box's lower border (Claude) or a blank row (Codex). '' when it shows no prompt line, or, in a screen read
-    with its styles (screen), when everything in the box is dim: Claude's and Codex's placeholder and hints, which typed
-    text never is. Plain text cannot tell a placeholder from a draft."""
+def shape(screen):
+    """(text, cut): the text typed in a screen's prompt box, and whether its top is off the screen. The box is what
+    follows the marker on the last prompt line and the rows under it, up to the box's lower border (Claude) or a blank
+    row (Codex). A Claude box taller than its pane shows no prompt line: only its last rows above the lower border,
+    which stand alone (cut). In a screen read with its styles (screen), a box whose every character is dim holds
+    nothing typed: Claude's and Codex's placeholder and hints, which typed text never is. Plain text cannot tell a
+    placeholder from a draft. ('', False) when it shows no prompt box."""
     lines = [cells(row) for row in screen.splitlines()]
     rows = [''.join(char for char, _ in line).replace('\xa0', ' ').rstrip() for line in lines]
+    borders = [i for i, row in enumerate(rows) if len(row.strip()) > 2 and not row.strip().strip('─')]
     prompts = [i for i, row in enumerate(rows) if PROMPT_LINE.match(row)]
-    if not prompts:
-        return ''
-    held = [lines[prompts[-1]][1:]]
-    for at in range(prompts[-1] + 1, len(rows)):
-        if not rows[at].strip() or rows[at].lstrip().startswith('─'):
-            break
-        held.append(lines[at])
+    top = max([i for i in borders + prompts if i < borders[-1]], default=-1) if borders else None
+    if (borders and not any(i > borders[-1] for i in prompts) and (top == -1 or top in borders)
+            and borders[-1] > top + 1 and rows[top + 1].startswith('  ')):
+        held, cut = lines[top + 1:borders[-1]], True   # Claude's box with its prompt line scrolled off the top
+    elif prompts:
+        held, cut = [lines[prompts[-1]][1:]], False
+        for at in range(prompts[-1] + 1, len(rows)):
+            if not rows[at].strip() or rows[at].lstrip().startswith('─'):
+                break
+            held.append(lines[at])
+    else:
+        return '', False
     if '\x1b[' in screen and all(dim for line in held for char, dim in line if char.strip()):
-        return ''
-    return ' '.join(''.join(char for char, _ in line).replace('\xa0', ' ').strip() for line in held).strip()
+        return '', False
+    return ' '.join(''.join(char for char, _ in line).replace('\xa0', ' ').strip() for line in held).strip(), cut
+
+
+def box(screen):
+    """The text typed in a screen's prompt box (shape)."""
+    return shape(screen)[0]
 
 
 def holds(screen, texts, lone=True):
-    """True when a screen's prompt box shows one of texts typed, or its start (a box drawn in part, or cut): compared
-    with no whitespace, since a wrapped row is indented, and each paste placeholder standing for any part of the text.
-    A box of placeholders alone holds one of texts only when lone says it may."""
-    shown = box(screen)
+    """True when a screen's prompt box shows one of texts typed, or its start (a box drawn in part), or, for a box whose
+    top is off the screen, a run of it: compared with no whitespace, since a wrapped row is indented, and each paste
+    placeholder standing for any part of the text. A box of placeholders alone holds one of texts only when lone says
+    it may."""
+    shown, cut = shape(screen)
     pieces = [re.sub(r'\s+', '', piece) for piece in PLACEHOLDER.split(shown)]
     if not any(pieces):
         return lone and bool(PLACEHOLDER.search(shown)) and bool(texts)
     pattern = re.compile('.*'.join(re.escape(piece) for piece in pieces), re.S)
-    return any(pattern.match(re.sub(r'\s+', '', text)) for text in texts)
+    find = pattern.search if cut else pattern.match
+    return any(find(re.sub(r'\s+', '', text)) for text in texts)
 
 
 def herdr_path():
@@ -148,14 +163,6 @@ def press(target, key):
         pass
 
 
-REFUSED = ('(not a live agent)', 'focused: the owner is in that pane; retry later', '(blocked at a dialog; read the screen)')
-
-
-def refused(line):
-    """True for a FAILED line of submit that typed nothing: no agent, the owner in its pane, or a dialog."""
-    return line.startswith('FAILED ') and line.endswith(REFUSED)
-
-
 def submit(target, text, keys=True):
     """Type text into the agent's prompt: (True, a SUBMITTED line) or (False, a FAILED line).
     Never a key for a focused, blocked or working agent. At idle or done it first clears leftover typed input with
@@ -165,11 +172,11 @@ def submit(target, text, keys=True):
     herdr_path()
     first = shown(target)
     if first is None:
-        return False, f'FAILED {target} {REFUSED[0]}'
+        return False, f'FAILED {target} (not a live agent)'
     if first['focused']:
-        return False, f'FAILED {target} {REFUSED[1]}'
+        return False, f'FAILED {target} focused: the owner is in that pane; retry later'
     if first['status'] == 'blocked':
-        return False, f'FAILED {target} {REFUSED[2]}'
+        return False, f'FAILED {target} (blocked at a dialog; read the screen)'
     before = screen(target, 8) if keys and first['status'] in ('idle', 'done') else None
     if before and typed(plain(before)) and calm(target):  # an unread screen gets no key
         press(target, 'ctrl+c')
@@ -179,7 +186,8 @@ def submit(target, text, keys=True):
                                  '--timeout', '15000', timeout=CALL + 20)
         # Herdr saw a turn start, but it can be an earlier prompt's: Claude Code 2.1.332, slow to submit one, kept a prompt
         # typed meanwhile in its box (live, 25 Nov 2026). Its answer stands unless the box still shows the text itself; a
-        # paste placeholder alone there may be the owner's, made since.
+        # paste placeholder alone there may be the owner's, made since (the deliverer's prompts are short enough never
+        # to show as one: tui.DELIVER_MAX).
         if answer.get('type') == 'agent_prompted':
             read = screen(target, 30)
             if read is None or not holds(read, [text], lone=False):
@@ -193,7 +201,7 @@ def submit(target, text, keys=True):
     except ValueError:
         code = ''
     if code == 'agent_blocked':  # Herdr refused it before typing anything
-        return False, f'FAILED {target} {REFUSED[2]}'
+        return False, f'FAILED {target} (blocked at a dialog; read the screen)'
     if text in ('/exit', '/quit'):  # it ends the agent, which never shows working (a Codex quit read as FAILED, 2026-10-17)
         try:
             herdrapi_.herdr('agent', 'wait', target, '--until', 'unknown', '--timeout', '30000', timeout=CALL + 30)

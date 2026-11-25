@@ -41,7 +41,9 @@ def deliver_soon(job):
     base_.detach([sys.executable, '-I', base_.SCRIPTS / 'fleet_job.py', '_deliver', job], job / 'hooks' / 'deliver.log')
 
 
-DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 1500  # seconds between looks, seconds one deliverer waits, characters per prompt
+DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 700  # seconds between looks, seconds one deliverer waits, characters per prompt
+# Claude Code 2.1.332 shows a typed prompt of about 800 characters or more as '[Pasted text #1]' (live, 25 Nov 2026): a
+# prompt of the deliverer's stays in its own words in the box, so a lone placeholder there is never its own.
 DELIVER_CALL, DELIVER_SEND = 15, 120  # seconds a Herdr look and a herdr-send may take before the deliverer stops waiting
 HOOK_GRACE = 30  # seconds a Claude lead's own file hook has to take a line before the deliverer types it
 
@@ -190,7 +192,7 @@ def claude_prompt_empty(screen):
     return not shown or ('\x1b[' in screen and all(dim for _, dim in shown))
 
 
-def ready(agent, kind='codex', ours=((), False, None)):
+def ready(agent, kind='codex', ours=((), None)):
     """True when Herdr shows the agent idle or done, nobody focused on its pane, and nothing typed in its prompt but,
     at most, text of ours (pending), which herdr-send clears before it types. Anything else in the prompt is a draft,
     which herdr-send would clear too, so it waits. A ValueError when Herdr does not answer in DELIVER_CALL seconds;
@@ -203,37 +205,28 @@ def ready(agent, kind='codex', ours=((), False, None)):
         return False
     screen = screen_of(agent)
     empty = claude_prompt_empty if kind == 'claude' else composer_empty
-    texts, lone, marker = ours
-    return (empty(screen) or send_.holds(screen, texts, lone)
+    texts, marker = ours
+    return (empty(screen) or send_.holds(screen, texts, lone=False)
             or bool(marker) and re.sub(r'\s+', '', send_.box(screen)).startswith(re.sub(r'\s+', '', marker)))
 
 
-LONE_FOR = 1800  # seconds after a send of ours that a lone paste placeholder in the lead's prompt counts as ours
-
-
 def pending(job, lead):
-    """(texts, lone, marker) for ready: the deliverer's own text that may still sit in the lead's prompt. texts: the
-    last texts it typed there (typed-<lead>.json) and the text it would type now. Clearing one loses nothing: its lines
-    are unread and typed again, or were delivered, and a copy Claude left in the prompt after a slow submit would be a
-    second one. lone: a paste placeholder alone is ours only within LONE_FOR seconds of a send of ours that typed the
-    text and that herdr-send did not confirm; otherwise it may be the owner's paste. marker: before any record (a prompt left by
-    stampede 0.2.5), a prompt that starts with our mark, [fleet-job inbox for <lead>, not typed by the owner], is ours.
-    An owner's draft, or our text with a word of theirs added, is never ours."""
+    """(texts, marker) for ready: the deliverer's own text that may still sit in the lead's prompt. texts: the last
+    texts it typed there (typed-<lead>.json) and the text it would type now. Clearing one loses nothing: its lines are
+    unread and typed again, or were delivered, and a copy Claude left in the prompt after a slow submit would be a
+    second one. marker: before any record (a prompt left by stampede 0.2.5), a prompt that starts with our mark,
+    [fleet-job inbox for <lead>, not typed by the owner], is ours. An owner's draft, our text with a word of theirs
+    added, or a paste placeholder alone (DELIVER_MAX keeps ours in their own words) is never ours."""
     typed = typed_record(job, lead)
     found = unread(job, lead)
     texts = (typed or {}).get('texts', []) + ([inbox_text(lead, found)] if found else [])
-    lone = (bool(typed) and typed['confirmed'] is not True and typed['typed'] is not False
-            and time.time() - typed['at'] < LONE_FOR)
-    return texts, lone, None if typed else mark(lead)
+    return texts, None if typed else mark(lead)
 
 
-def remember(job, lead, text, submitted=None, typed=None):
-    """Note a text the deliverer types into the lead's prompt (its last 5), when, whether herdr-send confirmed the last
-    one, and whether it typed anything (False when it refused first: the owner in the pane, a dialog); None before it
-    answers."""
+def remember(job, lead, text):
+    """Note a text the deliverer types into the lead's prompt: its last 5."""
     texts = [t for t in (typed_record(job, lead) or {}).get('texts', []) if t != text] + [text]
-    record = {'texts': texts[-5:], 'at': time.time(), 'confirmed': submitted, 'typed': typed}
-    (Path(job) / 'hooks' / ('typed-' + lead + '.json')).write_text(json.dumps(record) + '\n')
+    (Path(job) / 'hooks' / ('typed-' + lead + '.json')).write_text(json.dumps({'texts': texts[-5:]}) + '\n')
 
 
 def typed_record(job, lead):
@@ -244,9 +237,7 @@ def typed_record(job, lead):
         return None
     if not isinstance(typed, dict) or not isinstance(typed.get('texts'), list):
         return None
-    at = typed.get('at') if isinstance(typed.get('at'), (int, float)) else 0
-    return {'texts': [t for t in typed['texts'] if isinstance(t, str)], 'at': at, 'confirmed': typed.get('confirmed'),
-            'typed': typed.get('typed')}
+    return {'texts': [t for t in typed['texts'] if isinstance(t, str)]}
 
 
 def mark(lead):
@@ -275,7 +266,6 @@ def type_unread(job, lead, limit=None):
     else:
         remember(job, lead, text)
         submitted, said = herdr_send(job, lead, text)
-        remember(job, lead, text, submitted, typed=submitted or not send_.refused(said))
     print(f'{datetime.now():%Y-%m-%d %H:%M} {said}')
     if submitted is not False:
         with (Path(job) / 'hooks/.wake.lock').open('a') as lock:
@@ -288,12 +278,12 @@ def type_unread(job, lead, limit=None):
 
 
 def inbox_text(lead, found):
-    """The one prompt that carries unread lines ([(path, lines, end)]), marked as from fleet-job, cut to DELIVER_MAX."""
-    text = mark(lead) + ' ' + ' '.join(
-        f'{path.name}: ' + ' | '.join(lines) for path, lines, _ in found)
+    """The one prompt that carries unread lines ([(path, lines, end)]), marked as from fleet-job, cut to DELIVER_MAX
+    characters with where to read the rest."""
+    text = mark(lead) + ' ' + ' '.join(f'{path.name}: ' + ' | '.join(lines) for path, lines, _ in found)
     if len(text) > DELIVER_MAX:
-        text = text[:DELIVER_MAX - 120].rstrip() + ' ... (cut: read the rest at the end of ' + ' and '.join(
-            str(path) for path, _, _ in found) + ')'
+        rest = ' ... (cut: read the rest at the end of ' + ' and '.join(str(path) for path, _, _ in found) + ')'
+        text = text[:max(len(mark(lead)) + 1, DELIVER_MAX - len(rest))].rstrip() + rest
     return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)  # typed into a prompt: no control characters
 
 
