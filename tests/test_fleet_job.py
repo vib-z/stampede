@@ -1830,7 +1830,9 @@ class Deliver(unittest.TestCase):
                                       (box(ours + ' and my own words'), record, False),      # the owner added to it
                                       (box('my own half-written reply'), record, False),
                                       (box(ours), legacy, True),                              # left by stampede 0.2.5
-                                      (box('[fleet-job inbox for build-x, not typed by the owner] hi'), legacy, False)):
+                                      (box('[fleet-job inbox for build-x, not typed by the owner] hi'), legacy, False),
+                                      ('\n'.join(['  ' + ours[i:i + 46] for i in range(0, len(ours), 46)]  # review R11: the
+                                                 + [border, '  ⏵⏵ auto mode on']), legacy, False)):  # owner's start is off the top
             with self.subTest(screen=screen, pending=pending), mock.patch.object(
                     herdrapi_, 'herdr', return_value={'agent': {'agent_status': 'done'}}), \
                     mock.patch.object(tui_, 'screen_of', return_value=screen):

@@ -207,8 +207,9 @@ def ready(agent, kind='codex', ours=((), None)):
     screen = screen_of(agent)
     empty = claude_prompt_empty if kind == 'claude' else composer_empty
     texts, marker = ours
+    shown, cut = send_.shape(screen)
     return (empty(screen) or send_.holds(screen, texts, lone=False, clipped=False)
-            or bool(marker) and re.sub(r'\s+', '', send_.box(screen)).startswith(re.sub(r'\s+', '', marker)))
+            or bool(marker) and not cut and re.sub(r'\s+', '', shown).startswith(re.sub(r'\s+', '', marker)))
 
 
 def pending(job, lead):
