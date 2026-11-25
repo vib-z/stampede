@@ -41,9 +41,10 @@ def deliver_soon(job):
     base_.detach([sys.executable, '-I', base_.SCRIPTS / 'fleet_job.py', '_deliver', job], job / 'hooks' / 'deliver.log')
 
 
-DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 700  # seconds between looks, seconds one deliverer waits, characters per prompt
+DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 500  # seconds between looks, seconds one deliverer waits, characters per prompt
 # Claude Code 2.1.332 shows a typed prompt of about 800 characters or more as '[Pasted text #1]' (live, 25 Nov 2026): a
-# prompt of the deliverer's stays in its own words in the box, so a lone placeholder there is never its own.
+# prompt of the deliverer's stays in its own words in the box, so a lone placeholder there is never its own, and its
+# box stays short enough (about 11 rows in a 50-column pane) for its prompt line to show.
 DELIVER_CALL, DELIVER_SEND = 15, 120  # seconds a Herdr look and a herdr-send may take before the deliverer stops waiting
 HOOK_GRACE = 30  # seconds a Claude lead's own file hook has to take a line before the deliverer types it
 
@@ -206,7 +207,7 @@ def ready(agent, kind='codex', ours=((), None)):
     screen = screen_of(agent)
     empty = claude_prompt_empty if kind == 'claude' else composer_empty
     texts, marker = ours
-    return (empty(screen) or send_.holds(screen, texts, lone=False)
+    return (empty(screen) or send_.holds(screen, texts, lone=False, clipped=False)
             or bool(marker) and re.sub(r'\s+', '', send_.box(screen)).startswith(re.sub(r'\s+', '', marker)))
 
 
@@ -216,7 +217,8 @@ def pending(job, lead):
     unread and typed again, or were delivered, and a copy Claude left in the prompt after a slow submit would be a
     second one. marker: before any record (a prompt left by stampede 0.2.5), a prompt that starts with our mark,
     [fleet-job inbox for <lead>, not typed by the owner], is ours. An owner's draft, our text with a word of theirs
-    added, or a paste placeholder alone (DELIVER_MAX keeps ours in their own words) is never ours."""
+    added, a paste placeholder alone (DELIVER_MAX keeps ours in their own words), or a box whose prompt line is off
+    the screen (its hidden start may be the owner's) is never ours."""
     typed = typed_record(job, lead)
     found = unread(job, lead)
     texts = (typed or {}).get('texts', []) + ([inbox_text(lead, found)] if found else [])
@@ -278,12 +280,16 @@ def type_unread(job, lead, limit=None):
 
 
 def inbox_text(lead, found):
-    """The one prompt that carries unread lines ([(path, lines, end)]), marked as from fleet-job, cut to DELIVER_MAX
-    characters with where to read the rest."""
+    """The one prompt that carries unread lines ([(path, lines, end)]), marked as from fleet-job, never over DELIVER_MAX
+    characters: cut, with where to read the rest (the files' full paths, or their names in the job folder when the
+    paths are too long to fit)."""
     text = mark(lead) + ' ' + ' '.join(f'{path.name}: ' + ' | '.join(lines) for path, lines, _ in found)
     if len(text) > DELIVER_MAX:
-        rest = ' ... (cut: read the rest at the end of ' + ' and '.join(str(path) for path, _, _ in found) + ')'
-        text = text[:max(len(mark(lead)) + 1, DELIVER_MAX - len(rest))].rstrip() + rest
+        names = [[str(path) for path, _, _ in found],
+                 ['/'.join(path.parts[-2:]) if path.parent.name == 'inbox' else path.name for path, _, _ in found]]
+        rests = [' ... (cut: read the rest at the end of ' + ' and '.join(files) + ')' for files in names]
+        rest = next((r for r in rests if len(mark(lead)) + 60 + len(r) <= DELIVER_MAX), rests[-1])
+        text = (text[:max(0, DELIVER_MAX - len(rest))].rstrip() + rest)[:DELIVER_MAX]
     return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)  # typed into a prompt: no control characters
 
 

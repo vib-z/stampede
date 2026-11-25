@@ -390,6 +390,9 @@ class Box(unittest.TestCase):
         tall = claude_box(text * 3).split('\n')[5:]   # live, a 787-character draft in a 21-row pane: no prompt line shows
         self.assertEqual((send_.shape('\n'.join(tall))[1], send_.holds('\n'.join(tall), [text * 3])), (True, True))
         self.assertFalse(send_.holds('\n'.join(tall), [text]))                         # a run of another text is not it
+        owner = claude_box('my own instructions first, then a copy: ' + text * 3).split('\n')[5:]   # review R11
+        self.assertTrue(send_.holds('\n'.join(owner), [text * 3]))                  # right after typing it, as herdr-send asks
+        self.assertFalse(send_.holds('\n'.join(owner), [text * 3], clipped=False))  # later, as the deliverer asks: maybe theirs
         codex = '  output above\n' + '─' * 40 + '\n› ' + text + '\n\n  gpt model'   # a rule in Codex's history is no box border
         self.assertEqual(send_.shape(codex), (text, False))
         dim = '❯\xa0\x1b[2m' + text[:40] + '\x1b[0m\n────'           # Claude's dim hint is no typed text

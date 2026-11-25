@@ -1825,7 +1825,7 @@ class Deliver(unittest.TestCase):
         record, legacy = ([ours], None), ([], tui_.mark('lead-demo'))
         tall = box(ours * 3).split('\n')[4:]              # a box taller than its pane: its prompt line is off the top
         for screen, pending, want in ((box(ours), record, True), (box(ours[:60]), record, True),
-                                      ('\n'.join(tall), ([ours * 3], None), True),
+                                      ('\n'.join(tall), ([ours * 3], None), False),         # its hidden start may be the owner's
                                       (box('[Pasted text #1]'), record, False),             # ours never shows as one
                                       (box(ours + ' and my own words'), record, False),      # the owner added to it
                                       (box('my own half-written reply'), record, False),
@@ -1932,6 +1932,17 @@ class Deliver(unittest.TestCase):
         text = self.send.call_args.args[2]
         self.assertLessEqual(len(text), tui_.DELIVER_MAX)   # under the length Claude Code 2.1.332 shows as [Pasted text #1]
         self.assertIn('(cut: read the rest at the end of ' + str(self.job / 'inbox' / 'lead-demo.md'), text)
+
+    def test_a_long_job_path_never_pushes_the_prompt_past_its_cap(self):
+        """Review R10: with a 411-character job folder the two paths alone outgrew the cap, so the prompt grew to 951."""
+        job = Path('/' + 'j' * 410)
+        found = [(job / 'inbox/lead-demo.md', ['GATE ' + 'a' * 300], 0), (job / 'inbox.log', ['TURN build-x ' + 'b' * 300], 0)]
+        text = tui_.inbox_text('lead-demo', found)
+        self.assertLessEqual(len(text), tui_.DELIVER_MAX)
+        self.assertTrue(text.startswith(tui_.mark('lead-demo')))
+        self.assertTrue(text.endswith('(cut: read the rest at the end of inbox/lead-demo.md and inbox.log)'), text)
+        short = tui_.inbox_text('lead-demo', [(Path('/j/inbox.log'), ['TURN build-x ' + 'b' * 600], 0)])
+        self.assertTrue(short.endswith('(cut: read the rest at the end of /j/inbox.log)'), short)
 
     def test_ready_means_idle_or_done_unfocused_and_no_draft(self):
         from unittest import mock

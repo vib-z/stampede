@@ -102,12 +102,15 @@ def box(screen):
     return shape(screen)[0]
 
 
-def holds(screen, texts, lone=True):
+def holds(screen, texts, lone=True, clipped=True):
     """True when a screen's prompt box shows one of texts typed, or its start (a box drawn in part), or, for a box whose
     top is off the screen, a run of it: compared with no whitespace, since a wrapped row is indented, and each paste
     placeholder standing for any part of the text. A box of placeholders alone holds one of texts only when lone says
-    it may."""
+    it may, and a box whose top is off the screen only when clipped does: right after typing a text it is that text,
+    later its hidden start may be someone else's."""
     shown, cut = shape(screen)
+    if cut and not clipped:
+        return False
     pieces = [re.sub(r'\s+', '', piece) for piece in PLACEHOLDER.split(shown)]
     if not any(pieces):
         return lone and bool(PLACEHOLDER.search(shown)) and bool(texts)
