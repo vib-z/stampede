@@ -177,14 +177,15 @@ class Verify(unittest.TestCase):
 
     TEXT = '[fleet-job inbox for lead-demo, not typed by the owner] inbox.log: TURN build-x done | REPORT reports/build-x.md'
 
-    def run_send(self, kind='claude', status='done', screen=EMPTY_CLAUDE, keys=True, text=TEXT, **shape):
+    def run_send(self, kind='claude', status='done', screen=EMPTY_CLAUDE, keys=True, text=TEXT, settle=0, **shape):
         folder = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: subprocess.run(['rm', '-rf', str(folder)]))
         state = {'panes': {'w1:p1': {'screen': screen, 'agent': {
             'name': 'lead-demo', 'agent': kind, 'agent_status': status, 'focused': False, 'terminal_id': 'term_w1:p1',
             'completion_seq': 7, 'agent_session': None, 'args': [], 'prompts': []}}}, **shape}
         (folder / 'state.json').write_text(json.dumps(state))
-        with mock.patch.dict(os.environ, {'HERDR': str(FAKE), 'FAKE_HERDR': str(folder)}), quick():
+        with mock.patch.dict(os.environ, {'HERDR': str(FAKE), 'FAKE_HERDR': str(folder)}), quick(), \
+                mock.patch.object(send_, 'SETTLE', settle):
             ok, line = send_.submit('lead-demo', text, keys=keys)
         self.calls = [json.loads(row) for row in (folder / 'calls').read_text().splitlines()]
         self.state = json.loads((folder / 'state.json').read_text())
@@ -297,7 +298,12 @@ class Verify(unittest.TestCase):
         ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'},
                                  on_prompt={'lead-demo': {'screen': claude_box('{text}')}},
                                  on_get={'lead-demo': [{}, {'agent': {'focused': True}}]})
-        self.assertEqual((ok, line), (False, 'FAILED lead-demo focused: the owner came into that pane; its prompt may still hold the text'))
+        self.assertEqual((ok, line), (False, 'FAILED lead-demo focused: the owner came into that pane before it was '
+                                             'confirmed; its prompt may still hold the text'))
+        self.assertEqual(self.keys(), [])
+        ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'},          # recheck R7: a late start
+                                 on_get={'lead-demo': [{}, {'agent': {'focused': True, 'agent_status': 'working'}}]})
+        self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo (it started late)'))
         self.assertEqual(self.keys(), [])
 
     def test_an_empty_prompt_s_placeholder_is_never_our_text(self):
@@ -323,11 +329,29 @@ class Verify(unittest.TestCase):
                                              'lead-demo before any resend)'))
 
     def test_a_paste_the_owner_made_after_herdr_saw_the_turn_is_theirs(self):
-        """Review R4: Herdr took the prompt; the owner came in and pasted. Its answer stands, and nothing is typed again."""
-        ok, line = self.run_send(on_prompt={'lead-demo': {'screen': claude_box('[Pasted text #2]')}},
+        """Review R4: Herdr took the prompt; the owner came in and pasted, and may have left. Its answer stands, and
+        nothing is typed again: only the text itself in the box overrides it."""
+        for focus in ([{}, {'agent': {'focused': True}}], [{}]):
+            ok, line = self.run_send(on_prompt={'lead-demo': {'screen': claude_box('[Pasted text #2]')}}, on_get={'lead-demo': focus})
+            self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo'))
+            self.assertEqual((self.keys(), self.prompts()), ([], [self.TEXT]))
+
+    def test_our_text_still_in_the_box_is_never_confirmed_while_the_owner_looks(self):
+        """Recheck R8: Herdr saw an earlier turn start, the text stayed in the box, and the owner came in to look."""
+        ok, line = self.run_send(on_prompt={'lead-demo': {'screen': claude_box('{text}')}},
                                  on_get={'lead-demo': [{}, {'agent': {'focused': True}}]})
-        self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo'))
-        self.assertEqual((self.keys(), self.prompts()), ([], [self.TEXT]))
+        self.assertEqual((ok, line), (False, 'FAILED lead-demo focused: the owner came into that pane; its prompt still holds the text'))
+        self.assertEqual(self.keys(), [])
+
+    def test_a_blank_look_before_the_settle_time_confirms_nothing(self):
+        """Recheck R3: a long paste Claude draws late looks blank at first; that look alone is no proof."""
+        ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'}, settle=10 ** 6)
+        self.assertFalse(ok, line)
+        self.assertIn('it cannot tell whether the text went in', line)
+        self.assertEqual(self.keys(), [])
+        ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'}, read_fail={'lead-demo': 1}, settle=10 ** 6)
+        self.assertFalse(ok, line)
+        self.assertEqual(self.keys(), [])
 
     def test_no_key_once_the_owner_comes_in_during_a_look(self):
         """Review R5: a screen read can take seconds; the agent is looked at again just before any key."""
@@ -341,6 +365,10 @@ class Verify(unittest.TestCase):
         ok, line = self.run_send(prompt_error={'lead-demo': 'agent_blocked'})
         self.assertEqual((ok, line), (False, 'FAILED lead-demo (blocked at a dialog; read the screen)'))
         self.assertEqual(self.keys(), [])
+        self.assertTrue(send_.refused(line))                    # the deliverer knows nothing was typed
+        self.assertTrue(send_.refused('FAILED lead-demo focused: the owner is in that pane; retry later'))
+        self.assertFalse(send_.refused('FAILED lead-demo focused: the owner came into that pane before it was confirmed; '
+                                       'its prompt may still hold the text'))
 
 
 class Box(unittest.TestCase):

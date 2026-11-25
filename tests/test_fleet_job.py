@@ -1850,6 +1850,20 @@ class Deliver(unittest.TestCase):
         self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (True, None))         # FAILED
         tui_.remember(self.job, 'lead-demo', ours, True)
         self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, None))        # SUBMITTED: a paste now is the owner's
+        tui_.remember(self.job, 'lead-demo', ours, False, typed=False)
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, None))        # refused before typing: not ours either
+
+    def test_a_send_refused_before_typing_is_noted_as_typing_nothing(self):
+        """Recheck R1: the owner came into the pane between the deliverer's look and herdr-send's."""
+        self.send.side_effect = [(False, 'FAILED lead-demo focused: the owner is in that pane; retry later'),
+                                 (False, 'FAILED lead-demo (the text stayed in its prompt through 3 Enter; cleared it with ctrl+c, so it can be sent again)')]
+        from unittest import mock
+        with mock.patch.object(tui_, 'DELIVER_FOR', 0):
+            tui_.type_unread(self.job, 'lead-demo')
+            self.assertIs(tui_.typed_record(self.job, 'lead-demo')['typed'], False)
+            tui_.type_unread(self.job, 'lead-demo')
+            self.assertIs(tui_.typed_record(self.job, 'lead-demo')['typed'], True)
+        self.assertTrue(tui_.pending(self.job, 'lead-demo')[1])
 
     def test_a_claude_lead_s_stuck_copy_is_cleared_and_typed_once(self):
         """End to end with the real herdr-send and a fake Herdr: the prompt holds the deliverer's own earlier text; it is

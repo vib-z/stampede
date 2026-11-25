@@ -148,6 +148,14 @@ def press(target, key):
         pass
 
 
+REFUSED = ('(not a live agent)', 'focused: the owner is in that pane; retry later', '(blocked at a dialog; read the screen)')
+
+
+def refused(line):
+    """True for a FAILED line of submit that typed nothing: no agent, the owner in its pane, or a dialog."""
+    return line.startswith('FAILED ') and line.endswith(REFUSED)
+
+
 def submit(target, text, keys=True):
     """Type text into the agent's prompt: (True, a SUBMITTED line) or (False, a FAILED line).
     Never a key for a focused, blocked or working agent. At idle or done it first clears leftover typed input with
@@ -157,33 +165,35 @@ def submit(target, text, keys=True):
     herdr_path()
     first = shown(target)
     if first is None:
-        return False, f'FAILED {target} (not a live agent)'
+        return False, f'FAILED {target} {REFUSED[0]}'
     if first['focused']:
-        return False, f'FAILED {target} focused: the owner is in that pane; retry later'
+        return False, f'FAILED {target} {REFUSED[1]}'
     if first['status'] == 'blocked':
-        return False, f'FAILED {target} (blocked at a dialog; read the screen)'
+        return False, f'FAILED {target} {REFUSED[2]}'
     before = screen(target, 8) if keys and first['status'] in ('idle', 'done') else None
-    if before and typed(plain(before)):  # an unread screen gets no key
+    if before and typed(plain(before)) and calm(target):  # an unread screen gets no key
         press(target, 'ctrl+c')
         time.sleep(1)
     try:
         answer = herdrapi_.herdr('agent', 'prompt', target, text, '--wait', '--until', 'working', '--until', 'blocked',
                                  '--timeout', '15000', timeout=CALL + 20)
         # Herdr saw a turn start, but it can be an earlier prompt's: Claude Code 2.1.332, slow to submit one, kept a prompt
-        # typed meanwhile in its box (live, 25 Nov 2026). Its answer stands unless an unfocused box still shows the text
-        # (a paste the owner made while in the pane is theirs).
+        # typed meanwhile in its box (live, 25 Nov 2026). Its answer stands unless the box still shows the text itself; a
+        # paste placeholder alone there may be the owner's, made since.
         if answer.get('type') == 'agent_prompted':
-            read, now = screen(target, 30), None
-            now = shown(target) if read is not None else None
-            if now is None or now['focused'] or not holds(read, [text]):
+            read = screen(target, 30)
+            if read is None or not holds(read, [text], lone=False):
                 return True, f'SUBMITTED {target}'
+            now = shown(target)
+            if now is not None and now['focused']:
+                return False, f'FAILED {target} focused: the owner came into that pane; its prompt still holds the text'
         code = 'agent_prompt_stalled' if answer.get('type') == 'agent_prompted' else ''
     except herdrapi_.HerdrError as error:
         code = error.code
     except ValueError:
         code = ''
     if code == 'agent_blocked':  # Herdr refused it before typing anything
-        return False, f'FAILED {target} (blocked at a dialog; read the screen)'
+        return False, f'FAILED {target} {REFUSED[2]}'
     if text in ('/exit', '/quit'):  # it ends the agent, which never shows working (a Codex quit read as FAILED, 2026-10-17)
         try:
             herdrapi_.herdr('agent', 'wait', target, '--until', 'unknown', '--timeout', '30000', timeout=CALL + 30)
@@ -204,8 +214,9 @@ def verify(target, text, first, keys, typed_in):
       Enter), Enter again, at most ENTERS times; never for a slash command;
     - still there after the last look: ctrl+c once to clear it, then FAILED with the prompt empty, so the next send can
       type. Any other text there is left as it is (FAILED).
-    A look whose screen Herdr does not show tells nothing. No key unless Herdr shows the agent idle or done with
-    nobody in its pane just before it (calm)."""
+    A look whose screen Herdr does not show tells nothing, and a blank look before SETTLE seconds proves nothing (a long
+    paste is drawn late). Once the owner is in the pane a look presses nothing: a late start still counts, else FAILED.
+    No key unless Herdr shows the agent idle or done with nobody in its pane just before it (calm)."""
     slash, enters, seen, gone, looked, held, other = text.startswith('/'), 0, False, False, False, False, False
     started = time.monotonic()
     for pause in PAUSES:
@@ -213,14 +224,16 @@ def verify(target, text, first, keys, typed_in):
         now = shown(target)
         if now is None:
             return False, f'FAILED {target} (it left its pane)'
-        if now['focused']:
-            return False, f'FAILED {target} focused: the owner came into that pane; its prompt may still hold the text'
         read = screen(target, 30)
+        if now['focused']:  # a look with no key: a turn that started late still counts
+            if read is not None and not holds(read, [text]) and (now['status'] in ('working', 'blocked') or moved(first, now)):
+                return True, submitted(target, enters, 'it started late')
+            return False, f'FAILED {target} focused: the owner came into that pane before it was confirmed; its prompt may still hold the text'
         if read is None:
             continue
         looked, held = True, holds(read, [text])
         other, seen = not held and bool(box(read)) and typed(plain(read)), seen or held  # plain text: an empty prompt's markers
-        if not held and (now['status'] in ('working', 'blocked') or isinstance(now['seq'], int) and now['seq'] != first['seq']):
+        if not held and (now['status'] in ('working', 'blocked') or moved(first, now)):
             return True, submitted(target, enters, 'it started late')
         if held:
             gone = False
@@ -238,9 +251,10 @@ def verify(target, text, first, keys, typed_in):
     if not held:
         if other:
             return False, f'FAILED {target} (status before: {first["status"]}, now: {now["status"]}; another text is in its prompt, left as it is)'
-        if typed_in or seen:
+        if gone:  # the last look Herdr showed came after SETTLE seconds, with nothing typed
             return True, submitted(target, enters, 'the text left its prompt')
-        return False, f'FAILED {target} (status before: {first["status"]}, now: {now["status"]}; the text never showed in its prompt)'
+        why = 'it cannot tell whether the text went in' if typed_in or seen else 'the text never showed in its prompt'
+        return False, f'FAILED {target} (status before: {first["status"]}, now: {now["status"]}; {why}: read it with herdr agent read {target} before any resend)'
     if not keys or slash:
         why = 'no key for a slash command' if slash else 'no keys here'
         return False, f'FAILED {target} (the text is still in its prompt, {why}: read it with herdr agent read {target} before any resend)'
@@ -256,6 +270,11 @@ def verify(target, text, first, keys, typed_in):
     if after is None or holds(after, [text]):
         return False, f'FAILED {target} (the text is still in its prompt after {enters} Enter and a ctrl+c: read it with herdr agent read {target})'
     return False, f'FAILED {target} (the text stayed in its prompt through {enters} Enter; cleared it with ctrl+c, so it can be sent again)'
+
+
+def moved(first, now):
+    """True when Herdr's completion counter moved since the first look: a turn ended in between."""
+    return isinstance(now['seq'], int) and now['seq'] != first['seq']
 
 
 def submitted(target, enters, how):

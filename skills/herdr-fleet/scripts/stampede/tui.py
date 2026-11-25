@@ -216,22 +216,24 @@ def pending(job, lead):
     """(texts, lone, marker) for ready: the deliverer's own text that may still sit in the lead's prompt. texts: the
     last texts it typed there (typed-<lead>.json) and the text it would type now. Clearing one loses nothing: its lines
     are unread and typed again, or were delivered, and a copy Claude left in the prompt after a slow submit would be a
-    second one. lone: a paste placeholder alone is ours only within LONE_FOR seconds of a send of ours that herdr-send
-    did not confirm; after a confirmed one it may be the owner's paste. marker: before any record (a prompt left by
+    second one. lone: a paste placeholder alone is ours only within LONE_FOR seconds of a send of ours that typed the
+    text and that herdr-send did not confirm; otherwise it may be the owner's paste. marker: before any record (a prompt left by
     stampede 0.2.5), a prompt that starts with our mark, [fleet-job inbox for <lead>, not typed by the owner], is ours.
     An owner's draft, or our text with a word of theirs added, is never ours."""
     typed = typed_record(job, lead)
     found = unread(job, lead)
     texts = (typed or {}).get('texts', []) + ([inbox_text(lead, found)] if found else [])
-    lone = bool(typed) and typed['confirmed'] is not True and time.time() - typed['at'] < LONE_FOR
+    lone = (bool(typed) and typed['confirmed'] is not True and typed['typed'] is not False
+            and time.time() - typed['at'] < LONE_FOR)
     return texts, lone, None if typed else mark(lead)
 
 
-def remember(job, lead, text, submitted=None):
-    """Note a text the deliverer types into the lead's prompt (its last 5), when, and whether herdr-send confirmed the
-    last one (None before it answers)."""
+def remember(job, lead, text, submitted=None, typed=None):
+    """Note a text the deliverer types into the lead's prompt (its last 5), when, whether herdr-send confirmed the last
+    one, and whether it typed anything (False when it refused first: the owner in the pane, a dialog); None before it
+    answers."""
     texts = [t for t in (typed_record(job, lead) or {}).get('texts', []) if t != text] + [text]
-    record = {'texts': texts[-5:], 'at': time.time(), 'confirmed': submitted}
+    record = {'texts': texts[-5:], 'at': time.time(), 'confirmed': submitted, 'typed': typed}
     (Path(job) / 'hooks' / ('typed-' + lead + '.json')).write_text(json.dumps(record) + '\n')
 
 
@@ -244,7 +246,8 @@ def typed_record(job, lead):
     if not isinstance(typed, dict) or not isinstance(typed.get('texts'), list):
         return None
     at = typed.get('at') if isinstance(typed.get('at'), (int, float)) else 0
-    return {'texts': [t for t in typed['texts'] if isinstance(t, str)], 'at': at, 'confirmed': typed.get('confirmed')}
+    return {'texts': [t for t in typed['texts'] if isinstance(t, str)], 'at': at, 'confirmed': typed.get('confirmed'),
+            'typed': typed.get('typed')}
 
 
 def mark(lead):
@@ -273,7 +276,7 @@ def type_unread(job, lead, limit=None):
     else:
         remember(job, lead, text)
         submitted, said = herdr_send(job, lead, text)
-        remember(job, lead, text, submitted)
+        remember(job, lead, text, submitted, typed=submitted or not send_.refused(said))
     print(f'{datetime.now():%Y-%m-%d %H:%M} {said}')
     if submitted is not False:
         with (Path(job) / 'hooks/.wake.lock').open('a') as lock:
