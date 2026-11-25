@@ -2,7 +2,7 @@
 # Yours: copy this file to ~/.config/stampede/config.toml ($XDG_CONFIG_HOME/stampede/config.toml when that is set).
 # A project: commit a .stampede.toml at the repo root with the keys every job there should use.
 # User only: jobs_root, trust_root, ask.command, lead.allow, lead.forbid, workers.forbid, workers.max_effort,
-# backend and every gates and finish key come from your file, the environment or a flag. A repo cannot set them.
+# backend and every gates, claude and finish key come from your file, the environment or a flag. A repo cannot set them.
 # Last one wins: these defaults, your file, the repo's file, the environment (the names below), then a command's flags
 # and --set key=value. stampede new saves the result in <job>/settings.json. See it all: stampede config show
 
@@ -101,6 +101,9 @@ close = true                # closing a helper's terminals: the lead asks (a who
 
 [merge]
 method = "squash"  # how stampede merge merges: squash, merge or rebase
+
+[claude]  # every Claude agent a job starts (user only)
+idle_compaction = true  # false: start each one with "idleCompaction": false in its settings file, so Claude Code (2.1.290 or later) does not compact it while it waits; true leaves Claude Code's own setting
 
 [finish]  # what stampede finish does after its done event (user only)
 auto_close = false  # true: close the job's own Herdr TUI workspace by itself once every agent is idle, every git folder is clean, no gate waits on you and the reopen record is written

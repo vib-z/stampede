@@ -303,7 +303,7 @@ stampede new: --fork forks a Claude chat, so it takes a Claude lead: drop --lead
 
 **How the lead gets news.** A Codex lead has no file hook. Instead, a short-lived deliverer types its new inbox lines into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`.
 It types only once the pane is idle, not focused, and has nothing typed in its prompt. On Herdr Core, Core delivers them.
-A Claude lead on the Herdr TUI has the same deliverer as a backup. Claude Code's file watcher can miss a change, so after 30 seconds the deliverer types any line the hook did not take, once the lead is idle with an empty prompt.
+A Claude lead on the Herdr TUI has the same deliverer as a backup. Claude Code's file watcher can miss a change, so after 30 seconds the deliverer types any line the hook did not take, once the lead is idle with an empty prompt. A prompt that holds only the deliverer's own earlier text counts as empty: it is cleared and the lines typed once.
 If a lead's lines stay unread for 4 hours, the deliverer sends one `blocked` event (`kind` `undelivered`).
 Since this text is typed in, a Codex lead acts on a gate only after `stampede gate-ok` prints `APPROVED`.
 

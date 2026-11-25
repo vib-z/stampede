@@ -3,6 +3,8 @@ import contextlib, fcntl, json, os, re, shlex, subprocess, time, uuid
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, tui as tui_, out as out_
+from . import send as send_
+from .send import EMPTY_PROMPT, typed  # herdr-send's markers of an empty prompt
 
 
 def live_terminal(job, agent, adopt=True):
@@ -314,8 +316,8 @@ def unmark_handed(job):
 def prompt_handed(job, name, text):
     """Prompt a handed agent with one herdr agent prompt, never a key: only while its recorded pane runs this live launch
     (its name, and the session and completion this job or its follower saw; not one the follower saw end), idle or done,
-    the owner not in it and its prompt shown empty (a start's own pointer too). None once Herdr took the prompt, else
-    why not; anything Herdr does not show clearly refuses. A delivered prompt naming the agent's brief marks it briefed.
+    the owner not in it and its prompt shown empty (a start's own pointer too). None once herdr-send's check (send.submit
+    with keys=False) saw it go in, a late start too, else why not; anything Herdr does not show clearly refuses. A delivered prompt naming the agent's brief marks it briefed.
     ponytail: Herdr has no prompt --if idle, so an agent that turns working between the check and the prompt takes it as
     a message during its turn; upgrade: a status-guarded Herdr prompt."""
     entry = known(job, name)
@@ -347,10 +349,9 @@ def prompt_handed(job, name, text):
     if screen is None or screen.returncode or typed(screen.stdout, EMPTY_HANDED):
         return (f'text may be typed in its prompt, or its empty prompt is not one stampede knows: read it with herdr agent '
                 f'read {pane} --source visible --lines 8, clear it there only when it is idle, then tell again')
-    try:
-        herdrapi_.herdr('agent', 'prompt', pane, text, '--wait', '--until', 'working', '--until', 'blocked', '--timeout', '15000')
-    except (herdrapi_.HerdrError, ValueError) as error:
-        return f'{base_.line(error)}; read its screen with herdr agent read {pane} before any resend'
+    submitted, said = send_.submit(pane, text, keys=False)  # herdr-send's own check of the submit, with no key
+    if not submitted:
+        return f'{said.split(" ", 2)[-1].strip("() ")}; read its screen with herdr agent read {pane} before any resend'
     if entry.get('brief') and entry['brief'] in text:
         job_.bind(job, name, {'briefed': True})
     return None
@@ -402,33 +403,6 @@ def reopen_handed(job, agent):
         release_pane(job, agent)
     print(f'NOT RUNNING {agent} (pane {pane}): start it again in a pane at its shell prompt: {entry["start"]}')
     return 'missing'
-
-
-EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›)[ \xa0]*$',
-                          re.IGNORECASE | re.MULTILINE)  # herdr-send's markers of an empty prompt
-# Codex 0.170 in a narrow pane cuts its placeholder to 'Ask Codex to do anyth' and its footer to '← for agents ⚠ 2 · f2'
-# (live, 20 Nov 2026). That footer marks an empty prompt only as the last row, right under a status row, with no scroll
-# arrow from the last prompt line down: a draft can quote it, and a tall draft hides the status rows and scrolls.
-NARROW_FOOTER = re.compile(r' *← for agents( ·( \?( for( [a-z]*)?)?)?)?( +⚠ .*)?')
-PROMPT_LINE = re.compile(r'[»›❯>]( |$)')  # Codex's prompt line, in column 0: a draft's own lines are indented
-
-
-def narrow_footer(screen):
-    """True when a screen ends in Codex's footer cut to fit a narrow pane, as herdr-send's awk reads it. Arrows count only
-    from the last prompt line down (the whole screen when none shows), so one in a reply above it changes nothing."""
-    rows = [row.rstrip() for row in screen.splitlines()]
-    while rows and not rows[-1]:
-        rows.pop()
-    prompts = [i for i, row in enumerate(rows) if PROMPT_LINE.match(row)]
-    composer = rows[prompts[-1]:] if prompts else rows
-    return (len(rows) > 1 and bool(rows[-2]) and bool(NARROW_FOOTER.fullmatch(rows[-1]))
-            and not any(arrow in row for row in composer for arrow in '↑↓'))
-
-
-def typed(screen, empty=EMPTY_PROMPT):
-    """True when a screen's last 8 non-empty lines show no empty-prompt marker, and it does not end in Codex's narrow
-    footer: text already typed in the prompt."""
-    return not empty.search('\n'.join([line for line in screen.splitlines() if line.strip()][-8:])) and not narrow_footer(screen)
 
 
 # A handed agent's empty prompt: Cursor's placeholder too (Herdr 0.9.5, 30 Oct 2026), wrapped over lines in a narrow

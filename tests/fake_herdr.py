@@ -18,6 +18,11 @@ shapes the answers with:
   hang        seconds          every call waits this long first (a hung Herdr)
   on_read     {pane: change}   the next `pane read` of that pane first applies change ({agent: fields, screen: text}):
                                a replacement during the read
+  prompt_error {name: code}    `agent prompt` types the text but answers this code (agent_prompt_stalled: Herdr saw no
+                               turn start in 5 s); the agent keeps its status
+  on_prompt   {name: change}   `agent prompt` then applies change; '{text}' in its screen is the text typed
+  on_get      {name: [change]} each `agent get` of that agent first applies the next change: a turn that starts late
+  on_key      {name: {key: change}}  a key sent to that agent applies change: Enter submits, ctrl+c empties the prompt
 A prompt turns the agent working, as Herdr's prompt --wait --until working does. Errors are Herdr's shape, exit 1."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -38,6 +43,13 @@ def view(pane_id, pane):
     agent = pane['agent']
     return {'pane_id': pane_id, 'workspace_id': pane_id.split(':')[0], 'tab_id': pane_id.split(':')[0] + ':t1',
             'focused': False, **{k: v for k, v in agent.items() if k not in ('args', 'prompts', 'keys')}}
+
+
+def apply(pane, change, text=''):
+    """Apply a scripted change ({agent: fields, screen: text}) to a pane."""
+    pane['agent'].update(change.get('agent', {}))
+    if 'screen' in change:
+        pane['screen'] = change['screen'].replace('{text}', text)
 
 
 def find(state, target):
@@ -80,7 +92,11 @@ def command(state, argv):
             fail(state['get_error'][args[0]])
         if args[0] in state.get('get_answer', {}):
             return ok(state['get_answer'][args[0]])
-        return ok({'agent': view(*find(state, args[0]))})
+        pane_id, pane = find(state, args[0])
+        timeline = state.get('on_get', {}).get(pane['agent']['name'])
+        if timeline:
+            apply(pane, timeline.pop(0), (pane['agent']['prompts'] or [''])[-1])
+        return ok({'agent': view(pane_id, pane)})
     if verb == 'agent start':
         name, kind, pane_id = args[0], args[args.index('--kind') + 1], args[args.index('--pane') + 1]
         if pane_id not in panes:
@@ -98,11 +114,20 @@ def command(state, argv):
         return ok({'agent': view(*find(state, args[0]))})
     if verb == 'agent prompt':
         pane_id, pane = find(state, args[0])
+        name = pane['agent']['name']
         pane['agent']['prompts'].append(args[1])
+        if name in state.get('on_prompt', {}):
+            apply(pane, state['on_prompt'][name], args[1])
+        if state.get('prompt_error', {}).get(name):
+            fail(state['prompt_error'][name])
         pane['agent']['agent_status'] = 'working'
         return ok({'type': 'agent_prompted'})
     if verb == 'agent send-keys':
-        find(state, args[0])[1]['agent'].setdefault('keys', []).append(args[1:])
+        pane_id, pane = find(state, args[0])
+        pane['agent'].setdefault('keys', []).append(args[1:])
+        for key in args[1:]:
+            if key in state.get('on_key', {}).get(pane['agent']['name'], {}):
+                apply(pane, state['on_key'][pane['agent']['name']][key], (pane['agent']['prompts'] or [''])[-1])
         return ok({})
     fail('unknown_command')
 

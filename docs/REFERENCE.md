@@ -17,7 +17,7 @@ In [skills/grokbot-herdr/scripts/](../skills/grokbot-herdr/scripts/):
 | script | does | exit |
 |---|---|---|
 | `herdr-trust <dir>` | pre-trusts a repo for Claude and Codex | 0, or 2 refused |
-| `herdr-send <agent> <text>` | prompts an agent and confirms it started: `SUBMITTED` or `FAILED`; refuses a pane you have focused before any key | 0, 1 failed, 2 usage |
+| `herdr-send <agent> <text>` | prompts an agent and confirms it from the status and the screen: `SUBMITTED` once a turn starts or the text leaves the prompt, a late start too. Text left in the prompt gets Enter again (never a slash command), then ctrl+c and `FAILED`. Refuses a pane you have focused before any key | 0, 1 failed, 2 usage |
 | `herdr-reopen-snapshot <ws> <job dir>` | reads the live workspace (read only) and writes `REOPEN.md` and `reopen.sh` in the job folder: the tabs holding the job's agents (from `agents.tsv`), never another's agent. Given a `--relay` job's `<hc-key>`, it writes that job's record from `agents.tsv` and `core.json` | 0, or 1 with the reason |
 | `<job>/reopen.sh` | recreates the workspace and resumes each agent's session; `--fresh` new sessions, `--prompt` re-sends the briefs, `--into <ws>` adds to an open workspace | 0, 2 a workspace with that label is open or policy refuses an agent, 3 a pane's folder is gone, 4 a tab did not open, 5 the new workspace could not be tagged for its bot, 64 usage |
 | `<job>/reopen.sh` (a Core job) | the same as `stampede reopen <job>`: brings back what is not live from `tree.json`, parents first, under the cap | as `stampede reopen` |
