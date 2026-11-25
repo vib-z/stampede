@@ -1,55 +1,12 @@
 #!/bin/bash
 # herdr-send <agent> <text>: submit a prompt to a Herdr agent (name or pane id); prints SUBMITTED, or FAILED (exit 1).
-# Clears leftover typed input with ctrl+c only when the agent is idle or done AND its prompt is not empty
-# (ctrl+c on an EMPTY idle Codex prompt quits Codex). Never sends keys to a working, blocked or focused agent.
-# If Claude dropped the Enter (prompt visibly in its box, still idle), presses Enter once more; never ctrl+c there.
+# Never sends keys to a working, blocked or focused agent. At idle or done it clears leftover typed input with ctrl+c
+# only when the prompt is not empty (ctrl+c on an EMPTY idle Codex prompt quits Codex). After typing it checks the submit
+# from the status and the screen: a late start, or the text gone from the prompt, is SUBMITTED; text left in the prompt
+# gets Enter again (never for a slash command), then ctrl+c and FAILED. The logic is stampede's send.py in the
+# herdr-fleet skill beside this one, which every stampede path that types into a pane shares.
 set -u
 if [ $# -lt 2 ]; then echo "usage: herdr-send <agent-name-or-pane> <text>" >&2; exit 2; fi
-P="$1"; T="$2"
-H="$(command -v herdr 2>/dev/null || echo ~/.local/bin/herdr)"
-[ -x "$H" ] || H=~/.local/bin/herdr
-STATUS="$("$H" agent get "$P" 2>/dev/null | python3 -c 'import sys,json
-try: a=json.load(sys.stdin)["result"]["agent"]; print(a.get("agent_status","") + (" focused" if a.get("focused") else ""))
-except Exception: print("")' 2>/dev/null)"
-case "$STATUS" in
-  "") echo "FAILED $P (not a live agent)"; exit 1;;
-  *focused) echo "FAILED $P focused: the owner is in that pane; retry later"; exit 1;;
-  blocked) echo "FAILED $P (blocked at a dialog; read the screen)"; exit 1;;
-  idle|done)
-    # Empty-prompt markers: Codex placeholder and footer, Claude hint, a bare prompt line (Claude's ends in a no-break
-    # space). Or Codex 0.170's footer cut to fit a narrow pane ('← for agents ⚠ 2 · f2'), where its placeholder is cut
-    # too: only as the last row, right under a status row, with no scroll arrow from the last prompt line (column 0) down
-    # (a draft can quote it). Keep in step with EMPTY_PROMPT and narrow_footer in skills/herdr-fleet/scripts/stampede/handed.py.
-    SCREEN="$("$H" agent read "$P" --source visible --lines 8 2>/dev/null)"
-    if ! printf '%s\n' "$SCREEN" | grep -qiE 'Ask Codex to do anything|for shortcuts|To get started|describe a task|Try "|^ *(>|❯|›)[  ]*$' \
-        && ! printf '%s\n' "$SCREEN" | awk '{ sub(/[ \t\r]+$/, ""); row[NR] = $0; if ($0 ~ /^(»|›|❯|>)( |$)/) p = NR }
-            END { n = NR; while (n > 0 && row[n] == "") n--
-                  for (i = (p ? p : 1); i <= n; i++) if (row[i] ~ /↑|↓/) arrow = 1
-                  exit !(n > 1 && !arrow && row[n - 1] != "" && row[n] ~ /^ *← for agents( ·( [?]( for( [a-z]*)?)?)?)?( +⚠ .*)?$/) }'; then
-      "$H" agent send-keys "$P" ctrl+c >/dev/null 2>&1; sleep 1
-    fi;;
-esac
-if "$H" agent prompt "$P" "$T" --wait --until working --until blocked --timeout 15000 2>&1 | grep -q agent_prompted; then
-  echo "SUBMITTED $P"; exit 0
-fi
-# A prompt typed into Claude before it has drawn its screen keeps the text and loses the Enter: it sits in the box
-# and the agent stays idle. Press Enter once, only when the prompt's start is in the box (the last prompt line).
-# Never for a slash command: /exit and /quit end the agent, which never shows working.
-NOW="$("$H" agent get "$P" 2>/dev/null | python3 -c 'import sys,json
-try: print(json.load(sys.stdin)["result"]["agent"].get("agent_status",""))
-except Exception: print("")' 2>/dev/null)"
-PFX="${T%%$'\n'*}"; PFX="${PFX:0:30}"
-if [ "$NOW" = idle ] && [ -n "$PFX" ] && [ "${T:0:1}" != / ] && "$H" agent read "$P" --source visible --lines 15 2>/dev/null \
-    | grep -E '^ *(❯|>|›)' | tail -1 | grep -qF -- "$PFX"; then   # Claude draws ❯ plus a no-break space
-  "$H" agent send-keys "$P" enter >/dev/null 2>&1
-  if "$H" agent wait "$P" --until working --until blocked --timeout 10000 2>&1 | grep -q '"result"'; then
-    echo "SUBMITTED $P (pressed Enter again: the first was dropped)"; exit 0
-  fi
-fi
-# /exit and /quit end the agent, so it never shows working (Codex quit read as FAILED, 2026-10-17): confirm it left.
-case "$T" in /exit|/quit)
-  if "$H" agent wait "$P" --until unknown --timeout 30000 2>&1 | grep -q agent_not_running; then
-    echo "SUBMITTED $P (the agent exited)"; exit 0
-  fi;;
-esac
-echo "FAILED $P (status before: ${STATUS:-unknown}, now: ${NOW:-unknown})"; exit 1
+src=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")
+exec python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from stampede import send; raise SystemExit(send.main(sys.argv[2:]))' \
+  "$(dirname "$src")/../../herdr-fleet/scripts" "$@"

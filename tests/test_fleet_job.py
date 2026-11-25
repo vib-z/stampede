@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/herdr-fleet/scripts'
 sys.path.insert(0, str(SCRIPTS))
-from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_, settings as settings_
+from stampede import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, relay as relay_, cli as cli_, settings as settings_, send as send_
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quiet import setUpModule, tearDownModule  # noqa: E402,F401: commands run in-process print status lines
 
@@ -502,6 +502,23 @@ class ReviewRound1(unittest.TestCase):
         hooks = json.loads((job / 'hooks/lead-demo-claude.json').read_text())['hooks']
         self.assertNotIn('Stop', hooks)
         self.assertNotIn('SessionEnd', hooks)
+
+    def test_claude_idle_compaction_is_left_to_claude_unless_the_owner_turns_it_off(self):
+        """idleCompaction is in Claude Code's settings reference (2.1.290 or later); stampede writes it only on the owner's say."""
+        from unittest import mock
+        job = job_with([('lead-demo', 'claude'), ('build-x', 'claude')])
+        agents_.cli_args(job, 'build-x', 'claude', None, None, [])
+        self.assertNotIn('idleCompaction', json.loads((job / 'hooks/build-x-claude.json').read_text()))
+        config = Path(tempfile.mkdtemp())
+        (config / 'stampede').mkdir()
+        (config / 'stampede/config.toml').write_text('[claude]\nidle_compaction = false\n')
+        with mock.patch.dict(os.environ, {'XDG_CONFIG_HOME': str(config)}):
+            agents_.cli_args(job, 'build-x', 'claude', None, None, [])
+            agents_.cli_args(job, 'lead-demo', 'claude', None, None, [], lead=True)
+        for agent in ('build-x', 'lead-demo'):
+            self.assertIs(json.loads((job / f'hooks/{agent}-claude.json').read_text())['idleCompaction'], False)
+        (job.parent / '.stampede.toml').write_text('[claude]\nidle_compaction = false\n')   # a repo cannot set it
+        self.assertTrue(settings_.load(repo=job.parent, env={}, home=config).get('claude.idle_compaction'))
 
     def test_r2_codex_notify_takes_its_payload_as_the_last_argument(self):
         job = job_with([('lead-demo', 'claude'), ('build-ui', 'codex')])
@@ -1791,12 +1808,143 @@ class Deliver(unittest.TestCase):
         self.assertEqual((event['source'], event['state'], event['kind'], event['agent'], event['workspace']),
                          ('stampede', 'blocked', 'undelivered', 'lead-demo', 'w9'))
 
+    def test_the_deliverer_notes_what_it_types_as_its_own(self):
+        self.deliver()
+        text = self.send.call_args.args[2]
+        self.assertEqual(tui_.pending(self.job, 'lead-demo'), ([text], None))   # its last text, and nothing unread now
+        self.assertEqual(self.ready.call_args.kwargs, {'ours': ([text], tui_.mark('lead-demo'))})  # before any record
+
+    def test_a_prompt_holding_only_our_own_text_is_deliverable(self):
+        """25 Nov 2026: a copy of the deliverer's own line sat in a Claude lead's prompt for 4 hours, read as a draft."""
+        from unittest import mock
+        ours = '[fleet-job inbox for lead-demo, not typed by the owner] inbox.log: TURN build-x done | REPORT reports/build-x.md'
+        top, border = '──────────── lead-demo ─', '────────────────────────'
+        def box(shown):
+            rows = [shown[i:i + 46] for i in range(0, len(shown), 46)]
+            return '\n'.join([top, '❯\xa0' + rows[0]] + ['  ' + row for row in rows[1:]] + [border, '  ⏵⏵ auto mode on'])
+        record, legacy = ([ours], None), ([], tui_.mark('lead-demo'))
+        tall = box(ours * 3).split('\n')[4:]              # a box taller than its pane: its prompt line is off the top
+        for screen, pending, want in ((box(ours), record, True), (box(ours[:60]), record, True),
+                                      ('\n'.join(tall), ([ours * 3], None), False),         # its hidden start may be the owner's
+                                      (box('[Pasted text #1]'), record, False),             # ours never shows as one
+                                      (box(ours + ' and my own words'), record, False),      # the owner added to it
+                                      (box('my own half-written reply'), record, False),
+                                      (box(ours), legacy, True),                              # left by stampede 0.2.5
+                                      (box('[fleet-job inbox for build-x, not typed by the owner] hi'), legacy, False),
+                                      ('\n'.join(['  ' + ours[i:i + 46] for i in range(0, len(ours), 46)]  # review R11: the
+                                                 + [border, '  ⏵⏵ auto mode on']), legacy, False)):  # owner's start is off the top
+            with self.subTest(screen=screen, pending=pending), mock.patch.object(
+                    herdrapi_, 'herdr', return_value={'agent': {'agent_status': 'done'}}), \
+                    mock.patch.object(tui_, 'screen_of', return_value=screen):
+                self.assertEqual(REAL_READY('lead-demo', 'claude', ours=pending), want)
+        with mock.patch.object(herdrapi_, 'herdr', return_value={'agent': {'agent_status': 'done', 'focused': True}}), \
+                mock.patch.object(tui_, 'screen_of', return_value=box(ours)):
+            self.assertFalse(REAL_READY('lead-demo', 'claude', ours=record))  # never while the owner is in the pane
+        (self.job / 'hooks/typed-lead-demo.json').write_text('{"texts": ["half a rec')   # a write cut short
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1], tui_.mark('lead-demo'))
+        tui_.remember(self.job, 'lead-demo', ours)                                      # and the next send mends it
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1], None)
+        self.assertIn(ours, tui_.pending(self.job, 'lead-demo')[0])
+
+    def test_a_claude_lead_s_stuck_copy_is_cleared_and_typed_once(self):
+        """End to end with the real herdr-send and a fake Herdr: the prompt holds the deliverer's own earlier text; it is
+        cleared with one ctrl+c, the unread lines are typed once, and their offsets move."""
+        from unittest import mock
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
+        texts = tui_.inbox_text('lead-demo', tui_.unread(self.job, 'lead-demo'))
+        tui_.remember(self.job, 'lead-demo', texts)
+        folder = Path(tempfile.mkdtemp())
+        stuck = '──── lead-demo ─\n❯\xa0' + texts[:46] + '\n  ' + texts[46:92] + '\n────────────────\n  ⏵⏵ auto mode on'
+        empty = '──── lead-demo ─\n❯\xa0\n────────────────\n  ⏵⏵ auto mode on'
+        (folder / 'state.json').write_text(json.dumps({'panes': {'w1:p1': {'screen': stuck, 'agent': {
+            'name': 'lead-demo', 'agent': 'claude', 'agent_status': 'done', 'focused': False, 'terminal_id': 'term_w1:p1',
+            'completion_seq': 3, 'agent_session': None, 'args': [], 'prompts': []}}},
+            'on_key': {'lead-demo': {'ctrl+c': {'screen': empty}}}}))
+        fake = Path(__file__).resolve().parent / 'fake_herdr.py'
+        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'herdr_send', REAL_SEND), \
+                mock.patch.object(tui_, 'HOOK_GRACE', 0), mock.patch.dict(os.environ, {'HERDR': str(fake), 'FAKE_HERDR': str(folder)}):
+            self.assertEqual(self.deliver(), 0)
+        agent = json.loads((folder / 'state.json').read_text())['panes']['w1:p1']['agent']
+        self.assertEqual((agent['keys'], agent['prompts']), ([['ctrl+c']], [texts]))
+        self.assertEqual(tui_.unread(self.job, 'lead-demo'), [])
+
+    def real_send(self, **shape):
+        """The deliverer with the real send.py (in-process, its waits cut) on a fake Herdr shaped like shape: a Claude
+        lead idle at an empty prompt. Returns the fake's folder."""
+        from unittest import mock
+        from stampede import send as send_
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
+        folder = Path(tempfile.mkdtemp())
+        empty = '──── lead-demo ─\n❯\xa0\n────────────────\n  ⏵⏵ auto mode on'
+        (folder / 'state.json').write_text(json.dumps({'panes': {'w1:p1': {'screen': empty, 'agent': {
+            'name': 'lead-demo', 'agent': 'claude', 'agent_status': 'done', 'focused': False, 'terminal_id': 'term_w1:p1',
+            'completion_seq': 3, 'agent_session': None, 'args': [], 'prompts': []}}}, **shape}))
+        for patch in (mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'HOOK_GRACE', 0),
+                      mock.patch.object(tui_, 'herdr_send', lambda job, name, text: send_.submit(name, text)),
+                      mock.patch.object(send_.time, 'sleep'), mock.patch.object(send_, 'SETTLE', 0),
+                      mock.patch.dict(os.environ, {'HERDR': str(Path(__file__).resolve().parent / 'fake_herdr.py'),
+                                                   'FAKE_HERDR': str(folder)})):
+            patch.start()
+        return folder
+
+    def test_lines_stay_unread_while_the_lead_s_prompt_still_holds_them(self):
+        """Field note, 25 Nov 2026: lines were recorded as delivered while the lead's prompt still held them unsent, and
+        sat unread for hours. They count as delivered only once the prompt is clear or a turn started."""
+        from unittest import mock
+        stuck = '──── lead-demo ─\n❯\xa0{text}\n────────────────\n  ⏵⏵ auto mode on'
+        empty = '──── lead-demo ─\n❯\xa0\n────────────────\n  ⏵⏵ auto mode on'
+        cases = (  # Claude kept the text and every Enter was lost; Herdr saw an earlier prompt's turn start instead
+            {'prompt_error': {'lead-demo': 'agent_prompt_stalled'}, 'on_prompt': {'lead-demo': {'screen': stuck}},
+             'on_key': {'lead-demo': {'ctrl+c': {'screen': empty}}}},
+            {'on_prompt': {'lead-demo': {'screen': stuck}}, 'on_get': {'lead-demo': [{}, {}] + [
+                {'agent': {'agent_status': 'working'}}] * 40}})
+        for shape in cases:
+            with self.subTest(shape=sorted(shape)):
+                folder = self.real_send(**shape)
+                with mock.patch.object(tui_, 'DELIVER_FOR', 1):
+                    self.assertEqual(self.deliver(), 3)                 # it gave up, with the lines unread
+                self.assertEqual(len(tui_.unread(self.job, 'lead-demo')), 2)
+                agent = json.loads((folder / 'state.json').read_text())['panes']['w1:p1']['agent']
+                self.assertTrue(agent['prompts'])
+                mock.patch.stopall()
+                self.setUp()
+
+    def test_lines_count_as_delivered_once_the_prompt_is_clear(self):
+        from unittest import mock
+        folder = self.real_send(prompt_error={'lead-demo': 'agent_prompt_stalled'},       # a late start, no turn seen
+                                on_get={'lead-demo': [{}, {}, {}, {'agent': {'agent_status': 'working'}}]})
+        self.assertEqual(self.deliver(), 0)
+        self.assertEqual(tui_.unread(self.job, 'lead-demo'), [])
+        agent = json.loads((folder / 'state.json').read_text())['panes']['w1:p1']['agent']
+        self.assertEqual((len(agent['prompts']), agent.get('keys', [])), (1, []))          # typed once, no key
+
+    def test_an_owner_s_draft_is_never_cleared_by_the_deliverer(self):
+        from unittest import mock
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
+        draft = '──── lead-demo ─\n❯\xa0let me think about the gate\n────────────────\n  ⏵⏵ auto mode on'
+        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'HOOK_GRACE', 0), \
+                mock.patch.object(tui_, 'DELIVER_FOR', 0.05), mock.patch.object(tui_, 'screen_of', return_value=draft), \
+                mock.patch.object(herdrapi_, 'herdr', return_value={'agent': {'agent': 'claude', 'agent_status': 'done'}}):
+            self.assertEqual(self.deliver(), 3)
+        self.send.assert_not_called()
+
     def test_a_long_inbox_is_cut_with_where_to_read_the_rest(self):
         base_.append(self.job / 'inbox.log', 'TURN build-x ' + 'x' * 3000)
         self.deliver()
         text = self.send.call_args.args[2]
-        self.assertLessEqual(len(text), tui_.DELIVER_MAX + 200)
+        self.assertLessEqual(len(text), tui_.DELIVER_MAX)   # under the length Claude Code 2.1.332 shows as [Pasted text #1]
         self.assertIn('(cut: read the rest at the end of ' + str(self.job / 'inbox' / 'lead-demo.md'), text)
+
+    def test_a_long_job_path_never_pushes_the_prompt_past_its_cap(self):
+        """Review R10: with a 411-character job folder the two paths alone outgrew the cap, so the prompt grew to 951."""
+        job = Path('/' + 'j' * 410)
+        found = [(job / 'inbox/lead-demo.md', ['GATE ' + 'a' * 300], 0), (job / 'inbox.log', ['TURN build-x ' + 'b' * 300], 0)]
+        text = tui_.inbox_text('lead-demo', found)
+        self.assertLessEqual(len(text), tui_.DELIVER_MAX)
+        self.assertTrue(text.startswith(tui_.mark('lead-demo')))
+        self.assertTrue(text.endswith('(cut: read the rest at the end of inbox/lead-demo.md and inbox.log)'), text)
+        short = tui_.inbox_text('lead-demo', [(Path('/j/inbox.log'), ['TURN build-x ' + 'b' * 600], 0)])
+        self.assertTrue(short.endswith('(cut: read the rest at the end of /j/inbox.log)'), short)
 
     def test_ready_means_idle_or_done_unfocused_and_no_draft(self):
         from unittest import mock
@@ -1882,7 +2030,7 @@ class Deliver(unittest.TestCase):
         self.assertTrue(tui_.composer_empty(re.sub(r'\x1b\[[0-9;]*m', '', undimmed)))  # plain text cannot tell them apart
         arrows = empty.replace('Ask Codex to do anything', 'Ask Codex to do anything \x1b[2m\u2191', 1)
         self.assertFalse(tui_.composer_empty(arrows))              # a scrolled composer: its arrow is dim too
-        self.assertEqual(tui_.cells('\x1b[1m\x1b[38;2;2;2;2ma\x1b[2mb\x1b[0mc\x1b[48;5;2md\x1b[2;38;5;2me\x1b[22mf\r'),
+        self.assertEqual(send_.cells('\x1b[1m\x1b[38;2;2;2;2ma\x1b[2mb\x1b[0mc\x1b[48;5;2md\x1b[2;38;5;2me\x1b[22mf\r'),
                          [('a', False), ('b', True), ('c', False), ('d', False), ('e', True), ('f', False)])
 
     def test_screen_of_reads_styles_and_falls_back_to_text(self):
@@ -1906,16 +2054,16 @@ class Deliver(unittest.TestCase):
         stall = folder / 'stall'
         stall.write_text('#!/bin/bash\necho $$ >> "$(dirname "$0")/pids"\nsleep 30\n')
         stall.chmod(0o755)
-        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'DELIVER_CALL', 0.3), \
+        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'DELIVER_CALL', 1.5), \
                 mock.patch.dict(os.environ, {'HERDR': str(stall)}):
             started = time.monotonic()
             self.assertEqual(self.deliver(), 4)          # agent get hangs: the deliverer lets go at once
             self.assertLess(time.monotonic() - started, 5)
         self.send.assert_not_called()
         self.assertEqual(len(tui_.unread(self.job, 'lead-demo')), 2)   # nothing marked read
-        with mock.patch.object(tui_, 'HERDR_SEND', stall), mock.patch.object(tui_, 'DELIVER_SEND', 0.3):
+        with mock.patch.object(tui_, 'HERDR_SEND', stall), mock.patch.object(tui_, 'DELIVER_SEND', 1.5):  # time for bash to start on a busy machine
             started = time.monotonic()
-            self.assertEqual(REAL_SEND(self.job, 'lead-demo', 'hi'), (False, 'FAILED lead-demo: herdr-send did not finish in 0.3 s'))
+            self.assertEqual(REAL_SEND(self.job, 'lead-demo', 'hi'), (False, 'FAILED lead-demo: herdr-send did not finish in 1.5 s'))
             self.assertLess(time.monotonic() - started, 5)
         for pid in (folder / 'pids').read_text().split():   # every stalled child was stopped
             with self.assertRaises(ProcessLookupError):

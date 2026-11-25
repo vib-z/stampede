@@ -14,7 +14,7 @@ Each was hit for real; recheck a fix against the installed binary before relying
 | Stall alerts fire during long xhigh thinking | A stall is 15 minutes or more of an unchanged log (the watch's default), not 12. |
 | Codex sits in `unknown` after a reply, or Kimi stays `working` after an error turn, and `agent wait` times out | The report file is the signal. `STALL?` covers Claude and Codex only: check Hermes, Kimi and Gemini by their screen. |
 | A turn ends "Selected model is at capacity" | Read the screen to confirm nothing changed, then resend the prompt with "Retry:" in front. Again, or a usage limit: the [fallback](agents-and-models.md#fallback). |
-| A prompt sits unsent in Claude's box and the agent stays `idle` | `herdr-send` presses Enter once more and says so. After a raw `agent prompt`, read the screen and send `herdr agent send-keys <name> enter` once. |
+| A prompt sits unsent in Claude's box, the agent `idle` or `done` | `herdr-send` presses Enter again (up to 3 times) and says so, then clears it with ctrl+c and says `FAILED`. After a raw `agent prompt`, read the screen and send `herdr agent send-keys <name> enter` once. |
 | A CLI times out inside agents but works for the lead | The lead runs it (or the matching MCP tool) and writes the result into a brief. |
 | The date rolls over and agents stamp yesterday | `date +%F`, a rule in `_common.md`. |
 | A lead ran parallel lanes as built-in subagents: the owner, the phone, the watch and the review miss them | A pane per lane. Briefs name every parallel step as a pane (`research-web`, `research-local` in a `research` tab). |

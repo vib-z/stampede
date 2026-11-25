@@ -97,6 +97,9 @@ close = true                # closing a helper's terminals: the lead asks (a who
 [merge]
 method = "squash"  # how stampede merge merges: squash, merge or rebase
 
+[claude]  # every Claude agent a job starts (user only)
+idle_compaction = true  # false: start each one with "idleCompaction": false in its settings file, so Claude Code (2.1.290 or later) does not compact it while it waits; true leaves Claude Code's own setting
+
 [finish]  # what stampede finish does after its done event (user only)
 auto_close = false  # true: close the job's own Herdr TUI workspace by itself once every agent is idle, every git folder is clean, no gate waits on you and the reopen record is written
 close_after = 600   # seconds the workspace stays open after every agent went idle, so the bot or you can read the last screen

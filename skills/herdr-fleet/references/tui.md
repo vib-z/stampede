@@ -67,6 +67,7 @@ herdr-reopen-snapshot "$HERDR_WORKSPACE_ID" "$B"
 
 - Hooks write `REPORT`, `TURN`, `QUESTION`, `GONE` and `UNDELIVERED` (a question, gate or post its bot has not heard) to `<job>/inbox.log`; answers and messages go to `<job>/inbox/<lead>.md`.
 - A Claude lead's file hook reads them. A Codex lead has none: a short-lived deliverer types each new line into its pane, marked `[fleet-job inbox for <lead>, not typed by the owner]`, once it is idle and unfocused. A Claude lead gets the same deliverer as a backstop for a line its hook missed, after 30 seconds.
+- The deliverer clears its own earlier text left in a lead's prompt and types the lines again; a draft of anyone else's it never touches.
 - Before you end a turn to wait on workers, read the new lines of `inbox.log` and look at each worker you wait on; act on one that already finished.
 - Confirm a `TURN` with the report file. Never wait in a loop: end your turn.
 - `fleet-watch.sh` is for a bot outside Herdr, never the lead ([collaboration.md](collaboration.md#a-bots-watch)).

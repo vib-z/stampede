@@ -3,7 +3,7 @@ import fcntl, json, os, re, signal, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 
-from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, out as out_
+from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, out as out_, send as send_
 
 HERDR_SEND = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'
 
@@ -41,7 +41,10 @@ def deliver_soon(job):
     base_.detach([sys.executable, '-I', base_.SCRIPTS / 'fleet_job.py', '_deliver', job], job / 'hooks' / 'deliver.log')
 
 
-DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 1500  # seconds between looks, seconds one deliverer waits, characters per prompt
+DELIVER_EVERY, DELIVER_FOR, DELIVER_MAX = 5, 4 * 3600, 500  # seconds between looks, seconds one deliverer waits, characters per prompt
+# Claude Code 2.1.332 shows a typed prompt of about 800 characters or more as '[Pasted text #1]' (live, 25 Nov 2026): a
+# prompt of the deliverer's stays in its own words in the box, so a lone placeholder there is never its own, and its
+# box stays short enough (about 11 rows in a 50-column pane) for its prompt line to show.
 DELIVER_CALL, DELIVER_SEND = 15, 120  # seconds a Herdr look and a herdr-send may take before the deliverer stops waiting
 HOOK_GRACE = 30  # seconds a Claude lead's own file hook has to take a line before the deliverer types it
 
@@ -64,7 +67,8 @@ def deliver(job):
     and not focused, until none is unread (a Herdr Core job: deliver_core, after typing_unsafe says it may type at all).
     A Claude lead on the Herdr TUI: its file hook reads the lines and moves the same offsets, so the deliverer first
     gives it HOOK_GRACE seconds and then types only what the hook did not take, once the lead is idle with an empty prompt;
-    it exits at once when Herdr shows no Claude agent in the lead's name.
+    it exits at once when Herdr shows no Claude agent in the lead's name. A prompt that holds only the deliverer's own
+    earlier text (pending) counts as empty: herdr-send clears it and types the unread lines again.
     One deliverer at a time: another one exits at once, and the one running looks
     again after letting go of its lock, so a line written meanwhile is never stranded. A read offset moves only after
     herdr-send says SUBMITTED. Exit 3 when the lead stayed busy, focused, drafting or gone for DELIVER_FOR seconds; exit 4
@@ -102,7 +106,7 @@ def deliver(job):
                     gave_up(job, lead)
                     return 3
                 try:
-                    if ready(lead, kind) and type_unread(job, lead):
+                    if ready(lead, kind, ours=pending(job, lead)) and type_unread(job, lead):
                         continue
                 except ValueError as error:  # the next kick from outside the sandbox delivers the line
                     print(f'{datetime.now():%Y-%m-%d %H:%M} CANNOT REACH HERDR ({base_.line(error)}): left for the next deliverer')
@@ -140,29 +144,10 @@ def screen_of(agent):
         raise ValueError(f'herdr agent read did not answer in {DELIVER_CALL} s') from None
 
 
-ESCAPE = re.compile(r'\x1b(?:\[([0-9;:?]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)')  # CSI, OSC, or a two-byte escape
 # Codex's footer of hints, whole or cut to fit a narrow pane, with or without its warnings count: the row it hides
 # behind a draft, keeping only the count.
 CODEX_FOOTER = re.compile(r' *(← for agents( ·( \?( for( [a-z]*)?)?)?)?|\? for shortcuts)( +⚠ .*)?')
 SPARKLE = re.compile('[' + chr(0x2800) + '-' + chr(0x28ff) + ']')  # Codex's startup sparkles, braille dots: not text
-
-
-def cells(row):
-    """[(character, dim)] for one row of a screen read with --format ansi: each printed character, and whether it was
-    drawn dim (SGR 2). A row of plain text gives every character as not dim."""
-    out, dim, at = [], False, 0
-    for found in ESCAPE.finditer(row):
-        out += [(char, dim) for char in row[at:found.start()] if char != '\r']
-        at = found.end()
-        if found.group(2) == 'm' and '?' not in found.group(1):
-            codes, i = [int(code) if code else 0 for code in found.group(1).replace(':', ';').split(';')], 0
-            while i < len(codes):
-                if codes[i] in (38, 48, 58):  # a colour, then 5;n or 2;r;g;b
-                    i += 3 if codes[i + 1:i + 2] == [5] else 5
-                    continue
-                dim = True if codes[i] == 2 else False if codes[i] in (0, 22) else dim
-                i += 1
-    return out + [(char, dim) for char in row[at:] if char != '\r']
 
 
 def composer_empty(screen):
@@ -178,7 +163,7 @@ def composer_empty(screen):
     its styles (screen_of), the prompt line must also hold Codex's dim placeholder: typed text is never dim, so a
     draft that quotes the footer in a pane too short for the status rows is still a draft. Any other screen is a
     draft. Live tests: tests/fixtures/codex-0.170."""
-    lines = [[(SPARKLE.sub(' ', char), dim) for char, dim in cells(row)] for row in screen.splitlines()]
+    lines = [[(SPARKLE.sub(' ', char), dim) for char, dim in send_.cells(row)] for row in screen.splitlines()]
     rows = [''.join(char for char, _ in line).rstrip() for line in lines]
     while rows and not rows[-1]:
         rows.pop()
@@ -199,7 +184,7 @@ def claude_prompt_empty(screen):
     marker but Claude's dim placeholder, if anything, and the next row is the box's lower border. Any other screen is a
     draft. Read live from Claude Code 2.1.331 in a Herdr 0.9.5 pane on 24 Nov 2026: '❯' and a no-break space, or that
     and a dim 'Try "..."'."""
-    lines = [cells(row) for row in screen.splitlines()]
+    lines = [send_.cells(row) for row in screen.splitlines()]
     rows = [''.join(char for char, _ in line).rstrip() for line in lines]
     prompts = [i for i, row in enumerate(rows) if row.startswith('❯')]
     if not prompts or prompts[-1] + 1 >= len(rows) or not rows[prompts[-1] + 1].lstrip().startswith('─'):
@@ -208,16 +193,58 @@ def claude_prompt_empty(screen):
     return not shown or ('\x1b[' in screen and all(dim for _, dim in shown))
 
 
-def ready(agent, kind='codex'):
-    """True when Herdr shows the agent idle or done, nobody focused on its pane and nothing typed in its prompt (herdr-send
-    would clear a draft the owner left there). A ValueError when Herdr does not answer in DELIVER_CALL seconds; False when
-    it has no such agent."""
+def ready(agent, kind='codex', ours=((), None)):
+    """True when Herdr shows the agent idle or done, nobody focused on its pane, and nothing typed in its prompt but,
+    at most, text of ours (pending), which herdr-send clears before it types. Anything else in the prompt is a draft,
+    which herdr-send would clear too, so it waits. A ValueError when Herdr does not answer in DELIVER_CALL seconds;
+    False when it has no such agent."""
     try:
         shown = herdrapi_.herdr('agent', 'get', agent, timeout=DELIVER_CALL).get('agent', {})
     except herdrapi_.HerdrError:
         return False
+    if shown.get('agent_status') not in ('idle', 'done') or shown.get('focused'):
+        return False
+    screen = screen_of(agent)
     empty = claude_prompt_empty if kind == 'claude' else composer_empty
-    return shown.get('agent_status') in ('idle', 'done') and not shown.get('focused') and empty(screen_of(agent))
+    texts, marker = ours
+    shown, cut = send_.shape(screen)
+    return (empty(screen) or send_.holds(screen, texts, lone=False, clipped=False)
+            or bool(marker) and not cut and re.sub(r'\s+', '', shown).startswith(re.sub(r'\s+', '', marker)))
+
+
+def pending(job, lead):
+    """(texts, marker) for ready: the deliverer's own text that may still sit in the lead's prompt. texts: the last
+    texts it typed there (typed-<lead>.json) and the text it would type now. Clearing one loses nothing: its lines are
+    unread and typed again, or were delivered, and a copy Claude left in the prompt after a slow submit would be a
+    second one. marker: before any record (a prompt left by stampede 0.2.5), a prompt that starts with our mark,
+    [fleet-job inbox for <lead>, not typed by the owner], is ours. An owner's draft, our text with a word of theirs
+    added, a paste placeholder alone (DELIVER_MAX keeps ours in their own words), or a box whose prompt line is off
+    the screen (its hidden start may be the owner's) is never ours."""
+    typed = typed_record(job, lead)
+    found = unread(job, lead)
+    texts = (typed or {}).get('texts', []) + ([inbox_text(lead, found)] if found else [])
+    return texts, None if typed else mark(lead)
+
+
+def remember(job, lead, text):
+    """Note a text the deliverer types into the lead's prompt: its last 5."""
+    texts = [t for t in (typed_record(job, lead) or {}).get('texts', []) if t != text] + [text]
+    (Path(job) / 'hooks' / ('typed-' + lead + '.json')).write_text(json.dumps({'texts': texts[-5:]}) + '\n')
+
+
+def typed_record(job, lead):
+    """typed-<lead>.json, or None when there is none or it does not parse (then only our mark tells our text)."""
+    try:
+        typed = json.loads((Path(job) / 'hooks' / ('typed-' + lead + '.json')).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(typed, dict) or not isinstance(typed.get('texts'), list):
+        return None
+    return {'texts': [t for t in typed['texts'] if isinstance(t, str)]}
+
+
+def mark(lead):
+    return f'[fleet-job inbox for {lead}, not typed by the owner]'
 
 
 def unread(job, agent):
@@ -236,13 +263,12 @@ def type_unread(job, lead, limit=None):
     them (point_owed), which says where to read them."""
     from . import relay as relay_
     found = unread(job, lead)
-    text = f'[fleet-job inbox for {lead}, not typed by the owner] ' + ' '.join(
-        f'{path.name}: ' + ' | '.join(lines) for path, lines, _ in found)
-    if len(text) > DELIVER_MAX:
-        text = text[:DELIVER_MAX - 120].rstrip() + ' ... (cut: read the rest at the end of ' + ' and '.join(
-            str(path) for path, _, _ in found) + ')'
-    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)  # typed into a prompt: no control characters
-    submitted, said = relay_.send_core(job, lead, text, limit) if job_.backend(job) == 'core' else herdr_send(job, lead, text)
+    text = inbox_text(lead, found)
+    if job_.backend(job) == 'core':
+        submitted, said = relay_.send_core(job, lead, text, limit)
+    else:
+        remember(job, lead, text)
+        submitted, said = herdr_send(job, lead, text)
     print(f'{datetime.now():%Y-%m-%d %H:%M} {said}')
     if submitted is not False:
         with (Path(job) / 'hooks/.wake.lock').open('a') as lock:
@@ -252,6 +278,20 @@ def type_unread(job, lead, limit=None):
             for path, lines, end in found:
                 mark_read(job, lead, path.resolve(), end, lines, ack=submitted is True)
     return submitted
+
+
+def inbox_text(lead, found):
+    """The one prompt that carries unread lines ([(path, lines, end)]), marked as from fleet-job, never over DELIVER_MAX
+    characters: cut, with where to read the rest (the files' full paths, or their names in the job folder when the
+    paths are too long to fit)."""
+    text = mark(lead) + ' ' + ' '.join(f'{path.name}: ' + ' | '.join(lines) for path, lines, _ in found)
+    if len(text) > DELIVER_MAX:
+        names = [[str(path) for path, _, _ in found],
+                 ['/'.join(path.parts[-2:]) if path.parent.name == 'inbox' else path.name for path, _, _ in found]]
+        rests = [' ... (cut: read the rest at the end of ' + ' and '.join(files) + ')' for files in names]
+        rest = next((r for r in rests if len(mark(lead)) + 60 + len(r) <= DELIVER_MAX), rests[-1])
+        text = (text[:max(0, DELIVER_MAX - len(rest))].rstrip() + rest)[:DELIVER_MAX]
+    return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)  # typed into a prompt: no control characters
 
 
 def watched(job, agent, lead):

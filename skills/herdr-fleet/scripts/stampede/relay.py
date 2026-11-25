@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, tui as tui_, handed as handed_, settings as settings_, gates as gates_, \
-    out as out_
+    out as out_, send as send_
 
 
 def deliver_core(job, lead):
@@ -560,7 +560,7 @@ def drafted(address, job=None):
         screen = hcapi_.hc('read', address, '--lines', '8', job=job).get('text', '')
     except hcapi_.HcError:
         return False
-    return handed_.typed(screen)
+    return send_.typed(screen)
 
 
 def tell_core(job, name, text):

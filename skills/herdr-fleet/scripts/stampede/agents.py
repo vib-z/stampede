@@ -51,7 +51,8 @@ def cli_args(job, agent, kind, model, effort, reports, lead=False, yolo_in=None)
             for event in ('Stop', 'StopFailure'):
                 hooks[event] = [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'claude-stop')}]}]
             hooks['SessionEnd'] = [{'hooks': [{'type': 'command', 'command': hook_command(job, agent, 'session-end')}]}]
-        settings.write_text(json.dumps({'hooks': hooks}, indent=2) + '\n')
+        quiet = {} if settings_.current(job).get('claude.idle_compaction') is not False else {'idleCompaction': False}
+        settings.write_text(json.dumps({'hooks': hooks, **quiet}, indent=2) + '\n')
         args = mode + ['--add-dir', str(job), '-n', agent, '--settings', str(settings)]
         args += ['--model', model] if model else []
         return args + (['--effort', effort] if effort else [])
