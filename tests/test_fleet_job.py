@@ -1866,6 +1866,56 @@ class Deliver(unittest.TestCase):
         self.assertEqual((agent['keys'], agent['prompts']), ([['ctrl+c']], [texts]))
         self.assertEqual(tui_.unread(self.job, 'lead-demo'), [])
 
+    def real_send(self, **shape):
+        """The deliverer with the real send.py (in-process, its waits cut) on a fake Herdr shaped like shape: a Claude
+        lead idle at an empty prompt. Returns the fake's folder."""
+        from unittest import mock
+        from stampede import send as send_
+        (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
+        folder = Path(tempfile.mkdtemp())
+        empty = '──── lead-demo ─\n❯\xa0\n────────────────\n  ⏵⏵ auto mode on'
+        (folder / 'state.json').write_text(json.dumps({'panes': {'w1:p1': {'screen': empty, 'agent': {
+            'name': 'lead-demo', 'agent': 'claude', 'agent_status': 'done', 'focused': False, 'terminal_id': 'term_w1:p1',
+            'completion_seq': 3, 'agent_session': None, 'args': [], 'prompts': []}}}, **shape}))
+        for patch in (mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'HOOK_GRACE', 0),
+                      mock.patch.object(tui_, 'herdr_send', lambda job, name, text: send_.submit(name, text)),
+                      mock.patch.object(send_.time, 'sleep'), mock.patch.object(send_, 'SETTLE', 0),
+                      mock.patch.dict(os.environ, {'HERDR': str(Path(__file__).resolve().parent / 'fake_herdr.py'),
+                                                   'FAKE_HERDR': str(folder)})):
+            patch.start()
+        return folder
+
+    def test_lines_stay_unread_while_the_lead_s_prompt_still_holds_them(self):
+        """Field note, 25 Nov 2026: lines were recorded as delivered while the lead's prompt still held them unsent, and
+        sat unread for hours. They count as delivered only once the prompt is clear or a turn started."""
+        from unittest import mock
+        stuck = '──── lead-demo ─\n❯\xa0{text}\n────────────────\n  ⏵⏵ auto mode on'
+        empty = '──── lead-demo ─\n❯\xa0\n────────────────\n  ⏵⏵ auto mode on'
+        cases = (  # Claude kept the text and every Enter was lost; Herdr saw an earlier prompt's turn start instead
+            {'prompt_error': {'lead-demo': 'agent_prompt_stalled'}, 'on_prompt': {'lead-demo': {'screen': stuck}},
+             'on_key': {'lead-demo': {'ctrl+c': {'screen': empty}}}},
+            {'on_prompt': {'lead-demo': {'screen': stuck}}, 'on_get': {'lead-demo': [{}, {}] + [
+                {'agent': {'agent_status': 'working'}}] * 40}})
+        for shape in cases:
+            with self.subTest(shape=sorted(shape)):
+                folder = self.real_send(**shape)
+                with mock.patch.object(tui_, 'DELIVER_FOR', 1):
+                    self.assertEqual(self.deliver(), 3)                 # it gave up, with the lines unread
+                self.assertEqual(len(tui_.unread(self.job, 'lead-demo')), 2)
+                agent = json.loads((folder / 'state.json').read_text())['panes']['w1:p1']['agent']
+                self.assertTrue(agent['prompts'])
+                mock.patch.stopall()
+                self.setUp()
+
+    def test_lines_count_as_delivered_once_the_prompt_is_clear(self):
+        from unittest import mock
+        folder = self.real_send(prompt_error={'lead-demo': 'agent_prompt_stalled'},       # a late start, no turn seen
+                                on_get={'lead-demo': [{}, {}, {}, {'agent': {'agent_status': 'working'}}]})
+        self.assertEqual(self.deliver(), 0)
+        self.assertEqual(tui_.unread(self.job, 'lead-demo'), [])
+        agent = json.loads((folder / 'state.json').read_text())['panes']['w1:p1']['agent']
+        self.assertEqual((len(agent['prompts']), agent.get('keys', [])), (1, []))          # typed once, no key
+
     def test_an_owner_s_draft_is_never_cleared_by_the_deliverer(self):
         from unittest import mock
         (self.job / 'agents.tsv').write_text('lead-demo\tclaude\t-\t-\t-\nbuild-x\tclaude\t-\t-\t-\n')
