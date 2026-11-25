@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, out as out_, send as send_
+from .send import cells, plain  # a screen read with its styles
 
 HERDR_SEND = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-send'
 
@@ -141,29 +142,10 @@ def screen_of(agent):
         raise ValueError(f'herdr agent read did not answer in {DELIVER_CALL} s') from None
 
 
-ESCAPE = re.compile(r'\x1b(?:\[([0-9;:?]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)')  # CSI, OSC, or a two-byte escape
 # Codex's footer of hints, whole or cut to fit a narrow pane, with or without its warnings count: the row it hides
 # behind a draft, keeping only the count.
 CODEX_FOOTER = re.compile(r' *(← for agents( ·( \?( for( [a-z]*)?)?)?)?|\? for shortcuts)( +⚠ .*)?')
 SPARKLE = re.compile('[' + chr(0x2800) + '-' + chr(0x28ff) + ']')  # Codex's startup sparkles, braille dots: not text
-
-
-def cells(row):
-    """[(character, dim)] for one row of a screen read with --format ansi: each printed character, and whether it was
-    drawn dim (SGR 2). A row of plain text gives every character as not dim."""
-    out, dim, at = [], False, 0
-    for found in ESCAPE.finditer(row):
-        out += [(char, dim) for char in row[at:found.start()] if char != '\r']
-        at = found.end()
-        if found.group(2) == 'm' and '?' not in found.group(1):
-            codes, i = [int(code) if code else 0 for code in found.group(1).replace(':', ';').split(';')], 0
-            while i < len(codes):
-                if codes[i] in (38, 48, 58):  # a colour, then 5;n or 2;r;g;b
-                    i += 3 if codes[i + 1:i + 2] == [5] else 5
-                    continue
-                dim = True if codes[i] == 2 else False if codes[i] in (0, 22) else dim
-                i += 1
-    return out + [(char, dim) for char in row[at:] if char != '\r']
 
 
 def composer_empty(screen):
@@ -209,11 +191,6 @@ def claude_prompt_empty(screen):
     return not shown or ('\x1b[' in screen and all(dim for _, dim in shown))
 
 
-def plain(screen):
-    """A screen read with --format ansi as plain text: its characters without their styles."""
-    return '\n'.join(''.join(char for char, _ in cells(row)) for row in screen.splitlines())
-
-
 def ready(agent, kind='codex', ours=((), False, None)):
     """True when Herdr shows the agent idle or done, nobody focused on its pane, and nothing typed in its prompt but,
     at most, text of ours (pending), which herdr-send clears before it types. Anything else in the prompt is a draft,
@@ -228,8 +205,8 @@ def ready(agent, kind='codex', ours=((), False, None)):
     screen = screen_of(agent)
     empty = claude_prompt_empty if kind == 'claude' else composer_empty
     texts, lone, marker = ours
-    return (empty(screen) or send_.holds(plain(screen), texts, lone)
-            or bool(marker) and re.sub(r'\s+', '', send_.box(plain(screen))).startswith(re.sub(r'\s+', '', marker)))
+    return (empty(screen) or send_.holds(screen, texts, lone)
+            or bool(marker) and re.sub(r'\s+', '', send_.box(screen)).startswith(re.sub(r'\s+', '', marker)))
 
 
 LONE_FOR = 1800  # seconds after a send of ours that a lone paste placeholder in the lead's prompt counts as ours
@@ -239,23 +216,35 @@ def pending(job, lead):
     """(texts, lone, marker) for ready: the deliverer's own text that may still sit in the lead's prompt. texts: the
     last texts it typed there (typed-<lead>.json) and the text it would type now. Clearing one loses nothing: its lines
     are unread and typed again, or were delivered, and a copy Claude left in the prompt after a slow submit would be a
-    second one. lone: a paste placeholder alone is ours, within LONE_FOR seconds of a send of ours. marker: before any
-    record (a prompt left by stampede 0.2.5), a prompt that starts with our mark, [fleet-job inbox for <lead>, not typed
-    by the owner], is ours. An owner's draft, or our text with a word of theirs added, is never ours."""
-    record = Path(job) / 'hooks' / ('typed-' + lead + '.json')
-    typed = json.loads(record.read_text()) if record.is_file() else None
+    second one. lone: a paste placeholder alone is ours only within LONE_FOR seconds of a send of ours that herdr-send
+    did not confirm; after a confirmed one it may be the owner's paste. marker: before any record (a prompt left by
+    stampede 0.2.5), a prompt that starts with our mark, [fleet-job inbox for <lead>, not typed by the owner], is ours.
+    An owner's draft, or our text with a word of theirs added, is never ours."""
+    typed = typed_record(job, lead)
     found = unread(job, lead)
     texts = (typed or {}).get('texts', []) + ([inbox_text(lead, found)] if found else [])
-    lone = bool(typed) and time.time() - typed.get('at', 0) < LONE_FOR
+    lone = bool(typed) and typed['confirmed'] is not True and time.time() - typed['at'] < LONE_FOR
     return texts, lone, None if typed else mark(lead)
 
 
-def remember(job, lead, text):
-    """Note a text the deliverer types into the lead's prompt, and when: its last 5 texts."""
-    record = Path(job) / 'hooks' / ('typed-' + lead + '.json')
-    typed = json.loads(record.read_text()) if record.is_file() else {}
-    texts = [t for t in typed.get('texts', []) if t != text] + [text]
-    record.write_text(json.dumps({'texts': texts[-5:], 'at': time.time()}) + '\n')
+def remember(job, lead, text, submitted=None):
+    """Note a text the deliverer types into the lead's prompt (its last 5), when, and whether herdr-send confirmed the
+    last one (None before it answers)."""
+    texts = [t for t in (typed_record(job, lead) or {}).get('texts', []) if t != text] + [text]
+    record = {'texts': texts[-5:], 'at': time.time(), 'confirmed': submitted}
+    (Path(job) / 'hooks' / ('typed-' + lead + '.json')).write_text(json.dumps(record) + '\n')
+
+
+def typed_record(job, lead):
+    """typed-<lead>.json, or None when there is none or it does not parse (then only our mark tells our text)."""
+    try:
+        typed = json.loads((Path(job) / 'hooks' / ('typed-' + lead + '.json')).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(typed, dict) or not isinstance(typed.get('texts'), list):
+        return None
+    at = typed.get('at') if isinstance(typed.get('at'), (int, float)) else 0
+    return {'texts': [t for t in typed['texts'] if isinstance(t, str)], 'at': at, 'confirmed': typed.get('confirmed')}
 
 
 def mark(lead):
@@ -284,6 +273,7 @@ def type_unread(job, lead, limit=None):
     else:
         remember(job, lead, text)
         submitted, said = herdr_send(job, lead, text)
+        remember(job, lead, text, submitted)
     print(f'{datetime.now():%Y-%m-%d %H:%M} {said}')
     if submitted is not False:
         with (Path(job) / 'hooks/.wake.lock').open('a') as lock:

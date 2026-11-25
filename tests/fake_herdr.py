@@ -23,6 +23,7 @@ shapes the answers with:
   on_prompt   {name: change}   `agent prompt` then applies change; '{text}' in its screen is the text typed
   on_get      {name: [change]} each `agent get` of that agent first applies the next change: a turn that starts late
   on_key      {name: {key: change}}  a key sent to that agent applies change: Enter submits, ctrl+c empties the prompt
+  read_fail   {name: n}       the next n `agent read` calls of that agent fail: Herdr did not show the screen
 A prompt turns the agent working, as Herdr's prompt --wait --until working does. Errors are Herdr's shape, exit 1."""
 import fcntl, json, os, sys, time
 from pathlib import Path
@@ -76,6 +77,10 @@ def command(state, argv):
         return ok({})
     if verb in ('pane read', 'agent read'):
         pane = panes.get(args[0]) or find(state, args[0])[1]
+        name = (pane.get('agent') or {}).get('name')
+        if verb == 'agent read' and state.get('read_fail', {}).get(name):
+            state['read_fail'][name] -= 1
+            fail('timeout')
         change = state.get('on_read', {}).pop(args[0], None) if verb == 'pane read' else None
         if change:
             pane['agent'].update(change.get('agent', {}))

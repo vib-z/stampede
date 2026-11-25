@@ -22,9 +22,34 @@ EMPTY_PROMPT = re.compile(r'Ask Codex to do anything|for shortcuts|To get starte
 NARROW_FOOTER = re.compile(r' *← for agents( ·( \?( for( [a-z]*)?)?)?)?( +⚠ .*)?')
 PROMPT_LINE = re.compile(r'[»›❯>]( |$)')  # the prompt line, in column 0: a draft's own lines are indented
 # A long prompt shows as a paste placeholder: Claude Code 2.1.332 draws '[Pasted text #1]', or '[Pasted text #1 +3 lines]',
-# sometimes followed by the end of the text typed as usual (live, 25 Nov 2026); Codex draws '[Pasted Content 1500 chars]'.
+# sometimes followed by the end of the text typed as usual (live, 25 Nov 2026). Codex 0.169 showed a 1600-character text
+# whole, in a composer that scrolls (live, 25 Nov 2026); its own placeholder, '[Pasted Content 1600 chars]', is matched too.
 PLACEHOLDER = re.compile(r'\[Pasted (?:text #\d+(?: \+\d+ lines?)?|Content \d+ chars)\]')
 
+ESCAPE = re.compile(r'\x1b(?:\[([0-9;:?]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)')  # CSI, OSC, or a two-byte escape
+
+
+def cells(row):
+    """[(character, dim)] for one row of a screen read with --format ansi: each printed character, and whether it was
+    drawn dim (SGR 2). A row of plain text gives every character as not dim."""
+    out, dim, at = [], False, 0
+    for found in ESCAPE.finditer(row):
+        out += [(char, dim) for char in row[at:found.start()] if char != '\r']
+        at = found.end()
+        if found.group(2) == 'm' and '?' not in found.group(1):
+            codes, i = [int(code) if code else 0 for code in found.group(1).replace(':', ';').split(';')], 0
+            while i < len(codes):
+                if codes[i] in (38, 48, 58):  # a colour, then 5;n or 2;r;g;b
+                    i += 3 if codes[i + 1:i + 2] == [5] else 5
+                    continue
+                dim = True if codes[i] == 2 else False if codes[i] in (0, 22) else dim
+                i += 1
+    return out + [(char, dim) for char in row[at:] if char != '\r']
+
+
+def plain(screen):
+    """A screen read with --format ansi as plain text: its characters without their styles."""
+    return '\n'.join(''.join(char for char, _ in cells(row)) for row in screen.splitlines())
 
 def narrow_footer(screen):
     """True when a screen ends in Codex's footer cut to fit a narrow pane. Arrows count only from the last prompt line
@@ -45,24 +70,29 @@ def typed(screen, empty=EMPTY_PROMPT):
 
 
 def box(screen):
-    """The text a plain screen shows in its prompt box: what follows the marker on the last prompt line, and the rows
-    under it up to the box's lower border (Claude) or a blank row (Codex). '' when it shows no prompt line."""
-    rows = [row.replace('\xa0', ' ').rstrip() for row in screen.splitlines()]
+    """The text typed in a screen's prompt box: what follows the marker on the last prompt line, and the rows under it up
+    to the box's lower border (Claude) or a blank row (Codex). '' when it shows no prompt line, or, in a screen read
+    with its styles (screen), when everything in the box is dim: Claude's and Codex's placeholder and hints, which typed
+    text never is. Plain text cannot tell a placeholder from a draft."""
+    lines = [cells(row) for row in screen.splitlines()]
+    rows = [''.join(char for char, _ in line).replace('\xa0', ' ').rstrip() for line in lines]
     prompts = [i for i, row in enumerate(rows) if PROMPT_LINE.match(row)]
     if not prompts:
         return ''
-    held = [rows[prompts[-1]][1:]]
-    for row in rows[prompts[-1] + 1:]:
-        if not row.strip() or row.lstrip().startswith('─'):
+    held = [lines[prompts[-1]][1:]]
+    for at in range(prompts[-1] + 1, len(rows)):
+        if not rows[at].strip() or rows[at].lstrip().startswith('─'):
             break
-        held.append(row)
-    return ' '.join(part.strip() for part in held).strip()
+        held.append(lines[at])
+    if '\x1b[' in screen and all(dim for line in held for char, dim in line if char.strip()):
+        return ''
+    return ' '.join(''.join(char for char, _ in line).replace('\xa0', ' ').strip() for line in held).strip()
 
 
 def holds(screen, texts, lone=True):
-    """True when a plain screen's prompt box shows one of texts, or its start (a box drawn in part, or cut): compared with
-    no whitespace, since a wrapped row is indented, and each paste placeholder standing for any part of the text. A box
-    of placeholders alone holds one of texts only when lone says it may."""
+    """True when a screen's prompt box shows one of texts typed, or its start (a box drawn in part, or cut): compared
+    with no whitespace, since a wrapped row is indented, and each paste placeholder standing for any part of the text.
+    A box of placeholders alone holds one of texts only when lone says it may."""
     shown = box(screen)
     pieces = [re.sub(r'\s+', '', piece) for piece in PLACEHOLDER.split(shown)]
     if not any(pieces):
@@ -91,12 +121,24 @@ def shown(target):
 
 
 def screen(target, lines):
-    """The agent's visible screen as plain text, its last lines rows; '' when Herdr does not show it."""
+    """The agent's visible screen, its last lines rows, with its styles (--format ansi), or as plain text from a Herdr
+    that cannot give them; None when Herdr does not show it, which tells nothing."""
+    read = [herdr_path(), 'agent', 'read', target, '--source', 'visible', '--lines', str(lines)]
     try:
-        return subprocess.run([herdr_path(), 'agent', 'read', target, '--source', 'visible', '--lines', str(lines)],
-                              capture_output=True, text=True, timeout=CALL).stdout
+        for args in (read + ['--format', 'ansi'], read):
+            shown = subprocess.run(args, capture_output=True, text=True, timeout=CALL)
+            if shown.returncode == 0:
+                return shown.stdout
     except (OSError, subprocess.TimeoutExpired):
-        return ''
+        pass
+    return None
+
+
+def calm(target):
+    """True when Herdr shows the agent idle or done and nobody in its pane, read just before a key: a screen read can
+    take seconds, and the owner may have come in meanwhile."""
+    now = shown(target)
+    return now is not None and now['status'] in ('idle', 'done') and not now['focused']
 
 
 def press(target, key):
@@ -120,16 +162,21 @@ def submit(target, text, keys=True):
         return False, f'FAILED {target} focused: the owner is in that pane; retry later'
     if first['status'] == 'blocked':
         return False, f'FAILED {target} (blocked at a dialog; read the screen)'
-    if keys and first['status'] in ('idle', 'done') and typed(screen(target, 8)):
+    before = screen(target, 8) if keys and first['status'] in ('idle', 'done') else None
+    if before and typed(plain(before)):  # an unread screen gets no key
         press(target, 'ctrl+c')
         time.sleep(1)
     try:
         answer = herdrapi_.herdr('agent', 'prompt', target, text, '--wait', '--until', 'working', '--until', 'blocked',
                                  '--timeout', '15000', timeout=CALL + 20)
         # Herdr saw a turn start, but it can be an earlier prompt's: Claude Code 2.1.332, slow to submit one, kept a prompt
-        # typed meanwhile in its box (live, 25 Nov 2026). Only a box that no longer shows the text confirms it.
-        if answer.get('type') == 'agent_prompted' and not holds(screen(target, 30), [text]):
-            return True, f'SUBMITTED {target}'
+        # typed meanwhile in its box (live, 25 Nov 2026). Its answer stands unless an unfocused box still shows the text
+        # (a paste the owner made while in the pane is theirs).
+        if answer.get('type') == 'agent_prompted':
+            read, now = screen(target, 30), None
+            now = shown(target) if read is not None else None
+            if now is None or now['focused'] or not holds(read, [text]):
+                return True, f'SUBMITTED {target}'
         code = 'agent_prompt_stalled' if answer.get('type') == 'agent_prompted' else ''
     except herdrapi_.HerdrError as error:
         code = error.code
@@ -150,15 +197,17 @@ def submit(target, text, keys=True):
 
 def verify(target, text, first, keys, typed_in):
     """Decide whether a prompt Herdr did not see start went in, from a few looks over about 22 s (PAUSES):
-    - SUBMITTED once the prompt no longer shows the text and a turn started (working or blocked) or ended (seq moved),
-      or once it has looked empty for two looks in a row after SETTLE seconds, when Herdr typed the text (typed_in, from
-      its answer) or a look saw it: a late start is not a failure, and nothing is typed twice;
+    - SUBMITTED once the prompt no longer shows the text typed and a turn started (working or blocked) or ended (seq
+      moved), or once it has shown nothing typed for two looks in a row after SETTLE seconds, when Herdr typed the
+      text (typed_in, from its answer) or a look saw it: a late start is not a failure, and nothing is typed twice;
     - while the prompt still shows the text at idle or done (Claude kept it, or its paste placeholder, and lost the
       Enter), Enter again, at most ENTERS times; never for a slash command;
     - still there after the last look: ctrl+c once to clear it, then FAILED with the prompt empty, so the next send can
       type. Any other text there is left as it is (FAILED).
-    No key while the agent works, is blocked or is focused."""
-    slash, enters, seen, gone, started = text.startswith('/'), 0, False, False, time.monotonic()
+    A look whose screen Herdr does not show tells nothing. No key unless Herdr shows the agent idle or done with
+    nobody in its pane just before it (calm)."""
+    slash, enters, seen, gone, looked, held, other = text.startswith('/'), 0, False, False, False, False, False
+    started = time.monotonic()
     for pause in PAUSES:
         time.sleep(pause)
         now = shown(target)
@@ -167,30 +216,44 @@ def verify(target, text, first, keys, typed_in):
         if now['focused']:
             return False, f'FAILED {target} focused: the owner came into that pane; its prompt may still hold the text'
         read = screen(target, 30)
-        held = holds(read, [text])
-        seen = seen or held
+        if read is None:
+            continue
+        looked, held = True, holds(read, [text])
+        other, seen = not held and bool(box(read)) and typed(plain(read)), seen or held  # plain text: an empty prompt's markers
         if not held and (now['status'] in ('working', 'blocked') or isinstance(now['seq'], int) and now['seq'] != first['seq']):
             return True, submitted(target, enters, 'it started late')
         if held:
             gone = False
-            if keys and not slash and enters < ENTERS and now['status'] in ('idle', 'done'):
+            if keys and not slash and enters < ENTERS and calm(target):
                 press(target, 'enter')
                 enters += 1
-        elif typed(read):  # someone else's text: never ours to send or clear
+        elif other:  # someone else's text: never ours to send or clear
             gone = False
         elif (typed_in or seen) and time.monotonic() - started >= SETTLE:
             if gone:
                 return True, submitted(target, enters, 'the text left its prompt')
             gone = True
+    if not looked:
+        return False, f'FAILED {target} (Herdr did not show its screen: read it with herdr agent read {target} before any resend)'
     if not held:
-        why = 'another text is in its prompt, left as it is' if typed(read) else 'the text never showed in its prompt'
-        return False, f'FAILED {target} (status before: {first["status"]}, now: {now["status"]}; {why})'
-    if not keys or slash or now['status'] not in ('idle', 'done'):
-        why = 'no key for a slash command' if slash else 'no keys here' if not keys else f'it is {now["status"]}, so no key'
+        if other:
+            return False, f'FAILED {target} (status before: {first["status"]}, now: {now["status"]}; another text is in its prompt, left as it is)'
+        if typed_in or seen:
+            return True, submitted(target, enters, 'the text left its prompt')
+        return False, f'FAILED {target} (status before: {first["status"]}, now: {now["status"]}; the text never showed in its prompt)'
+    if not keys or slash:
+        why = 'no key for a slash command' if slash else 'no keys here'
         return False, f'FAILED {target} (the text is still in its prompt, {why}: read it with herdr agent read {target} before any resend)'
+    last, now = screen(target, 30), shown(target)
+    if now is None or now['focused'] or now['status'] not in ('idle', 'done'):
+        why = 'it left its pane' if now is None else 'the owner is in that pane' if now['focused'] else f'it is {now["status"]}'
+        return False, f'FAILED {target} (the text is still in its prompt, {why}, so no key: read it with herdr agent read {target} before any resend)'
+    if last is None or not holds(last, [text]) or not typed(plain(last)):  # never ctrl+c a prompt that may be empty
+        return False, f'FAILED {target} (its prompt did not show the text clearly at the last look, so no key: read it with herdr agent read {target} before any resend)'
     press(target, 'ctrl+c')
     time.sleep(CLEARED)
-    if holds(screen(target, 30), [text]):
+    after = screen(target, 30)
+    if after is None or holds(after, [text]):
         return False, f'FAILED {target} (the text is still in its prompt after {enters} Enter and a ctrl+c: read it with herdr agent read {target})'
     return False, f'FAILED {target} (the text stayed in its prompt through {enters} Enter; cleared it with ctrl+c, so it can be sent again)'
 

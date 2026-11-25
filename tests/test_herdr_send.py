@@ -253,7 +253,7 @@ class Verify(unittest.TestCase):
                                  on_key={'lead-demo': {'enter': {'agent': {'agent_status': 'working'}, 'screen': EMPTY_CLAUDE}}})
         self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo (pressed Enter again: the first was dropped)'))
         enter = [c for c in self.calls if c[:2] == ['agent', 'send-keys']][0]
-        self.assertEqual(self.calls[self.calls.index(enter) - 2][:2], ['agent', 'get'])
+        self.assertEqual(self.calls[self.calls.index(enter) - 1][:2], ['agent', 'get'])  # idle and unfocused just before it
         self.assertEqual(self.keys(), ['enter'])                # pressed only once it was done, never while working
 
     def test_an_owners_draft_is_left_alone(self):
@@ -300,6 +300,43 @@ class Verify(unittest.TestCase):
         self.assertEqual((ok, line), (False, 'FAILED lead-demo focused: the owner came into that pane; its prompt may still hold the text'))
         self.assertEqual(self.keys(), [])
 
+    def test_an_empty_prompt_s_placeholder_is_never_our_text(self):
+        """Review R2: a text that starts like Codex's dim placeholder must not read as stuck there, or ctrl+c would quit Codex."""
+        dim = '› \x1b[2mAsk Codex to do anything\x1b[0m\n\n  gpt-6.2-sol medium · ~/repo\n  ← for agents · ? for shortcuts'
+        ok, line = self.run_send(kind='codex', status='idle', screen=dim, text='Ask Codex to do anything about the report',
+                                 prompt_error={'lead-demo': 'agent_prompt_stalled'})
+        self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo (the text left its prompt)'))
+        self.assertEqual(self.keys(), [])
+        ok, line = self.run_send(kind='codex', status='idle', screen=dim.replace('\x1b[2m', '').replace('\x1b[0m', ''),
+                                 text='Ask Codex to do anything about the report', prompt_error={'lead-demo': 'timeout'})
+        self.assertNotIn('ctrl+c', self.keys())                # plain text: Enter at most, never ctrl+c on it
+
+    def test_a_screen_herdr_does_not_show_tells_nothing(self):
+        """Review R3: an unread screen after an earlier turn turned working must not confirm text still in the box."""
+        ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'}, on_prompt={'lead-demo': {
+            'screen': claude_box('{text}')}}, read_fail={'lead-demo': 2},
+            on_get={'lead-demo': [{}] + [{'agent': {'agent_status': 'working'}}] * 20})
+        self.assertFalse(ok, line)
+        self.assertEqual(self.keys(), [])
+        ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'}, read_fail={'lead-demo': 99})
+        self.assertEqual((ok, line), (False, 'FAILED lead-demo (Herdr did not show its screen: read it with herdr agent read '
+                                             'lead-demo before any resend)'))
+
+    def test_a_paste_the_owner_made_after_herdr_saw_the_turn_is_theirs(self):
+        """Review R4: Herdr took the prompt; the owner came in and pasted. Its answer stands, and nothing is typed again."""
+        ok, line = self.run_send(on_prompt={'lead-demo': {'screen': claude_box('[Pasted text #2]')}},
+                                 on_get={'lead-demo': [{}, {'agent': {'focused': True}}]})
+        self.assertEqual((ok, line), (True, 'SUBMITTED lead-demo'))
+        self.assertEqual((self.keys(), self.prompts()), ([], [self.TEXT]))
+
+    def test_no_key_once_the_owner_comes_in_during_a_look(self):
+        """Review R5: a screen read can take seconds; the agent is looked at again just before any key."""
+        ok, line = self.run_send(prompt_error={'lead-demo': 'agent_prompt_stalled'}, on_prompt={'lead-demo': {
+            'screen': claude_box('{text}')}}, on_get={'lead-demo': [{}, {}, {'agent': {'focused': True}}]})
+        self.assertFalse(ok)
+        self.assertIn('focused', line)
+        self.assertEqual(self.keys(), [])
+
     def test_a_refused_prompt_is_failed_with_nothing_pressed(self):
         ok, line = self.run_send(prompt_error={'lead-demo': 'agent_blocked'})
         self.assertEqual((ok, line), (False, 'FAILED lead-demo (blocked at a dialog; read the screen)'))
@@ -317,6 +354,9 @@ class Box(unittest.TestCase):
             with self.subTest(screen=screen):
                 self.assertEqual(send_.holds(screen, [text]), want)
         self.assertFalse(send_.holds(claude_box('[Pasted text #1]'), [text], lone=False))
+        dim = '❯\xa0\x1b[2m' + text[:40] + '\x1b[0m\n────'           # Claude's dim hint is no typed text
+        self.assertEqual((send_.box(dim), send_.holds(dim, [text])), ('', False))
+        self.assertTrue(send_.holds(dim.replace('\x1b[2m', ''), [text]))
         self.assertFalse(send_.holds(claude_box('[Pasted text #1]'), []))
 
 

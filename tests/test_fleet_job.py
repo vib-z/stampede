@@ -1812,7 +1812,7 @@ class Deliver(unittest.TestCase):
         self.deliver()
         text = self.send.call_args.args[2]
         texts, lone, marker = tui_.pending(self.job, 'lead-demo')
-        self.assertEqual((texts, lone, marker), ([text], True, None))   # its last send, and nothing unread now
+        self.assertEqual((texts, lone, marker), ([text], False, None))  # its last send, confirmed: a lone paste is not ours
         self.assertEqual(self.ready.call_args.kwargs, {'ours': ([text], False, tui_.mark('lead-demo'))})  # before any record
 
     def test_a_prompt_holding_only_our_own_text_is_deliverable(self):
@@ -1826,7 +1826,7 @@ class Deliver(unittest.TestCase):
         record = ([ours], True, None)
         for screen, pending, want in ((box(ours), record, True), (box(ours[:60]), record, True),
                                       (box('[Pasted text #1]'), record, True),
-                                      (box('[Pasted text #1]'), ([ours], False, None), False),   # an old send: may be the owner's
+                                      (box('[Pasted text #1]'), ([ours], False, None), False),   # may be the owner's
                                       (box(ours + ' and my own words'), record, False),           # the owner added to it
                                       (box('my own half-written reply'), record, False),
                                       (box(ours), ([], False, tui_.mark('lead-demo')), True),      # left by stampede 0.2.5
@@ -1842,6 +1842,14 @@ class Deliver(unittest.TestCase):
         old = {'texts': [ours], 'at': time.time() - tui_.LONE_FOR - 1}
         (self.job / 'hooks/typed-lead-demo.json').write_text(json.dumps(old))
         self.assertFalse(tui_.pending(self.job, 'lead-demo')[1])
+        (self.job / 'hooks/typed-lead-demo.json').write_text('{"texts": ["half a rec')   # a write cut short
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, tui_.mark('lead-demo')))
+        tui_.remember(self.job, 'lead-demo', ours)                                      # and the next send mends it
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (True, None))         # not confirmed yet
+        tui_.remember(self.job, 'lead-demo', ours, False)
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (True, None))         # FAILED
+        tui_.remember(self.job, 'lead-demo', ours, True)
+        self.assertEqual(tui_.pending(self.job, 'lead-demo')[1:], (False, None))        # SUBMITTED: a paste now is the owner's
 
     def test_a_claude_lead_s_stuck_copy_is_cleared_and_typed_once(self):
         """End to end with the real herdr-send and a fake Herdr: the prompt holds the deliverer's own earlier text; it is
@@ -1990,16 +1998,16 @@ class Deliver(unittest.TestCase):
         stall = folder / 'stall'
         stall.write_text('#!/bin/bash\necho $$ >> "$(dirname "$0")/pids"\nsleep 30\n')
         stall.chmod(0o755)
-        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'DELIVER_CALL', 0.3), \
+        with mock.patch.object(tui_, 'ready', REAL_READY), mock.patch.object(tui_, 'DELIVER_CALL', 1.5), \
                 mock.patch.dict(os.environ, {'HERDR': str(stall)}):
             started = time.monotonic()
             self.assertEqual(self.deliver(), 4)          # agent get hangs: the deliverer lets go at once
             self.assertLess(time.monotonic() - started, 5)
         self.send.assert_not_called()
         self.assertEqual(len(tui_.unread(self.job, 'lead-demo')), 2)   # nothing marked read
-        with mock.patch.object(tui_, 'HERDR_SEND', stall), mock.patch.object(tui_, 'DELIVER_SEND', 0.3):
+        with mock.patch.object(tui_, 'HERDR_SEND', stall), mock.patch.object(tui_, 'DELIVER_SEND', 1.5):  # time for bash to start on a busy machine
             started = time.monotonic()
-            self.assertEqual(REAL_SEND(self.job, 'lead-demo', 'hi'), (False, 'FAILED lead-demo: herdr-send did not finish in 0.3 s'))
+            self.assertEqual(REAL_SEND(self.job, 'lead-demo', 'hi'), (False, 'FAILED lead-demo: herdr-send did not finish in 1.5 s'))
             self.assertLess(time.monotonic() - started, 5)
         for pid in (folder / 'pids').read_text().split():   # every stalled child was stopped
             with self.assertRaises(ProcessLookupError):

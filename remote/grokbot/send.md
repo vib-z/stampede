@@ -21,12 +21,15 @@ herdr-send <agent> "/exit"                               # Claude and Hermes; Co
 | output | meaning |
 |---|---|
 | `SUBMITTED <agent>` | the agent took the prompt and started working |
-| `SUBMITTED <agent> (pressed Enter again: the first was dropped)` | Claude kept the text but lost the Enter while drawing its screen; it was pressed once more |
+| `SUBMITTED <agent> (it started late)` or `(the text left its prompt)` | Herdr saw no turn start in 5 seconds, but a turn started later, or the text left the prompt |
+| `SUBMITTED <agent> (pressed Enter again: the first was dropped)` | the agent kept the text, or its paste placeholder, and lost the Enter; Enter was pressed again, up to 3 times, until it went in |
 | `SUBMITTED <agent> (the agent exited)` | `/exit` or `/quit` ended the agent, as asked |
 | `FAILED <agent> (not a live agent)` | no agent by that name or pane; exit 1 |
 | `FAILED <agent> focused: the owner is in that pane; retry later` | the owner has that pane selected; no key or prompt was sent; exit 1 |
+| `FAILED <agent> focused: the owner came into that pane; its prompt may still hold the text` | the prompt was typed, and the owner came in before it went in; no key was pressed after that; read the screen; exit 1 |
 | `FAILED <agent> (blocked at a dialog; read the screen)` | the agent waits at a dialog; exit 1 |
-| `FAILED <agent> (status before: ..., now: ...)` | the prompt did not start a turn; read the screen; exit 1 |
+| `FAILED <agent> (the text stayed in its prompt through 3 Enter; cleared it with ctrl+c, ...)` | the text never went in, so it was cleared; send it again; exit 1 |
+| `FAILED <agent> (...: read it with herdr agent read <agent> before any resend)` or `(status before: ..., now: ...; ...)` | it cannot tell whether the prompt went in, or another text is in the prompt; read the screen before any resend; exit 1 |
 
 On Herdr Core there is no `herdr-send`: pass the owner's words with `stampede tell <job dir> lead "..."` (it runs `hc send` to the lead), and read the lead or a helper with `hc read <address>`; never type into a helper ([core.md](../../skills/herdr-fleet/references/core.md)).
 
