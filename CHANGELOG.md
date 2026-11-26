@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Agents share one BrowserOS Neo window per profile.** The ownership rules told every agent to open a new Neo window and left it open, so each run added one (25 piled up on 26 Nov 2026). They now open a tab in the profile's existing window, close their own tabs when they finish, and create a window only when the profile has none. A playbook change only; no script or setting changed.
+
 ## 0.2.5 (24 Nov 2026)
 
 A Claude lead hears inbox lines even when its file hook misses them, a finished job's workspace can close by itself, and herdr-send no longer sends ctrl+c to an empty Claude prompt.
