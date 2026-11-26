@@ -41,7 +41,8 @@ The job folder is the one channel. It sits outside every repo, so it serves agen
 - For append-only shared files (DECISIONS, changelogs), use the section letter your brief gives you, or propose the entry in your report.
 - Start no dev server and no production build unless your brief says so. One dev server on a fixed port serves everyone; separate worktrees get separate ports.
 - Run named test files only, and the tests your brief names after each step. The lead runs the full type check, suite and build once: parallel runs exhaust the machine's memory.
-- Browser: BrowserOS Neo only, in a new window of your own; close your tabs when you finish. If a Neo call has not returned in about 2 minutes, fetch that page with WebFetch or `curl -sL` instead.
+- Browser: BrowserOS Neo only, one window per profile. Open your own tab with `tabs` `new`, and close the tabs you opened when you finish, never the window. Call `windows` `create` only when `windows` `list` shows none for that profile, and leave that window open.
+- A profile other than the default: `browser_target` `set` it first. If a Neo call has not returned in about 2 minutes, fetch that page with WebFetch or `curl -sL` instead.
 - Credentials and `.env` files are in no brief: never read, copy or print them.
 - Work on your own. Make the reasonable call and record it in your report.
 - Use the real date (`date +%F`), not the one in the brief.
