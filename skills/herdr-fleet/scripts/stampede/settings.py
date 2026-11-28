@@ -270,7 +270,8 @@ def encode(value):
 def edit_user(changes):
     """(path, old, new): the user's own file (through a link, the file it names) as bytes, and as it would be with each
     key of changes set. Nothing is written here. Each key is exactly that change or a refusal: every other byte is kept;
-    a key already in the file must be one plain line `name = <value>` in its table, which is replaced; a new key goes
+    a key already in the file must be one plain line `name = <value>` in its table, whose value is replaced (a comment at
+    its end stays); a new key goes
     first in its table, a new table at the end, and a top-level key before every table; then the new text is parsed
     back whole and must equal the old with that one value. A key that already has the value changes nothing."""
     path = user_file()
@@ -304,11 +305,11 @@ def edit_user(changes):
         begin = header.search(text).end() if table and found else 0
         rest = re.search(r'(?m)^[ \t]*\[', text[begin:])
         stop = begin + rest.start() if rest else len(text)
-        line = re.compile(r'(?m)^([ \t]*)' + re.escape(name) + r'[ \t]*=[ \t]*(?:"[^"\\\r\n]*"|true|false|[+-]?[0-9]+)[ \t]*(?:#[^\r\n]*)?(?=\r?$)')
+        line = re.compile(r'(?m)^([ \t]*)' + re.escape(name) + r'[ \t]*=[ \t]*(?:"[^"\\\r\n]*"|true|false|[+-]?[0-9]+)([ \t]*#[^\r\n]*)?[ \t]*(?=\r?$)')
         if name in node:  # the one plain line of its table, or nothing: a second definition would not parse
             if not found or len(line.findall(text[begin:stop])) != 1:
                 raise by_hand(f'its {key} is not one plain line {name} = <value>')
-            new = text[:begin] + line.sub(lambda m: m.group(1) + wanted, text[begin:stop], count=1) + text[stop:]
+            new = text[:begin] + line.sub(lambda m: m.group(1) + wanted + (m.group(2) or ''), text[begin:stop], count=1) + text[stop:]
         elif found:  # first in its table (a top-level key: first in the file, before any table)
             new = text[:begin] + (eol if begin and text[begin - 1] != '\n' else '') + wanted + eol + text[begin:]
         else:

@@ -185,6 +185,24 @@ class Brief(Choices, Homes):
                     self.config('[dev]\npstack = false\n')
                 self.assertEqual(self.brief(), without)
 
+    def test_on_herdr_core_the_caller_s_own_config_folders_are_not_the_lead_s(self):
+        """A Core terminal gets the core's environment, never the caller's CLAUDE_CONFIG_DIR or CODEX_HOME (launch_env passes
+        neither): so a Core job looks in the default folders, and a TUI job, whose lead shares the caller's, in the caller's."""
+        elsewhere = self.home / 'elsewhere'
+        self.claude_plugin(root=elsewhere / 'claude')
+        self.codex_plugin(root=elsewhere / 'codex')
+        env = {'CLAUDE_CONFIG_DIR': str(elsewhere / 'claude'), 'CODEX_HOME': str(elsewhere / 'codex')}
+        with mock.patch.dict(os.environ, env):
+            self.assertIn('/pstack:poteto-mode', self.brief(), 'the Herdr TUI: the caller\'s folder')
+            self.assertIn('$pstack:poteto-mode', self.brief(kind='codex'))
+            for backend in ('native', 'core'):
+                with self.subTest(backend=backend):
+                    (self.job_folder / 'backend').write_text(backend + '\n')
+                    self.assertNotIn('poteto-mode', self.brief(key='hc-0123456789ab'))
+                    self.assertNotIn('poteto-mode', self.brief(key='hc-0123456789ab', kind='codex'))
+            self.claude_plugin()  # the default folder, where a Core lead looks
+            self.assertIn('/pstack:poteto-mode', self.brief(key='hc-0123456789ab'))
+
     def test_a_repo_file_switches_it_off_for_every_job_there(self):
         (self.repo / '.stampede.toml').write_text('[dev]\npstack = false\n')
         found = settings_.load(repo=self.repo)
@@ -243,6 +261,24 @@ class New(Choices, Homes):
                 code, _, err = self.new('--core', '--set', 'dev.pstack=false')
                 self.assertEqual((code, err), (0, ''))
                 self.assertNotIn('poteto-mode', (self.job / 'briefs' / (LEAD + '.md')).read_text())
+
+    def test_on_core_pstack_only_in_the_caller_s_own_folder_is_missing_for_the_lead(self):
+        self.claude_plugin(root=self.home / 'mine')
+        code, _, err = self.new('--core', env={'CLAUDE_CONFIG_DIR': str(self.home / 'mine')})
+        self.assertEqual((code, err), (0, self.note()))
+        self.assertNotIn('poteto-mode', (self.job / 'briefs' / (LEAD + '.md')).read_text())
+        (lead,) = [run for run in self.calls('run') if self.labels(run).get('stampede.role') == 'lead']
+        self.assertFalse([part for part in lead if part.startswith('CLAUDE_CONFIG_DIR=')], 'and the lead does not get that folder')
+
+    def test_a_start_that_failed_says_nothing_about_pstack(self):
+        for relay in ((), ('--relay',)):
+            with self.subTest(relay=relay):
+                self.setUp()
+                self.shape(run_error={LEAD: 'spawn_failed'})
+                code, out, err = self.new('--core', *relay)
+                self.assertEqual(code, 1, out + err)
+                self.assertIn('FAILED', out)
+                self.assertNotIn('pstack', err.replace(str(self.root), ''))
 
     def test_a_refused_new_stays_one_line(self):
         code, out, err = self.new('--core', '--relay', '--front-door')

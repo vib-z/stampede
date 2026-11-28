@@ -80,6 +80,13 @@ SOURCES = {  # for each CLI that leads a job, where it loads pstack from, the fi
 }
 
 
+def lead_env(core):
+    """The environment the lead's CLI finds its config folder in. On the Herdr TUI, the caller's. On Herdr Core a terminal
+    gets the core's own environment, with none of the caller's CLAUDE_CONFIG_DIR or CODEX_HOME (hcapi.launch_env), and
+    stampede cannot read it: so the default folders, which is where the lead looks unless the core itself moved them."""
+    return {} if core else os.environ
+
+
 def find(kind, repo=None, env=None, home=None):
     """How the lead's CLI (kind) has pstack on this machine, for a job in repo, or None."""
     env, home = os.environ if env is None else env, Path(home or Path.home())
@@ -91,7 +98,8 @@ def brief_text(job, kind=None, end=' '):
     """The sentence the lead's brief gets: only with dev.pstack on and pstack found for the lead's CLI (kind, else the
     job's lead.kind). The lead decides whether its job is coding work; stampede cannot know that from an ask."""
     settings = settings_.current(job)
-    found = settings.get('dev.pstack') and find(kind or settings.get('lead.kind'), job_.workdir(job))
+    found = settings.get('dev.pstack') and find(kind or settings.get('lead.kind'), job_.workdir(job),
+                                                 lead_env(job_.backend(job) != 'tui'))
     if not found:
         return ''
     return (f'pstack is installed ({found.how}). If this job is coding work (a feature, a fix, a refactor or a code review), '
@@ -99,9 +107,9 @@ def brief_text(job, kind=None, end=' '):
             'pstack\'s own. For any other job, leave pstack alone.' + end)
 
 
-def missing(settings, kind, repo=None):
+def missing(settings, kind, repo=None, core=False):
     """stampede new's one line when dev.pstack is on and the lead's CLI has no pstack: the job runs without it."""
-    if not settings.get('dev.pstack') or find(kind, repo):
+    if not settings.get('dev.pstack') or find(kind, repo, lead_env(core)):
         return ''
     return (f'note: pstack is not installed for a {NAMES[kind]} lead, so this job runs without it. To use it for coding jobs: '
             f'{INSTALL[kind]}. To stop this line: stampede setup --pstack no')

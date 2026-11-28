@@ -68,10 +68,11 @@ class Editor(Case):
         self.assertEqual(path, self.user)
         return new.decode()
 
-    def test_a_line_in_its_table_is_replaced_with_its_indent_and_every_other_byte_kept(self):
+    def test_a_line_in_its_table_gets_its_new_value_and_keeps_its_indent_and_its_end_comment(self):
         self.config(MINE)
         self.assertEqual(self.edit(lead__claude__model='claude-opus-5-5'),
-                         MINE.replace('  model = "claude-fable-5-2"  # my pick', '  model = "claude-opus-5-5"'))
+                         MINE.replace('  model = "claude-fable-5-2"  # my pick', '  model = "claude-opus-5-5"  # my pick'))
+        self.assertEqual(self.edit(backend='tui'), MINE.replace('backend = "auto"   # where jobs run', 'backend = "tui"   # where jobs run'))
         self.assertEqual(self.edit(lead__kind='codex'), MINE.replace('kind = "claude"', 'kind = "codex"'))
         self.assertEqual(self.user.read_text(), MINE, 'edit_user writes nothing')
 
@@ -189,7 +190,7 @@ class NoTerminal(Case):
         self.assertEqual(err, f'note: {self.user}: other.ratio is not a setting; skipped\n'  # a key it does not know is said, and kept
                          f'stampede setup: {self.user} would change as shown: run it again with --yes to save that; nothing was changed\n')
         self.assertEqual(out.splitlines()[:2], ['--- now', '+++ with your answers'])
-        for line in ('-  model = "claude-fable-5-2"  # my pick', '+  model = "claude-opus-5-5"', '+[dev]', '+pstack = false'):
+        for line in ('-  model = "claude-fable-5-2"  # my pick', '+  model = "claude-opus-5-5"  # my pick', '+[dev]', '+pstack = false'):
             self.assertIn(line, out.splitlines())
         self.assertEqual(self.user.read_text(), MINE)
         self.assertEqual([p.name for p in self.user.parent.iterdir()], ['config.toml'])
@@ -199,8 +200,9 @@ class NoTerminal(Case):
         code, out, err = self.setup('--pstack', 'no', '--lead-model', 'claude-opus-5-5', '--backend', 'tui', '--yes')
         self.assertEqual(code, 0, err)
         self.assertEqual(err, f'note: {self.user}: other.ratio is not a setting; skipped\n', 'a key it does not know is said and kept')
-        self.assertEqual(self.user.read_text(), MINE.replace('backend = "auto"   # where jobs run', 'backend = "tui"')
-                         .replace('  model = "claude-fable-5-2"  # my pick', '  model = "claude-opus-5-5"') + '\n[dev]\npstack = false\n')
+        self.assertEqual(self.user.read_text(), MINE.replace('backend = "auto"', 'backend = "tui"')
+                         .replace('model = "claude-fable-5-2"', 'model = "claude-opus-5-5"') + '\n[dev]\npstack = false\n',
+                         'only the three values differ: every comment, the unknown key and the order are as they were')
         self.assertIn(f'SAVED {self.user}', out.splitlines())
 
     def test_an_answer_it_does_not_take_is_refused_by_its_flag(self):
@@ -242,6 +244,17 @@ class NoTerminal(Case):
         self.assertEqual(self.setup('--worker-effort', 'high', '--yes')[0], 0)
         found = self.values()
         self.assertEqual((found.get('roles.mine.effort'), found.get('roles.build.effort'), found.get('roles.mine.kind')), ('high', 'high', 'codex'))
+
+    def test_a_role_of_your_own_with_no_effort_yet_gets_one_and_the_summary_is_true_of_it(self):
+        self.config('[roles.custom]\nkind = "codex"\n')  # another CLI than roles.default: it takes no default effort
+        self.assertEqual(cli_.role_values(self.values().values, 'custom', None, None, None), ('codex', None, None))
+        code, out, _ = self.setup('--defaults')
+        self.assertIn('  the workers\' efforts differ by role: stampede config show', out.splitlines())
+        code, out, err = self.setup('--worker-effort', 'low', '--yes')
+        self.assertEqual((code, err), (0, ''))
+        self.assertIn('  every worker\'s effort = "low"', out.splitlines())
+        self.assertEqual(cli_.role_values(self.values().values, 'custom', None, None, None), ('codex', None, 'low'))
+        self.assertIn('[roles.custom]\neffort = "low"\nkind = "codex"\n', self.user.read_text())
 
     def test_a_file_that_cannot_be_changed_safely_is_refused_whole(self):
         text = "lead.kind = 'codex'\n"
@@ -305,14 +318,25 @@ class Terminal(Case):
                                                      'backend', 'review.step')], [False, 'codex', 'gpt-6.2-sol', 'high', 'low', 'tui', 'each'])
         self.assertEqual(found.source('lead.codex.model'), 'default', 'Enter wrote nothing for it')
 
+    def test_with_every_flag_given_a_file_you_have_still_waits_for_a_typed_yes(self):
+        flags = ('--pstack', 'no', '--lead', 'claude', '--lead-model', 'claude-fable-5-2', '--lead-effort', 'xhigh', '--worker-effort',
+                 'medium', '--backend', 'auto', '--review', 'end')
+        self.config(MINE)
+        code, out, _ = self.setup(*flags, typed='\n')
+        self.assertEqual((code, self.user.read_text()), (0, MINE))
+        self.assertEqual(self.asked(out), [], 'no question is asked')
+        self.assertTrue(out.endswith(f'Save this change? yes or no [no]: NOT SAVED {self.user}: nothing was changed\n'), out)
+        code, out, _ = self.setup(*flags, typed='yes\n')
+        self.assertEqual((code, self.user.read_text()), (0, MINE + '\n[dev]\npstack = false\n'))
+
     def test_a_file_you_have_changes_only_on_a_yes(self):
         self.config(MINE)
-        for reply, saved in (('no\n', False), ('', False), ('maybe\n', False), ('\n', True)):
-            with self.subTest(reply=reply):
+        for reply, saved in (('no\n', False), ('', False), ('maybe\n', False), ('\n', False), ('yes\n', True), ('Y\n', True)):
+            with self.subTest(reply=reply):  # '' is the end of input; Enter alone is a no: only a typed yes saves
                 self.config(MINE)
                 code, out, _ = self.setup(typed='no\n' + '\n' * 6 + reply)
                 self.assertEqual(code, 0)
-                self.assertIn('Save this change? yes or no [yes]: ', out)
+                self.assertIn('Save this change? yes or no [no]: ', out)
                 self.assertIn('+pstack = false', out.splitlines())
                 self.assertEqual(self.user.read_text() != MINE, saved)
                 self.assertEqual(out.endswith(f'NOT SAVED {self.user}: nothing was changed\n'), not saved)
@@ -337,7 +361,7 @@ class Terminal(Case):
 
     def test_after_a_change_of_agent_a_kept_model_the_rules_forbid_is_asked_until_one_passes(self):
         self.config('[lead]\nallow = ["claude-opus-5-5", "gpt-6.2-astra"]\n')
-        code, out, _ = self.setup(typed='\ncodex\n\ngpt-6.2-astra\n\n\n\n\n\n')
+        code, out, _ = self.setup(typed='\ncodex\n\ngpt-6.2-astra\n\n\n\n\nyes\n')
         self.assertEqual(code, 0)
         self.assertIn("3 of 7  The lead's model [gpt-6.2-sol]:         the lead may not run on gpt-6.2-sol (lead.allow: claude-opus-5-5, "
                       "gpt-6.2-astra)\n3 of 7  The lead's model [gpt-6.2-sol]: 4 of 7", out)

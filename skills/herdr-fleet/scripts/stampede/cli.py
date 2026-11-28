@@ -114,9 +114,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         return settings, kind
 
     def made(repo, code=None):
-        """The job is made and its lead launched: with pstack on and missing, the one line that says so. Never with a
-        refusal, which stays one line."""
-        note = pstack_.missing(settings, kind, repo)
+        """new ended well (exit 0), its lead launched: with pstack on and missing, the one line that says so. Never with
+        a refusal, which stays one line, nor after a start that failed, whose line says nothing runs."""
+        note = '' if code else pstack_.missing(settings, kind, repo, core)
         if note:
             print(note, file=sys.stderr)
         return code
@@ -169,16 +169,16 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     subprocess.run([str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'), 'record', str(job), lead,
                     kind, str(brief), '--', *args], check=True)
     job_.mark_job(ws_id, job)
-    made(repo)
     if blocked:
-        return out_.emit('BLOCKED', f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"',
-                         agent=lead, lead=lead, job=str(job.absolute()), retry=f'stampede tell {job} lead "Read {brief}"')
+        return made(repo, out_.emit('BLOCKED', f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"',
+                                    agent=lead, lead=lead, job=str(job.absolute()), retry=f'stampede tell {job} lead "Read {brief}"'))
     pointer = f'You are {lead}. Read {brief} and do everything it says.'
     if kind == 'codex' and tui_.type_pointer(job, lead, 'lead', brief, pointer):
         return 1
     if kind == 'claude':
         owner_.tell(job, lead, pointer)
     out_.emit('STARTED', lead + ' ' + str(job), agent=lead, lead=lead, job=str(job.absolute()))
+    made(repo)
 
 
 GROUPS = (  # the top-level help, in the order an agent meets the commands; hook and the _ commands stay out of it
@@ -258,8 +258,8 @@ EXAMPLES = {
     'check': 'examples:\n  stampede check\n  stampede check --full',
     'setup': '''examples:
   stampede setup                                  # asks each question; Enter keeps the answer shown
-  stampede setup --pstack no --review each --yes  # no questions: these two answers, saved
-  stampede setup --defaults                       # no questions: on a new machine, a settings file with every default''',
+  stampede setup --defaults                       # no questions: on a new machine, a settings file with every default
+  stampede setup --defaults --pstack no --review each --yes   # no questions: these two answers, saved''',
     'config': '''examples:
   stampede config show
   stampede config show --json
@@ -430,10 +430,11 @@ def parse_and_run(argv):
     p.add_argument('--full', action='store_true', help='run the whole suite (minutes)')
     json_flag(p, '{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
     p = command('setup', 'Ask your default preferences for new jobs and save them in your own settings file (stampede config show\n'
-                         'names it). At a terminal it asks each question below; Enter keeps the answer shown. A flag answers its\n'
-                         'question with no prompt. Only an answer that differs from your settings is written, and every other line\n'
-                         'of the file is kept. A file you already have changes only after the change is shown and you say yes: at\n'
-                         'the prompt, or with --yes. Exit 0 saved or nothing to change, 2 refused (the line says why).')
+                         'names it). At a terminal it asks each question below that has no flag; Enter keeps the answer shown.\n'
+                         'With --defaults, or with no terminal, it asks nothing. Only an answer that differs from your settings\n'
+                         'is written, and every other line of the file is kept. A file you already have changes only after the\n'
+                         'change is shown and you type yes at the last prompt, or pass --yes. Exit 0 saved or nothing to change,\n'
+                         '2 refused (the line says why).')
     for q in setup_.QUESTIONS:
         p.add_argument('--' + q.name, metavar='ANSWER', help=f'{q.about}: {q.takes}')
     p.add_argument('--defaults', action='store_true', help='ask nothing: every question with no flag keeps its answer '

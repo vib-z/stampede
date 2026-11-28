@@ -228,8 +228,8 @@ The command prints your home folder in full where this page shows `~`, and the m
 **What it does.**
 - It saves your answers in your own settings file, `~/.config/stampede/config.toml`, which every job reads ([Configure](CONFIGURE.md)).
 - It writes only an answer that differs from what your settings already say. A default you keep stays a default, so it follows later releases.
-- In a file you already have, it changes only the lines of its own answers. Your comments, and every key it does not ask about, stay as they are. A line it replaces loses the comment at its end.
-- It never changes a file you already have without showing the change first and getting your yes.
+- In a file you already have, it changes only the values of its own answers. Your comments, on a line of their own or at the end of a line, and every key it does not ask about, stay as they are.
+- It never changes a file you already have without showing the change first and getting your yes. At that last question you type `yes`; Enter alone means no.
 - It is safe to run again. The brackets show what is set now, and the same answers a second time write nothing.
 - An answer it does not take is asked again, with the reason.
 
@@ -247,16 +247,16 @@ The command prints your home folder in full where this page shows `~`, and the m
 
 Your own rules still hold: the lead's model must pass `lead.allow` and `lead.forbid`, and a worker's effort must stay under `workers.max_effort`. Setup refuses an answer they rule out.
 
-**Without questions.** A flag answers its question. With no terminal (a bot, a script), nothing is asked, and a question with no flag keeps its answer. `--defaults` asks nothing at a terminal too.
-A file you already have then changes only with `--yes`. Without it, setup prints the change, writes nothing and exits 2.
+**Without questions.** A flag answers its question, and at a terminal the questions with no flag are still asked. `--defaults` asks nothing: a question with no flag keeps its answer. With no terminal (a bot, a script), nothing is asked either.
+When nothing is asked, a file you already have changes only with `--yes`. Without it, setup prints the change, writes nothing and exits 2.
 
 ```bash
-stampede setup --defaults                           # a new computer: a settings file, with every default
-stampede setup --pstack no --lead-effort max        # prints the change, exit 2, nothing written
-stampede setup --pstack no --lead-effort max --yes  # the same change, saved
+stampede setup --defaults                                      # a new computer: a settings file, with every default
+stampede setup --defaults --pstack no --lead-effort max        # prints the change, exit 2, nothing written
+stampede setup --defaults --pstack no --lead-effort max --yes  # the same change, saved
 ```
 
-The last line, run after the example above, prints the change in the form of a diff (`+` marks a new line, `-` one that goes):
+Run on the settings file that the questions at the top of this section saved (the one with `step = "each"`), the last line prints the change in the form of a diff (`+` marks a new line, `-` one that goes):
 
 ```text
 --- now
@@ -305,6 +305,7 @@ stampede looks for pstack where each agent program loads it from:
 - `poteto-mode` is pstack's entry skill, the one that starts its way of working. Every way of installing pstack brings it.
 - So other installs count too: the plugin from pstack's own home (`pstack@cursor-plugins`), and plain skill folders, such as the ones `npx skills add backnotprop/pstack` makes.
 - `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move the two home folders, as they do for the agent programs.
+- A job on Herdr Core is the exception: a Core terminal gets the core's own environment, never those two variables from your shell. So for a Core job stampede looks in the default folders, `~/.claude` and `~/.codex`, where that lead looks.
 - pstack for Claude does not reach a Codex lead, nor the other way round: each is checked by itself.
 - A missing pstack never stops a job. `stampede new` prints one line with the install command, and `stampede doctor` shows a `warn`.
 - To stop both lines, switch pstack off: `stampede setup --pstack no`.

@@ -2,7 +2,7 @@
 has a flag, so it runs with no prompt too. Only an answer that differs from what the settings already say is written,
 so the file holds what the user changed and every other key keeps following its default; a question skipped (Enter,
 --defaults, or no terminal) keeps what it was. A settings file that exists is changed only after the change was shown
-and a yes came: typed at the prompt, or --yes on the command line."""
+and a yes came: typed at the last prompt (Enter alone is a no), or --yes on the command line."""
 import difflib, json, os, sys
 from collections import namedtuple
 
@@ -40,14 +40,14 @@ def worker_effort(answer, values, rules):
 
 
 def roles(values):
-    """Every role with an effort of its own: the built-in ones, and the user's."""
-    return sorted(key.split('.')[1] for key in values if settings_.ROLE.fullmatch(key) and key.endswith('.effort'))
+    """Every role: the built-in ones, and each of the user's own, whichever of kind, model and effort it sets."""
+    return sorted({key.split('.')[1] for key in values if settings_.ROLE.fullmatch(key)})
 
 
 def shared(values):
-    """The effort every role has, or 'mixed' when they differ."""
-    efforts = {values[f'roles.{role}.effort'] for role in roles(values)}
-    return efforts.pop() if len(efforts) == 1 else 'mixed'
+    """The effort every role has, or 'mixed' when they differ or one of the user's own roles sets none."""
+    efforts = {values.get(f'roles.{role}.effort') for role in roles(values)}
+    return efforts.pop() if len(efforts) == 1 and None not in efforts else 'mixed'
 
 
 # One row per question, in the order asked. name: its flag (--name). about and takes: the flag's help. ask: the prompt.
@@ -99,7 +99,7 @@ def answers(given, ask, say):
                 if not typed or raw is None:  # a flag, or a kept answer with no one left to ask
                     raise ValueError(f'--{q.name}: {error}' if q.name in given else f'{error}: name another with --{q.name}') from None
                 say(f'        {error}')
-        changes.update({key: value for key, value in new.items() if values[key] != value})
+        changes.update({key: value for key, value in new.items() if values.get(key) != value})
         values.update(new)
     return changes
 
@@ -155,8 +155,8 @@ def main(a, stdin=None):
         if exists and not a.yes:
             if not prompts:
                 raise ValueError(f'{path} would change as shown: run it again with --yes to save that; nothing was changed')
-            reply = ask('Save this change? yes or no [yes]: ')
-            if reply is None or reply.strip().lower() not in ('', 'yes', 'y'):
+            reply = ask('Save this change? yes or no [no]: ')
+            if reply is None or reply.strip().lower() not in ('yes', 'y'):
                 out_.emit('NOT SAVED', f'NOT SAVED {path}: nothing was changed', **facts)
                 return 0
         settings_.write_user(path, old, new)

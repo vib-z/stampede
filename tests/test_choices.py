@@ -184,7 +184,7 @@ class SetBackend(Choices):
         before = '# mine\n\nbackend = "auto"   # was auto\njobs_root = "~/jobs"\n\n[lead]\nkind = "codex"  # backend = no\n'
         self.config(before)
         self.assertEqual(self.set('backend', 'tui')[0], 0)
-        self.assertEqual(self.user.read_text(), before.replace('backend = "auto"   # was auto', 'backend = "tui"'))
+        self.assertEqual(self.user.read_text(), before.replace('backend = "auto"   # was auto', 'backend = "tui"   # was auto'))
 
     def test_with_tables_and_no_line_it_goes_first_and_the_file_still_parses(self):
         self.config('[lead]\nkind = "codex"\n[roles.build]\nbackend = "x"\n')
