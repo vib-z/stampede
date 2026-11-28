@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/vib-z/stampede/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/vib-z/stampede/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="CHANGELOG.md"><img alt="Version 0.2.5" src="https://img.shields.io/badge/version-0.2.5-black"></a>
+  <a href="CHANGELOG.md"><img alt="Version 0.2.6" src="https://img.shields.io/badge/version-0.2.6-black"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black"></a>
 </p>
 
@@ -40,7 +40,7 @@ Open a terminal (the app where you type commands) and run these lines one at a t
 git clone https://github.com/vib-z/stampede.git ~/stampede
 ~/stampede/install.sh
 export PATH="$HOME/.local/bin:$PATH"   # add this line to your shell profile too
-stampede --version                     # 0.2.5
+stampede --version                     # 0.2.6
 stampede doctor
 ```
 
