@@ -1505,6 +1505,7 @@ class LeadChoice(unittest.TestCase):
         self.assertFalse((ask.parent / 'jobs').exists())
 
     def test_a_fork_takes_a_claude_lead_only(self):
+        import contextlib, io
         from unittest import mock
         sid = '0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37'
         for env, kw, said in (({}, {'kind': 'codex', 'fork': sid}, '--fork forks a Claude chat, so it takes a Claude lead'),
