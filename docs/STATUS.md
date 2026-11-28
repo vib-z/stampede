@@ -1,6 +1,6 @@
 # Status and roadmap
 
-**0.2.5, 24 Nov 2026, and early:** commands and files may still change. What each release shipped, and how it was tested: [CHANGELOG.md](../CHANGELOG.md). Real jobs, with timelines: [docs/RUNS.md](RUNS.md).
+**0.2.6, 28 Nov 2026, and early:** commands and files may still change. What each release shipped, and how it was tested: [CHANGELOG.md](../CHANGELOG.md). Real jobs, with timelines: [docs/RUNS.md](RUNS.md).
 
 **Works and tested.** Every command in the README and the pages under `docs/` was run against a scratch job with the fakes, or against `--help`.
 - **A job on the Herdr TUI:** the job folder, the lead's start with its hooks, Claude, Codex and Cursor workers, complete worker briefs, plan approval, background questions and cancel, gates that go back to whoever started the job, quieter events while a job is open, a lead forked from the planning chat, a Codex lead, a front door outside Herdr, and reopen.
