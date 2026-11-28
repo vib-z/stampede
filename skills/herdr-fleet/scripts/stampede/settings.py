@@ -250,36 +250,92 @@ def user_file(env=None, home=None):
 
 
 def set_backend(key, value):
-    """config set: writes backend, the one key it takes, to the user's own file (through a link, to the file it names).
-    Exactly that change or none: bytes kept as they are, the one plain top-level line replaced (else put first, valid
-    before any table), the new text parsed back whole and equal to the old with that one value, then a unique temporary file with the old mode renamed over it."""
+    """config set: writes backend, the one key it takes, to the user's own file (edit_user, then write_user)."""
     path = user_file()
     if key != 'backend':
         raise ValueError(f'config set takes backend only; for {key}, edit {path}')
     if value not in CHOICES['backend']:
         raise ValueError(f'backend must be one of {", ".join(CHOICES["backend"])}, not {value!r}')
+    write_user(*edit_user({'backend': value}))
+    return path
+
+
+def encode(value):
+    """A setting's value as TOML: a string (JSON's escapes are TOML's), a boolean, an integer, or a list of those."""
+    if isinstance(value, list):
+        return '[' + ', '.join(encode(item) for item in value) + ']'
+    return json.dumps(value, ensure_ascii=False)
+
+
+def edit_user(changes):
+    """(path, old, new): the user's own file (through a link, the file it names) as bytes, and as it would be with each
+    key of changes set. Nothing is written here. Each key is exactly that change or a refusal: every other byte is kept;
+    a key already in the file must be one plain line `name = <value>` in its table, which is replaced; a new key goes
+    first in its table, a new table at the end, and a top-level key before every table; then the new text is parsed
+    back whole and must equal the old with that one value. A key that already has the value changes nothing."""
+    path = user_file()
     target = path.resolve()
     old = target.read_bytes() if target.is_file() else b''
 
-    def parsed(data):
+    def parsed(text):
         try:
-            return parse(data.decode())
+            return parse(text.decode() if isinstance(text, bytes) else text)
         except ValueError as error:  # TOML and UTF-8 errors are ValueErrors
             raise ValueError(f'{path} does not parse ({str(error).splitlines()[0] if str(error) else type(error).__name__}): fix it by hand; nothing was changed') from None
-    table = re.search(rb'(?m)^[ \t]*\[', old)
-    top = old[:table.start()] if table else old
-    line = re.compile(rb'(?m)^[ \t]*backend[ \t]*=[ \t]*"[a-z]+"[ \t]*(?:#[^\r\n]*)?(?=\r?$)')
-    wanted = f'backend = "{value}"'.encode()
-    before = parsed(old)
-    expected = {**before, 'backend': value}
-    if before.get('backend') is None:
-        new = wanted + (b'\r\n' if b'\r\n' in old else b'\n') + old
-    elif len(line.findall(top)) == 1:
-        new = line.sub(wanted, top, count=1) + old[len(top):]
-    else:
-        raise ValueError(f'{path}: its backend is not one plain line backend = "<word>": edit the file by hand; nothing was changed')
-    if parsed(new) != expected:  # the whole file: only backend may differ, and it must be the value asked for
-        raise ValueError(f'{path}: the change would not set only backend to {value}: edit the file by hand; nothing was changed')
+
+    def by_hand(why):
+        return ValueError(f'{path}: {why}: edit the file by hand; nothing was changed')
+    tree, text = parsed(old), old.decode()
+    eol = '\r\n' if '\r\n' in text else '\n'
+    for key, value in changes.items():
+        *table, name = key.split('.')
+        node = tree
+        for part in table:
+            node = node.get(part, {}) if isinstance(node, dict) else None
+        if not isinstance(node, dict):
+            raise by_hand(f'{".".join(table)} is a value there, so {key} cannot be set')
+        if name in node and node[name] == value and type(node[name]) is type(value):
+            continue
+        wanted = f'{name} = {encode(value)}'
+        header = re.compile(r'(?m)^[ \t]*\[' + re.escape('.'.join(table)) + r'\][ \t]*(?:#[^\r\n]*)?\r?$\n?')
+        found = header.findall(text) if table else ['']
+        if len(found) > 1:
+            raise by_hand(f'[{".".join(table)}] stands there more than once')
+        begin = header.search(text).end() if table and found else 0
+        rest = re.search(r'(?m)^[ \t]*\[', text[begin:])
+        stop = begin + rest.start() if rest else len(text)
+        line = re.compile(r'(?m)^([ \t]*)' + re.escape(name) + r'[ \t]*=[ \t]*(?:"[^"\\\r\n]*"|true|false|[+-]?[0-9]+)[ \t]*(?:#[^\r\n]*)?(?=\r?$)')
+        if name in node:  # the one plain line of its table, or nothing: a second definition would not parse
+            if not found or len(line.findall(text[begin:stop])) != 1:
+                raise by_hand(f'its {key} is not one plain line {name} = <value>')
+            new = text[:begin] + line.sub(lambda m: m.group(1) + wanted, text[begin:stop], count=1) + text[stop:]
+        elif found:  # first in its table (a top-level key: first in the file, before any table)
+            new = text[:begin] + wanted + eol + text[begin:]
+        else:
+            new = text + (eol if text and not text.endswith('\n') else '') + (eol if text else '') + f'[{".".join(table)}]{eol}{wanted}{eol}'
+        expected = json.loads(json.dumps(tree))  # a copy; the file holds only what JSON holds too
+        node = expected
+        for part in table:
+            node = node.setdefault(part, {})
+        node[name] = value
+        try:  # the whole file: only this key may differ, and it must be the value asked for
+            same = parse(new) == expected
+        except ValueError:
+            same = False
+        if not same:
+            raise by_hand(f'the change would not set only {key} to {encode(value)}')
+        tree, text = expected, new
+    return path, old, text.encode()
+
+
+def write_user(path, old, new):
+    """Put new in place of the user's file, which must still hold old (it was read to make new): a unique temporary file
+    with the old mode, renamed over it, so the file is whole at every moment. Bytes that do not differ write nothing."""
+    target = path.resolve()
+    if new == old:
+        return
+    if (target.read_bytes() if target.is_file() else b'') != old:
+        raise ValueError(f'{path} changed while this ran: run it again; nothing was changed')
     target.parent.mkdir(parents=True, exist_ok=True)
     umask = os.umask(0)
     os.umask(umask)
@@ -293,7 +349,6 @@ def set_backend(key, value):
     except BaseException:
         os.unlink(temp)
         raise
-    return path
 
 
 def load(repo=None, env=None, flags=None, sets=(), home=None, saved=None):

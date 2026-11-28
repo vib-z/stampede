@@ -8,7 +8,7 @@ from . import base as base_
 ROOT = base_.SCRIPTS.parents[2]
 # the fast part: the repo's shape and contracts, then pure-unit classes. Each must be there, but OPTIONAL
 FAST = ('test_shape', 'test_version', 'test_hc_contract', 'test_layers', 'test_settings', 'test_routes', 'test_herdr_trust',
-        'test_herdr_send', 'test_platform', 'test_install',
+        'test_herdr_send', 'test_platform', 'test_install', 'test_setup', 'test_pstack.Find', 'test_pstack.Doctor',
         'test_fleet_job.Messages', 'test_fleet_job.Briefs', 'test_fleet_job.Command')
 RAN = re.compile(r'^Ran (\d+) tests? in', re.M)
 

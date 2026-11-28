@@ -75,8 +75,10 @@ def config():
     file when run inside a repo."""
     loaded = settings_.load(repo=repo())
     files = ', '.join(f['path'] for f in loaded.files.values() if f['exists']) or 'none'
+    offer = [] if loaded.files['user']['exists'] else [check('config', 'ok', 'no settings file of your own yet, so the defaults apply',
+                                                             'stampede setup asks your preferences and saves them')]
     return [check('config', 'PROBLEM', problem, 'fix or remove what it names, then stampede config show')
-            for problem in loaded.problems] or [check('config', 'ok', f'settings files without problems: {files}')]
+            for problem in loaded.problems] or [check('config', 'ok', f'settings files without problems: {files}')] + offer
 
 
 def pstack():

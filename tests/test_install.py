@@ -177,8 +177,9 @@ class Install(unittest.TestCase):
         result = self.run_install('--dry-run')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('would link', result.stdout)
-        self.assertEqual(result.stdout.splitlines()[-1], 'New jobs run on the Herdr TUI. For Herdr Core by default: '
-                         'stampede config set backend core; for one job: stampede new --core')
+        self.assertEqual(result.stdout.splitlines()[-2:], [
+            'New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core',
+            'Your preferences, once: stampede setup   (it asks about pstack for coding jobs, the lead, effort, where jobs run and the review step)'])
         self.assertFalse((self.home / '.local').exists())
         self.assertFalse((self.home / '.claude/skills').exists())
         self.assertEqual(self.run_install('--from-plugin').returncode, 0)

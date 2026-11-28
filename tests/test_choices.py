@@ -251,10 +251,19 @@ class SetBackend(Choices):
                      'x = """\nbackend = "tui"\n"""\nbackend = """auto"""\n'):
             with self.subTest(text=text):
                 self.user.write_text(text)
-                code, _, err = self.set('backend', 'core')
+                code, _, err = self.set('backend', 'tui')
                 self.assertEqual(code, 2, err)
                 self.assertIn('nothing was changed', err)
                 self.assertEqual(self.user.read_text(), text)
+
+    def test_a_value_the_file_already_has_in_any_spelling_writes_nothing(self):
+        quoted = ('"backend" = "core"\n',) if settings_.tomllib else ()  # 3.9's fallback reader refuses a quoted key
+        for text in ('backend = "core"  # mine\n', "backend = 'core'\n", *quoted):
+            with self.subTest(text=text):
+                self.user.write_text(text)
+                before = self.user.stat().st_mtime_ns
+                self.assertEqual(self.set('backend', 'core'), (0, f'backend = "core" ({self.user})\n', ''))
+                self.assertEqual((self.user.read_text(), self.user.stat().st_mtime_ns), (text, before))
 
     def test_with_no_backend_a_look_alike_inside_a_string_stays_as_it_is(self):
         """The line goes first and the string keeps its text; 3.9's fallback parser refuses the file: exit 2, unchanged."""
