@@ -7,6 +7,7 @@ This page installs stampede, keeps it up to date and removes it. The short versi
 - [Install](#install)
 - [Update](#update)
 - [Health check](#health-check)
+- [Your preferences](#your-preferences): `stampede setup`, and [pstack](#pstack) for coding jobs
 - [Unattended agents](#unattended-agents): the one-time settings
 - [Configure](#configure)
 - [The event relay, for a remote bot](#the-event-relay-for-a-remote-bot)
@@ -27,6 +28,7 @@ A Mac or a Linux computer with these tools. We tested on macOS 27.2 and Ubuntu 2
 | [Cursor Agent](https://cursor.com/docs/cli/installation) | 2026.10.19 | workers, optional |
 | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.22.5 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
 | [Kimi Code](https://moonshotai.github.io/kimi-code/) | 2.2.0 (flags checked with `--help`) | handed workers of a Herdr Core job, optional |
+| [pstack](https://github.com/michael-denyer/pstack-claude) | 0.9.159 as a Claude Code plugin and as a Codex plugin, on macOS, 28 Nov 2026: each install command below ran against an empty config folder, and stampede found the result | the lead's working rules on coding jobs, optional and recommended ([pstack](#pstack)) |
 | Python 3, git, jq, curl; on Linux also `flock` (util-linux) and `ps` (procps) | Python 3.9 (3.9 or later; the tests need 3.11), git 2.56, jq 1.7 | the scripts |
 | [Moshi](https://getmoshi.app/docs/herdr) `moshi-hook` | 0.4.50 (`ask`, `notify` and `job` flags checked with `--help`; on Linux, unpaired) | questions on your phone, optional (without it, see [Setup problems](#setup-problems)) |
 | [Tailscale](https://tailscale.com/kb/1017/install) | 1.104.1 | a bot on another computer, optional |
@@ -46,7 +48,7 @@ herdr-trust ~/code/my-app            # once per repo, before agents start there
 stampede config set backend core     # optional: Herdr Core by default (the default is the Herdr TUI)
 ```
 
-Then run the [health check](#health-check) and do the [one-time settings](#unattended-agents). Read on here when the installer skips something, or to see what it changes.
+Then run the [health check](#health-check), set [your preferences](#your-preferences) with `stampede setup`, and do the [one-time settings](#unattended-agents). Read on here when the installer skips something, or to see what it changes.
 
 **What the installer does.** It makes links (pointers to files), so the files stay in this checkout (your copy of the stampede repo).
 - It links the four skills into `~/.claude/skills/` and `~/.codex/skills/`, each only when `~/.claude` or `~/.codex` exists. A skill is a set of instructions an agent reads. The four are `skills/stampede` (the front door, the part you talk to), `skills/herdr-fleet`, `skills/grokbot-herdr` and `skills/share-plan`.
@@ -54,7 +56,7 @@ Then run the [health check](#health-check) and do the [one-time settings](#unatt
 - Your PATH (the list of folders your terminal looks in for commands) must hold `~/.local/bin`. If a bot will run stampede over SSH, set it for non-interactive SSH shells too.
 - On Linux, when the machine supports it, it sets up the event relay's schedule for its watchdog and flusher: two systemd timers, or one loop. When `--replace` first saves an older timer file of stampede's, it prints `replaced <unit> (stampede's own unit; the old one is in <backup>)`. The rest: [LINUX, the event timers](LINUX.md#the-event-timers). On macOS you load them by hand ([watchdogs](../remote/watchdogs.md)).
 - It never installs Herdr or an agent CLI. Start each agent CLI once by hand to sign in.
-- Its last line is `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core`. A `--replace` run that recorded changes in its journal prints its rollback line after it.
+- Its last two lines are `New jobs run on the Herdr TUI. For Herdr Core by default: stampede config set backend core; for one job: stampede new --core` and `Your preferences, once: stampede setup   (it asks about pstack for coding jobs, the lead, effort, where jobs run and the review step)`. A `--replace` run that recorded changes in its journal prints its rollback line after them.
 
 **Running it again** is safe.
 - A link already in place prints `ok`.
@@ -159,6 +161,8 @@ Keep anything of yours from `~/stampede-0.1.0`, then delete it. From then on, us
 Run `stampede doctor` after you install, while the Herdr server is running.
 
 `stampede doctor` checks Python, this checkout (its `VERSION`, and that every module imports), and that `stampede`, `fleet-job` and the `herdr-*` helpers on your PATH point into this checkout.
+It checks your settings files too. While you have none of your own, one `ok` line says so and names `stampede setup` ([Your preferences](#your-preferences)).
+It also says whether [pstack](#pstack) is installed for the agent program that leads your jobs: `ok` when it is found or switched off, a `warn` with the install line when it is missing, never a `PROBLEM`.
 Then it passes on the lines of `herdr-doctor`. You can run `herdr-doctor` alone too; `stampede doctor` passes `--core` and `--tui` on to it.
 
 `herdr-doctor` checks each backend that is installed. A backend is where a job runs: the Herdr TUI (Herdr's window, with tabs and panes), and Herdr Core when `hc` is on PATH.
@@ -180,6 +184,132 @@ Without the relay, a missing event plugin is only a warning. So is a missing `FL
 
 **Exit codes.** 0 means no `PROBLEM`, 1 at least one, 2 a usage error; warnings do not change it. `-h` or `--help` prints how to use it. The doctor only reads: it never fixes settings and never prints what a route holds.
 
+## Your preferences
+
+Run this once, after the install:
+
+```bash
+stampede setup
+```
+
+It asks seven questions about new jobs. Press Enter to keep the answer in brackets. Here every answer is kept but the last, on a computer with no settings file yet:
+
+```text
+stampede setup: your default preferences for new jobs.
+Press Enter to keep the answer in [brackets]. Nothing is saved before the end.
+
+1 of 7  Use pstack for coding jobs? It is a set of working rules for a coding agent. yes or no [yes]:
+2 of 7  Which agent leads a job? claude or codex [claude]:
+3 of 7  The lead's model [<model id>]:
+4 of 7  The lead's effort: none, minimal, low, medium, high, xhigh, max or ultra [xhigh]:
+5 of 7  Every worker's effort [medium]:
+6 of 7  Where do jobs run? tui (the Herdr TUI), core (Herdr Core) or auto (the TUI inside Herdr, else Core) [tui]:
+7 of 7  When is the work reviewed? end (one pass at the end), each (every pull request or step) or none [end]: each
+New file ~/.config/stampede/config.toml:
+  # stampede settings, written by `stampede setup`. Edit this file by hand, or run setup again.
+  # Every key with its default: config.example in the stampede checkout. What applies now: stampede config show
+
+  [review]
+  step = "each"
+SAVED ~/.config/stampede/config.toml
+What new jobs use now:
+  dev.pstack = true  (default)
+  lead.kind = "claude"  (default)
+  lead.claude.model = "<model id>"  (default)
+  lead.claude.effort = "xhigh"  (default)
+  backend = "tui"  (default)
+  review.step = "each"  (user)
+  every worker's effort = "medium"
+pstack is not installed for a Claude lead yet. Install it with: claude plugin marketplace add michael-denyer/pstack-claude && claude plugin install pstack@pstack-claude
+```
+
+The command prints your home folder in full where this page shows `~`, and the model's id where it shows `<model id>` (the ids are in [config.example](../config.example)).
+
+**What it does.**
+- It saves your answers in your own settings file, `~/.config/stampede/config.toml`, which every job reads ([Configure](CONFIGURE.md)).
+- It writes only an answer that differs from what your settings already say. A default you keep stays a default, so it follows later releases.
+- In a file you already have, it changes only the values of its own answers. Your comments, on a line of their own or at the end of a line, and every key it does not ask about, stay as they are.
+- It never changes a file you already have without showing the change first and getting your yes. At that last question you type `yes`; Enter alone means no.
+- It is safe to run again. The brackets show what is set now, and the same answers a second time write nothing.
+- An answer it does not take is asked again, with the reason.
+
+**The questions.** Each has a flag, for a run with no typing.
+
+| question | flag | answers | the setting it writes |
+|---|---|---|---|
+| pstack for coding jobs | `--pstack` | `yes` or `no` | `dev.pstack` |
+| which agent leads a job | `--lead` | `claude` or `codex` | `lead.kind` |
+| the lead's model | `--lead-model` | a model of that agent program | `lead.claude.model` or `lead.codex.model`, for the agent that leads |
+| the lead's effort | `--lead-effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` or `ultra` | `lead.claude.effort` or `lead.codex.effort` |
+| every worker's effort | `--worker-effort` | the same levels | `roles.<role>.effort`, for every role |
+| where jobs run | `--backend` | `tui`, `core` or `auto` | `backend` |
+| when the work is reviewed | `--review` | `end`, `each` or `none` | `review.step` |
+
+Your own rules still hold: the lead's model must pass `lead.allow` and `lead.forbid`, and a worker's effort must stay under `workers.max_effort`. Setup refuses an answer they rule out.
+
+**Without questions.** A flag answers its question, and at a terminal the questions with no flag are still asked. `--defaults` asks nothing: a question with no flag keeps its answer. With no terminal (a bot, a script), nothing is asked either.
+When nothing is asked, a file you already have changes only with `--yes`. Without it, setup prints the change, writes nothing and exits 2.
+
+```bash
+stampede setup --defaults                                      # a new computer: a settings file, with every default
+stampede setup --defaults --pstack no --lead-effort max        # prints the change, exit 2, nothing written
+stampede setup --defaults --pstack no --lead-effort max --yes  # the same change, saved
+```
+
+Run on the settings file that the questions at the top of this section saved (the one with `step = "each"`), the last line prints the change in the form of a diff (`+` marks a new line, `-` one that goes):
+
+```text
+--- now
++++ with your answers
+@@ -3,3 +3,9 @@
+
+ [review]
+ step = "each"
++
++[dev]
++pstack = false
++
++[lead.claude]
++effort = "max"
+SAVED ~/.config/stampede/config.toml
+What new jobs use now:
+  dev.pstack = false  (user)
+  lead.kind = "claude"  (default)
+  lead.claude.model = "<model id>"  (default)
+  lead.claude.effort = "max"  (user)
+  backend = "tui"  (default)
+  review.step = "each"  (user)
+  every worker's effort = "medium"
+```
+
+With `--json` it prints one object, whose `status` is `SAVED` or `UNCHANGED` ([CLI-JSON.md](CLI-JSON.md)).
+If it cannot change your file safely, it names the key, writes nothing, and you edit the file by hand ([Troubleshoot](TROUBLESHOOT.md#install-update-and-the-health-check)).
+
+### pstack
+
+[pstack](https://github.com/michael-denyer/pstack-claude) is optional, and recommended for coding jobs. With it installed, the lead follows its working rules on coding work ([the guide](GUIDE.md#works-well-with)).
+Install it for the agent program that leads your jobs. Each line is one command for a terminal:
+
+```bash
+claude plugin marketplace add michael-denyer/pstack-claude && claude plugin install pstack@pstack-claude   # a Claude lead
+codex plugin marketplace add michael-denyer/pstack-claude && codex plugin add pstack@pstack-claude         # a Codex lead
+```
+
+stampede looks for pstack where each agent program loads it from:
+
+| the lead | pstack counts as installed when |
+|---|---|
+| Claude | `~/.claude/plugins/installed_plugins.json` lists a plugin named `pstack`, from any marketplace, installed for you or for the job's repo, and `~/.claude/settings.json` does not switch it off; or a skill folder `poteto-mode` sits in `~/.claude/skills` or in the repo's `.claude/skills` |
+| Codex | `~/.codex/config.toml` has a `[plugins."pstack@<marketplace>"]` table that does not say `enabled = false`; or a skill folder `poteto-mode` sits in `~/.agents/skills`, `~/.codex/skills` or the repo's `.agents/skills` |
+
+- `poteto-mode` is pstack's entry skill, the one that starts its way of working. Every way of installing pstack brings it.
+- So other installs count too: the plugin from pstack's own home (`pstack@cursor-plugins`), and plain skill folders, such as the ones `npx skills add backnotprop/pstack` makes.
+- `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move the two home folders, as they do for the agent programs.
+- A job on Herdr Core is the exception: a Core terminal gets the core's own environment, never those two variables from your shell. So for a Core job stampede looks in the default folders, `~/.claude` and `~/.codex`, where that lead looks.
+- pstack for Claude does not reach a Codex lead, nor the other way round: each is checked by itself.
+- A missing pstack never stops a job. `stampede new` prints one line with the install command, and `stampede doctor` shows a `warn`.
+- To stop both lines, switch pstack off: `stampede setup --pstack no`.
+
 ## Unattended agents
 
 These two one-time steps let agents start and run without you visiting their pane. Run both yourself: an agent cannot change its own permissions.
@@ -199,7 +329,7 @@ These two one-time steps let agents start and run without you visiting their pan
 
 ## Configure
 
-Every setting has a default, so you need to set nothing. Every setting, its default and where to change it: [CONFIGURE.md](CONFIGURE.md).
+Every setting has a default, so you need to set nothing. `stampede setup` asks the ones most people choose ([Your preferences](#your-preferences)). Every setting, its default and where to change it: [CONFIGURE.md](CONFIGURE.md).
 
 ## The event relay, for a remote bot
 

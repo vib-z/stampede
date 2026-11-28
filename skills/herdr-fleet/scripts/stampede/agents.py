@@ -2,7 +2,7 @@
 import json, os, re, shlex, shutil, subprocess
 from pathlib import Path
 
-from . import base as base_, job as job_, settings as settings_, gates as gates_
+from . import base as base_, job as job_, settings as settings_, gates as gates_, pstack as pstack_
 
 
 def missing_sections(text, job=None):
@@ -334,6 +334,7 @@ def lead_brief(job, lead, owner, review, fork, key=None, front=False, kind='clau
     return (f'Every fleet-job below means {base_.SCRIPTS / "fleet-job"}: the one that started this job, so run it by that path '
             f'(a fleet-job on PATH may be older and lack its commands). '
             f'You are {lead}, the lead of the job in {job}. Read {job / "ask.md"} and run it with the herdr-fleet skill. '
+            + pstack_.brief_text(job, kind) +
             f'Plan in {job / "plan.md"}: {layout}, then the tasks with the pane that does each, then any questions with a default. {gate} '
             + reach + ask +
             f'fleet-job ask {job} "<question>" --option <a> --option <b>; keep working while it waits. '

@@ -41,7 +41,9 @@ skills/herdr-fleet/     the job: SKILL.md, references/ (core.md: a Core job; cor
                         native (a Core job), relay and handed (the --relay path), cli (the parser and help),
                         doctor and check (stampede doctor and stampede check), gates (stampede merge, the
                         pre-push hook and each job's gate record), out (--json),
-                        settings (the layered config) with defaults.toml (every key and its default);
+                        settings (the layered config, and the editor of your own file) with defaults.toml
+                        (every key and its default), setup (stampede setup), pstack (pstack for coding jobs:
+                        where each lead CLI has it, the brief's sentence, the line when it is missing);
                         core_native.py re-exports native
 skills/grokbot-herdr/   the bot front door: SKILL.md, scripts/ (herdr-send, herdr-trust, herdr-doctor,
                         the relay, herdr-event-sweep: the Core sweep and probes,

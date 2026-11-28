@@ -91,7 +91,7 @@ class CoreCase(unittest.TestCase):
 
     def quiet(self, call, *args, **kw):
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):  # new's pstack line too
             result = call(*args, **kw)
         return result, out.getvalue()
 

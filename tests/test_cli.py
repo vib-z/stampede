@@ -14,7 +14,7 @@ from test_fleet_job import fake_herdr, valid_brief  # noqa: E402
 from quiet import quiet  # noqa: E402
 
 ORDER = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'next', 'tree', 'approve', 'approve-gate', 'gate-ok', 'cancel', 'merge',
-         'finish', 'snapshot', 'reopen', 'close', 'config', 'doctor', 'check', 'update')
+         'finish', 'snapshot', 'reopen', 'close', 'setup', 'config', 'doctor', 'check', 'update')
 HIDDEN = ('hook', 'prepush', '_reopen', '_deliver', '_wake', '_ask')
 
 

@@ -4,7 +4,7 @@ import json, os, shlex, subprocess, sys
 from pathlib import Path
 
 from . import autoclose as autoclose_, base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
-    doctor as doctor_, check as check_, settings as settings_, gates as gates_, out as out_
+    doctor as doctor_, check as check_, settings as settings_, gates as gates_, out as out_, pstack as pstack_, setup as setup_
 
 
 def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
@@ -112,15 +112,24 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
             settings = settings_.for_new(repo, {**flags, f'lead.{kind}.model': lead_model, f'lead.{kind}.effort': lead_effort})
         agents_.check_lead_model(settings, settings.get(f'lead.{kind}.model'))
         return settings, kind
+
+    def made(repo, code=None):
+        """new ended well (exit 0), its lead launched: with pstack on and missing, the one line that says so. Never with
+        a refusal, which stays one line, nor after a start that failed, whose line says nothing runs."""
+        note = '' if code else pstack_.missing(settings, kind, repo, core)
+        if note:
+            print(note, file=sys.stderr)
+        return code
     if core:
-        settings, kind = resolve(repo_of(cwd))
+        repo = repo_of(cwd)
+        settings, kind = resolve(repo)
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
         if front and relay:
             raise ValueError('--front-door on Herdr Core is for a native job: drop --relay (a --core --relay job has no front door)')
         if not relay:
-            return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front, settings)
-        return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings)
+            return made(repo, native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front, settings))
+        return made(repo, relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings))
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if fork is not None and not base_.SESSION.fullmatch(fork):
@@ -161,14 +170,15 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
                     kind, str(brief), '--', *args], check=True)
     job_.mark_job(ws_id, job)
     if blocked:
-        return out_.emit('BLOCKED', f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"',
-                         agent=lead, lead=lead, job=str(job.absolute()), retry=f'stampede tell {job} lead "Read {brief}"')
+        return made(repo, out_.emit('BLOCKED', f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"',
+                                    agent=lead, lead=lead, job=str(job.absolute()), retry=f'stampede tell {job} lead "Read {brief}"'))
     pointer = f'You are {lead}. Read {brief} and do everything it says.'
     if kind == 'codex' and tui_.type_pointer(job, lead, 'lead', brief, pointer):
         return 1
     if kind == 'claude':
         owner_.tell(job, lead, pointer)
     out_.emit('STARTED', lead + ' ' + str(job), agent=lead, lead=lead, job=str(job.absolute()))
+    made(repo)
 
 
 GROUPS = (  # the top-level help, in the order an agent meets the commands; hook and the _ commands stay out of it
@@ -189,7 +199,8 @@ GROUPS = (  # the top-level help, in the order an agent meets the commands; hook
                         ('snapshot', 'a native job: save how to reopen it'),
                         ('reopen', 'a native job: start again what is not live'),
                         ('close', "a native job: end an agent's subtree, or the whole job"))),
-    ('settings', (('config', 'config show: every setting, and the layer that set it; config set backend: your default'),)),
+    ('settings', (('setup', 'ask your default preferences for new jobs, and save them'),
+                  ('config', 'config show: every setting, and the layer that set it; config set backend: your default'))),
     ('the machine', (('doctor', 'check this machine and this checkout, with the fix for each problem'),
                      ('check', "run this checkout's fast tests (--full: all of them)"),
                      ('update', 'update this checkout to the latest release'))),
@@ -245,6 +256,10 @@ EXAMPLES = {
     'close': 'examples:\n  stampede close <job> build-api\n  stampede close <job>     # the whole job',
     'doctor': 'examples:\n  stampede doctor\n  stampede doctor --core --json',
     'check': 'examples:\n  stampede check\n  stampede check --full',
+    'setup': '''examples:
+  stampede setup                                  # asks each question; Enter keeps the answer shown
+  stampede setup --defaults                       # no questions: on a new machine, a settings file with every default
+  stampede setup --defaults --pstack no --review each --yes   # no questions: these two answers, saved''',
     'config': '''examples:
   stampede config show
   stampede config show --json
@@ -259,7 +274,8 @@ def repo_of(cwd=None):
     return Path(top.stdout.strip()) if top.returncode == 0 else None
 
 
-# the commands --json turns into one object (out.py), and config set; tree, doctor, check and config show print their own
+# the commands of a job that --json turns into one object (out.py); setup and config set get one too; tree, doctor, check
+# and config show print their own
 JSON = ('new', 'start', 'tell', 'ask', 'post', 'wait', 'finish', 'next', 'snapshot', 'reopen', 'close', 'approve', 'approve-gate',
         'gate-ok', 'cancel', 'merge')
 
@@ -277,7 +293,7 @@ def main(argv):
     """argparse owns --json; whether to wrap the whole call in one object, its own usage error included, is decided
     before it parses: --json as a word before any -- (out.asks), on a command in JSON."""
     at, name = subcommand(argv)
-    if out_.asks(argv) and (name is None or name in JSON or argv[at:at + 2] == ['config', 'set']):
+    if out_.asks(argv) and (name is None or name in JSON or name == 'setup' or argv[at:at + 2] == ['config', 'set']):
         return out_.as_json(name, lambda: parse_and_run(argv))
     return parse_and_run(argv)
 
@@ -413,6 +429,18 @@ def parse_and_run(argv):
                          'on PATH, so nothing reaches a live job. One line per test module, then the total. Exit 0 or 1.')
     p.add_argument('--full', action='store_true', help='run the whole suite (minutes)')
     json_flag(p, '{"ok": bool, "tests": n, "seconds": s, "modules": [...]}')
+    p = command('setup', 'Ask your default preferences for new jobs and save them in your own settings file (stampede config show\n'
+                         'names it). At a terminal it asks each question below that has no flag; Enter keeps the answer shown.\n'
+                         'With --defaults, or with no terminal, it asks nothing. Only an answer that differs from your settings\n'
+                         'is written, and every other line of the file is kept. A file you already have changes only after the\n'
+                         'change is shown and you type yes at the last prompt, or pass --yes. Exit 0 saved or nothing to change,\n'
+                         '2 refused (the line says why).')
+    for q in setup_.QUESTIONS:
+        p.add_argument('--' + q.name, metavar='ANSWER', help=f'{q.about}: {q.takes}')
+    p.add_argument('--defaults', action='store_true', help='ask nothing: every question with no flag keeps its answer '
+                   '(on a new machine, the default)')
+    p.add_argument('--yes', action='store_true', help='save a change to a settings file you already have without asking')
+    json_flag(p)
     p = command('config', 'The settings: config show prints every setting as key = value (source), the source being the layer\n'
                           'that set it (default, user, repo, env:<NAME>, flag or set), then the environment-only variables,\n'
                           'then any problems. Exit 1 when the config has problems.')
@@ -550,6 +578,8 @@ def run(a):
     for pair in getattr(a, 'set', None) or []:
         settings_.parse_set(pair)  # a bad pair is refused before anything runs
     settings_.SETS[:] = getattr(a, 'set', None) or []
+    if a.cmd == 'setup':
+        return setup_.main(a)
     if a.cmd == 'config' and a.action == 'set':
         path = settings_.set_backend(a.key, a.value)
         out_.emit(None, f'backend = "{a.value}" ({path})', path=str(path))
