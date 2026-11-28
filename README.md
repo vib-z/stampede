@@ -29,7 +29,7 @@ It comes back to you only with real questions, and to ask before anything risky.
 - git, jq and curl, three small tools for the terminal.
 - Optional: [Codex](https://developers.openai.com/codex/cli), to work beside the lead or to [lead a job](docs/GUIDE.md#use-one-job-start-to-finish) with `--lead codex`.
 
-Also optional: a [bot on your phone](docs/GUIDE.md#front-doors) that starts jobs and asks you questions, and [Herdr Core](docs/CORE.md), a second way to run jobs.
+Also optional: a [phone bot](docs/GUIDE.md#front-doors) that starts jobs, [Herdr Core](docs/CORE.md), a second way to run jobs, and [pstack](docs/GUIDE.md#works-well-with), rules for coding jobs.
 The versions we tested: [docs/SETUP.md](docs/SETUP.md#what-you-need).
 
 ## Install
@@ -51,7 +51,7 @@ The full install, other ways to install, and updating: [docs/SETUP.md](docs/SETU
 
 ## Your first job
 
-1. Once per computer, do the [one-time settings](docs/SETUP.md#unattended-agents). They let the lead start more agents in Herdr without stopping to ask you at each step.
+1. Once per computer, run `stampede setup` to save [your preferences](docs/SETUP.md#your-preferences). Then do the [one-time settings](docs/SETUP.md#unattended-agents), so the lead can start agents.
 2. Your project must be a folder inside `~/code` that uses git, a tool that keeps the history of your files. Once per project, run `herdr-trust ~/code/my-app` with its folder.
 3. Write what you want in a file outside the project, such as `~/ask.md`:
 

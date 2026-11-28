@@ -187,6 +187,9 @@ class Outcomes(unittest.TestCase):
                 self.assertEqual(out.splitlines()[0], f'{ASKED_CORE}, repo {Path(job.repo).resolve()}', '--core names Herdr Core, and the repo')
             self.assertEqual((job.job / 'workdir').read_text().strip(), str(job.repo), 'the job folder is in the jobs root')
             self.assertIn('plan.md', (job.job / 'briefs' / (Job.LEAD + '.md')).read_text())
+            self.assertNotIn('poteto-mode', (job.job / 'briefs' / (Job.LEAD + '.md')).read_text(), 'no pstack on this machine')
+            self.assertEqual(self.step(job, 'new')[2].count('note: pstack is not installed for a Claude lead, so this job runs '
+                                                             'without it. To use it for coding jobs: claude plugin marketplace add '), 1)
             self.assertEqual(job.marked, str(job.job), 'the job is marked open until finish')
             owner = job.job / 'owner'
             self.assertEqual(owner.read_text().strip() if owner.is_file() else None, job.bot, 'the job is its starter\'s')
@@ -215,6 +218,10 @@ class Outcomes(unittest.TestCase):
                 out = self.ok(job, 'new')
                 self.assertEqual(out.strip().splitlines()[-1], f'{Job.LEAD} {job.job}')
                 pointer = f'You are {Job.LEAD}. Read {job.job / "briefs" / (Job.LEAD + ".md")}'
+                command = {'claude': '/pstack:poteto-mode', 'codex': '$pstack:poteto-mode'}[job.lead_kind]  # pstack is there
+                self.assertIn(f'If this job is coding work (a feature, a fix, a refactor or a code review), load it first with {command} ',
+                              (job.job / 'briefs' / (Job.LEAD + '.md')).read_text())
+                self.assertNotIn('pstack is not installed', self.step(job, 'new')[2])
                 if job.lead_kind == 'claude' and job.on_core:
                     (lead,) = [r for r in job.calls('run') if job.labels(r).get('stampede.role') == 'lead']
                     self.assertFalse(any(arg.startswith('XDG_CONFIG_HOME=') for arg in lead))

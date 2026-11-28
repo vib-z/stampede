@@ -2,7 +2,7 @@
 1 defaults.toml beside this file (the list of keys), 2 the user's config.toml, 3 <repo>/.stampede.toml, 4 the
 environment (the variable names stampede always read), 5 a command's flags, then its --set key=value pairs.
 A bad value, an unknown key or a file that does not parse is skipped and named in problems; it never stops a command."""
-import difflib, json, os, re, socket, sys, tempfile
+import copy, difflib, json, os, re, socket, sys, tempfile
 from pathlib import Path
 
 try:
@@ -310,10 +310,10 @@ def edit_user(changes):
                 raise by_hand(f'its {key} is not one plain line {name} = <value>')
             new = text[:begin] + line.sub(lambda m: m.group(1) + wanted, text[begin:stop], count=1) + text[stop:]
         elif found:  # first in its table (a top-level key: first in the file, before any table)
-            new = text[:begin] + wanted + eol + text[begin:]
+            new = text[:begin] + (eol if begin and text[begin - 1] != '\n' else '') + wanted + eol + text[begin:]
         else:
             new = text + (eol if text and not text.endswith('\n') else '') + (eol if text else '') + f'[{".".join(table)}]{eol}{wanted}{eol}'
-        expected = json.loads(json.dumps(tree))  # a copy; the file holds only what JSON holds too
+        expected = copy.deepcopy(tree)
         node = expected
         for part in table:
             node = node.setdefault(part, {})

@@ -87,7 +87,7 @@ Gate questions then reach your phone through Moshi, if you use it. Otherwise you
 
 **Your first ask, from a chat in Herdr.**
 
-1. Install stampede and do steps 1 and 2 of [your first job](../README.md#your-first-job): the [one-time settings](SETUP.md#unattended-agents), and `herdr-trust` for your repo.
+1. Install stampede and do steps 1 and 2 of [your first job](../README.md#your-first-job): `stampede setup` and the [one-time settings](SETUP.md#unattended-agents), then `herdr-trust` for your repo.
 2. Open your repo in Herdr, start Claude in a pane, and type:
 
 > With stampede: add a /health endpoint with a test, have a reviewer on another model check it, then open a draft PR.
@@ -172,9 +172,12 @@ The logos belong to their owners and imply no endorsement ([sources](images/logo
 
 ### Works well with
 
-**[pstack](https://github.com/michael-denyer/pstack-claude), optional.** For a coding job, the lead uses pstack if you have it. pstack settles how the data looks first, commits a skeleton of the code with one failing test, then proves the work on the real program.
-The lead is a normal Claude Code session, so an installed pstack loads by itself. stampede's rules keep the extra agents pstack starts as Herdr panes you can watch.
-Without pstack, nothing changes. The rules: [references/pstack.md](../skills/herdr-fleet/references/pstack.md).
+**[pstack](https://github.com/michael-denyer/pstack-claude), recommended for coding jobs.** pstack is a set of working rules for a coding agent. It settles how the data looks first, commits a skeleton of the code with one failing test, then proves the work on the real program.
+
+- **On by default.** When pstack is installed for the lead's agent program, the lead's brief (its first instructions) tells it to load pstack for coding work: a feature, a fix, a refactor or a code review. The lead reads your ask and decides whether the job is coding work. For any other job it leaves pstack alone.
+- **Not installed?** The job runs as before. `stampede new` prints one line with the command that installs pstack, and `stampede doctor` shows the same as a `warn`. How to install it: [Setup](SETUP.md#pstack).
+- **Switch it off** for every job with `stampede setup --pstack no`, for one project with `pstack = false` under `[dev]` in its `.stampede.toml`, or for one job with `stampede new --file ask.md --set dev.pstack=false`. The setting is [`dev.pstack`](CONFIGURE.md#every-key-with-its-default).
+- **In a fleet**, stampede's rules keep the extra agents pstack starts as Herdr panes you can watch: [references/pstack.md](../skills/herdr-fleet/references/pstack.md).
 
 ## See it
 

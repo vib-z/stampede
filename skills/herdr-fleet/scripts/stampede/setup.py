@@ -50,27 +50,29 @@ def shared(values):
     return efforts.pop() if len(efforts) == 1 else 'mixed'
 
 
-# One row per question, in the order asked. name: its flag (--name) and its key in --json. ask: the prompt.
+# One row per question, in the order asked. name: its flag (--name). about and takes: the flag's help. ask: the prompt.
 # shown: the answer in [brackets], from the values so far. keys: an answer as {setting: value}; it raises ValueError
-# with the reason for an answer it does not take. takes: the answers, for --help.
-Question = namedtuple('Question', 'name ask shown keys takes')
+# with the reason for an answer it does not take.
+Question = namedtuple('Question', 'name about takes ask shown keys')
 QUESTIONS = (
-    Question('pstack', 'Use pstack for coding jobs? It is a set of working rules for a coding agent. yes or no',
-             lambda v: 'yes' if v['dev.pstack'] else 'no', lambda a, v, r: {'dev.pstack': yes_no(a)}, 'yes or no'),
-    Question('lead', 'Which agent leads a job? claude or codex',
-             lambda v: v['lead.kind'], lambda a, v, r: {'lead.kind': one_of(a, settings_.CHOICES['lead.kind'])}, 'claude or codex'),
-    Question('lead-model', "The lead's model",
-             lambda v: v[f'lead.{v["lead.kind"]}.model'], lambda a, v, r: {f'lead.{v["lead.kind"]}.model': lead_model(a, v, r)},
-             'a model of the lead\'s CLI, such as claude-opus-5-5'),
-    Question('lead-effort', f"The lead's effort: {EFFORTS}",
+    Question('pstack', 'pstack for coding jobs', 'yes or no',
+             'Use pstack for coding jobs? It is a set of working rules for a coding agent. yes or no',
+             lambda v: 'yes' if v['dev.pstack'] else 'no', lambda a, v, r: {'dev.pstack': yes_no(a)}),
+    Question('lead', 'the agent that leads a job', 'claude or codex', 'Which agent leads a job? claude or codex',
+             lambda v: v['lead.kind'], lambda a, v, r: {'lead.kind': one_of(a, settings_.CHOICES['lead.kind'])}),
+    Question('lead-model', "the lead's model", f'a model of that agent, such as {settings_.DEFAULTS["lead.claude.model"]}', "The lead's model",
+             lambda v: v[f'lead.{v["lead.kind"]}.model'], lambda a, v, r: {f'lead.{v["lead.kind"]}.model': lead_model(a, v, r)}),
+    Question('lead-effort', "the lead's effort", EFFORTS, f"The lead's effort: {EFFORTS}",
              lambda v: v[f'lead.{v["lead.kind"]}.effort'],
-             lambda a, v, r: {f'lead.{v["lead.kind"]}.effort': one_of(a, settings_.EFFORTS)}, EFFORTS),
-    Question('worker-effort', "Every worker's effort", shared,
-             lambda a, v, r: {f'roles.{role}.effort': worker_effort(a, v, r) for role in roles(v)}, EFFORTS),
-    Question('backend', 'Where do jobs run? tui (the Herdr TUI), core (Herdr Core) or auto (the TUI inside Herdr, else Core)',
-             lambda v: v['backend'], lambda a, v, r: {'backend': one_of(a, ('tui', 'core', 'auto'))}, 'tui, core or auto'),
-    Question('review', 'When is the work reviewed? end (one pass at the end), each (every pull request or step) or none',
-             lambda v: v['review.step'], lambda a, v, r: {'review.step': one_of(a, settings_.CHOICES['review.step'])}, 'end, each or none'),
+             lambda a, v, r: {f'lead.{v["lead.kind"]}.effort': one_of(a, settings_.EFFORTS)}),
+    Question('worker-effort', "every worker's effort", EFFORTS, "Every worker's effort", shared,
+             lambda a, v, r: {f'roles.{role}.effort': worker_effort(a, v, r) for role in roles(v)}),
+    Question('backend', 'where jobs run', 'tui, core or auto',
+             'Where do jobs run? tui (the Herdr TUI), core (Herdr Core) or auto (the TUI inside Herdr, else Core)',
+             lambda v: v['backend'], lambda a, v, r: {'backend': one_of(a, ('tui', 'core', 'auto'))}),
+    Question('review', 'when the work is reviewed', 'end, each or none',
+             'When is the work reviewed? end (one pass at the end), each (every pull request or step) or none',
+             lambda v: v['review.step'], lambda a, v, r: {'review.step': one_of(a, settings_.CHOICES['review.step'])}),
 )
 
 
@@ -78,7 +80,7 @@ def answers(given, ask, say):
     """{setting: value} for every answer that differs from what the user's file and the defaults say now. An answer comes
     from a flag (given: {question name: text}), else is typed when ask is there (ask(prompt) returns the line, '' for
     Enter, None at the end of input). A typed answer that is not taken is said and asked again; a flag's is a refusal.
-    The lead's model must pass lead.forbid and lead.allow, kept or new."""
+    The lead's model must pass lead.forbid and lead.allow when this run names it, or changes the agent it belongs to."""
     rules = settings_.load()  # what stampede new enforces: your file and the environment
     mine = settings_.load(env={'XDG_CONFIG_HOME': os.environ.get('XDG_CONFIG_HOME', '')})  # your file over the defaults
     for problem in mine.problems:
@@ -90,7 +92,7 @@ def answers(given, ask, say):
             raw = ask(f'{number} of {len(QUESTIONS)}  {q.ask} [{q.shown(values)}]: ') if typed else given.get(q.name)
             try:
                 new = q.keys(raw.strip(), values, rules) if raw and raw.strip() else {}
-                if q.name == 'lead-model':
+                if q.name == 'lead-model' and (new or 'lead.kind' in changes):
                     agents_.check_lead_model(rules, {**values, **new}[f'lead.{values["lead.kind"]}.model'], suggest=False)
                 break
             except ValueError as error:
@@ -134,7 +136,7 @@ def main(a, stdin=None):
             print()
         return line.rstrip('\n') if line else None
     given = {q.name: getattr(a, q.name.replace('-', '_')) for q in QUESTIONS if getattr(a, q.name.replace('-', '_')) is not None}
-    if prompts:
+    if prompts and len(given) < len(QUESTIONS):
         say('stampede setup: your default preferences for new jobs.\n'
             'Press Enter to keep the answer in [brackets]. Nothing is saved before the end.\n')
     changes = answers(given, ask if prompts else None, say)
@@ -149,7 +151,7 @@ def main(a, stdin=None):
         if exists:
             say('\n'.join(difflib.unified_diff(old.decode().splitlines(), new.decode().splitlines(), 'now', 'with your answers', lineterm='')))
         else:
-            say(f'New file {path}:\n' + ''.join('  ' + line + '\n' for line in new.decode().splitlines()).rstrip('\n'))
+            say(f'New file {path}:\n' + '\n'.join(('  ' + line).rstrip() for line in new.decode().splitlines()))
         if exists and not a.yes:
             if not prompts:
                 raise ValueError(f'{path} would change as shown: run it again with --yes to save that; nothing was changed')

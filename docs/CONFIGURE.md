@@ -16,7 +16,9 @@ stampede reads each setting from these layers, in this order. When two layers se
 5. the command's own flags (`--lead`, `--lead-model`, `--lead-effort`, `--max-helpers`, and `start`'s `--kind`, `--model`, `--effort`), then `--set key=value`.
    `--set` works on `new` and `start`, and you can give it more than once. Its value is read as TOML, the format of these files, and a bare word is read as text.
 
-[config.example](../config.example) holds every key with its default. Copy it to `~/.config/stampede/config.toml` and keep only what you change:
+**The short way.** `stampede setup` asks the settings most people choose (pstack for coding jobs, the lead, effort, where jobs run and the review step) and writes your file for you: [Your preferences](SETUP.md#your-preferences).
+
+[config.example](../config.example) holds every key with its default. For any other key, copy it to `~/.config/stampede/config.toml` and keep only what you change:
 
 ```bash
 mkdir -p ~/.config/stampede && cp config.example ~/.config/stampede/config.toml
@@ -78,6 +80,7 @@ A role's effort goes only with its own CLI. With `--kind codex` on a Claude role
 | `lead.allow` | `[]` | `FLEET_LEAD_ALLOW` (comma-separated) | when set, the only exact models that may lead. Checked at `new`, on a lead restart with `start`, and before a reopen starts the lead again (user only) |
 | `lead.claude.model`, `lead.claude.effort` | Claude Opus 5.5 (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Claude lead's model and effort |
 | `lead.codex.model`, `lead.codex.effort` | GPT-6.2 Sol (its id is in config.example), `xhigh` | `FLEET_LEAD_MODEL`, `FLEET_LEAD_EFFORT` | a Codex lead's model and effort. `FLEET_LEAD_MODEL` and `FLEET_LEAD_EFFORT` set a pair: a `gpt-...` model sets the Codex pair, any other (or none) the Claude pair. `new --lead-model` and `--lead-effort` set the pair of the lead's own CLI |
+| `dev.pstack` | `true` | | coding jobs. `true`: when [pstack](SETUP.md#pstack) is installed for the lead's CLI, the lead's brief tells it to load pstack for coding work (a feature, a fix, a refactor or a code review) and to leave it alone on any other job; when pstack is missing, the job runs without it, `stampede new` prints one line with the install command, and `stampede doctor` shows a `warn`. `false`: no sentence in the brief and no line. Yours, a repo's or one job's (`--set dev.pstack=false`). `stampede setup --pstack <yes\|no>` writes it to your file |
 | `workers.forbid` | `[]` | | exact models workers may not use. Checked by `stampede start` on every backend after role defaults and flags. With a non-empty list, give `--model` if no model resolves (user only) |
 | `workers.max_effort` | `""` | | highest worker effort allowed. Levels rise from `none` through `minimal`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`. Empty leaves the effort open (user only). Programs run after `--` skip both worker checks. Queued native workers are checked again against live policy before their first launch |
 | `roles.<role>.kind`, `.model`, `.effort` | every role at `medium`: `build`, `research`, `copy`, `default`: Claude Opus 5.5; `test`: Claude Sonnet 5.5; `review`, `qa`, `design`: Codex GPT-6.2 Astra (the ids are in config.example) | | what `stampede start <job> <role>-<scope>` gives a helper that names no `--kind`, `--model` or `--effort`. The role is the name up to its first `-`; any other role takes `roles.default`. A role's model and effort go only with its own kind, so `--kind codex` on a Claude role leaves the model to Codex. Add a role of your own as `[roles.<name>]`. Not for a program after `--` |

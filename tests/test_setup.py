@@ -83,6 +83,8 @@ class Editor(Case):
         self.assertEqual(self.edit(review__step='each'), MINE + '\n[review]\nstep = "each"\n', 'a last line with no end gets one')
         self.user.unlink()
         self.assertEqual(self.edit(dev__pstack=False, backend='core'), 'backend = "core"\n[dev]\npstack = false\n')
+        self.config('[lead]')  # a table header as the last line, with no end
+        self.assertEqual(self.edit(lead__kind='codex'), '[lead]\nkind = "codex"\n')
 
     def test_several_keys_are_set_in_turn_and_a_value_already_there_is_left_alone(self):
         self.config(MINE)
@@ -217,8 +219,7 @@ class NoTerminal(Case):
     def test_the_lead_and_worker_rules_are_honoured(self):
         self.config('[lead]\nforbid = ["claude-opus-5-5"]\nallow = ["claude-opus-5-5", "claude-fable-5-2"]\n[workers]\nmax_effort = "medium"\n')
         before = self.user.read_text()
-        for argv, why in (((), 'the lead may not run on claude-opus-5-5 (lead.forbid): name another with --lead-model'),
-                          (('--lead', 'codex'), 'the lead may not run on gpt-6.2-sol (lead.allow: claude-opus-5-5, claude-fable-5-2): '
+        for argv, why in ((('--lead', 'codex'), 'the lead may not run on gpt-6.2-sol (lead.allow: claude-opus-5-5, claude-fable-5-2): '
                                                 'name another with --lead-model'),
                           (('--lead-model', 'claude-sonnet-5-5'), '--lead-model: the lead may not run on claude-sonnet-5-5 '
                                                                   '(lead.allow: claude-opus-5-5, claude-fable-5-2)'),
@@ -228,6 +229,8 @@ class NoTerminal(Case):
                 code, _, err = self.setup(*argv, '--yes')
                 self.assertEqual((code, err), (2, f'stampede setup: {why}\n'))
                 self.assertEqual(self.user.read_text(), before)
+        code, _, err = self.setup('--pstack', 'no', '--yes')
+        self.assertEqual((code, err), (0, ''), 'a model this run does not touch is not its business: new checks it')
         code, _, err = self.setup('--lead-model', 'claude-fable-5-2', '--worker-effort', 'low', '--yes')
         self.assertEqual((code, err), (0, ''))
         self.assertEqual(self.values().get('lead.claude.model'), 'claude-fable-5-2')
@@ -332,13 +335,14 @@ class Terminal(Case):
         self.assertNotIn('1 of 7', out)
         self.assertEqual(self.user.read_text(), setup_.HEADER + '\n[dev]\npstack = false\n\n[lead]\nkind = "codex"\n')
 
-    def test_a_kept_model_the_rules_forbid_is_asked_until_one_passes(self):
-        self.config('[lead]\nforbid = ["claude-opus-5-5"]\n')
-        code, out, _ = self.setup(typed='\n\n\nclaude-fable-5-2\n\n\n\n\n\n')
+    def test_after_a_change_of_agent_a_kept_model_the_rules_forbid_is_asked_until_one_passes(self):
+        self.config('[lead]\nallow = ["claude-opus-5-5", "gpt-6.2-astra"]\n')
+        code, out, _ = self.setup(typed='\ncodex\n\ngpt-6.2-astra\n\n\n\n\n\n')
         self.assertEqual(code, 0)
-        self.assertIn("3 of 7  The lead's model [claude-opus-5-5]:         the lead may not run on claude-opus-5-5 (lead.forbid)\n"
-                      "3 of 7  The lead's model [claude-opus-5-5]: 4 of 7", out)
-        self.assertEqual(self.values().get('lead.claude.model'), 'claude-fable-5-2')
+        self.assertIn("3 of 7  The lead's model [gpt-6.2-sol]:         the lead may not run on gpt-6.2-sol (lead.allow: claude-opus-5-5, "
+                      "gpt-6.2-astra)\n3 of 7  The lead's model [gpt-6.2-sol]: 4 of 7", out)
+        found = self.values()
+        self.assertEqual((found.get('lead.kind'), found.get('lead.codex.model')), ('codex', 'gpt-6.2-astra'))
 
 
 class Offered(Case):

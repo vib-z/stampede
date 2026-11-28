@@ -428,7 +428,7 @@ def parse_and_run(argv):
                          'of the file is kept. A file you already have changes only after the change is shown and you say yes: at\n'
                          'the prompt, or with --yes. Exit 0 saved or nothing to change, 2 refused (the line says why).')
     for q in setup_.QUESTIONS:
-        p.add_argument('--' + q.name, metavar='ANSWER', help=q.ask.split('? ')[0].split(': ')[0].rstrip('?') + ': ' + q.takes)
+        p.add_argument('--' + q.name, metavar='ANSWER', help=f'{q.about}: {q.takes}')
     p.add_argument('--defaults', action='store_true', help='ask nothing: every question with no flag keeps its answer '
                    '(on a new machine, the default)')
     p.add_argument('--yes', action='store_true', help='save a change to a settings file you already have without asking')

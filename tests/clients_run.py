@@ -245,9 +245,20 @@ class Job:
             self.error = traceback.format_exc()
         return self
 
+    def plant_pstack(self):
+        """pstack as its plugin is recorded for this job's lead CLI (tests/test_pstack.py covers every other way)."""
+        if self.lead_kind == 'codex':
+            (self.home / '.codex').mkdir(parents=True, exist_ok=True)
+            (self.home / '.codex/config.toml').write_text('[plugins."pstack@pstack-claude"]\nenabled = true\n')
+        else:
+            (self.home / '.claude/plugins').mkdir(parents=True, exist_ok=True)
+            (self.home / '.claude/plugins/installed_plugins.json').write_text(json.dumps(
+                {'version': 2, 'plugins': {'pstack@pstack-claude': [{'scope': 'user', 'version': '0.9.159'}]}}))
+
     def opening(self):
-        """Only O2's start, for a job with its own --lead."""
+        """Only O2's start, for a job with its own --lead, on a machine that has pstack for that lead's CLI."""
         self.base['FLEET_LEAD_ALLOW'] = f'{LEAD_MODEL},{CODEX_LEAD_MODEL}'
+        self.plant_pstack()
         if self.lead_kind == 'codex':
             self.base['XDG_CONFIG_HOME'] = str(self.root / 'custom config')
         try:

@@ -30,7 +30,7 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 | `parent` | the agent a Core helper runs under |
 | `id` | a question's or a gate's id (12 hex) |
 | `sha`, `pr`, `kind` | a gate's commit, PR number and kind (`merge`, `push_default_branch`, null); in `wait`, an item's kind; in `start`, the agent's CLI |
-| `outbox`, `path`, `text` | an outbox item's number (`"003"`), its file, its text; in `config set`, `path` is your config file |
+| `outbox`, `path`, `text` | an outbox item's number (`"003"`), its file, its text; in `config set` and `setup`, `path` is your config file |
 | `running`, `cap`, `queued` | helpers running in the tree, the cap, starts waiting |
 | `reason` | why: the error, the dialog's kind, or for `SKIPPED` and `DONE` a short code (below) |
 | `retry` | the command to run next, where the line names one |
@@ -59,6 +59,7 @@ $ stampede merge <job> 3 --sha <sha> --review <job>/reports/review.md --json
 | `cancel` | `CANCELLED` | `id` |
 | `merge` | `MERGED` | `pr`, `sha`, `merge_commit`, `method`, `gate` |
 | `config set` | none (`status` is null: the line is `backend = "<value>" (<file>)`) | `path`, your config file |
+| `setup` | `SAVED`, `UNCHANGED` (with `--json` it asks nothing, so never `NOT SAVED`) | `path`, your config file; `changed`, an object of each setting it wrote with its value, `{}` when nothing differed. The change it shows and the summary are under `notes` |
 
 ## Always present
 
