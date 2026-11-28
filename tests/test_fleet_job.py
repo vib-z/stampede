@@ -360,7 +360,8 @@ class Fixes(unittest.TestCase):
             extra['HOME'] = tempfile.mkdtemp()
         root = Path(extra.get('FLEET_JOBS_ROOT', repo.parent / 'herdr-jobs'))
         out = io.StringIO()
-        with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': str(root), **extra}), contextlib.redirect_stdout(out):
+        with mock.patch.dict(os.environ, {'HERDR': herdr, 'FLEET_JOBS_ROOT': str(root), **extra}), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):  # new's pstack line
             self.code = cli_.new(ask, 'w9', **kw)
         return out.getvalue(), max((root / 'jobs').iterdir(), key=lambda j: j.stat().st_mtime_ns), log.read_text()
 
@@ -1518,7 +1519,7 @@ class LeadChoice(unittest.TestCase):
         self.assertIn(f'--kind claude --pane w9:p2 --timeout 90000 -- --resume {sid} --fork-session', log)
         # typing_unsafe asks the machine's own Herdr Core for its version and hold: not this test's subject, and no test's to ask
         with mock.patch.dict(os.environ, {'FLEET_LEAD_KIND': 'codex'}), mock.patch.object(relay_, 'new_core', return_value=0) as core, \
-                mock.patch.object(hcapi_, 'typing_unsafe', return_value=''):
+                mock.patch.object(hcapi_, 'typing_unsafe', return_value=''), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli_.new('ask.md', None, core=True, relay=True), 0)
         self.assertEqual(core.call_args.args[5], 'codex')   # the standing choice is the lead of a Core job too
 

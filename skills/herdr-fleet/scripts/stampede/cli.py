@@ -111,19 +111,25 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         if lead_model or lead_effort:
             settings = settings_.for_new(repo, {**flags, f'lead.{kind}.model': lead_model, f'lead.{kind}.effort': lead_effort})
         agents_.check_lead_model(settings, settings.get(f'lead.{kind}.model'))
-        note = pstack_.missing(settings, kind, repo)
-        if note:  # the job runs all the same
-            print(note, file=sys.stderr)
         return settings, kind
+
+    def made(repo, code=None):
+        """The job is made and its lead launched: with pstack on and missing, the one line that says so. Never with a
+        refusal, which stays one line."""
+        note = pstack_.missing(settings, kind, repo)
+        if note:
+            print(note, file=sys.stderr)
+        return code
     if core:
-        settings, kind = resolve(repo_of(cwd))
+        repo = repo_of(cwd)
+        settings, kind = resolve(repo)
         if workspace or pane:
             raise ValueError('new --core takes --cwd <repo>, never --pane or --workspace: a Herdr Core job has no Herdr pane')
         if front and relay:
             raise ValueError('--front-door on Herdr Core is for a native job: drop --relay (a --core --relay job has no front door)')
         if not relay:
-            return native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front, settings)
-        return relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings)
+            return made(repo, native_.new(ask_file, name, review, fork, cwd, kind, space, max_helpers, front, settings))
+        return made(repo, relay_.new_core(ask_file, name, review, fork, cwd, kind, app or os.environ.get('STAMPEDE_APP_SPACE') == '1', settings))
     if app:
         raise ValueError('--app-space is for new --core: it shows a Herdr Core job in the Herdr app; a Herdr TUI job has its panes')
     if fork is not None and not base_.SESSION.fullmatch(fork):
@@ -163,6 +169,7 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
     subprocess.run([str(base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts/herdr-reopen-snapshot'), 'record', str(job), lead,
                     kind, str(brief), '--', *args], check=True)
     job_.mark_job(ws_id, job)
+    made(repo)
     if blocked:
         return out_.emit('BLOCKED', f'BLOCKED {lead}: clear the startup dialog, then stampede tell {job} lead "Read {brief}"',
                          agent=lead, lead=lead, job=str(job.absolute()), retry=f'stampede tell {job} lead "Read {brief}"')

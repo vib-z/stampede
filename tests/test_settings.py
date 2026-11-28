@@ -1,5 +1,5 @@
 """stampede/settings.py: layers, sources, the environment names, problems, show, and the two TOML readers."""
-import json, os, subprocess, sys, tempfile, unittest
+import contextlib, io, json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -476,7 +476,8 @@ class Review(Wired):
         sid = '0b5f1c2e-7d3a-4e8b-9c41-2a6f8e9d1b37'
         self.config('[lead]\nkind = "codex"\n')
         (repo / '.stampede.toml').write_text('[lead]\nkind = "claude"\n')
-        with self.env(FLEET_TRUST_ROOT=str(self.dir / 'code')), mock.patch.object(native_, 'new', return_value=0) as made:
+        with self.env(FLEET_TRUST_ROOT=str(self.dir / 'code')), mock.patch.object(native_, 'new', return_value=0) as made, \
+                contextlib.redirect_stderr(io.StringIO()):  # new's pstack line
             self.assertEqual(cli_.new('ask.md', None, core=True, cwd=str(repo), fork=sid), 0)
             self.assertEqual(made.call_args.args[5], 'claude', 'the repo\'s Claude lead takes the fork')
             self.config('')

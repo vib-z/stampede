@@ -10,6 +10,7 @@ from . import base as base_, job as job_, settings as settings_
 RULES = base_.SCRIPTS.parent / 'references' / 'pstack.md'  # what a fleet changes in pstack's playbooks
 Found = namedtuple('Found', 'how command')  # how it is installed, in a few words, and what the lead types to load it
 PLUGIN = re.compile(r'pstack@[A-Za-z0-9._-]+')  # the plugin pstack of any marketplace: the port's, or upstream's own
+VERSION = re.compile(r'[0-9A-Za-z.+_-]{1,32}')
 NAMES = {'claude': 'Claude', 'codex': 'Codex'}
 INSTALL = {'claude': 'claude plugin marketplace add michael-denyer/pstack-claude && claude plugin install pstack@pstack-claude',
            'codex': 'codex plugin marketplace add michael-denyer/pstack-claude && codex plugin add pstack@pstack-claude'}
@@ -45,7 +46,9 @@ def claude_plugin(env, home, repo):
                 continue
             where = entry.get('projectPath')
             if entry.get('scope') not in ('project', 'local') or (repo and isinstance(where, str) and Path(where).expanduser().resolve() == repo):
-                return Found(' '.join(filter(None, ('the Claude Code plugin', name, entry.get('version')))), '/pstack:poteto-mode')
+                version = entry.get('version')  # the plugin's own word: only a plain version reaches the lead's brief
+                plain = isinstance(version, str) and VERSION.fullmatch(version)
+                return Found(' '.join(('the Claude Code plugin', name) + ((version,) if plain else ())), '/pstack:poteto-mode')
 
 
 def codex_plugin(env, home, repo):
