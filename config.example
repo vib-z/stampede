@@ -23,6 +23,9 @@ effort = "xhigh"           # a Claude lead's effort (env FLEET_LEAD_EFFORT, with
 model = "gpt-6.2-sol"  # a Codex lead's model (env FLEET_LEAD_MODEL, when it is a gpt-... model)
 effort = "xhigh"       # a Codex lead's effort (env FLEET_LEAD_EFFORT, with a gpt-... model)
 
+[dev]  # coding jobs: a feature, a fix, a refactor or a code review
+pstack = true  # true: when pstack (working rules for a coding agent) is installed for the lead's CLI, the lead's brief tells it to use pstack for coding work, and when it is not, new says in one line how to install it; false: neither
+
 [workers]
 forbid = []      # exact models workers may not use (user only)
 max_effort = ""  # highest worker effort allowed; empty leaves it open (user only)

@@ -4,7 +4,7 @@ import json, os, shlex, subprocess, sys
 from pathlib import Path
 
 from . import autoclose as autoclose_, base as base_, job as job_, hcapi as hcapi_, herdrapi as herdrapi_, agents as agents_, owner as owner_, hooks as hooks_, tui as tui_, native as native_, \
-    doctor as doctor_, check as check_, settings as settings_, gates as gates_, out as out_
+    doctor as doctor_, check as check_, settings as settings_, gates as gates_, out as out_, pstack as pstack_
 
 
 def start(job, agent, kind, pane, brief, model=None, effort=None, reports=(), yolo_in=None, cwd=None, tab=None, parent=None,
@@ -111,6 +111,9 @@ def new(ask_file, workspace, name=None, review=False, pane=None, fork=None, core
         if lead_model or lead_effort:
             settings = settings_.for_new(repo, {**flags, f'lead.{kind}.model': lead_model, f'lead.{kind}.effort': lead_effort})
         agents_.check_lead_model(settings, settings.get(f'lead.{kind}.model'))
+        note = pstack_.missing(settings, kind, repo)
+        if note:  # the job runs all the same
+            print(note, file=sys.stderr)
         return settings, kind
     if core:
         settings, kind = resolve(repo_of(cwd))

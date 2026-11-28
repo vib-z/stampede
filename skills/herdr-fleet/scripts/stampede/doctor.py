@@ -3,7 +3,7 @@ herdr-doctor's lines passed through. Each check is {name, level, text, fix}; lev
 import importlib, json, os, re, shutil, subprocess, sys
 from pathlib import Path
 
-from . import base as base_, settings as settings_
+from . import base as base_, settings as settings_, pstack as pstack_
 
 ROOT = base_.SCRIPTS.parents[2]  # the checkout: skills/herdr-fleet/scripts -> the repo
 HELPERS = base_.SCRIPTS.parent.parent / 'grokbot-herdr/scripts'
@@ -63,18 +63,38 @@ def commands():
     return out or [check('commands', 'ok', f'stampede, fleet-job and {len(wanted) - 2} herdr helpers on PATH point into this checkout')]
 
 
+def repo():
+    """The repo doctor runs in, whose .stampede.toml and skill folders count; None outside one."""
+    top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    return top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else None
+
+
 def config():
     """The settings files: each problem stampede new would refuse on (a key that is not a setting, a wrong type, a value
     outside the key's choices, a file that is not TOML, a user-only key in a repo file), with the file to fix. The repo
     file when run inside a repo."""
-    top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
-    loaded = settings_.load(repo=top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else None)
+    loaded = settings_.load(repo=repo())
     files = ', '.join(f['path'] for f in loaded.files.values() if f['exists']) or 'none'
     return [check('config', 'PROBLEM', problem, 'fix or remove what it names, then stampede config show')
             for problem in loaded.problems] or [check('config', 'ok', f'settings files without problems: {files}')]
 
 
-CHECKS = (python, checkout, commands, config)  # each returns its lines; a new check is one more function here
+def pstack():
+    """pstack for coding jobs (dev.pstack), for the CLI that leads by default: found, switched off, or a warning with the
+    install line. Never a PROBLEM: a job runs without it."""
+    here = repo()
+    loaded = settings_.load(repo=here)
+    kind = loaded.get('lead.kind')
+    if not loaded.get('dev.pstack'):
+        return [check('pstack', 'ok', 'pstack is switched off for coding jobs (dev.pstack = false)')]
+    found = pstack_.find(kind, here)
+    if found:
+        return [check('pstack', 'ok', f'pstack for coding jobs: {found.how}, for a {pstack_.NAMES[kind]} lead')]
+    return [check('pstack', 'warn', f'pstack is not installed for a {pstack_.NAMES[kind]} lead, so coding jobs run without it',
+                  pstack_.INSTALL[kind] + '; or switch it off: stampede setup --pstack no')]
+
+
+CHECKS = (python, checkout, commands, config, pstack)  # each returns its lines; a new check is one more function here
 
 
 def herdr_doctor(core, tui):

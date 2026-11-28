@@ -5,7 +5,7 @@ import contextlib, fcntl, json, os, shlex, subprocess, time, uuid
 from pathlib import Path
 
 from . import base as base_, job as job_, hcapi as hcapi_, agents as agents_, owner as owner_, settings as settings_, gates as gates_, \
-    out as out_
+    out as out_, pstack as pstack_
 
 KINDS = ('claude', 'codex')
 
@@ -289,7 +289,7 @@ def lead_brief(job, lead, owner, review, fork, key, space, limit, front=False):
     return (f'Below, stampede means {base_.SCRIPTS / "fleet-job"}, the one that started this job: run it by that path.\n'
             f'You are {lead}, the lead of the job in {job}, on Herdr Core. The space {space} is your name label. Read {job / "ask.md"} '
             f'and run it. Write the plan in {job / "plan.md"}: the helpers (name, CLI, model, tab), the task of each, and any '
-            f'questions with a default. {gate}\n{reach}'
+            f'questions with a default. {gate}\n{pstack_.brief_text(job, end=chr(10))}{reach}'
             f'Start a helper as your own Core child: {s} start {job} <role>-<scope> --brief <file> [--kind claude|codex] '
             '[--model <m>] [--effort <e>] [--cwd <dir>] [--tab <label>]; the role (build, research, review, design, qa, copy, '
             'test) gives the kind, model and effort a flag does not. A brief has the sections Goal, Why, Inputs, Constraints, Done when, '

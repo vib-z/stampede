@@ -67,7 +67,7 @@ class Settings(unittest.TestCase):
             'backend': 'tui', 'jobs_root': '~/code/herdr-jobs', 'trust_root': '~/code', 'lead.kind': 'claude', 'lead.forbid': [],
             'lead.claude.model': 'claude-opus-5-5', 'lead.claude.effort': 'xhigh',
             'lead.codex.model': 'gpt-6.2-sol', 'lead.codex.effort': 'xhigh',
-            'lead.allow': [], 'workers.forbid': [], 'workers.max_effort': '',
+            'lead.allow': [], 'dev.pstack': True, 'workers.forbid': [], 'workers.max_effort': '',
             'ask.command': 'moshi-hook ask --require-remote --source herdr-fleet --timeout 24h',
             'brief.sections': ['Goal', 'Why', 'Inputs', 'Constraints', 'Done when', 'Report back', 'If blocked'],
             **{f'roles.{role}.{field}': value for role, row in ROLES.items() for field, value in zip(('kind', 'model', 'effort'), row)},
